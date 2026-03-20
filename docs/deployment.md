@@ -59,7 +59,7 @@ There is no manual deployment step. If you need to roll back, use Vercel's dashb
 - **Output directory**: `.next` (auto-detected by Vercel)
 - **Node.js version**: 20
 
-Environment variables (Supabase credentials, Stripe keys, etc.) are configured in the Vercel project dashboard, not committed to the repository.
+Environment variables (Supabase credentials, Stripe keys, etc.) are configured in the Vercel project dashboard, not committed to the repository. Production database credentials must **never** appear in local env files — local development uses the Supabase CLI local stack instead.
 
 ## Scheduled jobs
 
@@ -67,13 +67,22 @@ A GitHub Actions cron job (`.github/workflows/notification-cron.yml`) runs every
 
 ## Database migrations
 
-Prisma migrations are **not** run automatically during deployment. When you add a migration:
+Migrations are applied automatically via the **Database Migrate** workflow (`.github/workflows/migrate.yml`). The process:
 
 1. Create the migration locally: `pnpm --filter @lsr/platform db:migrate`
 2. Commit the generated migration file in `prisma/migrations/`.
-3. After merging, apply to the production database: `pnpm --filter @lsr/platform db:deploy`
+3. Open a PR and merge to `main`.
+4. The workflow detects changes in `prisma/migrations/`, backs up the production database, and runs `prisma migrate deploy`.
 
-Coordinate with the team lead before running migrations against the production database.
+The backup is uploaded as a GitHub Actions artifact (retained 90 days), downloadable from the Actions tab.
+
+### Writing safe migrations
+
+Always make migrations **backwards-compatible**. The Vercel build runs after the migration, so there's a brief window where the old code serves traffic against the new schema.
+
+- **Adding** columns, tables, or indexes is always safe.
+- **Renaming or removing** columns requires two deploys: first remove the code reference, then remove the column in a follow-up PR.
+- Note the migration in your PR description so reviewers know to check it.
 
 ## Guidelines for safe releases
 

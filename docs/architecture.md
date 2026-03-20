@@ -4,7 +4,7 @@ This document describes how the LSR Platform is structured.
 
 ## High-level overview
 
-The platform is a **Next.js 16** application using the App Router with React Server Components. It connects to a **PostgreSQL** database hosted on **Supabase**, accessed through **Prisma** ORM. Authentication is handled by **Supabase Auth** with Google OAuth and email/password sign-in.
+The platform is a **Next.js 16** application using the App Router with React Server Components. It connects to a **PostgreSQL** database via **Supabase**, accessed through **Prisma** ORM. Authentication is handled by **Supabase Auth** with Google OAuth and email/password sign-in. Local development runs the full Supabase stack (PostgreSQL, Auth, Studio) in Docker via the Supabase CLI — see [local-dev.md](./local-dev.md).
 
 ```
 Browser

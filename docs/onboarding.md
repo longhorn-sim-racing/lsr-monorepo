@@ -36,7 +36,7 @@ The main application lives in **`apps/platform/`**. This is where you will spend
 - **Node.js** 20+
 - **pnpm** 10+ (`npm install -g pnpm`)
 - **Git**
-- Access to the Supabase project (ask the team lead for credentials)
+- **Docker Desktop** ([download](https://www.docker.com/products/docker-desktop/)) — runs the local Supabase stack
 - A code editor (WebStorm or VS Code recommended)
 
 ## Getting started
@@ -49,14 +49,24 @@ cd lsr-monorepo
 # 2. Install dependencies
 pnpm install
 
-# 3. Set up environment variables
-cp apps/platform/.env.example apps/platform/.env.local
-# Fill in Supabase credentials (ask team lead)
+# 3. Start local Supabase (make sure Docker Desktop is running)
+cd apps/platform
+npx supabase start
 
-# 4. Generate the Prisma client
-pnpm --filter @lsr/platform db:generate
+# 4. Set up environment variables
+cp .env.example .env.local
+# Fill in values from `npx supabase status -o env` (see local-dev.md for details)
+# Also create .env with DATABASE_URL and DIRECT_URL for Prisma
 
-# 5. Start the dev server
+# 5. Apply migrations and seed the database
+pnpm db:migrate
+pnpm db:reset
+
+# 6. Generate the Prisma client
+pnpm db:generate
+
+# 7. Start the dev server (from repo root)
+cd ../..
 pnpm dev
 ```
 
@@ -99,6 +109,6 @@ All three must pass before a PR can be merged. See [deployment.md](./deployment.
 
 ## Getting help
 
-- Ask your team lead for Supabase project access and environment credentials.
+- Ask the team lead for any third-party credentials you need (Cloudinary, Shopify, Stripe, Resend).
 - Check existing docs before asking questions -- most workflows are documented.
 - If something is missing from the docs, add it as part of your PR.

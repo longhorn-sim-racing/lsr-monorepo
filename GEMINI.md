@@ -44,8 +44,9 @@ The database is extensive, covering several domains:
 ### Prerequisites
 *   Node.js (v20+)
 *   pnpm 10+
-*   PostgreSQL Database (Supabase recommended)
+*   Docker Desktop (for local Supabase stack)
 *   Env vars set in `apps/platform/.env.local` (copy from `apps/platform/.env.example`).
+*   Prisma also reads `apps/platform/.env` for `DATABASE_URL` and `DIRECT_URL`.
 
 ### Key Commands
 *   **Start Dev Server:** `pnpm dev`
@@ -58,11 +59,14 @@ The database is extensive, covering several domains:
 *   **Seed Database:** `cd apps/platform && npx prisma db seed`
 
 ## Environment Variables
-*   `NEXT_PUBLIC_SUPABASE_URL`: Supabase project URL.
-*   `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase public anon key.
-*   `DATABASE_URL`: PostgreSQL connection string (port 6543 for PgBouncer session mode).
-*   `DIRECT_URL`: Direct connection string for migrations (bypasses PgBouncer).
+*   `NEXT_PUBLIC_SUPABASE_URL`: Supabase URL (local: `http://127.0.0.1:54321`).
+*   `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase anon key (from `npx supabase status -o env`).
+*   `SUPABASE_SERVICE_ROLE_KEY`: Supabase service role key (from `npx supabase status -o env`).
+*   `DATABASE_URL`: PostgreSQL connection string (local: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`).
+*   `DIRECT_URL`: Direct connection string (same as `DATABASE_URL` for local dev).
 *   `ADMIN_EMAILS`: Comma-separated admin email allowlist.
+
+Local development uses the Supabase CLI (`npx supabase start` from `apps/platform/`) to run PostgreSQL, Auth, and Studio in Docker. Production credentials live only in Vercel.
 
 ## Architecture & Conventions
 *   **React Server Components (RSC):** The app uses the App Router. Default to Server Components unless interactivity is needed (`"use client"`).

@@ -31,7 +31,9 @@
       "Bash(pnpm:*)",
       "Bash(npm:*)",
       "Bash(corepack:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(npx supabase:*)",
+      "Bash(docker rm:*)"
     ]
   }
 }

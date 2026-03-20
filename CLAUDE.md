@@ -93,11 +93,25 @@ Use `"use client"` directive only when interactivity is required. The codebase f
 
 Event registration uses database locks (`FOR UPDATE`) to prevent race conditions. Waitlist is FIFO with automatic promotion when capacity opens. See `src/server/services/registration.service.ts`.
 
+## Local Development
+
+Local development uses the **Supabase CLI** to run a full Supabase stack (PostgreSQL, Auth, Studio) in Docker. See `docs/local-dev.md` for setup instructions.
+
+- `npx supabase start` from `apps/platform/` to start the local stack
+- `npx supabase status -o env` to get connection details
+- Local Supabase Studio at `http://127.0.0.1:54323`
+- Supabase config lives in `apps/platform/supabase/config.toml`
+
 ## Environment Variables
 
 Required in `apps/platform/.env.local`:
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `DATABASE_URL` (Supabase connection string, port 6543 for session mode)
-- `DIRECT_URL` (optional, for migrations)
+- `NEXT_PUBLIC_SUPABASE_URL` (local: `http://127.0.0.1:54321`)
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` (from `supabase status -o env`)
+- `SUPABASE_SERVICE_ROLE_KEY` (from `supabase status -o env`)
+- `DATABASE_URL` (local: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`)
+- `DIRECT_URL` (same as `DATABASE_URL` for local dev)
 - `ADMIN_EMAILS` (comma-separated admin email allowlist)
+
+Prisma reads `.env` (not `.env.local`), so `DATABASE_URL` and `DIRECT_URL` must also be in `apps/platform/.env`.
+
+Production credentials live only in Vercel — never in local env files.

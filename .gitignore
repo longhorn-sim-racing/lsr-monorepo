@@ -55,3 +55,7 @@ nul
 
 # turbo
 .turbo
+
+# supabase local
+**/supabase/.temp
+**/supabase/.branches
