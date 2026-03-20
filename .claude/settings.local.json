@@ -33,7 +33,8 @@
       "Bash(corepack:*)",
       "Bash(rm:*)",
       "Bash(npx supabase:*)",
-      "Bash(docker rm:*)"
+      "Bash(docker rm:*)",
+      "Bash(xargs grep:*)"
     ]
   }
 }

@@ -37,8 +37,8 @@ export default function HomePageClient({ posts, featuredEvent, upcomingEvents, d
         <Hotlap index={3} hotlap={hotlap} />
         <NewsHighlights index={4} posts={posts} />
         <FinalCta index={5} />
-        <GalleryRibbon index={6} galleryImages={galleryImages} />
-        <SponsorStrip index={7} />
+        <SponsorStrip index={6} />
+        <GalleryRibbon index={7} galleryImages={galleryImages} />
       </div>
     </main>
   )

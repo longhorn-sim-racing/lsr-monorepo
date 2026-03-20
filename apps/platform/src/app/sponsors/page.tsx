@@ -5,6 +5,82 @@ import Image from "next/image"
 import { Check, Download, ExternalLink, ArrowRight, Building2, Users, Trophy, Cpu } from "lucide-react"
 import { Metadata } from "next"
 
+type Partner = {
+  name: string
+  logo: string
+  href?: string
+  description?: string
+}
+
+const partners: Partner[] = [
+  {
+    name: "Race Club Austin",
+    logo: "/sponsors/raceclub.png",
+    href: "https://www.raceclubsim.com/",
+  },
+  {
+    name: "Driven to Care",
+    logo: "/sponsors/driventocare.png",
+    href: "https://www.driventocare.org/",
+  },
+  {
+    name: "Yugo",
+    logo: "/sponsors/yugo.png",
+    description: "Yugo is a global student living brand and operator creating safe, supportive communities where students can connect and thrive.",
+  },
+]
+
+function PartnerCard({ partner }: { partner: Partner }) {
+  const content = (
+    <>
+      <div className="relative h-20 w-56 mb-6 grayscale opacity-70 group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-300">
+        <Image
+          src={partner.logo}
+          alt={partner.name}
+          fill
+          className="object-contain"
+        />
+      </div>
+      <h3 className="font-sans font-black text-sm uppercase tracking-widest text-white mb-2">{partner.name}</h3>
+      {partner.description && (
+        <p className="font-sans text-sm text-white/60 leading-relaxed max-w-md">{partner.description}</p>
+      )}
+      {partner.href && (
+        <span className="mt-4 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-lsr-orange group-hover:text-white transition-colors">
+          Visit <ExternalLink className="h-3 w-3" />
+        </span>
+      )}
+    </>
+  )
+
+  const className = "group border border-white/10 bg-white/[0.02] p-8 flex flex-col items-center text-center hover:border-white/20 transition-colors"
+
+  if (partner.href) {
+    return (
+      <Link href={partner.href} target="_blank" rel="noopener noreferrer" className={className}>
+        {content}
+      </Link>
+    )
+  }
+
+  return <div className={className}>{content}</div>
+}
+
+function CurrentPartners() {
+  return (
+    <section className="mb-20 pb-20 border-b border-white/5">
+      <h2 className="font-display font-black italic text-3xl md:text-4xl text-white uppercase tracking-normal mb-10">
+        Current <span className="text-lsr-orange">Partners</span>
+      </h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {partners.map((partner) => (
+          <PartnerCard key={partner.name} partner={partner} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export const metadata: Metadata = {
   title: "Sponsors",
   description: "Partner with Longhorn Sim Racing to support student engineering and motorsport excellence at UT Austin.",
@@ -52,7 +128,10 @@ export default function SponsorsPage() {
       </div>
 
       <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
-        
+
+        {/* Current Partners */}
+        <CurrentPartners />
+
         {/* Why Partner With LSR? - Credibility Section */}
         <section className="mb-20">
           <div className="grid md:grid-cols-2 gap-12 items-start">
