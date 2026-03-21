@@ -33,7 +33,7 @@ const partners: Partner[] = [
 function PartnerCard({ partner }: { partner: Partner }) {
   const content = (
     <>
-      <div className="relative h-20 w-56 mb-6 grayscale opacity-70 group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-300">
+      <div className="relative h-20 w-56 mb-6 group-hover:scale-105 transition-transform duration-300">
         <Image
           src={partner.logo}
           alt={partner.name}

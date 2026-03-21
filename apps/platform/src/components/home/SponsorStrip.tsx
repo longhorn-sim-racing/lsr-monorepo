@@ -43,7 +43,7 @@ export default function SponsorStrip({ index }: { index: number }) {
               href={sponsor.href}
               target="_blank"
               rel="noopener noreferrer"
-              className="group relative h-20 w-56 md:h-24 md:w-64 shrink-0 grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all duration-300"
+              className="group relative h-20 w-56 md:h-24 md:w-64 shrink-0 hover:scale-105 transition-transform duration-300"
             >
               <Image
                 src={sponsor.logo}
