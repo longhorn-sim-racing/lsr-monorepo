@@ -115,3 +115,10 @@ Required in `apps/platform/.env.local`:
 Prisma reads `.env` (not `.env.local`), so `DATABASE_URL` and `DIRECT_URL` must also be in `apps/platform/.env`.
 
 Production credentials live only in Vercel — never in local env files.
+
+## Contributing
+
+- Tasks are tracked as [GitHub Issues](https://github.com/longhorn-sim-racing/lsr-monorepo/issues)
+- Branch naming: `short-description` (e.g., `fix-officer-images`) or `<issue-number>-short-description` for issue work
+- Include `Closes #<number>` in PR descriptions to auto-close issues on merge
+- See `docs/onboarding.md` for the full contributor workflow

@@ -78,13 +78,34 @@ For detailed local development instructions, see [local-dev.md](./local-dev.md).
 
 1. Create a feature branch from `main`:
    ```bash
-   git checkout -b feature/your-feature-name
+   git checkout -b your-feature-name
    ```
 2. Make your changes and commit with clear messages.
 3. Push your branch and open a pull request against `main`.
 4. CI will automatically run lint, type checking, and a production build.
 5. The PR requires review from the Digital Platforms lead (configured via CODEOWNERS).
 6. Once approved and CI passes, merge into `main`.
+
+## Working with GitHub Issues
+
+We track tasks and bugs as [GitHub Issues](https://github.com/longhorn-sim-racing/lsr-monorepo/issues). When working on an issue:
+
+1. **Find an issue** — Browse open issues. Issues labeled `good first issue` are great starting points. Assign yourself (or ask to be assigned) so others know it's taken.
+2. **Create a branch** — Name it with the issue number as a prefix:
+   ```bash
+   git checkout -b 24-fix-officer-images
+   ```
+3. **Do the work** — Make your changes, committing as you go. Reference the issue in commit messages:
+   ```bash
+   git commit -m "Fix officer image placeholders (#24)"
+   ```
+4. **Open a Pull Request** — Push your branch and open a PR against `main`. Include `Closes #24` in the PR description to auto-close the issue when merged.
+5. **Code review & merge** — Same review process as the branch workflow above.
+
+### Tips
+- Comment on an issue if you have questions or want to share progress.
+- If you discover something new while working, open a new issue for it rather than scope-creeping your current PR.
+- Keep PRs focused — one issue per PR when possible.
 
 ## How CI works
 
