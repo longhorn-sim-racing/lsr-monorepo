@@ -118,6 +118,7 @@ Production credentials live only in Vercel — never in local env files.
 
 ## Contributing
 
+- Work is tracked on the [GitHub Project board](https://github.com/orgs/longhorn-sim-racing/projects/1)
 - Tasks are tracked as [GitHub Issues](https://github.com/longhorn-sim-racing/lsr-monorepo/issues)
 - Branch naming: `short-description` (e.g., `fix-officer-images`) or `<issue-number>-short-description` for issue work
 - Include `Closes #<number>` in PR descriptions to auto-close issues on merge

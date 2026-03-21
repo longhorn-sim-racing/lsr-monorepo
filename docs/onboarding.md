@@ -74,6 +74,14 @@ The app will be available at **http://localhost:3000**.
 
 For detailed local development instructions, see [local-dev.md](./local-dev.md).
 
+## Project tracking
+
+We use [GitHub Projects](https://github.com/orgs/longhorn-sim-racing/projects/1) to track all work. The board has columns for **Backlog**, **Todo**, **In Progress**, **Blocked**, and **Done**. Issues auto-move through the board as PRs are opened, reviewed, and merged.
+
+- Browse the board to see what's available
+- Issues labeled `good first issue` are great starting points for new contributors
+- Filter by labels (`payments`, `notifications`, `racing`, `ui/ux`, `admin`, `infrastructure`) to find work by area
+
 ## Branch workflow
 
 1. Create a feature branch from `main`:
