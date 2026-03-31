@@ -95,11 +95,12 @@ export function ChampionshipChart({ standings }: Props) {
               padding: "8px 12px",
             }}
             labelStyle={{ color: "white", fontWeight: 700, marginBottom: 4 }}
-            formatter={(value: number, _name: string, props: { payload?: { gap: number } }) => {
+            formatter={(value, _name, props: { payload?: { gap: number } }) => {
+              const pts = typeof value === "number" ? value : 0;
               const gap = props.payload?.gap ?? 0;
               return [
                 <span key="pts" style={{ color: LSR_ORANGE, fontWeight: 700 }}>
-                  {value} pts{gap > 0 ? ` (−${gap})` : ""}
+                  {pts} pts{gap > 0 ? ` (−${gap})` : ""}
                 </span>,
                 "",
               ];
