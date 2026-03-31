@@ -14,6 +14,7 @@ import { StandingsTable } from "@/components/standings-table";
 import { prisma } from "@/server/db";
 import { Metadata } from "next";
 import { DatabaseUnavailable } from "@/components/database-unavailable";
+import { ChampionshipChart } from "@/components/championship-chart";
 
 export const metadata: Metadata = {
   title: "Lone Star Cup",
@@ -457,6 +458,10 @@ export default async function LoneStarCupPage() {
             <div className="border border-white/10 p-1 bg-white/[0.02]">
               <Image src="/images/LSCSchedule26.png" alt="LSC Calendar" width={1200} height={800} className="w-full h-auto opacity-80" />
             </div>
+
+            {currentStandings.length > 0 && (
+              <ChampionshipChart standings={currentStandings} />
+            )}
           </div>
         </div>
       </div>
