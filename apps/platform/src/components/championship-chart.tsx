@@ -109,7 +109,7 @@ export function ChampionshipChart({ standings }: Props) {
           <Bar dataKey="points" isAnimationActive={false}>
             {data.map((entry, index) => (
               <Cell
-                key={entry.name}
+                key={entry.id}
                 fill={
                   index === 0
                     ? LSR_ORANGE
