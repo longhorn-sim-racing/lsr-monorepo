@@ -43,6 +43,7 @@ export function ChampionshipChart({ standings }: Props) {
   const leaderPoints = top8[0].points;
 
   const data = top8.map((s) => ({
+    id: s.driver.id,
     name: s.driver.name,
     points: s.points,
     gap: leaderPoints - s.points,
