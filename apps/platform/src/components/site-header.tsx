@@ -31,7 +31,7 @@ export function SiteHeader({ user, roles, activeTierKey }: { user: User | null, 
   return (
     <header className="sticky top-0 z-50 bg-lsr-charcoal/95 backdrop-blur-md border-b border-white/5">
       <nav className="mx-auto max-w-6xl flex h-20 items-center justify-between px-6">
-        <Link href="/" className="flex items-center gap-4 group">
+        <Link href="/" className="flex items-center gap-4 group flex-shrink-0">
           {/* Logo Image: Always visible */}
           <div className="relative">
             <Image
