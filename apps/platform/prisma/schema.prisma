@@ -130,6 +130,7 @@ model User {
   iRating        Int?
   socials        Json?
   officerTitle   String?
+  racingNumber   Int?     @unique
   marketingOptIn Boolean    @default(true)
   status         UserStatus @default(active)
 

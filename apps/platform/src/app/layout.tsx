@@ -13,6 +13,7 @@ import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { prisma } from "@/server/db";
 import { Toaster } from "@/components/ui/sonner";
 import { CartProvider } from "@/lib/shopify/CartContext";
+import { RacingNumberPrompt } from "@/components/racing-number-prompt";
 
 const montserrat = Montserrat({
   subsets: ["latin"],
@@ -107,6 +108,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <main className="flex-1">{children}</main>
         <SiteFooter />
         <Toaster position="bottom-right" />
+        <RacingNumberPrompt userId={user?.id ?? null} hasRacingNumber={user?.racingNumber != null} />
       </CartProvider>
     </ThemeProvider>
     <Analytics />

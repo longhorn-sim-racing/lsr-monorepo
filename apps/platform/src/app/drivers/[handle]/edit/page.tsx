@@ -76,6 +76,10 @@ export default async function EditDriverPage({
                     <Input id="iRating" name="iRating" type="number" defaultValue={pageUser.iRating ?? ''}
                         className="rounded-none bg-white/5 border-white/10 text-white h-12 font-medium focus:ring-lsr-orange" />
                 </FormField>
+                <FormField id="racingNumber" label="Racing Number">
+                    <Input id="racingNumber" name="racingNumber" type="number" min="0" max="999" placeholder="e.g. 42" defaultValue={pageUser.racingNumber ?? ''}
+                        className="rounded-none bg-white/5 border-white/10 text-white h-12 font-medium focus:ring-lsr-orange" />
+                </FormField>
                 <FormField id="gradYear" label="Graduating Year">
                     <Input id="gradYear" name="gradYear" type="number" defaultValue={pageUser.gradYear ?? ''}
                         className="rounded-none bg-white/5 border-white/10 text-white h-12 font-medium focus:ring-lsr-orange" />
