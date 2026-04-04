@@ -31,7 +31,7 @@ export function SiteHeader({ user, roles, activeTierKey }: { user: User | null, 
   return (
     <header className="sticky top-0 z-50 bg-lsr-charcoal/95 backdrop-blur-md border-b border-white/5">
       <nav className="mx-auto max-w-6xl flex h-20 items-center justify-between px-6">
-        <Link href="/" className="flex items-center gap-4 group flex-shrink-0">
+        <Link href="/" className="flex items-center gap-4 group">
           {/* Logo Image: Always visible */}
           <div className="relative">
             <Image
@@ -62,10 +62,12 @@ export function SiteHeader({ user, roles, activeTierKey }: { user: User | null, 
               Events
               <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-lsr-orange transition-all group-hover/link:w-full" />
             </Link>
-            <Link href="/drivers" className="hover:text-lsr-orange transition-colors relative group/link">
-              Drivers
-              <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-lsr-orange transition-all group-hover/link:w-full" />
-            </Link>
+            {!isShopPage && (
+              <Link href="/drivers" className="hover:text-lsr-orange transition-colors relative group/link">
+                Drivers
+                <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-lsr-orange transition-all group-hover/link:w-full" />
+              </Link>
+            )}
             <Link href="/shop" className="hover:text-lsr-orange transition-colors relative group/link">
               Merch
               <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-lsr-orange transition-all group-hover/link:w-full" />
@@ -80,6 +82,11 @@ export function SiteHeader({ user, roles, activeTierKey }: { user: User | null, 
                 <ChevronDown className="h-3 w-3 opacity-50 group-hover/more:opacity-100 transition-opacity" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="bg-lsr-charcoal border-white/10 rounded-none p-2 min-w-[160px]">
+                {isShopPage && (
+                  <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
+                    <Link href="/drivers" className="font-sans font-bold text-[9px] uppercase tracking-widest py-2">Drivers</Link>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
                   <Link href="/news" className="font-sans font-bold text-[9px] uppercase tracking-widest py-2">News</Link>
                 </DropdownMenuItem>
