@@ -126,6 +126,24 @@ export function SiteFooter() {
               >
                 Gray Marshall
               </a>
+              ,{" "}
+              <a
+                href="https://www.linkedin.com/in/alexander-spears/"
+                target="_blank"
+                rel="noreferrer"
+                className="text-white/40 hover:text-white transition-colors"
+              >
+                Alexander Spears
+              </a>
+              ,{" "}
+              <a
+                href="https://www.linkedin.com/in/arav-agarwal1/"
+                target="_blank"
+                rel="noreferrer"
+                className="text-white/40 hover:text-white transition-colors"
+              >
+                Arav Agarwal
+              </a>
             </p>
           </div>
         </div>
