@@ -130,7 +130,9 @@ model User {
   iRating        Int?
   socials        Json?
   officerTitle   String?
-  racingNumber   Int?     @unique
+  racingNumber      Int?     @unique
+  racingNumberColor String   @default("#FFFFFF")
+  racingNumberFont  String   @default("sans-serif")
   marketingOptIn Boolean    @default(true)
   status         UserStatus @default(active)
 

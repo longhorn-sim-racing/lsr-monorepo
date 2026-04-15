@@ -18,6 +18,8 @@ const UserSchema = z.object({
     const n = typeof v === 'string' ? parseInt(v, 10) : v;
     return Number.isFinite(n as number) ? Number(n) : null;
   }),
+  racingNumberColor: z.string().optional(),
+  racingNumberFont: z.string().optional(),
   bio: z.string().max(2000).optional().nullable(),
   gradYear: z.union([z.string(), z.number()]).optional().transform(v => {
     const n = typeof v === 'string' ? parseInt(v, 10) : v;
@@ -30,11 +32,6 @@ const UserSchema = z.object({
   youtube: z.string().url().optional().or(z.literal('')).transform(v => v || null),
 });
 
-
-
-
-
-
 import { getLeorgeGawrenceEnforcementUnitStatus } from '@/app/admin/tools/actions';
 
 // ----- SERVER ACTION (single-arg shape for <form action={...}>) -----
@@ -45,6 +42,8 @@ export async function updateProfile(formData: FormData) {
     displayName: formData.get('displayName'),
     iRating: formData.get('iRating'),
     racingNumber: formData.get('racingNumber'),
+    racingNumberColor: formData.get('racingNumberColor'),
+    racingNumberFont: formData.get('racingNumberFont'),
     bio: formData.get('bio'),
     gradYear: formData.get('gradYear'),
     major: formData.get('major'),
@@ -83,6 +82,8 @@ export async function updateProfile(formData: FormData) {
       displayName: displayName,
       iRating: parsed.data.iRating ?? undefined,
       racingNumber: parsed.data.racingNumber !== undefined ? parsed.data.racingNumber : undefined,
+      racingNumberColor: parsed.data.racingNumberColor ?? undefined,
+      racingNumberFont: parsed.data.racingNumberFont ?? undefined,
       bio: parsed.data.bio ?? undefined,
       gradYear: parsed.data.gradYear ?? undefined,
       major: parsed.data.major ?? undefined,
@@ -129,7 +130,5 @@ export async function clearAvatar() {
     await prisma.$disconnect();
   }
 
-
   revalidatePath(`/drivers/${user.handle}`);
 }
-

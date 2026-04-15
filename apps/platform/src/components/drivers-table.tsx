@@ -21,6 +21,8 @@ type DriverRow = {
   allTimePoints: number;
   rank: number;
   racingNumber: number | null;
+  racingNumberColor?: string | null;
+  racingNumberFont?: string | null;
 };
 
 type SortConfig = {
@@ -153,7 +155,14 @@ export function DriversTable({ drivers }: { drivers: DriverRow[] }) {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className="font-display font-black italic text-lg text-white/40">
+                      <span
+                        className="font-display font-black italic text-lg"
+                        style={
+                          d.racingNumber !== null
+                            ? { color: d.racingNumberColor || undefined, fontFamily: d.racingNumberFont || undefined }
+                            : { color: 'rgba(255,255,255,0.4)' }
+                        }
+                      >
                         {d.racingNumber !== null ? `#${d.racingNumber}` : <span className="text-white/20">—</span>}
                       </span>
                     </td>

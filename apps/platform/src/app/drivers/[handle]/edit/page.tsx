@@ -80,6 +80,26 @@ export default async function EditDriverPage({
                     <Input id="racingNumber" name="racingNumber" type="number" min="0" max="999" placeholder="e.g. 42" defaultValue={pageUser.racingNumber ?? ''}
                         className="rounded-none bg-white/5 border-white/10 text-white h-12 font-medium focus:ring-lsr-orange" />
                 </FormField>
+                <div className="grid grid-cols-2 gap-6">
+                  <FormField id="racingNumberColor" label="Number Color">
+                    <div className="flex h-12">
+                      <Input id="racingNumberColor" name="racingNumberColor" type="color" defaultValue={pageUser.racingNumberColor ?? '#FFFFFF'}
+                          className="w-16 h-12 p-1 rounded-none bg-white/5 border-white/10 cursor-pointer" />
+                    </div>
+                  </FormField>
+                  <FormField id="racingNumberFont" label="Number Font">
+                    <select id="racingNumberFont" name="racingNumberFont" defaultValue={pageUser.racingNumberFont ?? 'sans-serif'}
+                        className="flex h-12 w-full rounded-none border border-white/10 bg-[#1e1e1e] px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-lsr-orange font-medium">
+                      <option value="sans-serif">Sans Serif</option>
+                      <option value="serif">Serif</option>
+                      <option value="monospace">Monospace</option>
+                      <option value="Impact, sans-serif">Impact</option>
+                      <option value="Arial Black, sans-serif">Arial Black</option>
+                      <option value="Trebuchet MS, sans-serif">Trebuchet</option>
+                      <option value="Verdana, sans-serif">Verdana</option>
+                    </select>
+                  </FormField>
+                </div>
                 <FormField id="gradYear" label="Graduating Year">
                     <Input id="gradYear" name="gradYear" type="number" defaultValue={pageUser.gradYear ?? ''}
                         className="rounded-none bg-white/5 border-white/10 text-white h-12 font-medium focus:ring-lsr-orange" />

@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCachedSessionUser } from '@/server/auth/cached-session';
 import { updateMarketingOptIn, updateNotificationPreferences, retireAccount, deleteAccount } from './actions';
@@ -46,7 +47,12 @@ export default async function AccountPage() {
 
         {/* ACCOUNT SETTINGS */}
         <section className="space-y-6">
-          <h2 className="font-sans font-bold text-xs text-lsr-orange uppercase tracking-[0.2em]">Profile Information</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="font-sans font-bold text-xs text-lsr-orange uppercase tracking-[0.2em]">Profile Information</h2>
+            <Button asChild variant="outline" size="sm" className="rounded-none border-white/10 text-white hover:bg-white hover:text-lsr-charcoal font-bold uppercase tracking-widest text-[10px]">
+              <Link href={`/drivers/${user.handle}/edit`}>Edit Profile</Link>
+            </Button>
+          </div>
           <div className="rounded-none border border-white/5 bg-white/[0.03] p-8">
             <div className="grid md:grid-cols-2 gap-8">
               <div className="grid gap-2">
@@ -64,6 +70,15 @@ export default async function AccountPage() {
               <div className="grid gap-2">
                 <Label className="font-sans font-bold text-[10px] text-white/40 uppercase tracking-[0.2em] pl-1">Handle</Label>
                 <Input value={`@${user.handle}`} readOnly className="rounded-none bg-white/5 border-white/10 text-white h-12 font-medium" />
+              </div>
+              <div className="grid gap-2">
+                <Label className="font-sans font-bold text-[10px] text-white/40 uppercase tracking-[0.2em] pl-1">Racing Number</Label>
+                <Input 
+                  value={user.racingNumber !== null ? `#${user.racingNumber}` : 'None'} 
+                  readOnly 
+                  className="rounded-none bg-white/5 border-white/10 text-white h-12 font-medium"
+                  style={user.racingNumber !== null ? { color: user.racingNumberColor || undefined, fontFamily: user.racingNumberFont || undefined } : undefined}
+                />
               </div>
             </div>
           </div>
