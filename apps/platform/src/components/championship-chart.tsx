@@ -1,36 +1,38 @@
 "use client";
 
 import {
-  BarChart,
-  Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Cell,
-  LabelList,
+  Legend,
 } from "recharts";
-
-type Standing = {
-  driver: { id: string; name: string; handle: string; avatarUrl?: string | null };
-  points: number;
-  rank: number | null;
-};
+import type { PointsProgression } from "@/server/queries/standings";
 
 type Props = {
-  standings: Standing[];
+  progression: PointsProgression;
 };
 
 const LSR_ORANGE = "#FF8000";
 
-export function ChampionshipChart({ standings }: Props) {
-  const top8 = standings
-    .filter((s) => s.rank !== null)
-    .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
-    .slice(0, 8);
+const LINE_COLORS = [
+  LSR_ORANGE,
+  "#FF6B35",
+  "#E55A2B",
+  "#CC4A22",
+  "#B33A18",
+  "#992B0F",
+  "#801C05",
+  "#661500",
+];
 
-  if (top8.length === 0) {
+export function ChampionshipChart({ progression }: Props) {
+  const { rounds, drivers } = progression;
+
+  if (drivers.length === 0 || rounds.length === 0) {
     return (
       <div className="border border-white/10 bg-black/20 p-8 text-center">
         <p className="font-sans font-bold text-white/40 uppercase tracking-widest text-xs">
@@ -40,54 +42,39 @@ export function ChampionshipChart({ standings }: Props) {
     );
   }
 
-  const leaderPoints = top8[0].points;
-
-  const data = top8.map((s) => ({
-    id: s.driver.id,
-    name: s.driver.name,
-    points: s.points,
-    gap: leaderPoints - s.points,
-    rank: s.rank,
-  }));
+  // Transform into recharts-friendly format: one object per round
+  const data = rounds.map((round, i) => {
+    const point: Record<string, string | number> = { round };
+    for (const driver of drivers) {
+      point[driver.name] = driver.data[i];
+    }
+    return point;
+  });
 
   return (
     <div className="border border-white/10 bg-black/20 p-5">
       <h3 className="font-sans font-black text-[10px] uppercase tracking-[0.2em] text-white/40 mb-5">
         Championship Battle
       </h3>
-      <ResponsiveContainer width="100%" height={Math.max(200, top8.length * 36)}>
-        <BarChart
-          data={data}
-          layout="vertical"
-          margin={{ left: 0, right: 36, top: 0, bottom: 0 }}
-          barSize={16}
-        >
+      <ResponsiveContainer width="100%" height={300}>
+        <LineChart data={data} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
           <CartesianGrid
             strokeDasharray="3 3"
             stroke="rgba(255,255,255,0.05)"
-            horizontal={false}
           />
           <XAxis
-            type="number"
-            domain={[0, leaderPoints]}
+            dataKey="round"
+            tick={{ fill: "rgba(255,255,255,0.4)", fontSize: 10, fontWeight: 700 }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
             tick={{ fill: "rgba(255,255,255,0.25)", fontSize: 9 }}
             axisLine={false}
             tickLine={false}
-            tickCount={5}
-          />
-          <YAxis
-            type="category"
-            dataKey="name"
-            tick={{ fill: "rgba(255,255,255,0.65)", fontSize: 10, fontWeight: 700 }}
-            axisLine={false}
-            tickLine={false}
-            width={90}
-            tickFormatter={(name: string) =>
-              name.length > 12 ? name.slice(0, 12) + "…" : name
-            }
+            width={32}
           />
           <Tooltip
-            cursor={{ fill: "rgba(255,255,255,0.03)" }}
             contentStyle={{
               background: "#1B1B1B",
               border: "1px solid rgba(255,255,255,0.1)",
@@ -96,40 +83,26 @@ export function ChampionshipChart({ standings }: Props) {
               padding: "8px 12px",
             }}
             labelStyle={{ color: "white", fontWeight: 700, marginBottom: 4 }}
-            formatter={(value, _name, props: { payload?: { gap: number } }) => {
-              const pts = typeof value === "number" ? value : 0;
-              const gap = props.payload?.gap ?? 0;
-              return [
-                <span key="pts" style={{ color: LSR_ORANGE, fontWeight: 700 }}>
-                  {pts} pts{gap > 0 ? ` (−${gap})` : ""}
-                </span>,
-                "",
-              ];
-            }}
+            itemStyle={{ padding: "1px 0" }}
           />
-          <Bar dataKey="points" isAnimationActive={false}>
-            {data.map((entry, index) => (
-              <Cell
-                key={entry.id}
-                fill={
-                  index === 0
-                    ? LSR_ORANGE
-                    : `rgba(255,128,0,${Math.max(0.15, 0.55 - index * 0.06)})`
-                }
-              />
-            ))}
-            <LabelList
-              dataKey="points"
-              position="right"
-              style={{
-                fill: "rgba(255,255,255,0.5)",
-                fontSize: 10,
-                fontWeight: 700,
-                fontFamily: "monospace",
-              }}
+          <Legend
+            wrapperStyle={{ fontSize: 9, fontWeight: 700 }}
+            iconType="plainline"
+            iconSize={12}
+          />
+          {drivers.map((driver, i) => (
+            <Line
+              key={driver.name}
+              type="monotone"
+              dataKey={driver.name}
+              stroke={LINE_COLORS[i] || "rgba(255,128,0,0.2)"}
+              strokeWidth={i === 0 ? 2.5 : 1.5}
+              dot={{ r: 2, fill: LINE_COLORS[i] || "rgba(255,128,0,0.2)" }}
+              activeDot={{ r: 4 }}
+              isAnimationActive={false}
             />
-          </Bar>
-        </BarChart>
+          ))}
+        </LineChart>
       </ResponsiveContainer>
     </div>
   );

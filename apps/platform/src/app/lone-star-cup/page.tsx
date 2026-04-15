@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/carousel";
 import Image from "next/image";
 import Link from "next/link";
-import { getStandings } from "@/server/queries/standings";
+import { getStandings, getPointsProgression } from "@/server/queries/standings";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StandingsTable } from "@/components/standings-table";
 import { prisma } from "@/server/db";
@@ -56,13 +56,14 @@ async function getSeriesWithPodiums(slug: string) {
 }
 
 export default async function LoneStarCupPage() {
-  let currentSeries, currentStandings, s1Series, s1Standings;
+  let currentSeries, currentStandings, s1Series, s1Standings, currentProgression;
   try {
-    [currentSeries, currentStandings, s1Series, s1Standings] = await Promise.all([
+    [currentSeries, currentStandings, s1Series, s1Standings, currentProgression] = await Promise.all([
       getSeriesWithPodiums("lone-star-cup-s2"),
       getStandings("lone-star-cup-s2"),
       getSeriesWithPodiums("lone-star-cup-s1"),
       getStandings("lone-star-cup-s1"),
+      getPointsProgression("lone-star-cup-s2"),
     ]);
   } catch (error) {
     console.error('[LoneStarCup] Failed to load series data:', error);
@@ -459,8 +460,8 @@ export default async function LoneStarCupPage() {
               <Image src="/images/LSCSchedule26.png" alt="LSC Calendar" width={1200} height={800} className="w-full h-auto opacity-80" />
             </div>
 
-            {currentStandings.length > 0 && (
-              <ChampionshipChart standings={currentStandings} />
+            {currentProgression && (
+              <ChampionshipChart progression={currentProgression} />
             )}
           </div>
         </div>
