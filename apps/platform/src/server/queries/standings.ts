@@ -28,6 +28,7 @@ export const getPointsProgression = cache(async (seriesSlug: string): Promise<Po
     },
     orderBy: { startsAtUtc: 'asc' },
     include: {
+      venue: true,
       ingestedSessions: {
         where: { sessionType: 'RACE' },
         include: {
