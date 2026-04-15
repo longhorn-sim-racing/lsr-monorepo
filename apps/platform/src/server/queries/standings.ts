@@ -85,7 +85,7 @@ export const getPointsProgression = cache(async (seriesSlug: string): Promise<Po
     .slice(0, 8)
     .map(({ name, data }) => ({ name, data }));
 
-  const rounds = events.map((e, i) => `R${i + 1}`);
+  const rounds = events.map((e, i) => e.venue?.name ?? e.title ?? `R${i + 1}`);
 
   return { rounds, drivers };
 });
