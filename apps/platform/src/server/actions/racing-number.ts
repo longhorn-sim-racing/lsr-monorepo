@@ -9,6 +9,8 @@ const schema = z.object({
   racingNumber: z.number().int().min(0).max(999),
   racingNumberColor: z.string().optional().default("#FFFFFF"),
   racingNumberFont: z.string().optional().default("sans-serif"),
+  racingNumberItalic: z.boolean().optional().default(false),
+  racingNumberBorder: z.boolean().optional().default(false),
 });
 
 export async function setRacingNumberAction(input: z.infer<typeof schema>) {
@@ -29,14 +31,23 @@ export async function setRacingNumberAction(input: z.infer<typeof schema>) {
     throw new Error("This racing number is already reserved by another driver.");
   }
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      racingNumber: parsed.data.racingNumber,
-      racingNumberColor: parsed.data.racingNumberColor,
-      racingNumberFont: parsed.data.racingNumberFont,
-    },
-  });
+  try {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        racingNumber: parsed.data.racingNumber,
+        racingNumberColor: parsed.data.racingNumberColor,
+        racingNumberFont: parsed.data.racingNumberFont,
+        racingNumberItalic: parsed.data.racingNumberItalic,
+        racingNumberBorder: parsed.data.racingNumberBorder,
+      },
+    });
+  } catch (error: any) {
+    if (error.code === "P2002") {
+      throw new Error("This racing number is already reserved by another driver.");
+    }
+    throw error;
+  }
 
   // Revalidate to hide the prompt
   revalidatePath("/", "layout");

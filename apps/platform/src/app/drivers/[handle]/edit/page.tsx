@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { updateProfile } from './actions';
 import { AvatarUploader } from '@/components/avatar-uploader';
+import { UpdateRacingNumberButton } from '@/components/racing-number-prompt';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,29 +77,24 @@ export default async function EditDriverPage({
                     <Input id="iRating" name="iRating" type="number" defaultValue={pageUser.iRating ?? ''}
                         className="rounded-none bg-white/5 border-white/10 text-white h-12 font-medium focus:ring-lsr-orange" />
                 </FormField>
-                <FormField id="racingNumber" label="Racing Number">
-                    <Input id="racingNumber" name="racingNumber" type="number" min="0" max="999" placeholder="e.g. 42" defaultValue={pageUser.racingNumber ?? ''}
-                        className="rounded-none bg-white/5 border-white/10 text-white h-12 font-medium focus:ring-lsr-orange" />
-                </FormField>
-                <div className="grid grid-cols-2 gap-6">
-                  <FormField id="racingNumberColor" label="Number Color">
-                    <div className="flex h-12">
-                      <Input id="racingNumberColor" name="racingNumberColor" type="color" defaultValue={pageUser.racingNumberColor ?? '#FFFFFF'}
-                          className="w-16 h-12 p-1 rounded-none bg-white/5 border-white/10 cursor-pointer" />
+                <div className="space-y-2">
+                  <Label className="font-sans font-bold text-[10px] text-white/40 uppercase tracking-[0.2em] pl-1">Racing Number</Label>
+                  <div className="flex items-center gap-4 h-12">
+                    <div className="text-2xl flex-1 px-3 py-2 bg-white/5 border border-white/10 flex items-center">
+                      <span 
+                        style={pageUser.racingNumber !== null ? { 
+                          color: pageUser.racingNumberColor || undefined, 
+                          fontFamily: pageUser.racingNumberFont || undefined,
+                          fontStyle: pageUser.racingNumberItalic ? 'italic' : 'normal',
+                          fontWeight: 900,
+                          WebkitTextStroke: pageUser.racingNumberBorder ? '1px white' : 'none',
+                        } : { color: 'rgba(255,255,255,0.4)' }}
+                      >
+                        {pageUser.racingNumber !== null ? `#${pageUser.racingNumber}` : 'None'}
+                      </span>
                     </div>
-                  </FormField>
-                  <FormField id="racingNumberFont" label="Number Font">
-                    <select id="racingNumberFont" name="racingNumberFont" defaultValue={pageUser.racingNumberFont ?? 'sans-serif'}
-                        className="flex h-12 w-full rounded-none border border-white/10 bg-[#1e1e1e] px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-lsr-orange font-medium">
-                      <option value="sans-serif">Sans Serif</option>
-                      <option value="serif">Serif</option>
-                      <option value="monospace">Monospace</option>
-                      <option value="Impact, sans-serif">Impact</option>
-                      <option value="Arial Black, sans-serif">Arial Black</option>
-                      <option value="Trebuchet MS, sans-serif">Trebuchet</option>
-                      <option value="Verdana, sans-serif">Verdana</option>
-                    </select>
-                  </FormField>
+                    <UpdateRacingNumberButton user={pageUser} />
+                  </div>
                 </div>
                 <FormField id="gradYear" label="Graduating Year">
                     <Input id="gradYear" name="gradYear" type="number" defaultValue={pageUser.gradYear ?? ''}

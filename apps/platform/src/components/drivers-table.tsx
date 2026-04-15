@@ -23,6 +23,8 @@ type DriverRow = {
   racingNumber: number | null;
   racingNumberColor?: string | null;
   racingNumberFont?: string | null;
+  racingNumberItalic?: boolean | null;
+  racingNumberBorder?: boolean | null;
 };
 
 type SortConfig = {
@@ -156,11 +158,16 @@ export function DriversTable({ drivers }: { drivers: DriverRow[] }) {
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span
-                        className="font-display font-black italic text-lg"
+                        className="font-display font-black text-lg"
                         style={
                           d.racingNumber !== null
-                            ? { color: d.racingNumberColor || undefined, fontFamily: d.racingNumberFont || undefined }
-                            : { color: 'rgba(255,255,255,0.4)' }
+                            ? { 
+                                color: d.racingNumberColor || undefined, 
+                                fontFamily: d.racingNumberFont || undefined,
+                                fontStyle: d.racingNumberItalic ? 'italic' : 'normal',
+                                WebkitTextStroke: d.racingNumberBorder ? '1px white' : 'none'
+                              }
+                            : { color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }
                         }
                       >
                         {d.racingNumber !== null ? `#${d.racingNumber}` : <span className="text-white/20">—</span>}

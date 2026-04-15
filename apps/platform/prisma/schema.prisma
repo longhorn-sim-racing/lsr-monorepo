@@ -133,6 +133,8 @@ model User {
   racingNumber      Int?     @unique
   racingNumberColor String   @default("#FFFFFF")
   racingNumberFont  String   @default("sans-serif")
+  racingNumberItalic Boolean @default(false)
+  racingNumberBorder Boolean @default(false)
   marketingOptIn Boolean    @default(true)
   status         UserStatus @default(active)
 

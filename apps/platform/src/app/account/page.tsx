@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { MarketingToggle } from '@/components/marketing-toggle';
 import { ConfirmSubmitButton } from '@/components/confirm-submit-button';
 import { NotificationPreferences } from '@/components/notification-preferences';
+import { UpdateRacingNumberButton } from '@/components/racing-number-prompt';
 import { prisma } from '@/server/db';
 
 export const dynamic = 'force-dynamic';
@@ -73,12 +74,24 @@ export default async function AccountPage() {
               </div>
               <div className="grid gap-2">
                 <Label className="font-sans font-bold text-[10px] text-white/40 uppercase tracking-[0.2em] pl-1">Racing Number</Label>
-                <Input 
-                  value={user.racingNumber !== null ? `#${user.racingNumber}` : 'None'} 
-                  readOnly 
-                  className="rounded-none bg-white/5 border-white/10 text-white h-12 font-medium"
-                  style={user.racingNumber !== null ? { color: user.racingNumberColor || undefined, fontFamily: user.racingNumberFont || undefined } : undefined}
-                />
+                <div className="flex items-center gap-4 h-12">
+                  <div 
+                    className="text-2xl flex-1 px-3 py-2 bg-white/5 border border-white/10 flex items-center"
+                  >
+                    <span 
+                      style={user.racingNumber !== null ? { 
+                        color: user.racingNumberColor || undefined, 
+                        fontFamily: user.racingNumberFont || undefined,
+                        fontStyle: user.racingNumberItalic ? 'italic' : 'normal',
+                        fontWeight: 900,
+                        WebkitTextStroke: user.racingNumberBorder ? '1px white' : 'none',
+                      } : { color: 'rgba(255,255,255,0.4)' }}
+                    >
+                      {user.racingNumber !== null ? `#${user.racingNumber}` : 'None'}
+                    </span>
+                  </div>
+                  <UpdateRacingNumberButton user={user} />
+                </div>
               </div>
             </div>
           </div>
