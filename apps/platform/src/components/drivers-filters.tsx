@@ -14,14 +14,16 @@ import {
   DropdownMenuCheckboxItem,
 } from "@/components/ui/dropdown-menu"
 
-type Props = { selectedRoles: RoleCode[] }
-
 const ALL_ROLES = Object.keys(ROLE_LABEL) as RoleCode[]
 
-export function DriversFilters({ selectedRoles }: Props) {
+export function DriversFilters() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+
+  const selectedRoles = (searchParams?.getAll("role") ?? []).filter(
+    (r): r is RoleCode => ALL_ROLES.includes(r as RoleCode),
+  )
 
   const toggleRole = (role: RoleCode, checked: boolean) => {
     const sp = new URLSearchParams(searchParams ?? undefined)
