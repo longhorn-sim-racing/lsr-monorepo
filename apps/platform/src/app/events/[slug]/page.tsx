@@ -130,8 +130,71 @@ export default async function EventPage({ params }: EventPageArgs) {
 
   const venue = event.venue;
 
+  const statusMap: Record<string, string> = {
+    CANCELLED: "https://schema.org/EventCancelled",
+    POSTPONED: "https://schema.org/EventPostponed",
+  };
+  const attendanceMode =
+    event.meetingUrl && venue
+      ? "https://schema.org/MixedEventAttendanceMode"
+      : event.meetingUrl
+        ? "https://schema.org/OnlineEventAttendanceMode"
+        : "https://schema.org/OfflineEventAttendanceMode";
+
+  const eventJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "SportsEvent",
+    name: event.title,
+    description: event.summary || event.description || undefined,
+    startDate: startsAt.toISOString(),
+    endDate: endsAt.toISOString(),
+    eventStatus: statusMap[event.status] ?? "https://schema.org/EventScheduled",
+    eventAttendanceMode: attendanceMode,
+    url: `https://www.longhornsimracing.org/events/${event.slug}`,
+    image: event.heroImageUrl || undefined,
+    location: venue
+      ? {
+          "@type": "Place",
+          name: venue.name,
+          address: {
+            "@type": "PostalAddress",
+            streetAddress: [venue.addressLine1, venue.addressLine2].filter(Boolean).join(", ") || undefined,
+            addressLocality: venue.city || undefined,
+            addressRegion: venue.state || undefined,
+            postalCode: venue.postalCode || undefined,
+            addressCountry: venue.country || undefined,
+          },
+        }
+      : event.meetingUrl
+        ? { "@type": "VirtualLocation", url: event.meetingUrl }
+        : undefined,
+    organizer: {
+      "@type": "SportsOrganization",
+      name: "Longhorn Sim Racing",
+      url: "https://www.longhornsimracing.org",
+    },
+  };
+
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.longhornsimracing.org/" },
+      { "@type": "ListItem", position: 2, name: "Events", item: "https://www.longhornsimracing.org/events" },
+      { "@type": "ListItem", position: 3, name: event.title, item: `https://www.longhornsimracing.org/events/${event.slug}` },
+    ],
+  };
+
   return (
     <main className="bg-lsr-charcoal text-white min-h-screen">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(eventJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
       <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
         <div className="mb-8">
           <Link href="/events" className="group inline-flex items-center gap-3 text-[10px] font-sans font-bold uppercase tracking-[0.25em] text-lsr-orange hover:text-white transition-colors">

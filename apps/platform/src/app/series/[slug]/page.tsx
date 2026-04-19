@@ -80,8 +80,22 @@ export default async function SeriesPage({ params }: SeriesPageArgs) {
     return notFound();
   }
 
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.longhornsimracing.org/" },
+      { "@type": "ListItem", position: 2, name: "Series", item: "https://www.longhornsimracing.org/events" },
+      { "@type": "ListItem", position: 3, name: series.title, item: `https://www.longhornsimracing.org/series/${series.slug}` },
+    ],
+  };
+
   return (
     <main className="bg-lsr-charcoal text-white min-h-screen">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
       <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
           <div>
