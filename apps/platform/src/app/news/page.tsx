@@ -49,6 +49,19 @@ export default async function NewsIndexPage({
 
   const allTags = [...new Set(allPosts.flatMap((p) => p.tags || []))].sort()
 
+  const itemListJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    name: "Longhorn Sim Racing News",
+    numberOfItems: allPosts.length,
+    itemListElement: allPosts.map((p, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      url: `https://www.longhornsimracing.org/news/${p.slug}`,
+      name: p.title,
+    })),
+  };
+
   const posts = allPosts.filter((p) => {
     const searchMatch = !q ||
       p.title.toLowerCase().includes(q.toLowerCase()) ||
@@ -63,6 +76,10 @@ export default async function NewsIndexPage({
 
   return (
     <main className="bg-lsr-charcoal text-white min-h-screen">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(itemListJsonLd) }}
+      />
       <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
           <div>
