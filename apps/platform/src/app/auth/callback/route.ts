@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { type CookieOptions, createServerClient } from '@supabase/ssr';
 import { prisma } from '@/server/db';
 import { slugify } from '@/lib/slug';
+import { revalidateDriverList } from '@/server/cache/revalidate-public';
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -49,17 +50,18 @@ export async function GET(request: Request) {
   const { user } = data;
 
   try {
-    const dbUser = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const existingUser = await tx.user.findUnique({ where: { id: user.id } });
 
       if (existingUser) {
         if (existingUser.status !== 'active') {
-          return tx.user.update({
+          const reactivated = await tx.user.update({
             where: { id: user.id },
             data: { status: 'active' },
           });
+          return { user: reactivated, created: false, reactivated: true };
         }
-        return existingUser;
+        return { user: existingUser, created: false, reactivated: false };
       }
 
       if (!user.email) {
@@ -67,7 +69,7 @@ export async function GET(request: Request) {
       }
 
       const displayName = user.user_metadata.full_name || user.user_metadata.displayName || user.email.split('@')[0];
-      
+
       // Create a unique handle, appending a number if necessary
       const baseHandle = slugify(displayName);
       let finalHandle = baseHandle;
@@ -86,12 +88,17 @@ export async function GET(request: Request) {
         status: 'active' as const,
         marketingOptIn: user.user_metadata.marketingOptIn ?? true,
       };
-      
-      return tx.user.create({ data: newUserPayload });
+
+      const created = await tx.user.create({ data: newUserPayload });
+      return { user: created, created: true, reactivated: false };
     });
 
+    if (result.created || result.reactivated) {
+      revalidateDriverList();
+    }
+
     const next = searchParams.get('next');
-    const redirectUrl = next ? `${origin}${next}` : `${origin}/drivers/${dbUser.handle}`;
+    const redirectUrl = next ? `${origin}${next}` : `${origin}/drivers/${result.user.handle}`;
     return NextResponse.redirect(redirectUrl);
 
   } catch (dbError) {
