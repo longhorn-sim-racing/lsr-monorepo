@@ -73,8 +73,12 @@ export default async function NewsPostPage({
   const { slug } = await params // 👈 await before using
 
   let postData;
+  let allPosts: Awaited<ReturnType<typeof getAllPosts>> = [];
   try {
-    postData = await getPostContent(slug);
+    [postData, allPosts] = await Promise.all([
+      getPostContent(slug),
+      getAllPosts(),
+    ]);
   } catch (error) {
     console.error('[NewsPost] Failed to load post:', error);
     return (
@@ -87,6 +91,7 @@ export default async function NewsPostPage({
   }
 
   const { content, frontmatter } = postData
+  const relatedPosts = allPosts.filter(p => p.slug !== slug).slice(0, 3)
 
   const articleJsonLd = {
     "@context": "https://schema.org",
@@ -175,6 +180,33 @@ export default async function NewsPostPage({
           {content}
         </article>
         
+        {relatedPosts.length > 0 && (
+          <section className="mt-20 pt-10 border-t border-white/10">
+            <h2 className="font-display font-black italic text-2xl md:text-3xl text-white uppercase tracking-normal mb-8">
+              More <span className="text-lsr-orange">from LSR</span>
+            </h2>
+            <div className="grid gap-6 md:grid-cols-3">
+              {relatedPosts.map(p => (
+                <Link
+                  key={p.slug}
+                  href={`/news/${p.slug}`}
+                  className="group border border-white/10 bg-white/[0.02] p-6 hover:border-lsr-orange/60 transition-colors"
+                >
+                  <time className="font-mono text-[10px] text-lsr-orange uppercase tracking-widest">
+                    {new Date(p.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                  </time>
+                  <h3 className="font-display font-black italic text-xl text-white uppercase tracking-normal mt-3 group-hover:text-lsr-orange transition-colors">
+                    {p.title}
+                  </h3>
+                  {p.excerpt && (
+                    <p className="font-sans text-sm text-white/60 mt-3 line-clamp-3">{p.excerpt}</p>
+                  )}
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
         <div className="mt-20 pt-10 border-t border-white/10">
           <div className="flex justify-between items-center">
             <span className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/30">End of Transmission</span>
