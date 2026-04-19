@@ -29,9 +29,39 @@ export async function generateMetadata({
   params,
 }: { params: Promise<{ handle: string }> }): Promise<Metadata> {
   const { handle } = await params;
+
+  let stats;
+  try {
+    stats = await getDriverStats(handle);
+  } catch {
+    stats = null;
+  }
+
+  if (!stats?.user) {
+    return {
+      title: "Driver",
+      alternates: { canonical: `/drivers/${handle}` },
+    };
+  }
+
+  const { user } = stats;
+  const description =
+    user.bio?.slice(0, 155) ||
+    `${user.displayName} — driver profile, race history, and stats with Longhorn Sim Racing at UT Austin.`;
+
   return {
-    alternates: {
-      canonical: `/drivers/${handle}`,
+    title: user.displayName,
+    description,
+    alternates: { canonical: `/drivers/${handle}` },
+    openGraph: {
+      title: user.displayName,
+      description,
+      type: "profile",
+      url: `/drivers/${handle}`,
+    },
+    twitter: {
+      title: user.displayName,
+      description,
     },
   };
 }

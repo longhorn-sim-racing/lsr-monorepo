@@ -14,9 +14,42 @@ export async function generateMetadata({
   params: Promise<RouteParams>
 }): Promise<Metadata> {
   const { slug } = await params;
+
+  let postData;
+  try {
+    postData = await getPostContent(slug);
+  } catch {
+    postData = null;
+  }
+
+  if (!postData) {
+    return {
+      title: "News",
+      alternates: { canonical: `/news/${slug}` },
+    };
+  }
+
+  const { frontmatter } = postData;
+  const description =
+    frontmatter.excerpt ||
+    `${frontmatter.title} — read the latest from Longhorn Sim Racing.`;
+
   return {
-    alternates: {
-      canonical: `/news/${slug}`,
+    title: frontmatter.title,
+    description,
+    alternates: { canonical: `/news/${slug}` },
+    openGraph: {
+      title: frontmatter.title,
+      description,
+      type: "article",
+      url: `/news/${slug}`,
+      publishedTime: frontmatter.date,
+      authors: frontmatter.author ? [frontmatter.author] : undefined,
+      tags: frontmatter.tags,
+    },
+    twitter: {
+      title: frontmatter.title,
+      description,
     },
   };
 }

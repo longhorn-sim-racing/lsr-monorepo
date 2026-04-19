@@ -24,9 +24,39 @@ export async function generateMetadata({
   params,
 }: EventPageArgs): Promise<Metadata> {
   const { slug } = await params;
+
+  let event;
+  try {
+    event = await getEventBySlug(slug);
+  } catch {
+    event = null;
+  }
+
+  if (!event) {
+    return {
+      title: "Event",
+      alternates: { canonical: `/events/${slug}` },
+    };
+  }
+
+  const description =
+    event.summary ||
+    event.description?.slice(0, 155) ||
+    `Details, registration, and results for ${event.title} — a Longhorn Sim Racing event.`;
+
   return {
-    alternates: {
-      canonical: `/events/${slug}`,
+    title: event.title,
+    description,
+    alternates: { canonical: `/events/${slug}` },
+    openGraph: {
+      title: event.title,
+      description,
+      type: "article",
+      url: `/events/${slug}`,
+    },
+    twitter: {
+      title: event.title,
+      description,
     },
   };
 }

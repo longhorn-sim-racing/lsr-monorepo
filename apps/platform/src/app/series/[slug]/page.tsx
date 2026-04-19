@@ -23,9 +23,36 @@ export async function generateMetadata({
   params,
 }: SeriesPageArgs): Promise<Metadata> {
   const { slug } = await params;
+
+  let series;
+  try {
+    series = await getSeriesBySlug(slug);
+  } catch {
+    series = null;
+  }
+
+  if (!series) {
+    return {
+      title: "Series",
+      alternates: { canonical: `/series/${slug}` },
+    };
+  }
+
+  const description = `${series.title} — a championship series hosted by Longhorn Sim Racing. Schedule, standings, and race results.`;
+
   return {
-    alternates: {
-      canonical: `/series/${slug}`,
+    title: series.title,
+    description,
+    alternates: { canonical: `/series/${slug}` },
+    openGraph: {
+      title: series.title,
+      description,
+      type: "website",
+      url: `/series/${slug}`,
+    },
+    twitter: {
+      title: series.title,
+      description,
     },
   };
 }
