@@ -62,3 +62,4 @@ nul
 # supabase local
 **/supabase/.temp
 **/supabase/.branches
+.env*.local
