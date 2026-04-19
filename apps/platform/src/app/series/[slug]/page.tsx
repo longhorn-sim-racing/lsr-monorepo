@@ -15,6 +15,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Metadata } from "next";
 import { DatabaseUnavailable } from "@/components/database-unavailable";
 
+export const revalidate = 3600;
+
 type SeriesPageArgs = {
   params: Promise<{ slug: string }>;
 };

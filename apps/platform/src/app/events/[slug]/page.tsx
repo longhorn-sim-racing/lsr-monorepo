@@ -16,6 +16,8 @@ import { isEventLive } from "@/lib/events";
 import { StreamPlayer } from "@/components/stream-player";
 import { DatabaseUnavailable } from "@/components/database-unavailable";
 
+export const revalidate = 3600;
+
 type EventPageArgs = {
   params: Promise<{ slug: string }>;
 };
