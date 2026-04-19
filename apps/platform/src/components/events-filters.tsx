@@ -12,13 +12,14 @@ import {
 import { Button } from "@/components/ui/button"
 import { Filter, X } from "lucide-react"
 
-export function EventsFilters({ allTypes, selectedTypes }: {
+export function EventsFilters({ allTypes }: {
   allTypes: string[],
-  selectedTypes: string[]
 }) {
   const searchParams = useSearchParams()
   const router = useRouter()
   const pathname = usePathname()
+
+  const selectedTypes = (searchParams?.getAll("type") ?? []).map(t => t.toLowerCase())
 
   const handleSelect = (type: string) => {
     const params = new URLSearchParams(searchParams)
