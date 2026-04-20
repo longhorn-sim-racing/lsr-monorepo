@@ -1,0 +1,4724 @@
+{
+  "Cars": [
+    {
+      "Skin": "01_rss_special_14",
+      "CarId": 0,
+      "Model": "rss_gtm_bayer_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "04_duraoil_30",
+      "CarId": 1,
+      "Model": "rss_gtm_akuro_v6_evo2",
+      "Driver": {
+        "Guid": "76561198959857060",
+        "Name": "A L e x",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "00_rss_racing_2",
+      "CarId": 2,
+      "Model": "rss_gtm_protech_p92_f6",
+      "Driver": {
+        "Guid": "76561198982352546",
+        "Name": "TabbyTheCat",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "04_racesphere",
+      "CarId": 3,
+      "Model": "rss_gtm_hyperion_v8",
+      "Driver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "02_eagle_19",
+      "CarId": 4,
+      "Model": "rss_gtm_hyperion_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "03_red_eagle_65",
+      "CarId": 5,
+      "Model": "rss_gtm_lux_v8",
+      "Driver": {
+        "Guid": "76561198165166052",
+        "Name": "Player",
+        "Team": "",
+        "Nation": "ITA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "00_sneakers_46",
+      "CarId": 6,
+      "Model": "rss_gtm_aero_v10_evo2",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "02_firestarter_95",
+      "CarId": 7,
+      "Model": "rss_gtm_mercer_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "04_carfex_24",
+      "CarId": 8,
+      "Model": "rss_gtm_lux_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "04_rss_lms_1",
+      "CarId": 9,
+      "Model": "rss_gtm_aero_v10_evo2",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "04_rss_new_age",
+      "CarId": 10,
+      "Model": "rss_gtm_bayer_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "04_camo",
+      "CarId": 11,
+      "Model": "rss_gtm_furiano_96_v6",
+      "Driver": {
+        "Guid": "76561199585362421",
+        "Name": "Blue_Brz",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "04_white_falcon_90",
+      "CarId": 12,
+      "Model": "rss_gtm_mercer_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "01_drona_44",
+      "CarId": 13,
+      "Model": "rss_gtm_akuro_v6_evo2",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "04_powell_72",
+      "CarId": 14,
+      "Model": "rss_gtm_protech_p92_f6",
+      "Driver": {
+        "Guid": "76561199058896905",
+        "Name": "lewanGOLski",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "00_silver_54",
+      "CarId": 15,
+      "Model": "rss_gtm_furiano_96_v6",
+      "Driver": {
+        "Guid": "76561199696991938",
+        "Name": "Prak",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "05_factory",
+      "CarId": 16,
+      "Model": "rss_gtm_hyperion_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "06_factory",
+      "CarId": 17,
+      "Model": "rss_gtm_aero_v10_evo2",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "04_rss_lms_1",
+      "CarId": 18,
+      "Model": "rss_gtm_aero_v10_evo2",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "03_red_eagle_65",
+      "CarId": 19,
+      "Model": "rss_gtm_lux_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "06_factory",
+      "CarId": 20,
+      "Model": "rss_gtm_aero_v10_evo2",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "01_drona_44",
+      "CarId": 21,
+      "Model": "rss_gtm_akuro_v6_evo2",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "03_rss_blue_dgt",
+      "CarId": 22,
+      "Model": "rss_gtm_bayer_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "02_firestarter_95",
+      "CarId": 23,
+      "Model": "rss_gtm_mercer_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "02_factory_gtm_51",
+      "CarId": 24,
+      "Model": "rss_gtm_furiano_96_v6",
+      "Driver": {
+        "Guid": "76561199403370886",
+        "Name": "Mark Y",
+        "Team": "",
+        "Nation": "USA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "02_rss_sport_11",
+      "CarId": 25,
+      "Model": "rss_gtm_aero_v10_evo2",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "01_rss_special_14",
+      "CarId": 26,
+      "Model": "rss_gtm_bayer_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "01_red_21",
+      "CarId": 27,
+      "Model": "rss_gtm_furiano_96_v6",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "02_torqspeed_15",
+      "CarId": 28,
+      "Model": "rss_gtm_lux_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "04_carfex_24",
+      "CarId": 29,
+      "Model": "rss_gtm_lux_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "04_duraoil_30",
+      "CarId": 30,
+      "Model": "rss_gtm_akuro_v6_evo2",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "04_white_falcon_90",
+      "CarId": 31,
+      "Model": "rss_gtm_mercer_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "05_factory",
+      "CarId": 32,
+      "Model": "rss_gtm_hyperion_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "03_rss_motorsport_12",
+      "CarId": 33,
+      "Model": "rss_gtm_mercer_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "03_carbon_fiber",
+      "CarId": 34,
+      "Model": "rss_gtm_hyperion_v8",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    },
+    {
+      "Skin": "02_protech_factory_92",
+      "CarId": 35,
+      "Model": "rss_gtm_protech_p92_f6",
+      "Driver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "BallastKG": 0,
+      "Restrictor": 0
+    }
+  ],
+  "Date": "2026-03-07T12:03:00-06:00",
+  "Laps": [
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122328,
+      "Sectors": [
+        45728,
+        49896,
+        26704
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4139559,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123449,
+      "Sectors": [
+        46329,
+        50255,
+        26865
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4140693,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123744,
+      "Sectors": [
+        45975,
+        50967,
+        26802
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4141000,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 125857,
+      "Sectors": [
+        47440,
+        51286,
+        27131
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4143081,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 126828,
+      "Sectors": [
+        48240,
+        51263,
+        27325
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 4144046,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 128181,
+      "Sectors": [
+        47901,
+        52609,
+        27671
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 4145405,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 128996,
+      "Sectors": [
+        47231,
+        53960,
+        27805
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4146240,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120267,
+      "Sectors": [
+        43641,
+        49815,
+        26811
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4259830,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 119896,
+      "Sectors": [
+        43873,
+        49221,
+        26802
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4260586,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120446,
+      "Sectors": [
+        43982,
+        49833,
+        26631
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4261443,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123499,
+      "Sectors": [
+        44920,
+        51255,
+        27324
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4266579,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 124870,
+      "Sectors": [
+        44779,
+        51548,
+        28543
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 4268905,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123534,
+      "Sectors": [
+        44657,
+        50643,
+        28234
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 4268937,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123266,
+      "Sectors": [
+        44985,
+        51264,
+        27017
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4269478,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 119803,
+      "Sectors": [
+        43672,
+        49405,
+        26726
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4379637,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120868,
+      "Sectors": [
+        44269,
+        49901,
+        26698
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4382309,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 124196,
+      "Sectors": [
+        47993,
+        49370,
+        26833
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4384779,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122892,
+      "Sectors": [
+        44763,
+        51011,
+        27118
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4389471,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 125478,
+      "Sectors": [
+        46403,
+        50733,
+        28342
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 4394414,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 124999,
+      "Sectors": [
+        46011,
+        51048,
+        27940
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4394505,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 130740,
+      "Sectors": [
+        53241,
+        50363,
+        27136
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 4399636,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 119791,
+      "Sectors": [
+        43570,
+        49657,
+        26564
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4499429,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121001,
+      "Sectors": [
+        44335,
+        49837,
+        26829
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4503307,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 119747,
+      "Sectors": [
+        43675,
+        49302,
+        26770
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4504522,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123025,
+      "Sectors": [
+        44891,
+        50967,
+        27167
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4512494,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 127675,
+      "Sectors": [
+        45158,
+        55647,
+        26870
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4522155,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 134450,
+      "Sectors": [
+        44991,
+        62073,
+        27386
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 4534073,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 140570,
+      "Sectors": [
+        45107,
+        68162,
+        27301
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 4534981,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 119868,
+      "Sectors": [
+        43674,
+        49635,
+        26559
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4619303,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120206,
+      "Sectors": [
+        43810,
+        49730,
+        26666
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4623514,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 119923,
+      "Sectors": [
+        43612,
+        49626,
+        26685
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4624442,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122761,
+      "Sectors": [
+        44663,
+        50941,
+        27157
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4635254,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121730,
+      "Sectors": [
+        44673,
+        50071,
+        26986
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4643876,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122740,
+      "Sectors": [
+        45128,
+        50414,
+        27198
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 4656804,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122690,
+      "Sectors": [
+        44832,
+        50508,
+        27350
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 4657667,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 119645,
+      "Sectors": [
+        43416,
+        49509,
+        26720
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4738948,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120756,
+      "Sectors": [
+        44071,
+        50117,
+        26568
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4744266,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120515,
+      "Sectors": [
+        43795,
+        49919,
+        26801
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4745008,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122288,
+      "Sectors": [
+        44412,
+        50678,
+        27198
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4757541,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121444,
+      "Sectors": [
+        44395,
+        50270,
+        26779
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4765321,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122523,
+      "Sectors": [
+        45442,
+        50171,
+        26910
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 4779319,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123082,
+      "Sectors": [
+        45129,
+        50858,
+        27095
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 4780748,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 119788,
+      "Sectors": [
+        43662,
+        49509,
+        26617
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4858740,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120841,
+      "Sectors": [
+        44296,
+        49568,
+        26977
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4865793,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122300,
+      "Sectors": [
+        45661,
+        49919,
+        26720
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4866567,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123987,
+      "Sectors": [
+        45138,
+        51237,
+        27612
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4881527,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121946,
+      "Sectors": [
+        44371,
+        50638,
+        26937
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 4887257,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 131473,
+      "Sectors": [
+        52458,
+        51660,
+        27355
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 4912219,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 134347,
+      "Sectors": [
+        55831,
+        50841,
+        27675
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 4913654,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 119769,
+      "Sectors": [
+        43597,
+        49549,
+        26623
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4978512,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120263,
+      "Sectors": [
+        44096,
+        49357,
+        26810
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4986052,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120517,
+      "Sectors": [
+        44102,
+        49815,
+        26600
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 4987081,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122998,
+      "Sectors": [
+        44901,
+        50796,
+        27301
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5004523,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121952,
+      "Sectors": [
+        44746,
+        50287,
+        26919
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5009214,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123108,
+      "Sectors": [
+        45019,
+        50999,
+        27090
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 5036754,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 131068,
+      "Sectors": [
+        44276,
+        58829,
+        27963
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 5043283,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120852,
+      "Sectors": [
+        44257,
+        49774,
+        26821
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5099368,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120855,
+      "Sectors": [
+        43779,
+        49634,
+        27442
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5106908,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120560,
+      "Sectors": [
+        43710,
+        50026,
+        26824
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5107639,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122005,
+      "Sectors": [
+        44520,
+        50336,
+        27149
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5126526,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 131290,
+      "Sectors": [
+        44678,
+        50963,
+        35649
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5140501,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 128627,
+      "Sectors": [
+        49297,
+        52079,
+        27251
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 5165369,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 124669,
+      "Sectors": [
+        46076,
+        51220,
+        27373
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 5167949,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121882,
+      "Sectors": [
+        44392,
+        49815,
+        27675
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5228786,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121367,
+      "Sectors": [
+        44013,
+        50039,
+        27315
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5229006,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 146078,
+      "Sectors": [
+        68787,
+        49904,
+        27387
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5245448,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123148,
+      "Sectors": [
+        44960,
+        50927,
+        27261
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5249673,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 137355,
+      "Sectors": [
+        55185,
+        53514,
+        28656
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5277852,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123410,
+      "Sectors": [
+        44989,
+        51120,
+        27301
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 5288769,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 125799,
+      "Sectors": [
+        46607,
+        51283,
+        27909
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 5293748,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121735,
+      "Sectors": [
+        44978,
+        49658,
+        27099
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5350518,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122551,
+      "Sectors": [
+        44908,
+        50562,
+        27081
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5351555,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 125416,
+      "Sectors": [
+        45222,
+        50683,
+        29511
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5375087,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 143723,
+      "Sectors": [
+        66639,
+        50327,
+        26757
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5389173,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123491,
+      "Sectors": [
+        45295,
+        50567,
+        27629
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 5412249,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123489,
+      "Sectors": [
+        45017,
+        50986,
+        27486
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 5417235,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 154430,
+      "Sectors": [
+        77287,
+        50207,
+        26936
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5432280,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122032,
+      "Sectors": [
+        43980,
+        49922,
+        28130
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5473586,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 156952,
+      "Sectors": [
+        80672,
+        49635,
+        26645
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5507468,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121503,
+      "Sectors": [
+        44638,
+        49972,
+        26893
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5510680,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 160534,
+      "Sectors": [
+        82832,
+        50589,
+        27113
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5535620,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 1,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 128514,
+      "Sectors": [
+        46532,
+        51381,
+        30601
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 5540754,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 124477,
+      "Sectors": [
+        45106,
+        51818,
+        27553
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5556757,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 159056,
+      "Sectors": [
+        44406,
+        86035,
+        28615
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 5576287,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120354,
+      "Sectors": [
+        43827,
+        49702,
+        26825
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5627819,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122967,
+      "Sectors": [
+        44792,
+        51426,
+        26749
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5633650,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 163441,
+      "Sectors": [
+        82297,
+        54364,
+        26780
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5637027,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122657,
+      "Sectors": [
+        44952,
+        50413,
+        27292
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5658274,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123504,
+      "Sectors": [
+        45100,
+        50832,
+        27572
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5680260,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 162792,
+      "Sectors": [
+        84406,
+        50954,
+        27432
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 5703534,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 157746,
+      "Sectors": [
+        79185,
+        51241,
+        27320
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 5734031,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122976,
+      "Sectors": [
+        44770,
+        51242,
+        26964
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5756631,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120799,
+      "Sectors": [
+        43647,
+        50499,
+        26653
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5757826,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 137083,
+      "Sectors": [
+        43843,
+        66685,
+        26555
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5764900,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122038,
+      "Sectors": [
+        44616,
+        50291,
+        27131
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5780310,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122345,
+      "Sectors": [
+        44815,
+        50485,
+        27045
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5802603,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122408,
+      "Sectors": [
+        44676,
+        50697,
+        27035
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 5825930,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121805,
+      "Sectors": [
+        44172,
+        50134,
+        27499
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 5855833,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122567,
+      "Sectors": [
+        45410,
+        50472,
+        26685
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5880391,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120232,
+      "Sectors": [
+        43835,
+        49658,
+        26739
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5885130,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 132282,
+      "Sectors": [
+        54827,
+        50518,
+        26937
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 5888918,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122711,
+      "Sectors": [
+        44866,
+        50575,
+        27270
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5903021,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 130556,
+      "Sectors": [
+        52670,
+        50671,
+        27215
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 5933151,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121737,
+      "Sectors": [
+        44417,
+        50256,
+        27064
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 5947659,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121782,
+      "Sectors": [
+        44318,
+        50378,
+        27086
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 5977614,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120288,
+      "Sectors": [
+        43958,
+        49735,
+        26595
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6000676,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120102,
+      "Sectors": [
+        43642,
+        49698,
+        26762
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6005231,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122498,
+      "Sectors": [
+        44720,
+        50445,
+        27333
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6011417,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122326,
+      "Sectors": [
+        44859,
+        50552,
+        26915
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6025343,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123375,
+      "Sectors": [
+        45299,
+        50877,
+        27199
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6056524,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 126368,
+      "Sectors": [
+        48667,
+        50431,
+        27270
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 6074016,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 132322,
+      "Sectors": [
+        50665,
+        54239,
+        27418
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 6109936,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120311,
+      "Sectors": [
+        43933,
+        49783,
+        26595
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6120987,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120797,
+      "Sectors": [
+        43708,
+        50040,
+        27049
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6126024,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123662,
+      "Sectors": [
+        44795,
+        50428,
+        28439
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6135082,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122419,
+      "Sectors": [
+        45046,
+        50391,
+        26982
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6147761,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123012,
+      "Sectors": [
+        45242,
+        50536,
+        27234
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6179539,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 139651,
+      "Sectors": [
+        45083,
+        67221,
+        27347
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 6213655,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122009,
+      "Sectors": [
+        44538,
+        50237,
+        27234
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 6231940,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 119882,
+      "Sectors": [
+        43832,
+        49514,
+        26536
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6240866,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121426,
+      "Sectors": [
+        43967,
+        50374,
+        27085
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6247448,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 129022,
+      "Sectors": [
+        50951,
+        50778,
+        27293
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6264107,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122347,
+      "Sectors": [
+        44875,
+        50386,
+        27086
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6270107,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122948,
+      "Sectors": [
+        44977,
+        50746,
+        27225
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6302478,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 137670,
+      "Sectors": [
+        44843,
+        65386,
+        27441
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 6351315,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121980,
+      "Sectors": [
+        44152,
+        50567,
+        27261
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 6353918,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120557,
+      "Sectors": [
+        43977,
+        49887,
+        26693
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6361422,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121816,
+      "Sectors": [
+        44020,
+        50521,
+        27275
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6369261,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 124683,
+      "Sectors": [
+        46504,
+        50931,
+        27248
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6388793,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122707,
+      "Sectors": [
+        44947,
+        50467,
+        27293
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6392812,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123447,
+      "Sectors": [
+        45236,
+        50841,
+        27370
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6425953,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123300,
+      "Sectors": [
+        45274,
+        50936,
+        27090
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 6474606,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122300,
+      "Sectors": [
+        44531,
+        50810,
+        26959
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 6476214,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 119901,
+      "Sectors": [
+        43680,
+        49724,
+        26497
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6481323,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 121271,
+      "Sectors": [
+        43926,
+        49981,
+        27364
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6490530,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123682,
+      "Sectors": [
+        45450,
+        50769,
+        27463
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6512478,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122113,
+      "Sectors": [
+        44767,
+        50373,
+        26973
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6514923,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123678,
+      "Sectors": [
+        45639,
+        50858,
+        27181
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6549601,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123183,
+      "Sectors": [
+        44693,
+        51062,
+        27428
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 6597781,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122241,
+      "Sectors": [
+        44147,
+        50176,
+        27918
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 6598456,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120716,
+      "Sectors": [
+        43910,
+        49807,
+        26999
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6602038,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 125584,
+      "Sectors": [
+        44777,
+        52290,
+        28517
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6616110,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123679,
+      "Sectors": [
+        44614,
+        51637,
+        27428
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6638602,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 127441,
+      "Sectors": [
+        46608,
+        52613,
+        28220
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6639923,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 123209,
+      "Sectors": [
+        45215,
+        50967,
+        27027
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6672813,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122553,
+      "Sectors": [
+        44064,
+        50417,
+        28072
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 6721006,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120652,
+      "Sectors": [
+        44166,
+        49846,
+        26640
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6722689,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 124368,
+      "Sectors": [
+        45280,
+        50602,
+        28486
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6740476,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 146047,
+      "Sectors": [
+        44577,
+        50390,
+        51080
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 6743816,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 122073,
+      "Sectors": [
+        44618,
+        50342,
+        27113
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6760673,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 137498,
+      "Sectors": [
+        57570,
+        52321,
+        27607
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6777423,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 124041,
+      "Sectors": [
+        45498,
+        51183,
+        27360
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6796852,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 24,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 120889,
+      "Sectors": [
+        44285,
+        50022,
+        26582
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6843575,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 1,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 124091,
+      "Sectors": [
+        45949,
+        51080,
+        27062
+      ],
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "Timestamp": 6845094,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 3,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 127180,
+      "Sectors": [
+        45771,
+        53118,
+        28291
+      ],
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "Timestamp": 6870986,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 11,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 132772,
+      "Sectors": [
+        47772,
+        54594,
+        30406
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6873246,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 14,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 144130,
+      "Sectors": [
+        54702,
+        51218,
+        38210
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6904802,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "D",
+      "CarId": 15,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 135966,
+      "Sectors": [
+        47140,
+        52754,
+        36072
+      ],
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "Timestamp": 6913393,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "Restrictor": 0
+    },
+    {
+      "Cuts": 0,
+      "Tyre": "H",
+      "CarId": 2,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "LapTime": 134414,
+      "Sectors": [
+        55385,
+        51782,
+        27247
+      ],
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "Timestamp": 6931262,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "Restrictor": 0
+    }
+  ],
+  "Type": "RACE",
+  "Events": [
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 15,
+      "Driver": {
+        "Guid": "76561199696991938",
+        "Name": "Prak",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 2,
+      "ImpactSpeed": 7.676736,
+      "OtherDriver": {
+        "Guid": "76561198982352546",
+        "Name": "TabbyTheCat",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": -0.7097778,
+        "Y": -0.25261593,
+        "Z": -2.25468
+      },
+      "WorldPosition": {
+        "X": 695.2066,
+        "Y": -28.655952,
+        "Z": -25.243813
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 2,
+      "Driver": {
+        "Guid": "76561198982352546",
+        "Name": "TabbyTheCat",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 15,
+      "ImpactSpeed": 8.603713,
+      "OtherDriver": {
+        "Guid": "76561199696991938",
+        "Name": "Prak",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": 0.23820138,
+        "Y": -0.2708477,
+        "Z": 2.5377498
+      },
+      "WorldPosition": {
+        "X": 696.0806,
+        "Y": -28.6807,
+        "Z": -24.686666
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 24,
+      "Driver": {
+        "Guid": "76561199403370886",
+        "Name": "Mark Y",
+        "Team": "",
+        "Nation": "USA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 11,
+      "ImpactSpeed": 11.60055,
+      "OtherDriver": {
+        "Guid": "76561199585362421",
+        "Name": "Blue_Brz",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": 1.0169516,
+        "Y": 0.07131599,
+        "Z": 1.9370978
+      },
+      "WorldPosition": {
+        "X": -1011.4226,
+        "Y": 1.0335685,
+        "Z": -91.253654
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 11,
+      "Driver": {
+        "Guid": "76561199585362421",
+        "Name": "Blue_Brz",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 24,
+      "ImpactSpeed": 7.1393456,
+      "OtherDriver": {
+        "Guid": "76561199403370886",
+        "Name": "Mark Y",
+        "Team": "",
+        "Nation": "USA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": -1.0367229,
+        "Y": 0.15868428,
+        "Z": -1.7280254
+      },
+      "WorldPosition": {
+        "X": -1011.5392,
+        "Y": 1.0684701,
+        "Z": -91.34546
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 14,
+      "Driver": {
+        "Guid": "76561199058896905",
+        "Name": "lewanGOLski",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 3,
+      "ImpactSpeed": 13.738432,
+      "OtherDriver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": 1.0221937,
+        "Y": -0.29104245,
+        "Z": 2.0273223
+      },
+      "WorldPosition": {
+        "X": -387.83478,
+        "Y": -1.8546611,
+        "Z": -196.21469
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 14,
+      "Driver": {
+        "Guid": "76561199058896905",
+        "Name": "lewanGOLski",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 3,
+      "ImpactSpeed": 9.458929,
+      "OtherDriver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": 1.018873,
+        "Y": -0.2922312,
+        "Z": -0.91704506
+      },
+      "WorldPosition": {
+        "X": -432.82098,
+        "Y": -0.9514289,
+        "Z": -136.01093
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 3,
+      "Driver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 14,
+      "ImpactSpeed": 9.325224,
+      "OtherDriver": {
+        "Guid": "76561199058896905",
+        "Name": "lewanGOLski",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": -1.0408757,
+        "Y": -0.31437272,
+        "Z": 1.9525514
+      },
+      "WorldPosition": {
+        "X": -432.82593,
+        "Y": -0.9544903,
+        "Z": -135.98566
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 1,
+      "Driver": {
+        "Guid": "76561198959857060",
+        "Name": "A L e x",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 3,
+      "ImpactSpeed": 15.226731,
+      "OtherDriver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": -0.8424025,
+        "Y": -0.19584346,
+        "Z": 2.1623244
+      },
+      "WorldPosition": {
+        "X": 991.7186,
+        "Y": -39.200184,
+        "Z": 258.85513
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 3,
+      "Driver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 1,
+      "ImpactSpeed": 35.420105,
+      "OtherDriver": {
+        "Guid": "76561198959857060",
+        "Name": "A L e x",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": -0.88817084,
+        "Y": 0.7890577,
+        "Z": -2.483521
+      },
+      "WorldPosition": {
+        "X": 984.9348,
+        "Y": -37.73053,
+        "Z": 274.70285
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 3,
+      "Driver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 2,
+      "ImpactSpeed": 64.8162,
+      "OtherDriver": {
+        "Guid": "76561198982352546",
+        "Name": "TabbyTheCat",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": -0.34162006,
+        "Y": -0.2983172,
+        "Z": 2.5161242
+      },
+      "WorldPosition": {
+        "X": 982.8867,
+        "Y": -38.678833,
+        "Z": 277.80734
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 2,
+      "Driver": {
+        "Guid": "76561198982352546",
+        "Name": "TabbyTheCat",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 3,
+      "ImpactSpeed": 64.78587,
+      "OtherDriver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": 0.24998553,
+        "Y": -0.2272268,
+        "Z": 2.521831
+      },
+      "WorldPosition": {
+        "X": 982.56946,
+        "Y": -38.661896,
+        "Z": 277.79285
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 1,
+      "Driver": {
+        "Guid": "76561198959857060",
+        "Name": "A L e x",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 2,
+      "ImpactSpeed": 13.275507,
+      "OtherDriver": {
+        "Guid": "76561198982352546",
+        "Name": "TabbyTheCat",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": -0.7878515,
+        "Y": -0.25942183,
+        "Z": -2.0022717
+      },
+      "WorldPosition": {
+        "X": 13.231772,
+        "Y": -1.9181879,
+        "Z": -182.53526
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 2,
+      "Driver": {
+        "Guid": "76561198982352546",
+        "Name": "TabbyTheCat",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 1,
+      "ImpactSpeed": 11.694213,
+      "OtherDriver": {
+        "Guid": "76561198959857060",
+        "Name": "A L e x",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": 0.5151322,
+        "Y": -0.2574996,
+        "Z": 2.4756494
+      },
+      "WorldPosition": {
+        "X": 13.358771,
+        "Y": -1.9397613,
+        "Z": -182.64832
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 1,
+      "Driver": {
+        "Guid": "76561198959857060",
+        "Name": "A L e x",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 3,
+      "ImpactSpeed": 65.58156,
+      "OtherDriver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": -0.9270787,
+        "Y": 0.8028355,
+        "Z": -1.8720666
+      },
+      "WorldPosition": {
+        "X": 968.4209,
+        "Y": -37.090626,
+        "Z": 290.6655
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 3,
+      "Driver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 1,
+      "ImpactSpeed": 70.727936,
+      "OtherDriver": {
+        "Guid": "76561198959857060",
+        "Name": "A L e x",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": -0.91279197,
+        "Y": 0.7985037,
+        "Z": -2.49334
+      },
+      "WorldPosition": {
+        "X": 968.4123,
+        "Y": -37.10147,
+        "Z": 290.61264
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_ENV",
+      "CarId": 3,
+      "Driver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": -1,
+      "ImpactSpeed": 52.264446,
+      "OtherDriver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": null
+      },
+      "RelPosition": {
+        "X": -0.55142325,
+        "Y": -0.31754187,
+        "Z": 2.3457906
+      },
+      "WorldPosition": {
+        "X": 37.198803,
+        "Y": -6.897146,
+        "Z": -61.266773
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_ENV",
+      "CarId": 15,
+      "Driver": {
+        "Guid": "76561199696991938",
+        "Name": "Prak",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": -1,
+      "ImpactSpeed": 70.46127,
+      "OtherDriver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": null
+      },
+      "RelPosition": {
+        "X": 0.98113054,
+        "Y": 0.7671562,
+        "Z": -2.3650599
+      },
+      "WorldPosition": {
+        "X": 819.9249,
+        "Y": -34.205704,
+        "Z": 205.89488
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_ENV",
+      "CarId": 15,
+      "Driver": {
+        "Guid": "76561199696991938",
+        "Name": "Prak",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": -1,
+      "ImpactSpeed": 10.740073,
+      "OtherDriver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": null
+      },
+      "RelPosition": {
+        "X": 0.9811232,
+        "Y": 0.767154,
+        "Z": -2.3650715
+      },
+      "WorldPosition": {
+        "X": 809.28326,
+        "Y": -34.063526,
+        "Z": 197.9958
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_ENV",
+      "CarId": 2,
+      "Driver": {
+        "Guid": "76561198982352546",
+        "Name": "TabbyTheCat",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": -1,
+      "ImpactSpeed": 69.35902,
+      "OtherDriver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": null
+      },
+      "RelPosition": {
+        "X": -0.95470124,
+        "Y": -0.28119835,
+        "Z": 2.23966
+      },
+      "WorldPosition": {
+        "X": 904.25854,
+        "Y": -35.9183,
+        "Z": 312.4361
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 14,
+      "Driver": {
+        "Guid": "76561199058896905",
+        "Name": "lewanGOLski",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 3,
+      "ImpactSpeed": 2.250585,
+      "OtherDriver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": -0.24107574,
+        "Y": -0.27000144,
+        "Z": -2.064137
+      },
+      "WorldPosition": {
+        "X": 718.2933,
+        "Y": -33.215668,
+        "Z": 174.72826
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_ENV",
+      "CarId": 1,
+      "Driver": {
+        "Guid": "76561198959857060",
+        "Name": "A L e x",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": -1,
+      "ImpactSpeed": 39.743336,
+      "OtherDriver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": null
+      },
+      "RelPosition": {
+        "X": -0.49822998,
+        "Y": -0.29386503,
+        "Z": 2.5040872
+      },
+      "WorldPosition": {
+        "X": 141.69695,
+        "Y": -6.0390778,
+        "Z": -125.78218
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_ENV",
+      "CarId": 3,
+      "Driver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": -1,
+      "ImpactSpeed": 27.913979,
+      "OtherDriver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": null
+      },
+      "RelPosition": {
+        "X": -0.4767089,
+        "Y": -0.30475402,
+        "Z": 2.5073195
+      },
+      "WorldPosition": {
+        "X": -305.05795,
+        "Y": -13.649196,
+        "Z": 90.014755
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_ENV",
+      "CarId": 3,
+      "Driver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": -1,
+      "ImpactSpeed": 31.616331,
+      "OtherDriver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": null
+      },
+      "RelPosition": {
+        "X": 0.9418522,
+        "Y": 0.90156174,
+        "Z": -2.5789711
+      },
+      "WorldPosition": {
+        "X": -293.95035,
+        "Y": -12.333693,
+        "Z": 72.99222
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_ENV",
+      "CarId": 15,
+      "Driver": {
+        "Guid": "76561199696991938",
+        "Name": "Prak",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": -1,
+      "ImpactSpeed": 4.791615,
+      "OtherDriver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": null
+      },
+      "RelPosition": {
+        "X": -0.98111916,
+        "Y": 0.7671554,
+        "Z": -2.3650942
+      },
+      "WorldPosition": {
+        "X": 560.3517,
+        "Y": -23.123217,
+        "Z": 84.67211
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_ENV",
+      "CarId": 3,
+      "Driver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": -1,
+      "ImpactSpeed": 21.005262,
+      "OtherDriver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": null
+      },
+      "RelPosition": {
+        "X": -0.5367,
+        "Y": -0.23993012,
+        "Z": 2.4593127
+      },
+      "WorldPosition": {
+        "X": -228.12433,
+        "Y": -13.974557,
+        "Z": 174.63829
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 14,
+      "Driver": {
+        "Guid": "76561199058896905",
+        "Name": "lewanGOLski",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 15,
+      "ImpactSpeed": 5.224936,
+      "OtherDriver": {
+        "Guid": "76561199696991938",
+        "Name": "Prak",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": -1.0199919,
+        "Y": -0.00781897,
+        "Z": -0.80702835
+      },
+      "WorldPosition": {
+        "X": -974.4581,
+        "Y": -11.818667,
+        "Z": 95.8702
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 15,
+      "Driver": {
+        "Guid": "76561199696991938",
+        "Name": "Prak",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 14,
+      "ImpactSpeed": 5.101232,
+      "OtherDriver": {
+        "Guid": "76561199058896905",
+        "Name": "lewanGOLski",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": 1.0298754,
+        "Y": -0.08760205,
+        "Z": 1.9095187
+      },
+      "WorldPosition": {
+        "X": -974.20996,
+        "Y": -11.87934,
+        "Z": 95.939835
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 1,
+      "Driver": {
+        "Guid": "76561198959857060",
+        "Name": "A L e x",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 3,
+      "ImpactSpeed": 11.640761,
+      "OtherDriver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": 0.7716594,
+        "Y": -0.29402235,
+        "Z": -2.0167644
+      },
+      "WorldPosition": {
+        "X": 96.59108,
+        "Y": -3.4371622,
+        "Z": -198.33685
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_CAR",
+      "CarId": 3,
+      "Driver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": 1,
+      "ImpactSpeed": 8.513646,
+      "OtherDriver": {
+        "Guid": "76561198959857060",
+        "Name": "A L e x",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "RelPosition": {
+        "X": -0.54927224,
+        "Y": -0.30592057,
+        "Z": 2.4505134
+      },
+      "WorldPosition": {
+        "X": 96.98619,
+        "Y": -3.4473386,
+        "Z": -198.72482
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_ENV",
+      "CarId": 14,
+      "Driver": {
+        "Guid": "76561199058896905",
+        "Name": "lewanGOLski",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": -1,
+      "ImpactSpeed": 31.282162,
+      "OtherDriver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": null
+      },
+      "RelPosition": {
+        "X": 0.47671282,
+        "Y": -0.28214505,
+        "Z": 2.5110564
+      },
+      "WorldPosition": {
+        "X": 422.46573,
+        "Y": -17.407927,
+        "Z": 104.07276
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_ENV",
+      "CarId": 3,
+      "Driver": {
+        "Guid": "76561199523638263",
+        "Name": "jacolo12344",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": -1,
+      "ImpactSpeed": 72.85354,
+      "OtherDriver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": null
+      },
+      "RelPosition": {
+        "X": -0.9450285,
+        "Y": -0.19570808,
+        "Z": 2.1414142
+      },
+      "WorldPosition": {
+        "X": -620.9595,
+        "Y": -7.2730985,
+        "Z": 141.47295
+      }
+    },
+    {
+      "Type": "COLLISION_WITH_ENV",
+      "CarId": 14,
+      "Driver": {
+        "Guid": "76561199058896905",
+        "Name": "lewanGOLski",
+        "Team": "",
+        "Nation": "PLA",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": [
+          ""
+        ]
+      },
+      "OtherCarId": -1,
+      "ImpactSpeed": 83.63661,
+      "OtherDriver": {
+        "Guid": "",
+        "Name": "",
+        "Team": "",
+        "Nation": "",
+        "ClassID": "00000000-0000-0000-0000-000000000000",
+        "GuidsList": null
+      },
+      "RelPosition": {
+        "X": 0.93037295,
+        "Y": 0.8814724,
+        "Z": -2.216949
+      },
+      "WorldPosition": {
+        "X": -98.588524,
+        "Y": -3.7647274,
+        "Z": 82.97301
+      }
+    }
+  ],
+  "Result": [
+    {
+      "CarId": 24,
+      "BestLap": 119882,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "TotalTime": 2826344,
+      "DriverGuid": "76561199403370886",
+      "DriverName": "Mark Y",
+      "HasPenalty": false,
+      "LapPenalty": 0,
+      "Restrictor": 0,
+      "PenaltyTime": 0,
+      "Disqualified": false
+    },
+    {
+      "CarId": 11,
+      "BestLap": 119747,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "TotalTime": 2856015,
+      "DriverGuid": "76561199585362421",
+      "DriverName": "Blue_Brz",
+      "HasPenalty": false,
+      "LapPenalty": 0,
+      "Restrictor": 0,
+      "PenaltyTime": 0,
+      "Disqualified": false
+    },
+    {
+      "CarId": 14,
+      "BestLap": 122005,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "TotalTime": 2887575,
+      "DriverGuid": "76561199058896905",
+      "DriverName": "lewanGOLski",
+      "HasPenalty": false,
+      "LapPenalty": 0,
+      "Restrictor": 0,
+      "PenaltyTime": 0,
+      "Disqualified": false
+    },
+    {
+      "CarId": 15,
+      "BestLap": 119645,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "CarModel": "rss_gtm_furiano_96_v6",
+      "BallastKG": 0,
+      "TotalTime": 2896164,
+      "DriverGuid": "76561199696991938",
+      "DriverName": "Prak",
+      "HasPenalty": false,
+      "LapPenalty": 0,
+      "Restrictor": 0,
+      "PenaltyTime": 0,
+      "Disqualified": false
+    },
+    {
+      "CarId": 2,
+      "BestLap": 121444,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "CarModel": "rss_gtm_protech_p92_f6",
+      "BallastKG": 0,
+      "TotalTime": 2914026,
+      "DriverGuid": "76561198982352546",
+      "DriverName": "TabbyTheCat",
+      "HasPenalty": false,
+      "LapPenalty": 0,
+      "Restrictor": 0,
+      "PenaltyTime": 0,
+      "Disqualified": false
+    },
+    {
+      "CarId": 1,
+      "BestLap": 121782,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "CarModel": "rss_gtm_akuro_v6_evo2",
+      "BallastKG": 0,
+      "TotalTime": 2827866,
+      "DriverGuid": "76561198959857060",
+      "DriverName": "A L e x",
+      "HasPenalty": false,
+      "LapPenalty": 0,
+      "Restrictor": 0,
+      "PenaltyTime": 0,
+      "Disqualified": false
+    },
+    {
+      "CarId": 3,
+      "BestLap": 121737,
+      "ClassID": "00000000-0000-0000-0000-000000000000",
+      "CarModel": "rss_gtm_hyperion_v8",
+      "BallastKG": 0,
+      "TotalTime": 2853757,
+      "DriverGuid": "76561199523638263",
+      "DriverName": "jacolo12344",
+      "HasPenalty": false,
+      "LapPenalty": 0,
+      "Restrictor": 0,
+      "PenaltyTime": 0,
+      "Disqualified": false
+    }
+  ],
+  "TrackName": "rt_suzuka",
+  "SessionFile": "2026_3_7_12_3_RACE",
+  "TrackConfig": "suzukagp",
+  "RaceWeekendID": "",
+  "ChampionshipID": ""
+}

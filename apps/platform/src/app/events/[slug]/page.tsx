@@ -1,5 +1,6 @@
 import { getEventBySlug } from "@/server/queries/events";
-import { getIngestedResultsByEventId } from "@/server/queries/results";
+import { getIngestedResultsByEventId, getLapDataBySessionId } from "@/server/queries/results";
+import { LapPositionChart, type LapPositionData } from "@/components/lap-position-chart";
 import { notFound } from "next/navigation";
 import Image from "next/image";
 import { Badge } from "@/components/ui/badge";
@@ -88,6 +89,93 @@ export default async function EventPage({ params }: EventPageArgs) {
     }
     positionsGainedBySession.set(session.id, map);
   }
+
+  // Fetch lap data for RACE sessions and compute lap-by-lap positions
+  const raceSessionIds = rawSessions
+    .filter((s) => s.sessionType === "RACE")
+    .map((s) => s.id);
+  const lapDataBySession = new Map<
+    string,
+    { data: LapPositionData[]; drivers: string[]; driverCount: number }
+  >();
+
+  if (raceSessionIds.length > 0) {
+    const lapResults = await Promise.all(
+      raceSessionIds.map((id) => getLapDataBySessionId(id))
+    );
+
+    for (let i = 0; i < raceSessionIds.length; i++) {
+      const sessionId = raceSessionIds[i];
+      const laps = lapResults[i];
+      if (laps.length === 0) continue;
+
+      // Group laps by participant, compute cumulative times
+      const participantLaps = new Map<
+        string,
+        { name: string; lapTimes: { lap: number; cumTime: number }[] }
+      >();
+
+      for (const lap of laps) {
+        const pid = lap.participantId;
+        if (!participantLaps.has(pid)) {
+          const displayName =
+            lap.participant.carMapping?.displayName ??
+            lap.participant.user?.displayName ??
+            lap.participant.displayName;
+          participantLaps.set(pid, { name: displayName, lapTimes: [] });
+        }
+        const entry = participantLaps.get(pid)!;
+        const prevCum =
+          entry.lapTimes.length > 0
+            ? entry.lapTimes[entry.lapTimes.length - 1].cumTime
+            : 0;
+        entry.lapTimes.push({
+          lap: lap.lapNumber,
+          cumTime: prevCum + lap.lapTime,
+        });
+      }
+
+      // Find the max lap number across all participants
+      const maxLap = Math.max(
+        ...Array.from(participantLaps.values()).map(
+          (p) => p.lapTimes[p.lapTimes.length - 1]?.lap ?? 0
+        )
+      );
+      const driverCount = participantLaps.size;
+
+      // For each lap, rank drivers by cumulative time
+      const chartData: LapPositionData[] = [];
+      for (let lap = 1; lap <= maxLap; lap++) {
+        const driversAtLap: { name: string; cumTime: number }[] = [];
+        for (const [, p] of participantLaps) {
+          const lapEntry = p.lapTimes.find((l) => l.lap === lap);
+          if (lapEntry) {
+            driversAtLap.push({ name: p.name, cumTime: lapEntry.cumTime });
+          }
+        }
+        driversAtLap.sort((a, b) => a.cumTime - b.cumTime);
+        const point: LapPositionData = { lap };
+        driversAtLap.forEach((d, idx) => {
+          point[d.name] = idx + 1;
+        });
+        chartData.push(point);
+      }
+
+      // Order drivers by their final position
+      const finalLap = chartData[chartData.length - 1];
+      const drivers = Object.entries(finalLap)
+        .filter(([key]) => key !== "lap")
+        .sort((a, b) => (a[1] as number) - (b[1] as number))
+        .map(([name]) => name);
+
+      lapDataBySession.set(sessionId, {
+        data: chartData,
+        drivers,
+        driverCount,
+      });
+    }
+  }
+
   const startsAt = new Date(event.startsAtUtc);
   const endsAt = new Date(event.endsAtUtc);
   const isLive = isEventLive(event);
@@ -250,6 +338,7 @@ export default async function EventPage({ params }: EventPageArgs) {
                 {raceSessions.map(session => {
                     const typeLabel = session.sessionType === "QUALIFYING" ? "Qualifying" : session.sessionType === "PRACTICE" ? "Practice" : "Race";
                     const isRace = session.sessionType === "RACE";
+                    const lapPositions = isRace ? lapDataBySession.get(session.id) : undefined;
                     return (
                     <div key={session.id}>
                         <ResultsTable
@@ -259,6 +348,13 @@ export default async function EventPage({ params }: EventPageArgs) {
                             sessionType={session.sessionType}
                             positionsGained={isRace ? positionsGainedBySession.get(session.id) : undefined}
                         />
+                        {lapPositions && (
+                          <LapPositionChart
+                            data={lapPositions.data}
+                            drivers={lapPositions.drivers}
+                            driverCount={lapPositions.driverCount}
+                          />
+                        )}
                     </div>
                     );
                 })}
