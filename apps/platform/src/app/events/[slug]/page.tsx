@@ -109,10 +109,10 @@ export default async function EventPage({ params }: EventPageArgs) {
       const laps = lapResults[i];
       if (laps.length === 0) continue;
 
-      // Group laps by participant, compute cumulative times
+      // Group laps by participant, compute cumulative + individual lap times
       const participantLaps = new Map<
         string,
-        { name: string; lapTimes: { lap: number; cumTime: number }[] }
+        { name: string; lapTimes: { lap: number; cumTime: number; lapTime: number }[] }
       >();
 
       for (const lap of laps) {
@@ -132,10 +132,24 @@ export default async function EventPage({ params }: EventPageArgs) {
         entry.lapTimes.push({
           lap: lap.lapNumber,
           cumTime: prevCum + lap.lapTime,
+          lapTime: lap.lapTime,
         });
       }
 
-      // Find the max lap number across all participants
+      // Ensure driver names are unique (disambiguate duplicates with a suffix)
+      const nameCounts = new Map<string, number>();
+      for (const p of participantLaps.values()) {
+        nameCounts.set(p.name, (nameCounts.get(p.name) ?? 0) + 1);
+      }
+      const nameSeen = new Map<string, number>();
+      for (const p of participantLaps.values()) {
+        if ((nameCounts.get(p.name) ?? 0) > 1) {
+          const n = (nameSeen.get(p.name) ?? 0) + 1;
+          nameSeen.set(p.name, n);
+          p.name = `${p.name} #${n}`;
+        }
+      }
+
       const maxLap = Math.max(
         ...Array.from(participantLaps.values()).map(
           (p) => p.lapTimes[p.lapTimes.length - 1]?.lap ?? 0
@@ -145,28 +159,33 @@ export default async function EventPage({ params }: EventPageArgs) {
 
       // For each lap, rank drivers by cumulative time
       const chartData: LapPositionData[] = [];
+      const lastPositionByDriver = new Map<string, number>();
       for (let lap = 1; lap <= maxLap; lap++) {
-        const driversAtLap: { name: string; cumTime: number }[] = [];
+        const driversAtLap: { name: string; cumTime: number; lapTime: number }[] = [];
         for (const [, p] of participantLaps) {
           const lapEntry = p.lapTimes.find((l) => l.lap === lap);
           if (lapEntry) {
-            driversAtLap.push({ name: p.name, cumTime: lapEntry.cumTime });
+            driversAtLap.push({ name: p.name, cumTime: lapEntry.cumTime, lapTime: lapEntry.lapTime });
           }
         }
         driversAtLap.sort((a, b) => a.cumTime - b.cumTime);
         const point: LapPositionData = { lap };
         driversAtLap.forEach((d, idx) => {
           point[d.name] = idx + 1;
+          point[`${d.name}__lapTime`] = d.lapTime;
+          lastPositionByDriver.set(d.name, idx + 1);
         });
         chartData.push(point);
       }
 
-      // Order drivers by their final position
-      const finalLap = chartData[chartData.length - 1];
-      const drivers = Object.entries(finalLap)
-        .filter(([key]) => key !== "lap")
-        .sort((a, b) => (a[1] as number) - (b[1] as number))
-        .map(([name]) => name);
+      // Include all drivers (even those who DNF'd), ordered by last known position
+      const drivers = Array.from(participantLaps.values())
+        .map((p) => p.name)
+        .sort(
+          (a, b) =>
+            (lastPositionByDriver.get(a) ?? Number.MAX_SAFE_INTEGER) -
+            (lastPositionByDriver.get(b) ?? Number.MAX_SAFE_INTEGER)
+        );
 
       lapDataBySession.set(sessionId, {
         data: chartData,

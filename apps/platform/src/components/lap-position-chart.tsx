@@ -22,6 +22,74 @@ type Props = {
   driverCount: number;
 };
 
+function formatLapTime(ms: number | undefined): string {
+  if (ms === undefined || ms === null || Number.isNaN(ms)) return "—";
+  const totalSeconds = ms / 1000;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds - minutes * 60;
+  return `${minutes}:${seconds.toFixed(3).padStart(6, "0")}`;
+}
+
+type TooltipEntry = {
+  dataKey?: string | number;
+  value?: number;
+  color?: string;
+  payload?: Record<string, number>;
+};
+
+function LapTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: TooltipEntry[];
+  label?: number;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const entries = payload
+    .filter(
+      (p) =>
+        typeof p.dataKey === "string" &&
+        !p.dataKey.endsWith("__lapTime") &&
+        p.value !== undefined
+    )
+    .map((p) => ({
+      name: p.dataKey as string,
+      position: p.value as number,
+      color: p.color,
+      lapTime: p.payload?.[`${p.dataKey as string}__lapTime`],
+    }))
+    .sort((a, b) => a.position - b.position);
+
+  return (
+    <div
+      style={{
+        background: "#1B1B1B",
+        border: "1px solid rgba(255,255,255,0.1)",
+        padding: "8px 12px",
+        fontSize: 11,
+      }}
+    >
+      <div style={{ color: "white", fontWeight: 700, marginBottom: 6 }}>
+        Lap {label}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: "2px 10px" }}>
+        {entries.map((e) => (
+          <div key={e.name} style={{ display: "contents", color: e.color }}>
+            <span style={{ fontWeight: 700 }}>P{e.position}</span>
+            <span>{e.name}</span>
+            <span style={{ fontFamily: "ui-monospace, monospace", color: "rgba(255,255,255,0.8)" }}>
+              {formatLapTime(e.lapTime)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const LINE_COLORS = [
   "#FF8000",
   "#FF6B35",
@@ -85,19 +153,7 @@ export function LapPositionChart({ data, drivers, driverCount }: Props) {
               style: { fill: "rgba(255,255,255,0.25)", fontSize: 9, fontWeight: 700 },
             }}
           />
-          <Tooltip
-            contentStyle={{
-              background: "#1B1B1B",
-              border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 0,
-              fontSize: 11,
-              padding: "8px 12px",
-            }}
-            labelStyle={{ color: "white", fontWeight: 700, marginBottom: 4 }}
-            labelFormatter={(value) => `Lap ${value}`}
-            formatter={(value) => [`P${value}`]}
-            itemStyle={{ padding: "1px 0" }}
-          />
+          <Tooltip content={<LapTooltip />} />
           <Legend
             wrapperStyle={{ fontSize: 9, fontWeight: 700 }}
             iconType="plainline"
