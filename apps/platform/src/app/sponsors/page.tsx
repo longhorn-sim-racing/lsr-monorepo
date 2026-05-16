@@ -102,11 +102,40 @@ export const metadata: Metadata = {
   },
 };
 
+const SITE_URL = "https://www.longhornsimracing.org"
+
+function canonicalHref(href: string): string {
+  const u = new URL(href)
+  return `${u.origin}${u.pathname}`
+}
+
+const partnerListJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "ItemList",
+  name: "Longhorn Sim Racing Partners",
+  numberOfItems: partners.length,
+  itemListElement: partners.map((p, i) => ({
+    "@type": "ListItem",
+    position: i + 1,
+    item: {
+      "@type": "Organization",
+      name: p.name,
+      logo: `${SITE_URL}${p.logo}`,
+      ...(p.href ? { url: canonicalHref(p.href) } : {}),
+      ...(p.description ? { description: p.description } : {}),
+    },
+  })),
+}
+
 export default function SponsorsPage() {
   const outreachEmail = "outreach@longhornsimracing.org"
 
   return (
     <main className="bg-lsr-charcoal text-white min-h-screen">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(partnerListJsonLd) }}
+      />
       {/* Hero Section */}
       <div className="relative border-b border-white/10 overflow-hidden">
         <div className="absolute inset-0 z-0">
