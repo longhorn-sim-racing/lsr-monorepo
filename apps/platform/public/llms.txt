@@ -22,6 +22,7 @@
 - [Sponsors](https://www.longhornsimracing.org/sponsors): Partner organizations supporting LSR
 - [Shop](https://www.longhornsimracing.org/shop): Official merchandise
 - [Privacy Policy](https://www.longhornsimracing.org/privacy)
+- [Terms of Service](https://www.longhornsimracing.org/terms)
 
 ## Feeds and structured data
 
