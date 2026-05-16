@@ -4,6 +4,7 @@ import { prisma } from "@/server/db";
 import { requireOfficer, requireSystemAdmin } from "@/server/auth/guards";
 import { createAuditLog } from "@/server/audit/log";
 import { revalidatePath } from "next/cache";
+import { revalidateDriverList } from "@/server/cache/revalidate-public";
 
 export type UpdateUserPayload = {
     displayName: string;
@@ -211,4 +212,5 @@ export async function updateUser(userId: string, payload: UpdateUserPayload) {
     if (trimmedHandle !== targetUser.handle) {
         revalidatePath(`/drivers/${targetUser.handle}`);
     }
+    revalidateDriverList();
 }

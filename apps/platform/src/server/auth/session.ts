@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { prisma } from '@/server/db';
 import { User } from '@prisma/client';
 import { slugify } from '@/lib/slug';
+import { revalidateDriverList } from '@/server/cache/revalidate-public';
 
 export type SessionUser = {
   user: (User & { roles: { role: { key: string } }[] }) | null;
@@ -102,6 +103,8 @@ export async function getSessionUser(): Promise<SessionUser> {
           },
         },
       });
+      // New driver joined the roster — bust the cached /drivers page.
+      if (dbUser) revalidateDriverList();
     } catch (error) {
       console.error('[getSessionUser] Failed to provision missing user:', error);
       // Fallthrough to return null

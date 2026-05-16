@@ -29,9 +29,39 @@ export async function generateMetadata({
   params,
 }: { params: Promise<{ handle: string }> }): Promise<Metadata> {
   const { handle } = await params;
+
+  let stats;
+  try {
+    stats = await getDriverStats(handle);
+  } catch {
+    stats = null;
+  }
+
+  if (!stats?.user) {
+    return {
+      title: "Driver",
+      alternates: { canonical: `/drivers/${handle}` },
+    };
+  }
+
+  const { user } = stats;
+  const description =
+    user.bio?.slice(0, 155) ||
+    `${user.displayName} — driver profile, race history, and stats with Longhorn Sim Racing at UT Austin.`;
+
   return {
-    alternates: {
-      canonical: `/drivers/${handle}`,
+    title: user.displayName,
+    description,
+    alternates: { canonical: `/drivers/${handle}` },
+    openGraph: {
+      title: user.displayName,
+      description,
+      type: "profile",
+      url: `/drivers/${handle}`,
+    },
+    twitter: {
+      title: user.displayName,
+      description,
     },
   };
 }
@@ -73,10 +103,44 @@ export default async function DriverProfilePage({
   }
   const socials = (user.socials as Record<string, string> | null) ?? {};
 
+  const personJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Person",
+    name: user.displayName,
+    alternateName: `@${user.handle}`,
+    url: `https://www.longhornsimracing.org/drivers/${user.handle}`,
+    image: user.avatarUrl || undefined,
+    description: user.bio || undefined,
+    memberOf: {
+      "@type": "SportsOrganization",
+      name: "Longhorn Sim Racing",
+      url: "https://www.longhornsimracing.org",
+    },
+    sameAs: Object.values(socials).filter((v): v is string => typeof v === "string" && v.length > 0),
+  };
+
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.longhornsimracing.org/" },
+      { "@type": "ListItem", position: 2, name: "Drivers", item: "https://www.longhornsimracing.org/drivers" },
+      { "@type": "ListItem", position: 3, name: user.displayName, item: `https://www.longhornsimracing.org/drivers/${user.handle}` },
+    ],
+  };
+
   return (
     <main className="bg-lsr-charcoal text-white min-h-screen">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(personJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
       <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
-        
+
         <div className="flex items-center justify-between mb-8">
           <Link href="/drivers" className="group inline-flex items-center gap-3 text-[10px] font-sans font-bold uppercase tracking-[0.25em] text-lsr-orange hover:text-white transition-colors">
             <div className="h-px w-8 bg-lsr-orange/30 group-hover:bg-white group-hover:w-12 transition-all" />

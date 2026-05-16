@@ -1,7 +1,4 @@
-import Link from 'next/link';
-import Image from 'next/image';
 import { prisma } from '@/server/db';
-import { ROLE_LABEL, type RoleCode } from '@/lib/roles';
 import { DriversFilters } from '@/components/drivers-filters';
 import { DriversSearch } from '@/components/drivers-search';
 import { DriversTable } from '@/components/drivers-table';
@@ -17,24 +14,14 @@ export const metadata: Metadata = {
   },
 };
 
-export const dynamic = 'force-dynamic';
+// ISR: regenerate at most once per day. Mutating actions (new signup,
+// profile edit, results ingestion, etc.) call revalidatePath('/drivers')
+// to invalidate sooner — see src/server/cache/revalidate-public.ts.
+export const revalidate = 86400;
 
-const ALL_ROLES = Object.keys(ROLE_LABEL) as RoleCode[];
-
-export default async function DriversIndexPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const sp = await searchParams;
-  const q = typeof sp.q === 'string' ? sp.q.trim().toLowerCase() : '';
-  const roleParam = sp.role;
-  const selectedRoles = (Array.isArray(roleParam) ? roleParam : roleParam ? [roleParam] : [])
-    .map(r => r.toString().toLowerCase())
-    .filter((r): r is RoleCode => ALL_ROLES.includes(r as RoleCode));
-
+export default async function DriversIndexPage() {
   try {
-    return await renderDriversPage(q, selectedRoles);
+    return await renderDriversPage();
   } catch (error) {
     console.error('[Drivers] Failed to load drivers:', error);
     return (
@@ -53,7 +40,7 @@ export default async function DriversIndexPage({
   }
 }
 
-async function renderDriversPage(q: string, selectedRoles: RoleCode[]) {
+async function renderDriversPage() {
   const allDrivers = await prisma.user.findMany({
     where: {
       status: { not: 'deleted' },
@@ -85,24 +72,6 @@ async function renderDriversPage(q: string, selectedRoles: RoleCode[]) {
     ...d,
     rank: index + 1
   }));
-
-  // Apply Filters (Search & Roles) on the Ranked List
-  const filteredDrivers = rankedDrivers.filter(d => {
-    // Search Filter
-    if (q) {
-      const matchesName = d.displayName.toLowerCase().includes(q);
-      const matchesHandle = d.handle.toLowerCase().includes(q);
-      if (!matchesName && !matchesHandle) return false;
-    }
-
-    // Role Filter
-    if (selectedRoles.length > 0) {
-      const hasRole = d.roles.some(r => selectedRoles.includes(r.role.key as RoleCode));
-      if (!hasRole) return false;
-    }
-
-    return true;
-  });
 
   const now = new Date();
 
@@ -159,8 +128,25 @@ async function renderDriversPage(q: string, selectedRoles: RoleCode[]) {
     }
   });
 
+  const itemListJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    name: "Longhorn Sim Racing Driver Roster",
+    numberOfItems: rankedDrivers.length,
+    itemListElement: rankedDrivers.map((d, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      url: `https://www.longhornsimracing.org/drivers/${d.handle}`,
+      name: d.displayName,
+    })),
+  };
+
   return (
     <main className="bg-lsr-charcoal text-white min-h-screen">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(itemListJsonLd) }}
+      />
       <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
           <div>
@@ -170,8 +156,8 @@ async function renderDriversPage(q: string, selectedRoles: RoleCode[]) {
             <p className="font-sans font-bold text-white/40 uppercase tracking-[0.3em] text-[10px] mt-2">Official Entry List</p>
           </div>
           <div className="flex items-center gap-2 w-full md:w-auto">
-            <DriversSearch q={q} />
-            <DriversFilters selectedRoles={selectedRoles} />
+            <DriversSearch />
+            <DriversFilters />
           </div>
         </div>
 
@@ -181,7 +167,7 @@ async function renderDriversPage(q: string, selectedRoles: RoleCode[]) {
           </div>
 
           <div className="md:col-span-2">
-            <DriversTable drivers={filteredDrivers} />
+            <DriversTable drivers={rankedDrivers} />
           </div>
         </div>
       </div>
