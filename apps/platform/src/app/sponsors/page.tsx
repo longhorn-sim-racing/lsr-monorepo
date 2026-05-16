@@ -10,18 +10,26 @@ type Partner = {
   logo: string
   href?: string
   description?: string
+  title?: string
 }
 
 const partners: Partner[] = [
   {
+    name: "PitLane Systems",
+    logo: "/sponsors/pitlane.png",
+    href: "https://www.pitlanesystems.com/?utm_source=longhornsimracing.org&utm_medium=referral&utm_campaign=sponsor-page",
+    title: "Official Broadcast Partner",
+    description: "PitLane Systems builds the first unified broadcast director software for sim racing, consolidating camera control, overlays, timing data, and OBS into a single dashboard — bringing TV-grade production to our Assetto Corsa events.",
+  },
+  {
     name: "Race Club Austin",
     logo: "/sponsors/raceclub.png",
-    href: "https://www.raceclubsim.com/",
+    href: "https://www.raceclubsim.com/?utm_source=longhornsimracing.org&utm_medium=referral&utm_campaign=sponsor-page",
   },
   {
     name: "Driven to Care",
     logo: "/sponsors/driventocare.png",
-    href: "https://www.driventocare.org/",
+    href: "https://www.driventocare.org/?utm_source=longhornsimracing.org&utm_medium=referral&utm_campaign=sponsor-page",
   },
   {
     name: "Yugo",
@@ -33,6 +41,11 @@ const partners: Partner[] = [
 function PartnerCard({ partner }: { partner: Partner }) {
   const content = (
     <>
+      {partner.title && (
+        <span className="font-sans font-black text-[10px] uppercase tracking-[0.25em] text-lsr-orange mb-4">
+          {partner.title}
+        </span>
+      )}
       <div className="relative h-20 w-56 mb-6 group-hover:scale-105 transition-transform duration-300">
         <Image
           src={partner.logo}
@@ -89,11 +102,40 @@ export const metadata: Metadata = {
   },
 };
 
+const SITE_URL = "https://www.longhornsimracing.org"
+
+function canonicalHref(href: string): string {
+  const u = new URL(href)
+  return `${u.origin}${u.pathname}`
+}
+
+const partnerListJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "ItemList",
+  name: "Longhorn Sim Racing Partners",
+  numberOfItems: partners.length,
+  itemListElement: partners.map((p, i) => ({
+    "@type": "ListItem",
+    position: i + 1,
+    item: {
+      "@type": "Organization",
+      name: p.name,
+      logo: `${SITE_URL}${p.logo}`,
+      ...(p.href ? { url: canonicalHref(p.href) } : {}),
+      ...(p.description ? { description: p.description } : {}),
+    },
+  })),
+}
+
 export default function SponsorsPage() {
   const outreachEmail = "outreach@longhornsimracing.org"
 
   return (
     <main className="bg-lsr-charcoal text-white min-h-screen">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(partnerListJsonLd) }}
+      />
       {/* Hero Section */}
       <div className="relative border-b border-white/10 overflow-hidden">
         <div className="absolute inset-0 z-0">
