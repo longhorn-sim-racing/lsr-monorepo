@@ -4,13 +4,16 @@ import * as React from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Input } from "@/components/ui/input"
 
-export function DriversSearch({ q }: { q: string }) {
-  const [term, setTerm] = React.useState(q)
+export function DriversSearch() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
-  React.useEffect(() => setTerm(q), [q])
+  const urlQuery = searchParams?.get("q") ?? ""
+  const [term, setTerm] = React.useState(urlQuery)
+
+  // Sync local state if the URL changes externally (back/forward nav, clear filter etc.)
+  React.useEffect(() => setTerm(urlQuery), [urlQuery])
 
   // Debounce URL updates
   React.useEffect(() => {

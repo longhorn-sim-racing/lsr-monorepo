@@ -2,12 +2,16 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { StatusIcons } from "@/components/status-indicators";
 import { getStatusIndicators, getActiveTierKey } from "@/lib/status-indicators";
+import { ROLE_LABEL, type RoleCode } from "@/lib/roles";
+
+const ALL_ROLES = Object.keys(ROLE_LABEL) as RoleCode[];
 
 type DriverRow = {
   id: string;
@@ -30,6 +34,31 @@ type SortConfig = {
 export function DriversTable({ drivers }: { drivers: DriverRow[] }) {
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: "rank", direction: "asc" });
 
+  const searchParams = useSearchParams();
+  const q = (searchParams?.get("q") ?? "").trim().toLowerCase();
+  const selectedRolesKey = (searchParams?.getAll("role") ?? []).join(",");
+
+  const filteredDrivers = useMemo(() => {
+    const roles = selectedRolesKey
+      ? (selectedRolesKey.split(",").filter(Boolean) as string[])
+          .map((r) => r.toLowerCase())
+          .filter((r): r is RoleCode => ALL_ROLES.includes(r as RoleCode))
+      : [];
+
+    return drivers.filter((d) => {
+      if (q) {
+        const matchesName = d.displayName.toLowerCase().includes(q);
+        const matchesHandle = d.handle.toLowerCase().includes(q);
+        if (!matchesName && !matchesHandle) return false;
+      }
+      if (roles.length > 0) {
+        const hasRole = d.roles.some((r) => roles.includes(r.role.key as RoleCode));
+        if (!hasRole) return false;
+      }
+      return true;
+    });
+  }, [drivers, q, selectedRolesKey]);
+
   const handleSort = (key: string) => {
     setSortConfig((current) => ({
       key,
@@ -50,7 +79,7 @@ export function DriversTable({ drivers }: { drivers: DriverRow[] }) {
     }
   };
 
-  const sortedDrivers = [...drivers].sort((a, b) => {
+  const sortedDrivers = [...filteredDrivers].sort((a, b) => {
     const aValue = getValue(a, sortConfig.key);
     const bValue = getValue(b, sortConfig.key);
 

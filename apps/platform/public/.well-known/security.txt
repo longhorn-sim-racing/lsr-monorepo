@@ -1,0 +1,3 @@
+Contact: mailto:info@longhornsimracing.org
+Preferred-Languages: en
+Canonical: https://www.longhornsimracing.org/.well-known/security.txt

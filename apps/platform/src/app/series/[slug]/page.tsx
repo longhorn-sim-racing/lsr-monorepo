@@ -15,6 +15,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Metadata } from "next";
 import { DatabaseUnavailable } from "@/components/database-unavailable";
 
+export const revalidate = 3600;
+
 type SeriesPageArgs = {
   params: Promise<{ slug: string }>;
 };
@@ -23,9 +25,36 @@ export async function generateMetadata({
   params,
 }: SeriesPageArgs): Promise<Metadata> {
   const { slug } = await params;
+
+  let series;
+  try {
+    series = await getSeriesBySlug(slug);
+  } catch {
+    series = null;
+  }
+
+  if (!series) {
+    return {
+      title: "Series",
+      alternates: { canonical: `/series/${slug}` },
+    };
+  }
+
+  const description = `${series.title} — a championship series hosted by Longhorn Sim Racing. Schedule, standings, and race results.`;
+
   return {
-    alternates: {
-      canonical: `/series/${slug}`,
+    title: series.title,
+    description,
+    alternates: { canonical: `/series/${slug}` },
+    openGraph: {
+      title: series.title,
+      description,
+      type: "website",
+      url: `/series/${slug}`,
+    },
+    twitter: {
+      title: series.title,
+      description,
     },
   };
 }
@@ -53,8 +82,22 @@ export default async function SeriesPage({ params }: SeriesPageArgs) {
     return notFound();
   }
 
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.longhornsimracing.org/" },
+      { "@type": "ListItem", position: 2, name: "Series", item: "https://www.longhornsimracing.org/events" },
+      { "@type": "ListItem", position: 3, name: series.title, item: `https://www.longhornsimracing.org/series/${series.slug}` },
+    ],
+  };
+
   return (
     <main className="bg-lsr-charcoal text-white min-h-screen">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
       <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
           <div>

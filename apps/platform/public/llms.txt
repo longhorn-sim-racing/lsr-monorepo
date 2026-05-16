@@ -1,0 +1,37 @@
+# Longhorn Sim Racing
+
+> Longhorn Sim Racing (LSR) is a student organization at The University of Texas at Austin focused on competitive simulation racing. We host events, run championship series, publish race results, and maintain a community of student drivers.
+
+## About
+
+- Based at The University of Texas at Austin in Austin, Texas, USA
+- Competitive sim racing across multiple titles (iRacing, Assetto Corsa, and others)
+- Student-run; membership is open to UT Austin students, alumni, and affiliated community members
+- Website: https://www.longhornsimracing.org
+- Contact: info@longhornsimracing.org
+
+## Key pages
+
+- [Home](https://www.longhornsimracing.org/): Organization overview and featured content
+- [About](https://www.longhornsimracing.org/about): Mission, officer team, and history
+- [Events](https://www.longhornsimracing.org/events): Upcoming and past race events, practice sessions, meetings
+- [Drivers](https://www.longhornsimracing.org/drivers): Active driver roster with profiles and career stats
+- [News](https://www.longhornsimracing.org/news): Race reports, announcements, and team updates
+- [Lone Star Cup](https://www.longhornsimracing.org/lone-star-cup): Our flagship championship series
+- [Gallery](https://www.longhornsimracing.org/gallery): Photos from events and races
+- [Sponsors](https://www.longhornsimracing.org/sponsors): Partner organizations supporting LSR
+- [Shop](https://www.longhornsimracing.org/shop): Official merchandise
+- [Privacy Policy](https://www.longhornsimracing.org/privacy)
+
+## Feeds and structured data
+
+- RSS feed: https://www.longhornsimracing.org/news/rss.xml
+- Sitemap: https://www.longhornsimracing.org/sitemap.xml
+- Pages include JSON-LD structured data (Organization, SportsEvent, Person, NewsArticle, BreadcrumbList, ItemList)
+
+## Community
+
+- Discord: https://discord.gg/5Uv9YwpnFz
+- Instagram: https://instagram.com/longhorn_sim_racing
+- Twitch: https://www.twitch.tv/longhorn_sim_racing
+- LinkedIn: https://www.linkedin.com/company/longhorn-sim-racing
