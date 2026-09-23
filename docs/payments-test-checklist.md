@@ -25,3 +25,13 @@ handlers ignore them by design. Drive the real objects instead, as noted in step
 | 10 | Officer → `/admin/payments` | Rows from steps 2, 5, 7, 8 with the right status and a working Stripe link. |
 
 Anything that fails here is a blocker for the merge, not a follow-up.
+
+## Steps 1–8 without a browser
+
+`apps/platform/scripts/payments-smoke.ts` drives the service layer directly: real Stripe **test-mode** Checkout Sessions, then signed `checkout.session.completed` / `charge.refunded` / `checkout.session.expired` events fed into `handleStripeWebhook()`, asserting every row the checklist expects. It refuses to run against a live key.
+
+```
+STRIPE_TEST_SECRET_KEY=sk_test_… pnpm --filter @lsr/platform exec tsx scripts/payments-smoke.ts
+```
+
+Run it first; it takes about ten seconds. Steps 9–10 and the page states still need the browser.
