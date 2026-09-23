@@ -1,6 +1,6 @@
 import { getStripe } from "@/lib/stripe";
 import { prisma } from "@/server/db";
-import { RegistrationStatus, Prisma } from "@prisma/client";
+import { RegistrationStatus } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
 import { sendNotification } from "@/server/services/notification.service";
 import { formatInTimeZone } from "date-fns-tz";
@@ -69,12 +69,7 @@ export async function createEventCheckoutSession(
     },
   });
 
-  // Build base URL using the same pattern as the rest of the codebase
-  const baseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    (process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : "http://localhost:3000");
+  const baseUrl = getBaseUrl();
 
   const session = await getStripe().checkout.sessions.create({
     mode: "payment",
@@ -101,6 +96,141 @@ export async function createEventCheckoutSession(
   });
 
   // Store the checkout session ID as the provider reference
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: { providerRef: session.id },
+  });
+
+  if (!session.url) {
+    throw new Error("Failed to create Stripe Checkout session.");
+  }
+
+  return session.url;
+}
+
+// ---------------------------------------------------------------------------
+// Product Checkout (dues, league entry)
+// ---------------------------------------------------------------------------
+
+export type CheckoutProductType = "ANNUAL_DUES" | "LEAGUE_FEE";
+
+/** Where Stripe sends the member back after a product checkout. */
+const PRODUCT_RETURN_PATHS: Record<string, string> = {
+  "lone-star-cup": "/lone-star-cup",
+};
+
+function getBaseUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    (process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : "http://localhost:3000")
+  );
+}
+
+/**
+ * Starts a Stripe Checkout for a Product-backed purchase (annual dues or a
+ * league entry fee) and returns the hosted checkout URL. The webhook turns the
+ * resulting Payment into an Entitlement — see handleCheckoutCompleted.
+ */
+export async function createProductCheckoutSession(
+  userId: string,
+  productType: CheckoutProductType,
+  leagueSlug?: string
+): Promise<string> {
+  if (productType === "LEAGUE_FEE" && !leagueSlug) {
+    throw new Error("A league is required for a league entry fee.");
+  }
+
+  const product = await prisma.product.findFirst({
+    where: {
+      type: productType,
+      active: true,
+      ...(productType === "LEAGUE_FEE"
+        ? { league: { slug: leagueSlug } }
+        : { leagueId: null }),
+    },
+    include: { league: { select: { id: true, slug: true, name: true } } },
+  });
+  if (!product) throw new Error("This purchase is not available right now.");
+  if (product.amountCents <= 0) {
+    throw new Error("This purchase does not require payment.");
+  }
+
+  // Active entitlements decide whether there is anything left to buy.
+  const now = new Date();
+  const entitlements = await prisma.entitlement.findMany({
+    where: {
+      userId,
+      validFrom: { lte: now },
+      OR: [{ validTo: null }, { validTo: { gte: now } }],
+    },
+    select: { kind: true, leagueId: true },
+  });
+  const hasMembership = entitlements.some((e) => e.kind === "lsr_member");
+
+  if (productType === "ANNUAL_DUES" && hasMembership) {
+    throw new Error("Your LSR membership is already active.");
+  }
+  if (productType === "LEAGUE_FEE") {
+    const alreadyEntered = entitlements.some(
+      (e) => e.kind === "league_access" && e.leagueId === product.leagueId
+    );
+    if (alreadyEntered) {
+      throw new Error(`You're already entered in ${product.league?.name ?? "this league"}.`);
+    }
+    // Pending #82: league entry is gated on an active membership.
+    if (!hasMembership) {
+      throw new Error("An active LSR membership is required to enter. Pay your dues first.");
+    }
+  }
+
+  const payment = await prisma.payment.create({
+    data: {
+      userId,
+      productId: product.id,
+      amountCents: product.amountCents,
+      currency: product.currency,
+      provider: "stripe",
+      status: "pending",
+      metadata: {
+        kind: "product",
+        productType,
+        productName: product.name,
+        leagueId: product.leagueId,
+        leagueSlug: product.league?.slug ?? null,
+      },
+    },
+  });
+
+  const returnPath =
+    (leagueSlug && PRODUCT_RETURN_PATHS[leagueSlug]) || "/account";
+  const baseUrl = getBaseUrl();
+
+  const session = await getStripe().checkout.sessions.create({
+    mode: "payment",
+    line_items: [
+      {
+        price_data: {
+          currency: product.currency.toLowerCase(),
+          unit_amount: product.amountCents,
+          product_data: { name: product.name },
+        },
+        quantity: 1,
+      },
+    ],
+    success_url: `${baseUrl}${returnPath}?payment=success`,
+    cancel_url: `${baseUrl}${returnPath}?payment=cancelled`,
+    metadata: {
+      paymentId: payment.id,
+      userId,
+      kind: "product",
+      productType,
+      leagueId: product.leagueId ?? "",
+    },
+    client_reference_id: payment.id,
+  });
+
   await prisma.payment.update({
     where: { id: payment.id },
     data: { providerRef: session.id },
