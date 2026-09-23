@@ -288,6 +288,15 @@ async function handleCheckoutCompleted(
   // Idempotency: don't process twice
   if (payment.status === "succeeded") return;
 
+  // Product-backed payments (dues, league entry) become entitlements.
+  if (payment.productId) {
+    await grantProduct(
+      { id: payment.id, userId: payment.userId, productId: payment.productId },
+      session
+    );
+    return;
+  }
+
   const meta = payment.metadata as {
     eventId: string;
     eventSlug: string;
@@ -401,6 +410,166 @@ async function handleCheckoutCompleted(
       )
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Product payments → entitlements
+// ---------------------------------------------------------------------------
+
+/** End of the membership year (Aug 1 – Jul 31) that contains `now`. */
+function membershipValidTo(now: Date): Date {
+  const startYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+  return new Date(startYear + 1, 6, 31, 23, 59, 59, 999);
+}
+
+/**
+ * Turns a succeeded product-backed Payment into an Entitlement (plus a
+ * UserMembership row for dues, so the existing badge and admin tier view stay
+ * correct), then audits and notifies. Runs inside handleCheckoutCompleted.
+ */
+async function grantProduct(
+  payment: { id: string; userId: string; productId: string },
+  session: Stripe.Checkout.Session
+): Promise<void> {
+  const product = await prisma.product.findUnique({
+    where: { id: payment.productId },
+    include: { league: { select: { id: true, slug: true, name: true } } },
+  });
+  if (!product) throw new Error(`Product ${payment.productId} not found`);
+
+  const now = new Date();
+
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: {
+        status: "succeeded",
+        paidAt: now,
+        providerRef: (session.payment_intent as string) ?? session.id,
+      },
+    });
+
+    if (product.type === "ANNUAL_DUES") {
+      const validTo = membershipValidTo(now);
+      const entitlement = await tx.entitlement.create({
+        data: {
+          userId: payment.userId,
+          kind: "lsr_member",
+          scope: "year",
+          validFrom: now,
+          validTo,
+          sourcePaymentId: payment.id,
+        },
+      });
+
+      // Dual-write: the badge (user-menu, layout) and /admin/users read UserMembership.
+      // Mirrors the extend-or-create logic in server/actions/users.ts.
+      const tier = await tx.membershipTier.findUnique({ where: { key: "LSR_MEMBER" } });
+      if (tier) {
+        const active = await tx.userMembership.findFirst({
+          where: {
+            userId: payment.userId,
+            tierId: tier.id,
+            validFrom: { lte: now },
+            OR: [{ validTo: null }, { validTo: { gte: now } }],
+          },
+          orderBy: { validFrom: "desc" },
+        });
+        if (active) {
+          await tx.userMembership.update({ where: { id: active.id }, data: { validTo } });
+        } else {
+          await tx.userMembership.create({
+            data: { userId: payment.userId, tierId: tier.id, validFrom: now, validTo },
+          });
+        }
+      }
+
+      return { entitlement, validTo };
+    }
+
+    if (product.type === "LEAGUE_FEE") {
+      if (!product.leagueId) throw new Error(`Product ${product.id} has no league`);
+
+      // Entry runs to the end of the league's current season; the nearest
+      // upcoming endAt wins, seasons with no endAt come last, then newest year.
+      // Pending #82: confirm Season.endAt is the intended window.
+      const season = await tx.season.findFirst({
+        where: {
+          leagueId: product.leagueId,
+          OR: [{ endAt: null }, { endAt: { gte: now } }],
+        },
+        orderBy: [{ endAt: { sort: "asc", nulls: "last" } }, { year: "desc" }],
+        select: { slug: true, endAt: true },
+      });
+      const validTo =
+        season?.endAt ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+
+      const entitlement = await tx.entitlement.create({
+        data: {
+          userId: payment.userId,
+          kind: "league_access",
+          leagueId: product.leagueId,
+          scope: "season",
+          validFrom: now,
+          validTo,
+          sourcePaymentId: payment.id,
+          meta: season ? { seasonSlug: season.slug } : undefined,
+        },
+      });
+
+      return { entitlement, validTo };
+    }
+
+    throw new Error(`Product type ${product.type} is not purchasable through checkout`);
+  });
+
+  // Audit log (after transaction)
+  await createAuditLog({
+    actorUserId: null,
+    actionType: "PAYMENT_SUCCEEDED",
+    entityType: "PAYMENT",
+    entityId: payment.id,
+    targetUserId: payment.userId,
+    summary: `Stripe checkout completed for ${product.name}`,
+    metadata: {
+      sessionId: session.id,
+      productId: product.id,
+      productType: product.type,
+      leagueId: product.leagueId,
+      entitlementId: result.entitlement.id,
+      validTo: result.validTo,
+    },
+    after: result.entitlement,
+  });
+
+  // Send notification (fire and forget)
+  const isDues = product.type === "ANNUAL_DUES";
+  const through = formatInTimeZone(result.validTo, "America/Chicago", "MMMM d, yyyy");
+  const leagueName = product.league?.name ?? "the league";
+  const actionUrl = isDues
+    ? "/account"
+    : (product.league?.slug && PRODUCT_RETURN_PATHS[product.league.slug]) || "/account";
+
+  sendNotification({
+    userId: payment.userId,
+    type: isDues ? "DUES_CONFIRMED" : "LEAGUE_REGISTERED",
+    title: isDues ? "You're an LSR member!" : `You're entered in ${leagueName}!`,
+    body: isDues
+      ? `Payment confirmed. Your membership is active through ${through}.`
+      : `Payment confirmed. Your ${leagueName} entry is active through ${through}.`,
+    actionUrl,
+    channels: ["IN_APP", "EMAIL"],
+    metadata: {
+      paymentId: payment.id,
+      productId: product.id,
+      productType: product.type,
+      leagueId: product.leagueId,
+      entitlementId: result.entitlement.id,
+      validTo: result.validTo,
+    },
+  }).catch((err) =>
+    console.error("[Payment] Failed to send product notification:", err)
+  );
 }
 
 // ---------------------------------------------------------------------------
