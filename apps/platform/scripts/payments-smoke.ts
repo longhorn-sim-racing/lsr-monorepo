@@ -47,6 +47,9 @@ if (!(process.env.STRIPE_SECRET_KEY ?? "").startsWith("sk_test_")) {
 // The webhook secret only has to match what we sign with below.
 process.env.STRIPE_WEBHOOK_SECRET = `whsec_smoke_${Date.now()}`;
 process.env.NEXT_PUBLIC_SITE_URL ??= "http://localhost:3000";
+// db.ts logs every query unless NODE_ENV is production; keep the run readable.
+// (Next's types mark NODE_ENV read-only; at runtime it's an ordinary env var.)
+(process.env as Record<string, string | undefined>).NODE_ENV ??= "production";
 
 const KEEP = process.argv.includes("--keep");
 const results: { step: string; ok: boolean; note?: string }[] = [];
@@ -262,6 +265,7 @@ async function main() {
   }
 }
 
+/** Cleanup + summary only; the exit code is decided once main() settles so a crash can't read as a pass. */
 async function finish(prisma: { user: { delete: (a: { where: { id: string } }) => Promise<unknown> }; $disconnect: () => Promise<void> }, deleteUserId: string | null) {
   if (deleteUserId) {
     await prisma.user.delete({ where: { id: deleteUserId } }); // cascades payments, entitlements, memberships, notifications
@@ -270,10 +274,11 @@ async function finish(prisma: { user: { delete: (a: { where: { id: string } }) =
   await prisma.$disconnect();
   const passed = results.filter((r) => r.ok).length;
   console.log(`\n${passed}/${results.length} passed`);
-  process.exit(failed ? 1 : 0);
 }
 
-main().catch(async (e) => {
-  console.error("smoke test crashed:", e);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(failed ? 1 : 0))
+  .catch((e) => {
+    console.error("\nsmoke test crashed:", e instanceof Error ? e.message : e);
+    process.exit(1);
+  });
