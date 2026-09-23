@@ -267,6 +267,9 @@ export async function handleStripeWebhook(
     case "charge.refunded":
       await handleChargeRefunded(event.data.object as Stripe.Charge);
       break;
+    case "checkout.session.expired":
+      await handleCheckoutExpired(event.data.object as Stripe.Checkout.Session);
+      break;
   }
 }
 
@@ -451,19 +454,11 @@ async function grantProduct(
 
     if (product.type === "ANNUAL_DUES") {
       const validTo = membershipValidTo(now);
-      const entitlement = await tx.entitlement.create({
-        data: {
-          userId: payment.userId,
-          kind: "lsr_member",
-          scope: "year",
-          validFrom: now,
-          validTo,
-          sourcePaymentId: payment.id,
-        },
-      });
 
       // Dual-write: the badge (user-menu, layout) and /admin/users read UserMembership.
-      // Mirrors the extend-or-create logic in server/actions/users.ts.
+      // Mirrors the extend-or-create logic in server/actions/users.ts, and records
+      // what it did so a refund can reverse exactly that (see revokeProduct).
+      let membership: MembershipChange | null = null;
       const tier = await tx.membershipTier.findUnique({ where: { key: "LSR_MEMBER" } });
       if (tier) {
         const active = await tx.userMembership.findFirst({
@@ -477,12 +472,30 @@ async function grantProduct(
         });
         if (active) {
           await tx.userMembership.update({ where: { id: active.id }, data: { validTo } });
+          membership = {
+            id: active.id,
+            action: "extended",
+            previousValidTo: active.validTo?.toISOString() ?? null,
+          };
         } else {
-          await tx.userMembership.create({
+          const created = await tx.userMembership.create({
             data: { userId: payment.userId, tierId: tier.id, validFrom: now, validTo },
           });
+          membership = { id: created.id, action: "created", previousValidTo: null };
         }
       }
+
+      const entitlement = await tx.entitlement.create({
+        data: {
+          userId: payment.userId,
+          kind: "lsr_member",
+          scope: "year",
+          validFrom: now,
+          validTo,
+          sourcePaymentId: payment.id,
+          meta: membership ? { membership } : undefined,
+        },
+      });
 
       return { entitlement, validTo };
     }
@@ -576,12 +589,26 @@ async function grantProduct(
 // charge.refunded
 // ---------------------------------------------------------------------------
 
+/** What grantProduct did to the dues UserMembership row, stored in Entitlement.meta. */
+type MembershipChange = {
+  id: string;
+  action: "created" | "extended";
+  previousValidTo: string | null;
+};
+
 async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
   // Find payment by the payment_intent stored in providerRef
   const payment = await prisma.payment.findFirst({
     where: { providerRef: charge.payment_intent as string },
   });
   if (!payment) return; // Not a payment we track
+
+  // Stripe sends charge.refunded for partial refunds too; only a full refund
+  // (charge.refunded === true) takes the entitlement away.
+  const revoked =
+    payment.productId && charge.refunded
+      ? await revokeProduct(payment.id, payment.userId)
+      : [];
 
   await prisma.payment.update({
     where: { id: payment.id },
@@ -593,7 +620,86 @@ async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
     actionType: "PAYMENT_REFUNDED",
     entityType: "PAYMENT",
     entityId: payment.id,
-    summary: `Stripe charge refunded`,
-    metadata: { chargeId: charge.id },
+    targetUserId: payment.userId,
+    summary: revoked.length
+      ? `Stripe charge refunded; ${revoked.length} entitlement(s) revoked`
+      : `Stripe charge refunded`,
+    metadata: {
+      chargeId: charge.id,
+      fullRefund: charge.refunded,
+      amountRefunded: charge.amount_refunded,
+      revokedEntitlementIds: revoked,
+    },
+  });
+}
+
+/**
+ * Ends every entitlement a product payment granted and undoes the dues
+ * dual-write on UserMembership using what grantProduct recorded in meta.
+ * Returns the ids of the entitlements it revoked.
+ */
+async function revokeProduct(paymentId: string, userId: string): Promise<string[]> {
+  const now = new Date();
+  return prisma.$transaction(async (tx) => {
+    const entitlements = await tx.entitlement.findMany({
+      where: {
+        sourcePaymentId: paymentId,
+        OR: [{ validTo: null }, { validTo: { gt: now } }],
+      },
+    });
+
+    for (const e of entitlements) {
+      await tx.entitlement.update({ where: { id: e.id }, data: { validTo: now } });
+
+      const membership = (e.meta as { membership?: MembershipChange } | null)?.membership;
+      if (e.kind === "lsr_member" && membership) {
+        const row = await tx.userMembership.findFirst({
+          where: { id: membership.id, userId },
+        });
+        if (row) {
+          await tx.userMembership.update({
+            where: { id: row.id },
+            data: {
+              validTo:
+                membership.action === "extended"
+                  ? membership.previousValidTo
+                    ? new Date(membership.previousValidTo)
+                    : null
+                  : now,
+            },
+          });
+        }
+      }
+    }
+
+    return entitlements.map((e) => e.id);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// checkout.session.expired
+// ---------------------------------------------------------------------------
+
+/** An abandoned Checkout Session: mark the still-pending Payment failed. */
+async function handleCheckoutExpired(session: Stripe.Checkout.Session): Promise<void> {
+  const paymentId = session.metadata?.paymentId;
+  if (!paymentId) return;
+
+  const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+  if (!payment || payment.status !== "pending") return;
+
+  await prisma.payment.update({
+    where: { id: paymentId },
+    data: { status: "failed" },
+  });
+
+  await createAuditLog({
+    actorUserId: null,
+    actionType: "PAYMENT_EXPIRED",
+    entityType: "PAYMENT",
+    entityId: paymentId,
+    targetUserId: payment.userId,
+    summary: `Stripe checkout session expired before payment`,
+    metadata: { sessionId: session.id },
   });
 }
