@@ -7,7 +7,7 @@ export async function getActiveEntitlements(userId: string) {
     where: {
       userId,
       validFrom: { lte: now },
-      validTo: { gte: now },
+      OR: [{ validTo: { gte: now } }, { validTo: null }],
     },
   });
 }
