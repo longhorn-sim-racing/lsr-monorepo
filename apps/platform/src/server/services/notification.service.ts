@@ -10,6 +10,8 @@ export type NotificationType =
   | "EVENT_POSTED"
   | "REGISTRATION_OPENED"
   | "RESULTS_POSTED"
+  | "DUES_CONFIRMED"
+  | "LEAGUE_REGISTERED"
   | "CUSTOM";
 
 export type SendNotificationParams = {
@@ -130,7 +132,13 @@ function shouldSendEmail(
   // - Registration and Waitlist: ON by default
   // - Everything else: OFF by default
   if (!prefs) {
-    return type === "REGISTRATION_CONFIRMED" || type === "WAITLIST_PROMOTED" || type === "CUSTOM";
+    return (
+      type === "REGISTRATION_CONFIRMED" ||
+      type === "WAITLIST_PROMOTED" ||
+      type === "DUES_CONFIRMED" ||
+      type === "LEAGUE_REGISTERED" ||
+      type === "CUSTOM"
+    );
   }
 
   switch (type) {
