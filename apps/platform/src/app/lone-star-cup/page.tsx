@@ -15,6 +15,12 @@ import { prisma } from "@/server/db";
 import { Metadata } from "next";
 import { DatabaseUnavailable } from "@/components/database-unavailable";
 import { ChampionshipChart } from "@/components/championship-chart";
+import { getCachedSessionUser } from "@/server/auth/cached-session";
+import { getActiveEntitlements } from "@/server/repos/membership.repo";
+import { ProductCheckoutButton, ProductPaymentToast } from "@/components/product-checkout-button";
+import { Button } from "@/components/ui/button";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Lone Star Cup",
@@ -56,15 +62,24 @@ async function getSeriesWithPodiums(slug: string) {
 }
 
 export default async function LoneStarCupPage() {
-  let currentSeries, currentStandings, s1Series, s1Standings, currentProgression;
+  let currentSeries, currentStandings, s1Series, s1Standings, currentProgression, session, league, entryProduct;
+  let entitlements: Awaited<ReturnType<typeof getActiveEntitlements>> = [];
   try {
-    [currentSeries, currentStandings, s1Series, s1Standings, currentProgression] = await Promise.all([
+    [currentSeries, currentStandings, s1Series, s1Standings, currentProgression, session, league, entryProduct] = await Promise.all([
       getSeriesWithPodiums("lone-star-cup-s2"),
       getStandings("lone-star-cup-s2"),
       getSeriesWithPodiums("lone-star-cup-s1"),
       getStandings("lone-star-cup-s1"),
       getPointsProgression("lone-star-cup-s2"),
+      getCachedSessionUser(),
+      prisma.league.findUnique({ where: { slug: "lone-star-cup" }, select: { id: true } }),
+      prisma.product.findFirst({
+        where: { type: "LEAGUE_FEE", league: { slug: "lone-star-cup" }, active: true },
+      }),
     ]);
+    if (session.user) {
+      entitlements = await getActiveEntitlements(session.user.id);
+    }
   } catch (error) {
     console.error('[LoneStarCup] Failed to load series data:', error);
     return (
@@ -86,6 +101,12 @@ export default async function LoneStarCupPage() {
   if (!currentSeries) {
     return notFound();
   }
+
+  // Pending #82: the current plan requires paid dues before league entry.
+  const needsMembership = !!session.user && !entitlements.some((entitlement) => entitlement.kind === "lsr_member");
+  const isEntered = !!league && entitlements.some(
+    (entitlement) => entitlement.kind === "league_access" && entitlement.leagueId === league.id,
+  );
 
   // Archive structure for extensibility
   const archivedSeasons = [
@@ -118,13 +139,27 @@ export default async function LoneStarCupPage() {
 
   return (
     <main className="bg-lsr-charcoal text-white min-h-screen">
+      <ProductPaymentToast />
       <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
+        <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-6 mb-10">
           <div>
             <h1 className="font-display font-black italic text-5xl md:text-7xl text-white uppercase tracking-normal leading-[0.9]">
               Lone Star Cup
             </h1>
             <p className="font-sans font-bold text-white/40 uppercase tracking-[0.3em] text-[10px] mt-4">Official Championship Series</p>
+          </div>
+          <div className="w-full sm:w-auto">
+            {needsMembership ? (
+              <Button asChild className="h-12 rounded-none bg-lsr-orange px-6 font-sans text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-white hover:text-lsr-charcoal">
+                <Link href="/account">Membership required</Link>
+              </Button>
+            ) : isEntered ? (
+              <p className="font-sans text-sm font-bold text-lsr-orange">You&apos;re entered</p>
+            ) : entryProduct ? (
+              <ProductCheckoutButton product="LEAGUE_FEE" league="lone-star-cup" label="Enter the Lone Star Cup" priceCents={entryProduct.amountCents} />
+            ) : (
+              <p className="font-sans text-sm text-white/60">Entry is currently unavailable.</p>
+            )}
           </div>
         </div>
 
@@ -140,7 +175,7 @@ export default async function LoneStarCupPage() {
               </h2>
               <div className="prose prose-invert prose-p:font-sans prose-p:text-white/70 prose-p:leading-relaxed max-w-none">
                 <p>
-                  The Lone Star Cup, not only an introduction to the competitive world of Sim Racing but also a platform to show your skills. This league brings together members of all experience levels, from season veterans to those taking their first turns on a track. Participation in this league involves an entry fee of $10 ($5 if returning league participant) and is meant to help build a community built on sportsmanship and shared passion for the art of racing. You will go head to head in an environment that is built on encouragement and willingness to help newcomers.
+                  The Lone Star Cup, not only an introduction to the competitive world of Sim Racing but also a platform to show your skills. This league brings together members of all experience levels, from season veterans to those taking their first turns on a track. Participation in this league involves an entry fee and is meant to help build a community built on sportsmanship and shared passion for the art of racing. You will go head to head in an environment that is built on encouragement and willingness to help newcomers.
                 </p>
                 <p>&nbsp;</p>
                 <p>
