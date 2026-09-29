@@ -220,32 +220,40 @@ export async function createProductCheckoutSession(
     (leagueSlug && PRODUCT_RETURN_PATHS[leagueSlug]) || "/account";
   const baseUrl = getBaseUrl();
 
-  const session = await getStripe().checkout.sessions.create({
-    mode: "payment",
-    line_items: [
-      {
-        price_data: {
-          currency: product.currency.toLowerCase(),
-          unit_amount: price.amountCents,
-          product_data: {
-            name: price.tier === "returning" ? `${product.name} (returning driver)` : product.name,
+  let session: Stripe.Checkout.Session;
+  try {
+    session = await getStripe().checkout.sessions.create({
+      mode: "payment",
+      line_items: [
+        {
+          price_data: {
+            currency: product.currency.toLowerCase(),
+            unit_amount: price.amountCents,
+            product_data: {
+              name: price.tier === "returning" ? `${product.name} (returning driver)` : product.name,
+            },
           },
+          quantity: 1,
         },
-        quantity: 1,
+      ],
+      success_url: `${baseUrl}${returnPath}?payment=success`,
+      cancel_url: `${baseUrl}${returnPath}?payment=cancelled`,
+      metadata: {
+        paymentId: payment.id,
+        userId,
+        kind: "product",
+        productType,
+        leagueId: product.leagueId ?? "",
+        priceTier: price.tier,
       },
-    ],
-    success_url: `${baseUrl}${returnPath}?payment=success`,
-    cancel_url: `${baseUrl}${returnPath}?payment=cancelled`,
-    metadata: {
-      paymentId: payment.id,
-      userId,
-      kind: "product",
-      productType,
-      leagueId: product.leagueId ?? "",
-      priceTier: price.tier,
-    },
-    client_reference_id: payment.id,
-  });
+      client_reference_id: payment.id,
+    });
+  } catch (error) {
+    // No session means no webhook will ever settle this row.
+    await prisma.payment.update({ where: { id: payment.id }, data: { status: "failed" } });
+    console.error("[Payment] Stripe checkout session failed:", error);
+    throw new Error("Couldn't start checkout. Try again in a minute.");
+  }
 
   await prisma.payment.update({
     where: { id: payment.id },
