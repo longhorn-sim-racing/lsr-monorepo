@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { updateProfile } from './actions';
 import { AvatarUploader } from '@/components/avatar-uploader';
 import { UpdateRacingNumberButton } from '@/components/racing-number-prompt';
+import { RacingNumber } from '@/components/racing-number';
 
 export const dynamic = 'force-dynamic';
 
@@ -81,17 +82,7 @@ export default async function EditDriverPage({
                   <Label className="font-sans font-bold text-[10px] text-white/40 uppercase tracking-[0.2em] pl-1">Racing Number</Label>
                   <div className="flex items-center gap-4 h-12">
                     <div className="text-2xl flex-1 px-3 py-2 bg-white/5 border border-white/10 flex items-center">
-                      <span 
-                        style={pageUser.racingNumber !== null ? { 
-                          color: pageUser.racingNumberColor || undefined, 
-                          fontFamily: pageUser.racingNumberFont || undefined,
-                          fontStyle: pageUser.racingNumberItalic ? 'italic' : 'normal',
-                          fontWeight: 900,
-                          WebkitTextStroke: pageUser.racingNumberBorder ? '1px white' : 'none',
-                        } : { color: 'rgba(255,255,255,0.4)' }}
-                      >
-                        {pageUser.racingNumber !== null ? `#${pageUser.racingNumber}` : 'None'}
-                      </span>
+                      <RacingNumber user={pageUser} size="md" fallback={<span className="text-white/40">None</span>} />
                     </div>
                     <UpdateRacingNumberButton user={pageUser} />
                   </div>

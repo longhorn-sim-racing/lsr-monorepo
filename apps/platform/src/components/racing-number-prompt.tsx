@@ -10,15 +10,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { setRacingNumberAction } from "@/server/actions/racing-number";
 import { toast } from "sonner";
+import type { RacingNumberStyle } from "@/lib/racing-number";
 
-/** A driver's racing number and how it's styled; any User row satisfies it. */
-export type RacingNumberStyle = {
-  racingNumber?: number | null;
-  racingNumberColor?: string | null;
-  racingNumberFont?: string | null;
-  racingNumberItalic?: boolean | null;
-  racingNumberBorder?: boolean | null;
-};
+export type { RacingNumberStyle } from "@/lib/racing-number";
 
 export function RacingNumberDialog({
   open,

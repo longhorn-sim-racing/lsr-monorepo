@@ -11,9 +11,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { RacingNumber, type RacingNumberStyle } from "@/components/racing-number";
 
 type Standing = {
-    driver: {
+    driver: RacingNumberStyle & {
         id: string;
         name: string;
         handle: string;
@@ -178,8 +179,11 @@ export function StandingsTable({ standings, title = "Standings", infoText }: { s
                                             </AvatarFallback>
                                         </Avatar>
                                         <div className="flex flex-col">
-                                            <span className="font-bold text-white group-hover:text-lsr-orange transition-colors uppercase tracking-tight">
-                                                {standing.driver.name}
+                                            <span className="flex items-baseline gap-2">
+                                                <span className="font-bold text-white group-hover:text-lsr-orange transition-colors uppercase tracking-tight">
+                                                    {standing.driver.name}
+                                                </span>
+                                                <RacingNumber user={standing.driver} size="xs" />
                                             </span>
                                             {standing.car && standing.car !== "Unknown" && (
                                                 <span className="text-[10px] text-white/40 uppercase font-normal">{standing.car}</span>

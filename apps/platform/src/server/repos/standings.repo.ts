@@ -1,4 +1,5 @@
 import { prisma } from '@/server/db';
+import { pickRacingNumberStyle, type RacingNumberStyle } from '@/lib/racing-number';
 
 export async function getStandings(slug: string) {
   // 1. Try finding a Season by slug
@@ -23,7 +24,8 @@ export async function getStandings(slug: string) {
               id: entry.user?.id || "", 
               name: entry.user?.displayName || "Unknown", 
               handle: entry.user?.handle || "",
-              avatarUrl: entry.user?.avatarUrl
+              avatarUrl: entry.user?.avatarUrl,
+              ...pickRacingNumberStyle(entry.user),
           },
           points: entry.totalPoints,
           wins: entry.wins,
@@ -62,7 +64,7 @@ export async function getStandings(slug: string) {
   });
 
   const driverStats = new Map<string, {
-    driver: { id: string, name: string, handle: string, avatarUrl?: string | null };
+    driver: { id: string, name: string, handle: string, avatarUrl?: string | null } & RacingNumberStyle;
     points: number;
     wins: number;
     podiums: number;
@@ -86,7 +88,7 @@ export async function getStandings(slug: string) {
 
     if (!driverStats.has(userId)) {
       driverStats.set(userId, {
-        driver: { id: userId, name: driverName, handle: driverHandle, avatarUrl: driverAvatar },
+        driver: { id: userId, name: driverName, handle: driverHandle, avatarUrl: driverAvatar, ...pickRacingNumberStyle(result.entry.user) },
         points: 0,
         wins: 0,
         podiums: 0,

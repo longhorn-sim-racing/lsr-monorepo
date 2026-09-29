@@ -10,10 +10,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { StatusIcons } from "@/components/status-indicators";
 import { getStatusIndicators, getActiveTierKey } from "@/lib/status-indicators";
 import { ROLE_LABEL, type RoleCode } from "@/lib/roles";
+import { RacingNumber, type RacingNumberStyle } from "@/components/racing-number";
 
 const ALL_ROLES = Object.keys(ROLE_LABEL) as RoleCode[];
 
-type DriverRow = {
+type DriverRow = RacingNumberStyle & {
   id: string;
   displayName: string;
   handle: string;
@@ -25,10 +26,6 @@ type DriverRow = {
   allTimePoints: number;
   rank: number;
   racingNumber: number | null;
-  racingNumberColor?: string | null;
-  racingNumberFont?: string | null;
-  racingNumberItalic?: boolean | null;
-  racingNumberBorder?: boolean | null;
 };
 
 type SortConfig = {
@@ -186,21 +183,11 @@ export function DriversTable({ drivers }: { drivers: DriverRow[] }) {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span
-                        className="font-display font-black text-lg"
-                        style={
-                          d.racingNumber !== null
-                            ? { 
-                                color: d.racingNumberColor || undefined, 
-                                fontFamily: d.racingNumberFont || undefined,
-                                fontStyle: d.racingNumberItalic ? 'italic' : 'normal',
-                                WebkitTextStroke: d.racingNumberBorder ? '1px white' : 'none'
-                              }
-                            : { color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }
-                        }
-                      >
-                        {d.racingNumber !== null ? `#${d.racingNumber}` : <span className="text-white/20">—</span>}
-                      </span>
+                      <RacingNumber
+                        user={d}
+                        size="sm"
+                        fallback={<span className="font-display font-black italic text-lg text-white/20">—</span>}
+                      />
                     </td>
                     <td className="px-4 py-3">
                       <Link href={`/drivers/${d.handle}`} className="flex items-center gap-4 group/driver">
