@@ -5,6 +5,7 @@ import { prisma } from '@/server/db';
 import { requireUser } from '@/server/auth/guards';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { revalidateDriverList } from '@/server/cache/revalidate-public';
 
 // Schema shared by the action
 const UserSchema = z.object({
@@ -75,6 +76,7 @@ export async function updateProfile(formData: FormData) {
   });
 
   revalidatePath(`/drivers/${user.handle}`);
+  revalidateDriverList();
   redirect(`/drivers/${user.handle}`);
 }
 
@@ -92,6 +94,7 @@ export async function saveAvatar(url: string) {
   }
 
   revalidatePath(`/drivers/${user.handle}`);
+  revalidateDriverList();
 }
 
 export async function clearAvatar() {
@@ -108,4 +111,5 @@ export async function clearAvatar() {
   }
 
   revalidatePath(`/drivers/${user.handle}`);
+  revalidateDriverList();
 }

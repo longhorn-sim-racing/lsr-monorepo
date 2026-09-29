@@ -6,6 +6,11 @@ import { createAuditLog } from "@/server/audit/log";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireOfficer } from "@/server/auth/guards";
+import {
+  revalidateEventList,
+  revalidateEventDetail,
+  revalidateSeriesPages,
+} from "@/server/cache/revalidate-public";
 
 export async function createEvent(formData: FormData) {
   const user = await requireOfficer();
@@ -72,6 +77,10 @@ export async function createEvent(formData: FormData) {
   });
 
   revalidatePath("/admin/events");
+  if (event.status === "PUBLISHED" || event.status === "SCHEDULED") {
+    revalidateEventList();
+    revalidateEventDetail(event.slug);
+  }
   redirect("/admin/events");
 }
 
@@ -86,9 +95,10 @@ export async function updateEventStatus(eventId: string, status: EventStatus, pu
     publishedAt,
   };
 
-  await prisma.event.update({
+  const updated = await prisma.event.update({
     where: { id: eventId },
     data,
+    select: { slug: true },
   });
 
   await createAuditLog({
@@ -101,6 +111,8 @@ export async function updateEventStatus(eventId: string, status: EventStatus, pu
   });
 
   revalidatePath("/admin/events");
+  revalidateEventList();
+  revalidateEventDetail(updated.slug);
   redirect("/admin/events");
 }
 
@@ -165,9 +177,10 @@ export async function updateEvent(id: string, formData: FormData) {
     eventUpdateData.status = "DRAFT";
   }
 
-  await prisma.event.update({
+  const updated = await prisma.event.update({
     where: { id },
     data: eventUpdateData,
+    select: { slug: true, series: { select: { slug: true } } },
   });
 
   await createAuditLog({
@@ -179,16 +192,19 @@ export async function updateEvent(id: string, formData: FormData) {
     after: eventUpdateData,
   });
 
-  revalidatePath("/events");
   revalidatePath("/admin/events");
+  revalidateEventList();
+  revalidateEventDetail(updated.slug);
+  if (updated.series?.slug) revalidateSeriesPages(updated.series.slug);
   redirect("/admin/events");
 }
 
 export async function deleteEvent(eventId: string) {
   const user = await requireOfficer();
 
-  await prisma.event.delete({
+  const deleted = await prisma.event.delete({
     where: { id: eventId },
+    select: { slug: true, series: { select: { slug: true } } },
   });
 
   await createAuditLog({
@@ -200,6 +216,9 @@ export async function deleteEvent(eventId: string) {
   });
 
   revalidatePath("/admin/events");
+  revalidateEventList();
+  revalidateEventDetail(deleted.slug);
+  if (deleted.series?.slug) revalidateSeriesPages(deleted.series.slug);
 }
 
 import { adminOverrideRegistration } from "@/server/services/registration.service";
@@ -228,9 +247,10 @@ export async function updateEventRegistrationConfig(eventId: string, formData: F
     registrationFeeCents,
   };
 
-  await prisma.event.update({
+  const updated = await prisma.event.update({
     where: { id: eventId },
     data: configData,
+    select: { slug: true },
   });
 
   await createAuditLog({
@@ -246,7 +266,8 @@ export async function updateEventRegistrationConfig(eventId: string, formData: F
   });
 
   revalidatePath(`/admin/events/${eventId}`);
-  revalidatePath(`/events`);
+  revalidateEventList();
+  revalidateEventDetail(updated.slug);
 }
 
 export async function overrideRegistrationStatus(eventId: string, userId: string, status: RegistrationStatus, reason?: string) {
@@ -254,8 +275,10 @@ export async function overrideRegistrationStatus(eventId: string, userId: string
 
   await adminOverrideRegistration(user.id, userId, eventId, status, reason);
 
+  const ev = await prisma.event.findUnique({ where: { id: eventId }, select: { slug: true } });
   revalidatePath(`/admin/events/${eventId}`);
-  revalidatePath(`/events`);
+  revalidateEventList();
+  if (ev) revalidateEventDetail(ev.slug);
 }
 
 export async function reorderWaitlist(eventId: string, orderedRegistrationIds: string[]) {

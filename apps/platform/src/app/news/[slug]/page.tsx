@@ -14,9 +14,42 @@ export async function generateMetadata({
   params: Promise<RouteParams>
 }): Promise<Metadata> {
   const { slug } = await params;
+
+  let postData;
+  try {
+    postData = await getPostContent(slug);
+  } catch {
+    postData = null;
+  }
+
+  if (!postData) {
+    return {
+      title: "News",
+      alternates: { canonical: `/news/${slug}` },
+    };
+  }
+
+  const { frontmatter } = postData;
+  const description =
+    frontmatter.excerpt ||
+    `${frontmatter.title} — read the latest from Longhorn Sim Racing.`;
+
   return {
-    alternates: {
-      canonical: `/news/${slug}`,
+    title: frontmatter.title,
+    description,
+    alternates: { canonical: `/news/${slug}` },
+    openGraph: {
+      title: frontmatter.title,
+      description,
+      type: "article",
+      url: `/news/${slug}`,
+      publishedTime: frontmatter.date,
+      authors: frontmatter.author ? [frontmatter.author] : undefined,
+      tags: frontmatter.tags,
+    },
+    twitter: {
+      title: frontmatter.title,
+      description,
     },
   };
 }
@@ -40,8 +73,12 @@ export default async function NewsPostPage({
   const { slug } = await params // 👈 await before using
 
   let postData;
+  let allPosts: Awaited<ReturnType<typeof getAllPosts>> = [];
   try {
-    postData = await getPostContent(slug);
+    [postData, allPosts] = await Promise.all([
+      getPostContent(slug),
+      getAllPosts(),
+    ]);
   } catch (error) {
     console.error('[NewsPost] Failed to load post:', error);
     return (
@@ -54,9 +91,54 @@ export default async function NewsPostPage({
   }
 
   const { content, frontmatter } = postData
+  const relatedPosts = allPosts.filter(p => p.slug !== slug).slice(0, 3)
+
+  const articleJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    headline: frontmatter.title,
+    description: frontmatter.excerpt || undefined,
+    datePublished: frontmatter.date,
+    dateModified: frontmatter.date,
+    author: {
+      "@type": frontmatter.author && frontmatter.author !== "LSR Team" ? "Person" : "Organization",
+      name: frontmatter.author || "Longhorn Sim Racing",
+    },
+    publisher: {
+      "@type": "SportsOrganization",
+      name: "Longhorn Sim Racing",
+      logo: {
+        "@type": "ImageObject",
+        url: "https://www.longhornsimracing.org/brand/logos/black_logo_white_square.png",
+      },
+    },
+    keywords: frontmatter.tags,
+    mainEntityOfPage: {
+      "@type": "WebPage",
+      "@id": `https://www.longhornsimracing.org/news/${slug}`,
+    },
+  };
+
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.longhornsimracing.org/" },
+      { "@type": "ListItem", position: 2, name: "News", item: "https://www.longhornsimracing.org/news" },
+      { "@type": "ListItem", position: 3, name: frontmatter.title, item: `https://www.longhornsimracing.org/news/${slug}` },
+    ],
+  };
 
   return (
     <main className="bg-lsr-charcoal text-white min-h-screen">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
       <div className="mx-auto max-w-4xl px-6 md:px-8 py-14 md:py-20">
         <div className="mb-8">
           <Link href="/news" className="group inline-flex items-center gap-3 text-[10px] font-sans font-bold uppercase tracking-[0.25em] text-white/50 hover:text-lsr-orange transition-colors">
@@ -98,6 +180,33 @@ export default async function NewsPostPage({
           {content}
         </article>
         
+        {relatedPosts.length > 0 && (
+          <section className="mt-20 pt-10 border-t border-white/10">
+            <h2 className="font-display font-black italic text-2xl md:text-3xl text-white uppercase tracking-normal mb-8">
+              More <span className="text-lsr-orange">from LSR</span>
+            </h2>
+            <div className="grid gap-6 md:grid-cols-3">
+              {relatedPosts.map(p => (
+                <Link
+                  key={p.slug}
+                  href={`/news/${p.slug}`}
+                  className="group border border-white/10 bg-white/[0.02] p-6 hover:border-lsr-orange/60 transition-colors"
+                >
+                  <time className="font-mono text-[10px] text-lsr-orange uppercase tracking-widest">
+                    {new Date(p.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                  </time>
+                  <h3 className="font-display font-black italic text-xl text-white uppercase tracking-normal mt-3 group-hover:text-lsr-orange transition-colors">
+                    {p.title}
+                  </h3>
+                  {p.excerpt && (
+                    <p className="font-sans text-sm text-white/60 mt-3 line-clamp-3">{p.excerpt}</p>
+                  )}
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
         <div className="mt-20 pt-10 border-t border-white/10">
           <div className="flex justify-between items-center">
             <span className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/30">End of Transmission</span>

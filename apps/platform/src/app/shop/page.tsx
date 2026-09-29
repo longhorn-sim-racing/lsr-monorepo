@@ -50,7 +50,13 @@ export default async function ShopPage() {
     );
   }
 
-  const allProducts = await getProducts();
+  let allProducts: Awaited<ReturnType<typeof getProducts>> = [];
+  try {
+    allProducts = await getProducts();
+  } catch (error) {
+    // A Shopify outage (or a frozen store) must not fail the build or the page.
+    console.error("[Shop] Failed to load catalog:", error);
+  }
 
   // If no products, show empty state
   if (!allProducts.length) {

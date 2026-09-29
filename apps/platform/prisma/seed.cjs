@@ -97,16 +97,22 @@ async function main() {
     });
   }
 
-  // League fee ($20): safe to upsert because leagueId is non-null
+  // League fee: $10 new, $5 for drivers in a past season's standings (Competition, 9/25).
+  // Safe to upsert because leagueId is non-null.
+  const lscPricing = {
+    returningAmountCents: 500,
+    returningSeasonSlugs: ["lone-star-cup-s1", "lone-star-cup-s2"],
+  };
   await prisma.product.upsert({
     where: { type_leagueId: { type: "LEAGUE_FEE", leagueId: loneStarCup.id } },
-    update: { name: "Lone Star Cup Entry Fee", amountCents: 2000, currency: "USD", active: true },
+    update: { name: "Lone Star Cup Entry Fee", amountCents: 1000, currency: "USD", active: true, metadata: lscPricing },
     create: {
       type: "LEAGUE_FEE",
       name: "Lone Star Cup Entry Fee",
-      amountCents: 2000,
+      amountCents: 1000,
       currency: "USD",
       active: true,
+      metadata: lscPricing,
       league: { connect: { id: loneStarCup.id } },
     },
   });

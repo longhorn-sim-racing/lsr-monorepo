@@ -89,7 +89,7 @@ function SortableGalleryItem({
         <div className="relative aspect-video w-full bg-black/20">
           <Image
               src={`https://res.cloudinary.com/${cloudName}/image/upload/w_400,h_300,c_fill,q_auto/${image.publicId}`}
-              alt={image.alt ?? ''}
+              alt={image.alt ?? image.creditName ?? 'Gallery image'}
               fill
               className="object-cover pointer-events-none"
               sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
