@@ -53,6 +53,16 @@ function readReturningPricing(product: PricedProduct): ReturningPricing | null {
 }
 
 /**
+ * A league product can require paid LSR dues before entry with
+ * `{ "requiresMembership": true }` in its metadata. Off unless set.
+ */
+export function productRequiresMembership(product: Pick<Product, "type" | "metadata">): boolean {
+  if (product.type !== "LEAGUE_FEE") return false;
+  const meta = product.metadata as Record<string, unknown> | null;
+  return meta?.requiresMembership === true;
+}
+
+/**
  * True when the user has a standings entry in any of the given seasons.
  * Mirrors both paths in standings.repo: a Season's own entries (matched by the
  * season's slug or its series' slug), and legacy results reached through

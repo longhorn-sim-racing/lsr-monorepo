@@ -4,7 +4,8 @@ import { Prisma, RegistrationStatus, type Payment } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
 import { sendNotification } from "@/server/services/notification.service";
 import { formatInTimeZone } from "date-fns-tz";
-import { priceForUser } from "@/server/services/product-pricing";
+import { priceForUser, productRequiresMembership } from "@/server/services/product-pricing";
+import { getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
 import type Stripe from "stripe";
 
 // ---------------------------------------------------------------------------
@@ -180,9 +181,15 @@ export async function createProductCheckoutSession(
     if (alreadyEntered) {
       throw new Error(`You're already entered in ${product.league?.name ?? "this league"}.`);
     }
-    // Pending #82: league entry is gated on an active membership.
-    if (!hasMembership) {
+    if (productRequiresMembership(product) && !hasMembership) {
       throw new Error("An active LSR membership is required to enter. Pay your dues first.");
+    }
+    const season = await getOpenLeagueSeason(product.leagueId!, now);
+    if (!season) {
+      throw new Error(`${product.league?.name ?? "League"} entry isn't open right now.`);
+    }
+    if (!(await getLeagueApplication(userId, season.id))) {
+      throw new Error("Fill out the entry form before paying.");
     }
   }
 
@@ -567,17 +574,8 @@ async function grantProduct(
     if (product.type === "LEAGUE_FEE") {
       if (!product.leagueId) throw new Error(`Product ${product.id} has no league`);
 
-      // Entry runs to the end of the league's current season; the nearest
-      // upcoming endAt wins, seasons with no endAt come last, then newest year.
-      // Pending #82: confirm Season.endAt is the intended window.
-      const season = await tx.season.findFirst({
-        where: {
-          leagueId: product.leagueId,
-          OR: [{ endAt: null }, { endAt: { gte: now } }],
-        },
-        orderBy: [{ endAt: { sort: "asc", nulls: "last" } }, { year: "desc" }],
-        select: { slug: true, endAt: true },
-      });
+      // Entry runs to the end of the league's open season.
+      const season = await getOpenLeagueSeason(product.leagueId, now, tx);
       const validTo =
         season?.endAt ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
 
@@ -634,7 +632,7 @@ async function grantProduct(
     title: isDues ? "You're an LSR member!" : `You're entered in ${leagueName}!`,
     body: isDues
       ? `Payment confirmed. Your membership is active through ${through}.`
-      : `Payment confirmed. Your ${leagueName} entry is active through ${through}.`,
+      : `Payment confirmed. Your ${leagueName} entry is active through ${through}. Next, the comp team will give you the ${leagueName} role on Discord, which unlocks the track and car downloads.`,
     actionUrl,
     channels: ["IN_APP", "EMAIL"],
     metadata: {
