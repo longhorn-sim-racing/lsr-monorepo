@@ -6,12 +6,14 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/server/db";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { requireOfficerPage } from "@/server/auth/guards";
 
 type ManageRegistrationArgs = {
   params: Promise<{ id: string }>;
 };
 
 export default async function ManageRegistrationPage({ params }: ManageRegistrationArgs) {
+  await requireOfficerPage();
   const { id } = await params;
   const [event, registrations] = await Promise.all([
     getEventForAdmin(id),

@@ -118,6 +118,7 @@ export async function updateEventStatus(eventId: string, status: EventStatus, pu
 
 
 export async function getEvent(id: string) {
+  await requireOfficer();
   return await getEventById(id);
 }
 

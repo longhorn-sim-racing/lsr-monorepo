@@ -1,12 +1,14 @@
 import { prisma } from "@/server/db";
 import { notFound } from "next/navigation";
 import { ResultDetailClient } from "./client";
+import { requireOfficerPage } from "@/server/auth/guards";
 
 export default async function ResultDetailPage({
   params,
 }: {
   params: { id: string };
 }) {
+  await requireOfficerPage();
   const awaitedParams = await params;
   const result = await prisma.rawResultUpload.findUnique({
     where: { id: awaitedParams.id },

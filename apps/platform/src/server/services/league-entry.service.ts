@@ -1,6 +1,7 @@
 import { Prisma, type LeagueApplicationSource } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { createAuditLog } from "@/server/audit/log";
+import { expireOpenCheckouts } from "@/server/services/checkout-sessions";
 import type { LeagueApplicationInput } from "@/schemas/league-application.schema";
 
 type Db = Prisma.TransactionClient | typeof prisma;
@@ -128,6 +129,9 @@ export async function grantManualLeagueEntry(params: {
       },
     });
   });
+
+  // They're in now; an old unpaid checkout tab shouldn't be payable on top of this.
+  await expireOpenCheckouts(userId, { leagueId });
 
   await createAuditLog({
     actorUserId,

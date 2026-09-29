@@ -11,6 +11,7 @@ import {
 import { createAuditLog } from "@/server/audit/log";
 
 export async function getHotlapSettings(): Promise<HotlapSettings | null> {
+  await requireOfficer();
   const data = await getSystemSetting<HotlapSettings>(SETTINGS.HOTLAP);
   return data ?? null;
 }

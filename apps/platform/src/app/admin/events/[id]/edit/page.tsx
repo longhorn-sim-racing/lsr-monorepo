@@ -3,12 +3,14 @@ import { getEventForAdmin, getAllEventSeries } from "@/server/queries/events";
 import { EventForm } from "@/components/admin/event-form";
 import { getAllVenues } from "@/server/queries/venue";
 import { notFound } from "next/navigation";
+import { requireOfficerPage } from "@/server/auth/guards";
 
 type EditEventArgs = {
   params: Promise<{ id: string }>;
 };
 
 export default async function EditEventPage({ params }: EditEventArgs) {
+  await requireOfficerPage();
   const { id } = await params;
   const [event, series, venues] = await Promise.all([
     getEventForAdmin(id),

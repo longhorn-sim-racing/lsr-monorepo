@@ -215,6 +215,27 @@ async function main() {
     }
     check("unknown sessions: ignored without an error", !threw);
 
+    // 9b. Paying for something they already have (an officer entered them while the
+    // checkout was open) records the payment, grants nothing more, and flags it. No refund.
+    const lsc = await prisma.product.findFirst({ where: { type: "LEAGUE_FEE", league: { slug: "lone-star-cup" } } });
+    if (lsc?.leagueId) {
+      const u8 = await mkUser("dupe");
+      const manual = await prisma.entitlement.create({
+        data: { userId: u8, kind: "league_access", leagueId: lsc.leagueId, scope: "season", validFrom: new Date(), validTo: new Date(Date.now() + 30 * day), meta: { source: "manual" } },
+      });
+      const p8 = await mkPayment(u8, lsc.id);
+      await send("checkout.session.completed", session(p8.id, `pi_${ts}_9b`));
+      const after = await prisma.payment.findUnique({ where: { id: p8.id } });
+      const entries = await prisma.entitlement.count({ where: { userId: u8, kind: "league_access" } });
+      const dupeAudit = await prisma.auditLog.count({ where: { entityId: p8.id, actionType: "PAYMENT_DUPLICATE" } });
+      check("already entered: payment kept, no second entry, flagged for an officer",
+        after?.status === "succeeded" && entries === 1 &&
+          (after.metadata as Record<string, unknown>)?.duplicateOfEntitlementId === manual.id && dupeAudit === 1,
+        `status=${after?.status} entries=${entries} audits=${dupeAudit}`);
+    } else {
+      check("LSC product seeded (for the duplicate-payment case)", false, "run: prisma db seed");
+    }
+
     // 10. Paid event seats: concurrent duplicates register once (same claim).
     const event = await prisma.event.create({
       data: {

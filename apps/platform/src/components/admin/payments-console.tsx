@@ -165,6 +165,14 @@ function PaymentRow({ payment }: { payment: AdminPayment }) {
         <Badge variant="outline" className={cn("rounded-none uppercase tracking-wider text-[10px]", STATUS_STYLES[payment.status])}>
           {payment.status}
         </Badge>
+        {typeof meta.duplicateOfEntitlementId === "string" && payment.status === "succeeded" && (
+          <div
+            className="mt-1 text-[10px] font-bold uppercase tracking-wider text-red-400"
+            title="They already had this entry or membership when this payment went through. Refund it in Stripe."
+          >
+            Duplicate — refund
+          </div>
+        )}
       </td>
       <td className="px-4 py-2.5 text-right whitespace-nowrap">
         {stripeUrl ? (
