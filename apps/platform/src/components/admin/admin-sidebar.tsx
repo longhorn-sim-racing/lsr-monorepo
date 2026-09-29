@@ -21,6 +21,7 @@ import {
   Flag,
   CreditCard,
   Package,
+  FileText,
 } from "lucide-react";
 
 const pinnedItems = [
@@ -37,6 +38,7 @@ const navItems = [
   { title: "Misc. Tools", href: "/admin/tools", icon: Wrench },
   { title: "News", href: "/admin/news", icon: Newspaper },
   { title: "Notifications", href: "/admin/notifications", icon: Bell },
+  { title: "Pages", href: "/admin/pages", icon: FileText },
   { title: "Payments", href: "/admin/payments", icon: CreditCard },
   { title: "Products", href: "/admin/products", icon: Package },
   { title: "Results", href: "/admin/results", icon: FileSpreadsheet },

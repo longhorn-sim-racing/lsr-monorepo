@@ -19,6 +19,7 @@ import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { getActiveEntitlements } from "@/server/repos/membership.repo";
 import { priceForUser, productRequiresMembership } from "@/server/services/product-pricing";
 import { getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
+import { LSC_RULES_SLUG } from "@/lib/pages";
 import { ProductCheckoutButton, ProductPaymentToast } from "@/components/product-checkout-button";
 import { Button } from "@/components/ui/button";
 
@@ -106,6 +107,7 @@ async function loadLoneStarCup() {
       league ? getOpenLeagueSeason(league.id) : null,
       session.user ? getActiveEntitlements(session.user.id) : [],
     ]);
+  const rulesPage = await prisma.page.findUnique({ where: { slug: LSC_RULES_SLUG }, select: { visibility: true } });
 
   // Returning drivers (in a past season's standings) see their lower rate.
   const [entryPrice, application] = await Promise.all([
@@ -126,6 +128,7 @@ async function loadLoneStarCup() {
     openSeason,
     entitlements,
     application,
+    rulesPublished: rulesPage?.visibility === "public",
   };
 }
 
@@ -163,6 +166,7 @@ export default async function LoneStarCupPage() {
     openSeason,
     entitlements,
     application,
+    rulesPublished,
   } = data;
 
   // We only strictly require the current series to exist for the page to render meaningfully
@@ -209,6 +213,11 @@ export default async function LoneStarCupPage() {
               Lone Star Cup
             </h1>
             <p className="font-sans font-bold text-white/40 uppercase tracking-[0.3em] text-[10px] mt-4">Official Championship Series</p>
+            {rulesPublished && (
+              <Link href="/lone-star-cup/rules" className="mt-3 inline-block font-sans text-[10px] font-bold uppercase tracking-[0.2em] text-lsr-orange hover:text-white">
+                Read the rules →
+              </Link>
+            )}
           </div>
           <div className="w-full sm:w-auto">
             {isEntered ? (

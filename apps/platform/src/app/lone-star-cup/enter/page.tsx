@@ -7,6 +7,7 @@ import { getActiveEntitlements } from "@/server/repos/membership.repo";
 import { priceForUser, productRequiresMembership } from "@/server/services/product-pricing";
 import { getActiveLeagueEntry, getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
 import { LeagueEntryForm } from "@/components/league-entry-form";
+import { LSC_RULES_SLUG } from "@/lib/pages";
 import { UpdateRacingNumberButton } from "@/components/racing-number-prompt";
 import { Button } from "@/components/ui/button";
 
@@ -61,11 +62,12 @@ export default async function EnterLoneStarCupPage() {
     );
   }
 
-  const [entry, application, price, entitlements] = await Promise.all([
+  const [entry, application, price, entitlements, rulesPage] = await Promise.all([
     getActiveLeagueEntry(user.id, league.id),
     getLeagueApplication(user.id, season.id),
     priceForUser(product, user.id),
     getActiveEntitlements(user.id),
+    prisma.page.findUnique({ where: { slug: LSC_RULES_SLUG }, select: { visibility: true } }),
   ]);
   if (entry) redirect("/lone-star-cup");
 
@@ -95,6 +97,15 @@ export default async function EnterLoneStarCupPage() {
           {price.tier === "returning" ? " (returning driver rate)" : price.returningAmountCents !== null ? ` ($${(price.returningAmountCents / 100).toFixed(2)} for returning drivers)` : ""}
           . It covers both the Lone Star Cup and the Formula Sunday League. Fill this out, then you&apos;ll pay on Stripe.
         </p>
+        {rulesPage?.visibility === "public" && (
+          <p>
+            Entering means you agree to the{" "}
+            <Link href="/lone-star-cup/rules" target="_blank" className="font-bold text-lsr-orange hover:text-white">
+              Lone Star Cup rules
+            </Link>
+            .
+          </p>
+        )}
         <p className="text-xs text-white/40">
           Payment issues or refunds:{" "}
           <a href="mailto:info@longhornsimracing.org" className="text-white/60 hover:text-lsr-orange">info@longhornsimracing.org</a>
