@@ -4,6 +4,7 @@ import { type User } from '@prisma/client';
 import Image from "next/image"
 import { Trophy } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { RacingNumber } from "@/components/racing-number"
 
 type DriverWithPoints = User & { allTimePoints: number };
 
@@ -81,8 +82,11 @@ export default function Leaderboard({ index, drivers }: Props) {
                             )}
                           </div>
                           <div className="flex flex-col">
-                            <span className="font-sans font-bold text-white text-base group-hover/driver:text-lsr-orange transition-colors uppercase tracking-[0.1em]">
-                              {driver.displayName}
+                            <span className="flex items-baseline gap-2">
+                              <span className="font-sans font-bold text-white text-base group-hover/driver:text-lsr-orange transition-colors uppercase tracking-[0.1em]">
+                                {driver.displayName}
+                              </span>
+                              <RacingNumber user={driver} size="xs" />
                             </span>
                             <span className="text-[9px] font-bold text-white/30 uppercase tracking-[0.2em]">Active Member</span>
                           </div>
