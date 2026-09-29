@@ -26,11 +26,6 @@ const UserSchema = z.object({
   youtube: z.string().url().optional().or(z.literal('')).transform(v => v || null),
 });
 
-
-
-
-
-
 import { getLeorgeGawrenceEnforcementUnitStatus } from '@/app/admin/tools/actions';
 
 // ----- SERVER ACTION (single-arg shape for <form action={...}>) -----
@@ -115,8 +110,6 @@ export async function clearAvatar() {
     await prisma.$disconnect();
   }
 
-
   revalidatePath(`/drivers/${user.handle}`);
   revalidateDriverList();
 }
-
