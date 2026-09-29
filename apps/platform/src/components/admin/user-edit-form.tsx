@@ -348,7 +348,7 @@ export function UserEditForm({ user, currentUser, allRoles, allTiers }: UserEdit
                         Membership
                     </h2>
                     <p className="text-[10px] text-white/40 uppercase tracking-wider mt-1">
-                        Dues status and membership tier
+                        Membership tier (LSR Member, Alumni, Partner)
                     </p>
                 </div>
                 <div className="p-6 space-y-5">

@@ -49,6 +49,16 @@ export async function applyProductUpdate(id: string, input: ProductUpdate) {
     if (input.returningSeasonSlugs.length) metadata.returningSeasonSlugs = input.returningSeasonSlugs;
     else delete metadata.returningSeasonSlugs;
 
+    // Requiring dues while dues aren't on sale would leave drivers with no way to enter.
+    if (input.requiresMembership) {
+      const dues = await prisma.product.findFirst({ where: { type: "ANNUAL_DUES", active: true }, select: { id: true } });
+      if (!dues) {
+        throw new ProductUpdateError(
+          "Dues aren't on sale, so drivers couldn't meet this requirement. Turn the dues product on first.",
+          "requiresMembership"
+        );
+      }
+    }
     metadata.requiresMembership = input.requiresMembership;
     data.metadata = metadata as Prisma.InputJsonObject;
   }
