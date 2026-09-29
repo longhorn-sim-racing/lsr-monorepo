@@ -155,13 +155,19 @@ export default async function LoneStarCupPage() {
             <p className="font-sans font-bold text-white/40 uppercase tracking-[0.3em] text-[10px] mt-4">Official Championship Series</p>
           </div>
           <div className="w-full sm:w-auto">
-            {needsMembership ? (
+            {isEntered ? (
+              <p className="font-sans text-sm font-bold text-lsr-orange">You&apos;re entered</p>
+            ) : !entryProduct || !entryPrice ? (
+              <p className="font-sans text-sm text-white/60">Entry is currently unavailable.</p>
+            ) : !session.user ? (
+              <Button asChild className="h-12 rounded-none bg-lsr-orange px-6 font-sans text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-white hover:text-lsr-charcoal">
+                <Link href="/auth/signin?next=/lone-star-cup">Sign in to enter</Link>
+              </Button>
+            ) : needsMembership ? (
               <Button asChild className="h-12 rounded-none bg-lsr-orange px-6 font-sans text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-white hover:text-lsr-charcoal">
                 <Link href="/account">Membership required</Link>
               </Button>
-            ) : isEntered ? (
-              <p className="font-sans text-sm font-bold text-lsr-orange">You&apos;re entered</p>
-            ) : entryProduct && entryPrice ? (
+            ) : (
               <div className="flex flex-col gap-2 sm:items-end">
                 <ProductCheckoutButton product="LEAGUE_FEE" league="lone-star-cup" label="Enter the Lone Star Cup" priceCents={entryPrice.amountCents} />
                 {entryPrice.returningAmountCents !== null && (
@@ -172,8 +178,6 @@ export default async function LoneStarCupPage() {
                   </p>
                 )}
               </div>
-            ) : (
-              <p className="font-sans text-sm text-white/60">Entry is currently unavailable.</p>
             )}
           </div>
         </div>
