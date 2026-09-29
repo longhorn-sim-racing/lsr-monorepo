@@ -3,12 +3,13 @@ import { getCachedSessionUser } from '@/server/auth/cached-session';
 import { updateMarketingOptIn, updateNotificationPreferences, retireAccount, deleteAccount } from './actions';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { MarketingToggle } from '@/components/marketing-toggle';
 import { ConfirmSubmitButton } from '@/components/confirm-submit-button';
 import { NotificationPreferences } from '@/components/notification-preferences';
 import { prisma } from '@/server/db';
+import { getActiveEntitlements } from '@/server/repos/membership.repo';
+import { ProductCheckoutButton, ProductPaymentToast } from '@/components/product-checkout-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,10 +17,12 @@ export default async function AccountPage() {
   const { user } = await getCachedSessionUser();
   if (!user) redirect('/login');
 
-  // Fetch notification preferences
-  const notificationPrefs = await prisma.notificationPreference.findUnique({
-    where: { userId: user.id },
-  });
+  const [notificationPrefs, entitlements, dues] = await Promise.all([
+    prisma.notificationPreference.findUnique({ where: { userId: user.id } }),
+    getActiveEntitlements(user.id),
+    prisma.product.findFirst({ where: { type: 'ANNUAL_DUES', active: true } }),
+  ]);
+  const membership = entitlements.find((entitlement) => entitlement.kind === 'lsr_member');
 
   // Default preferences if none exist
   const preferences = notificationPrefs ?? {
@@ -32,6 +35,7 @@ export default async function AccountPage() {
 
   return (
     <main className="bg-lsr-charcoal text-white min-h-screen pt-20 pb-20">
+      <ProductPaymentToast />
       <div className="mx-auto max-w-4xl px-6 md:px-8 space-y-12">
         <div>
           <h1 className="font-display font-black italic text-4xl md:text-6xl text-white uppercase tracking-normal">
@@ -43,6 +47,36 @@ export default async function AccountPage() {
         </div>
 
         <div className="w-full h-px bg-white/5" />
+
+        {/* MEMBERSHIP */}
+        <section className="space-y-6">
+          <h2 className="font-sans font-bold text-xs text-lsr-orange uppercase tracking-[0.2em]">Membership</h2>
+          <div className="rounded-none border border-white/5 bg-white/[0.03] p-8">
+            <h3 className="font-display font-bold italic text-xl text-white uppercase tracking-tight">Longhorn Sim Racing</h3>
+            {membership ? (
+              <p className="mt-4 font-sans text-sm text-white/70">
+                LSR Member{membership.validTo
+                  ? ` through ${membership.validTo.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`
+                  : ''}
+              </p>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <p className="font-sans text-sm text-white/70">Pay your annual dues to become an LSR Member.</p>
+                {dues ? (
+                  <ProductCheckoutButton product="ANNUAL_DUES" label="Pay dues" priceCents={dues.amountCents} />
+                ) : (
+                  <p className="font-sans text-sm text-white/50">Dues payment is currently unavailable.</p>
+                )}
+                <p className="font-sans text-xs leading-relaxed text-white/50">
+                  For payment issues or refunds, contact{' '}
+                  <a href="mailto:info@longhornsimracing.org" className="border-b border-white/10 text-white/70 transition-colors hover:border-lsr-orange hover:text-lsr-orange">
+                    info@longhornsimracing.org
+                  </a>.
+                </p>
+              </div>
+            )}
+          </div>
+        </section>
 
         {/* ACCOUNT SETTINGS */}
         <section className="space-y-6">
@@ -156,4 +190,3 @@ export default async function AccountPage() {
     </main>
   );
 }
-
