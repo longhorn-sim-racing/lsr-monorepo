@@ -111,7 +111,7 @@ export function UsersConsole({ initialUsers, allRoles }: UsersConsoleProps) {
                         <TooltipContent className="max-w-xs bg-black/90 border-white/10 text-white p-3">
                             <p className="font-bold mb-1 text-lsr-orange">User Console</p>
                             <p className="text-xs text-white/80">
-                                Manage user accounts, assign roles, and record membership dues.
+                                Manage user accounts, assign roles, and set membership tiers.
                                 Click a row to edit.
                             </p>
                         </TooltipContent>

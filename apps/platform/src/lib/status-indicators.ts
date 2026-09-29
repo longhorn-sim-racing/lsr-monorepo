@@ -1,7 +1,5 @@
 import {
   Shield,
-  BadgeCheck,
-  CircleDashed,
   Trophy,
   Star,
   GraduationCap,
@@ -57,23 +55,8 @@ export function getStatusIndicators(opts: {
       tooltip: "Partner",
       colorClass: "text-blue-400",
     });
-  } else if (activeTierKey === "LSR_MEMBER") {
-    indicators.push({
-      key: "paid",
-      icon: BadgeCheck,
-      label: "Dues Paid",
-      tooltip: "Dues Paid",
-      colorClass: "text-emerald-400",
-    });
-  } else {
-    indicators.push({
-      key: "unpaid",
-      icon: CircleDashed,
-      label: "Unpaid",
-      tooltip: "Dues Unpaid",
-      colorClass: "text-white/30",
-    });
   }
+  // No dues badges (paid/unpaid): LSR is dues-optional and only charges for activities.
 
   // Participation badges (can stack)
   if (roles.includes("lsc_driver")) {

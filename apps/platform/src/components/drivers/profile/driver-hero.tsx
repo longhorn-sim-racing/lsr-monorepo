@@ -37,22 +37,13 @@ export function DriverHero({ user, isOwner, totalRegistrations }: DriverHeroProp
   // Membership Logic
   const activeMembership = user.memberships.find(m => !m.validTo || new Date(m.validTo) > new Date());
 
-  const getDuesLabel = (m: (UserMembership & { tier: MembershipTier })) => {
-    if (m.tier.key === "ALUMNI") return "ALUMNI";
-    if (m.tier.key === "PARTNER") return m.tier.label;
-    if (!m.validTo) return m.tier.label;
-
-    const validTo = new Date(m.validTo);
-    const month = validTo.getMonth();
-    const year = validTo.getFullYear();
-
-    // Jan-June = Spring, July-Dec = Fall
-    const season = month <= 5 ? "Spring" : "Fall";
-
-    return `${season} ${year} Dues Paid`;
-  };
-
-  const membershipLabel = activeMembership ? getDuesLabel(activeMembership) : "Rookie";
+  // Only non-dues tiers get a label; LSR is dues-optional, so no "Dues Paid" / "Rookie".
+  const membershipLabel =
+    activeMembership?.tier.key === "ALUMNI"
+      ? "ALUMNI"
+      : activeMembership?.tier.key === "PARTNER"
+        ? activeMembership.tier.label
+        : null;
 
   const getJoinedSeason = (date: Date) => {
     const month = date.getMonth();
