@@ -5,11 +5,17 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { requireUser } from "@/server/auth/guards";
 import { revalidatePath } from "next/cache";
+import { RACING_NUMBER_COLOR, RACING_NUMBER_FONTS } from "@/lib/racing-number";
 
 const schema = z.object({
   racingNumber: z.number().int().min(0).max(999),
-  racingNumberColor: z.string().optional().default("#FFFFFF"),
-  racingNumberFont: z.string().optional().default("sans-serif"),
+  // These end up in inline styles on public pages, so only accept what the picker offers.
+  racingNumberColor: z.string().regex(RACING_NUMBER_COLOR).optional().default("#FFFFFF"),
+  racingNumberFont: z
+    .string()
+    .refine((f) => RACING_NUMBER_FONTS.some((o) => o.value === f))
+    .optional()
+    .default("sans-serif"),
   racingNumberItalic: z.boolean().optional().default(false),
   racingNumberBorder: z.boolean().optional().default(false),
 });

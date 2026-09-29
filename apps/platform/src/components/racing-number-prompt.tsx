@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { setRacingNumberAction } from "@/server/actions/racing-number";
 import { toast } from "sonner";
-import type { RacingNumberStyle } from "@/lib/racing-number";
+import { RACING_NUMBER_FONTS, type RacingNumberStyle } from "@/lib/racing-number";
 
 export type { RacingNumberStyle } from "@/lib/racing-number";
 
@@ -147,13 +147,9 @@ export function RacingNumberDialog({
                     <SelectValue placeholder="Select a font" />
                   </SelectTrigger>
                   <SelectContent className="bg-[#1e1e1e] border-white/10 text-white">
-                    <SelectItem value="sans-serif">Sans Serif</SelectItem>
-                    <SelectItem value="serif">Serif</SelectItem>
-                    <SelectItem value="monospace">Monospace</SelectItem>
-                    <SelectItem value="Impact, sans-serif">Impact</SelectItem>
-                    <SelectItem value="Arial Black, sans-serif">Arial Black</SelectItem>
-                    <SelectItem value="Trebuchet MS, sans-serif">Trebuchet</SelectItem>
-                    <SelectItem value="Verdana, sans-serif">Verdana</SelectItem>
+                    {RACING_NUMBER_FONTS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

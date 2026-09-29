@@ -18,6 +18,7 @@ import {
   Bell,
   IdCard,
   Timer,
+  Flag,
 } from "lucide-react";
 
 const pinnedItems = [
@@ -30,6 +31,7 @@ const navItems = [
   { title: "Events", href: "/admin/events", icon: Calendar },
   { title: "Gallery", href: "/admin/gallery", icon: ImageIcon },
   { title: "Hotlap", href: "/admin/hotlap", icon: Timer },
+  { title: "LSC Entrants", href: "/admin/league-entries", icon: Flag },
   { title: "Misc. Tools", href: "/admin/tools", icon: Wrench },
   { title: "News", href: "/admin/news", icon: Newspaper },
   { title: "Notifications", href: "/admin/notifications", icon: Bell },
