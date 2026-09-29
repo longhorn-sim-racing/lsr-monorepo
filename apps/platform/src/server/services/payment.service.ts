@@ -4,6 +4,7 @@ import { Prisma, RegistrationStatus, type Payment } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
 import { sendNotification } from "@/server/services/notification.service";
 import { formatInTimeZone } from "date-fns-tz";
+import { priceForUser } from "@/server/services/product-pricing";
 import type Stripe from "stripe";
 
 // ---------------------------------------------------------------------------
@@ -185,11 +186,14 @@ export async function createProductCheckoutSession(
     }
   }
 
+  // Returning drivers can get a lower league rate (see product-pricing.ts).
+  const price = await priceForUser(product, userId);
+
   const payment = await prisma.payment.create({
     data: {
       userId,
       productId: product.id,
-      amountCents: product.amountCents,
+      amountCents: price.amountCents,
       currency: product.currency,
       provider: "stripe",
       status: "pending",
@@ -199,6 +203,8 @@ export async function createProductCheckoutSession(
         productName: product.name,
         leagueId: product.leagueId,
         leagueSlug: product.league?.slug ?? null,
+        priceTier: price.tier,
+        listAmountCents: product.amountCents,
       },
     },
   });
@@ -213,8 +219,10 @@ export async function createProductCheckoutSession(
       {
         price_data: {
           currency: product.currency.toLowerCase(),
-          unit_amount: product.amountCents,
-          product_data: { name: product.name },
+          unit_amount: price.amountCents,
+          product_data: {
+            name: price.tier === "returning" ? `${product.name} (returning driver)` : product.name,
+          },
         },
         quantity: 1,
       },
@@ -227,6 +235,7 @@ export async function createProductCheckoutSession(
       kind: "product",
       productType,
       leagueId: product.leagueId ?? "",
+      priceTier: price.tier,
     },
     client_reference_id: payment.id,
   });
