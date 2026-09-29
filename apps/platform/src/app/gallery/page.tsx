@@ -69,7 +69,7 @@ export default async function GalleryPage() {
               <div key={image.id} className="aspect-[4/3] border border-white/10 bg-black relative group overflow-hidden">
                 <Image
                   src={`https://res.cloudinary.com/${cloudName}/image/upload/v1/${image.publicId}`}
-                  alt={image.alt ?? ''}
+                  alt={image.alt ?? image.creditName ?? 'Longhorn Sim Racing photo'}
                   width={800}
                   height={600}
                   className="object-cover w-full h-full opacity-85 group-hover:opacity-100 group-hover:scale-105 transition-all duration-700"

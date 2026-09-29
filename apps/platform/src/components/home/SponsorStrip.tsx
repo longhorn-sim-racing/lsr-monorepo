@@ -2,16 +2,29 @@ import Link from "next/link"
 import Image from "next/image"
 import SectionReveal from "./SectionReveal"
 
-const goldSponsors = [
+type GoldSponsor = {
+  name: string
+  logo: string
+  href: string
+  title?: string
+}
+
+const goldSponsors: GoldSponsor[] = [
   {
     name: "Race Club Austin",
     logo: "/sponsors/raceclub.png",
-    href: "https://www.raceclubsim.com/",
+    href: "https://www.raceclubsim.com/?utm_source=longhornsimracing.org&utm_medium=referral&utm_campaign=sponsor-homepage",
   },
   {
     name: "Driven to Care",
     logo: "/sponsors/driventocare.png",
-    href: "https://www.driventocare.org/",
+    href: "https://www.driventocare.org/?utm_source=longhornsimracing.org&utm_medium=referral&utm_campaign=sponsor-homepage",
+  },
+  {
+    name: "PitLane Systems",
+    logo: "/sponsors/pitlane.png",
+    href: "https://www.pitlanesystems.com/?utm_source=longhornsimracing.org&utm_medium=referral&utm_campaign=sponsor-homepage",
+    title: "Official Broadcast Partner",
   },
 ]
 
@@ -36,21 +49,28 @@ export default function SponsorStrip({ index }: { index: number }) {
           </Link>
         </div>
 
-        <div className="relative z-10 flex flex-col sm:flex-row items-center justify-center gap-10 md:gap-16">
+        <div className="relative z-10 flex flex-col sm:flex-row items-center justify-center flex-wrap gap-x-10 md:gap-x-16 gap-y-10">
           {goldSponsors.map((sponsor) => (
             <Link
               key={sponsor.name}
               href={sponsor.href}
               target="_blank"
               rel="noopener noreferrer"
-              className="group relative h-20 w-56 md:h-24 md:w-64 shrink-0 hover:scale-105 transition-transform duration-300"
+              className="group flex flex-col items-center gap-3 shrink-0"
             >
-              <Image
-                src={sponsor.logo}
-                alt={sponsor.name}
-                fill
-                className="object-contain"
-              />
+              {sponsor.title && (
+                <span className="font-sans font-black text-[10px] uppercase tracking-[0.25em] text-lsr-orange">
+                  {sponsor.title}
+                </span>
+              )}
+              <div className="relative h-20 w-56 md:h-24 md:w-64 group-hover:scale-105 transition-transform duration-300">
+                <Image
+                  src={sponsor.logo}
+                  alt={sponsor.name}
+                  fill
+                  className="object-contain"
+                />
+              </div>
             </Link>
           ))}
         </div>

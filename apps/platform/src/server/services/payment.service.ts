@@ -1,9 +1,10 @@
 import { getStripe } from "@/lib/stripe";
 import { prisma } from "@/server/db";
-import { RegistrationStatus, Prisma } from "@prisma/client";
+import { Prisma, RegistrationStatus, type Payment } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
 import { sendNotification } from "@/server/services/notification.service";
 import { formatInTimeZone } from "date-fns-tz";
+import { priceForUser } from "@/server/services/product-pricing";
 import type Stripe from "stripe";
 
 // ---------------------------------------------------------------------------
@@ -69,12 +70,7 @@ export async function createEventCheckoutSession(
     },
   });
 
-  // Build base URL using the same pattern as the rest of the codebase
-  const baseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    (process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : "http://localhost:3000");
+  const baseUrl = getBaseUrl();
 
   const session = await getStripe().checkout.sessions.create({
     mode: "payment",
@@ -114,6 +110,149 @@ export async function createEventCheckoutSession(
 }
 
 // ---------------------------------------------------------------------------
+// Product Checkout (dues, league entry)
+// ---------------------------------------------------------------------------
+
+export type CheckoutProductType = "ANNUAL_DUES" | "LEAGUE_FEE";
+
+/** Where Stripe sends the member back after a product checkout. */
+const PRODUCT_RETURN_PATHS: Record<string, string> = {
+  "lone-star-cup": "/lone-star-cup",
+};
+
+function getBaseUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    (process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : "http://localhost:3000")
+  );
+}
+
+/**
+ * Starts a Stripe Checkout for a Product-backed purchase (annual dues or a
+ * league entry fee) and returns the hosted checkout URL. The webhook turns the
+ * resulting Payment into an Entitlement — see handleCheckoutCompleted.
+ */
+export async function createProductCheckoutSession(
+  userId: string,
+  productType: CheckoutProductType,
+  leagueSlug?: string
+): Promise<string> {
+  if (productType === "LEAGUE_FEE" && !leagueSlug) {
+    throw new Error("A league is required for a league entry fee.");
+  }
+
+  const product = await prisma.product.findFirst({
+    where: {
+      type: productType,
+      active: true,
+      ...(productType === "LEAGUE_FEE"
+        ? { league: { slug: leagueSlug } }
+        : { leagueId: null }),
+    },
+    include: { league: { select: { id: true, slug: true, name: true } } },
+  });
+  if (!product) throw new Error("This purchase is not available right now.");
+  if (product.amountCents <= 0) {
+    throw new Error("This purchase does not require payment.");
+  }
+
+  // Active entitlements decide whether there is anything left to buy.
+  const now = new Date();
+  const entitlements = await prisma.entitlement.findMany({
+    where: {
+      userId,
+      validFrom: { lte: now },
+      OR: [{ validTo: null }, { validTo: { gte: now } }],
+    },
+    select: { kind: true, leagueId: true },
+  });
+  const hasMembership = entitlements.some((e) => e.kind === "lsr_member");
+
+  if (productType === "ANNUAL_DUES" && hasMembership) {
+    throw new Error("Your LSR membership is already active.");
+  }
+  if (productType === "LEAGUE_FEE") {
+    const alreadyEntered = entitlements.some(
+      (e) => e.kind === "league_access" && e.leagueId === product.leagueId
+    );
+    if (alreadyEntered) {
+      throw new Error(`You're already entered in ${product.league?.name ?? "this league"}.`);
+    }
+    // Pending #82: league entry is gated on an active membership.
+    if (!hasMembership) {
+      throw new Error("An active LSR membership is required to enter. Pay your dues first.");
+    }
+  }
+
+  // Returning drivers can get a lower league rate (see product-pricing.ts).
+  const price = await priceForUser(product, userId);
+
+  const payment = await prisma.payment.create({
+    data: {
+      userId,
+      productId: product.id,
+      amountCents: price.amountCents,
+      currency: product.currency,
+      provider: "stripe",
+      status: "pending",
+      metadata: {
+        kind: "product",
+        productType,
+        productName: product.name,
+        leagueId: product.leagueId,
+        leagueSlug: product.league?.slug ?? null,
+        priceTier: price.tier,
+        listAmountCents: product.amountCents,
+      },
+    },
+  });
+
+  const returnPath =
+    (leagueSlug && PRODUCT_RETURN_PATHS[leagueSlug]) || "/account";
+  const baseUrl = getBaseUrl();
+
+  const session = await getStripe().checkout.sessions.create({
+    mode: "payment",
+    line_items: [
+      {
+        price_data: {
+          currency: product.currency.toLowerCase(),
+          unit_amount: price.amountCents,
+          product_data: {
+            name: price.tier === "returning" ? `${product.name} (returning driver)` : product.name,
+          },
+        },
+        quantity: 1,
+      },
+    ],
+    success_url: `${baseUrl}${returnPath}?payment=success`,
+    cancel_url: `${baseUrl}${returnPath}?payment=cancelled`,
+    metadata: {
+      paymentId: payment.id,
+      userId,
+      kind: "product",
+      productType,
+      leagueId: product.leagueId ?? "",
+      priceTier: price.tier,
+    },
+    client_reference_id: payment.id,
+  });
+
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: { providerRef: session.id },
+  });
+
+  if (!session.url) {
+    throw new Error("Failed to create Stripe Checkout session.");
+  }
+
+  return session.url;
+}
+
+// ---------------------------------------------------------------------------
 // Webhook Handler
 // ---------------------------------------------------------------------------
 
@@ -129,9 +268,29 @@ export async function handleStripeWebhook(
   const event = getStripe().webhooks.constructEvent(rawBody, signature, webhookSecret);
 
   switch (event.type) {
-    case "checkout.session.completed":
-      await handleCheckoutCompleted(
-        event.data.object as Stripe.Checkout.Session
+    case "checkout.session.completed": {
+      // Delayed payment methods (bank debits and the like) complete the session
+      // before the money arrives; those finish with async_payment_succeeded or
+      // async_payment_failed instead, so only a paid session grants anything here.
+      const session = event.data.object as Stripe.Checkout.Session;
+      if (session.payment_status === "paid") await handleCheckoutPaid(session);
+      break;
+    }
+    case "checkout.session.async_payment_succeeded":
+      await handleCheckoutPaid(event.data.object as Stripe.Checkout.Session);
+      break;
+    case "checkout.session.async_payment_failed":
+      await failPendingPayment(
+        event.data.object as Stripe.Checkout.Session,
+        "PAYMENT_FAILED",
+        "Delayed payment failed"
+      );
+      break;
+    case "checkout.session.expired":
+      await failPendingPayment(
+        event.data.object as Stripe.Checkout.Session,
+        "PAYMENT_EXPIRED",
+        "Stripe checkout session expired before payment"
       );
       break;
     case "charge.refunded":
@@ -140,24 +299,69 @@ export async function handleStripeWebhook(
   }
 }
 
-// ---------------------------------------------------------------------------
-// checkout.session.completed
-// ---------------------------------------------------------------------------
-
-async function handleCheckoutCompleted(
-  session: Stripe.Checkout.Session
-): Promise<void> {
+/**
+ * The Payment a session was created for, or null for a session this app didn't
+ * create (a Payment Link, `stripe trigger`, another environment's checkout).
+ * Those are ignored rather than rejected, so Stripe doesn't retry them for days.
+ */
+async function findSessionPayment(session: Stripe.Checkout.Session): Promise<Payment | null> {
   const paymentId = session.metadata?.paymentId;
-  if (!paymentId) {
-    throw new Error("No paymentId in Stripe session metadata");
-  }
+  if (!paymentId) return null;
 
   const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
-  if (!payment) throw new Error(`Payment ${paymentId} not found`);
+  if (!payment) {
+    console.warn(`[Stripe Webhook] Payment ${paymentId} not found; ignoring session ${session.id}`);
+  }
+  return payment;
+}
 
-  // Idempotency: don't process twice
-  if (payment.status === "succeeded") return;
+/**
+ * Atomically moves a Payment from pending to succeeded. Returns false when the
+ * payment was already claimed (a duplicate or concurrent delivery) or has ended
+ * (refunded, expired, failed), in which case the caller must grant nothing.
+ * Runs inside the grant's transaction, so the claim and the grant commit together.
+ */
+async function claimPayment(
+  tx: Prisma.TransactionClient,
+  paymentId: string,
+  session: Stripe.Checkout.Session,
+  paidAt: Date
+): Promise<boolean> {
+  const { count } = await tx.payment.updateMany({
+    where: { id: paymentId, status: "pending" },
+    data: {
+      status: "succeeded",
+      paidAt,
+      providerRef: (session.payment_intent as string) ?? session.id,
+    },
+  });
+  return count === 1;
+}
 
+// ---------------------------------------------------------------------------
+// Paid checkout → seat or entitlement
+// ---------------------------------------------------------------------------
+
+async function handleCheckoutPaid(session: Stripe.Checkout.Session): Promise<void> {
+  const payment = await findSessionPayment(session);
+  if (!payment) return;
+
+  // Product-backed payments (dues, league entry) become entitlements.
+  if (payment.productId) {
+    await grantProduct(
+      { id: payment.id, userId: payment.userId, productId: payment.productId },
+      session
+    );
+    return;
+  }
+
+  await grantEventSeat(payment, session);
+}
+
+async function grantEventSeat(
+  payment: Payment,
+  session: Stripe.Checkout.Session
+): Promise<void> {
   const meta = payment.metadata as {
     eventId: string;
     eventSlug: string;
@@ -167,16 +371,8 @@ async function handleCheckoutCompleted(
   let registrationStatus: RegistrationStatus = "REGISTERED";
   let waitlistOrder: number | null = null;
 
-  await prisma.$transaction(async (tx) => {
-    // Update payment
-    await tx.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: "succeeded",
-        paidAt: new Date(),
-        providerRef: (session.payment_intent as string) ?? session.id,
-      },
-    });
+  const claimed = await prisma.$transaction(async (tx) => {
+    if (!(await claimPayment(tx, payment.id, session, new Date()))) return false;
 
     // Lock event row for capacity check
     await tx.$executeRaw`SELECT 1 FROM "Event" WHERE id = ${meta.eventId} FOR UPDATE`;
@@ -211,7 +407,7 @@ async function handleCheckoutCompleted(
           status: registrationStatus,
           waitlistOrder:
             registrationStatus === "WAITLISTED" ? waitlistOrder : null,
-          sourcePaymentId: paymentId,
+          sourcePaymentId: payment.id,
         },
       });
     } else {
@@ -222,21 +418,23 @@ async function handleCheckoutCompleted(
           status: registrationStatus,
           waitlistOrder:
             registrationStatus === "WAITLISTED" ? waitlistOrder : null,
-          sourcePaymentId: paymentId,
+          sourcePaymentId: payment.id,
         },
       });
     }
 
     // NOTE: Do NOT call reconcileEvent here. For paid events, auto-promotion
     // is disabled — officers handle waitlist manually.
+    return true;
   });
+  if (!claimed) return;
 
   // Audit log (after transaction)
   await createAuditLog({
     actorUserId: null,
     actionType: "PAYMENT_SUCCEEDED",
     entityType: "PAYMENT",
-    entityId: paymentId,
+    entityId: payment.id,
     targetUserId: payment.userId,
     summary: `Stripe checkout completed for event registration`,
     metadata: { sessionId: session.id, eventId: meta.eventId },
@@ -273,9 +471,200 @@ async function handleCheckoutCompleted(
   }
 }
 
+/** End of the membership year (Aug 1 – Jul 31) that contains `now`. */
+function membershipValidTo(now: Date): Date {
+  const startYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+  return new Date(startYear + 1, 6, 31, 23, 59, 59, 999);
+}
+
+/** Later end date wins; an open-ended row (validTo = null) beats any date. */
+function endsLater(a: { validTo: Date | null }, b: { validTo: Date | null }): boolean {
+  if (a.validTo === null) return b.validTo !== null;
+  if (b.validTo === null) return false;
+  return a.validTo > b.validTo;
+}
+
+const sameInstant = (a: Date | null, b: Date | null) =>
+  a === null || b === null ? a === b : a.getTime() === b.getTime();
+
+const parseDate = (iso: string | null) => (iso === null ? null : new Date(iso));
+
+/**
+ * Turns a paid product-backed Payment into an Entitlement (plus a UserMembership
+ * row for dues, so the existing badge and admin tier view stay correct), then
+ * audits and notifies. Grants nothing when the payment can't be claimed.
+ */
+async function grantProduct(
+  payment: { id: string; userId: string; productId: string },
+  session: Stripe.Checkout.Session
+): Promise<void> {
+  const product = await prisma.product.findUnique({
+    where: { id: payment.productId },
+    include: { league: { select: { id: true, slug: true, name: true } } },
+  });
+  if (!product) throw new Error(`Product ${payment.productId} not found`);
+
+  const now = new Date();
+
+  const result = await prisma.$transaction(async (tx) => {
+    if (!(await claimPayment(tx, payment.id, session, now))) return null;
+
+    if (product.type === "ANNUAL_DUES") {
+      const validTo = membershipValidTo(now);
+
+      // Dual-write: the badge (user-menu, layout) and /admin/users read UserMembership.
+      // Never shortens a membership, and records exactly what it wrote so a refund
+      // can undo this change and nothing else (see revokeProduct).
+      let membership: MembershipChange | null = null;
+      const tier = await tx.membershipTier.findUnique({ where: { key: "LSR_MEMBER" } });
+      if (tier) {
+        const active = await tx.userMembership.findFirst({
+          where: {
+            userId: payment.userId,
+            tierId: tier.id,
+            validFrom: { lte: now },
+            OR: [{ validTo: null }, { validTo: { gte: now } }],
+          },
+          orderBy: { validFrom: "desc" },
+        });
+        if (!active) {
+          const created = await tx.userMembership.create({
+            data: { userId: payment.userId, tierId: tier.id, validFrom: now, validTo },
+          });
+          membership = {
+            id: created.id,
+            action: "created",
+            previousValidTo: null,
+            writtenValidTo: validTo.toISOString(),
+          };
+        } else if (endsLater({ validTo }, active)) {
+          await tx.userMembership.update({ where: { id: active.id }, data: { validTo } });
+          membership = {
+            id: active.id,
+            action: "extended",
+            previousValidTo: active.validTo?.toISOString() ?? null,
+            writtenValidTo: validTo.toISOString(),
+          };
+        }
+        // Otherwise the membership is open-ended or already runs later: leave it.
+      }
+
+      const entitlement = await tx.entitlement.create({
+        data: {
+          userId: payment.userId,
+          kind: "lsr_member",
+          scope: "year",
+          validFrom: now,
+          validTo,
+          sourcePaymentId: payment.id,
+          meta: membership ? { membership } : undefined,
+        },
+      });
+
+      return { entitlement, validTo };
+    }
+
+    if (product.type === "LEAGUE_FEE") {
+      if (!product.leagueId) throw new Error(`Product ${product.id} has no league`);
+
+      // Entry runs to the end of the league's current season; the nearest
+      // upcoming endAt wins, seasons with no endAt come last, then newest year.
+      // Pending #82: confirm Season.endAt is the intended window.
+      const season = await tx.season.findFirst({
+        where: {
+          leagueId: product.leagueId,
+          OR: [{ endAt: null }, { endAt: { gte: now } }],
+        },
+        orderBy: [{ endAt: { sort: "asc", nulls: "last" } }, { year: "desc" }],
+        select: { slug: true, endAt: true },
+      });
+      const validTo =
+        season?.endAt ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+
+      const entitlement = await tx.entitlement.create({
+        data: {
+          userId: payment.userId,
+          kind: "league_access",
+          leagueId: product.leagueId,
+          scope: "season",
+          validFrom: now,
+          validTo,
+          sourcePaymentId: payment.id,
+          meta: season ? { seasonSlug: season.slug } : undefined,
+        },
+      });
+
+      return { entitlement, validTo };
+    }
+
+    throw new Error(`Product type ${product.type} is not purchasable through checkout`);
+  });
+  if (!result) return;
+
+  // Audit log (after transaction)
+  await createAuditLog({
+    actorUserId: null,
+    actionType: "PAYMENT_SUCCEEDED",
+    entityType: "PAYMENT",
+    entityId: payment.id,
+    targetUserId: payment.userId,
+    summary: `Stripe checkout completed for ${product.name}`,
+    metadata: {
+      sessionId: session.id,
+      productId: product.id,
+      productType: product.type,
+      leagueId: product.leagueId,
+      entitlementId: result.entitlement.id,
+      validTo: result.validTo,
+    },
+    after: result.entitlement,
+  });
+
+  // Send notification (fire and forget)
+  const isDues = product.type === "ANNUAL_DUES";
+  const through = formatInTimeZone(result.validTo, "America/Chicago", "MMMM d, yyyy");
+  const leagueName = product.league?.name ?? "the league";
+  const actionUrl = isDues
+    ? "/account"
+    : (product.league?.slug && PRODUCT_RETURN_PATHS[product.league.slug]) || "/account";
+
+  sendNotification({
+    userId: payment.userId,
+    type: isDues ? "DUES_CONFIRMED" : "LEAGUE_REGISTERED",
+    title: isDues ? "You're an LSR member!" : `You're entered in ${leagueName}!`,
+    body: isDues
+      ? `Payment confirmed. Your membership is active through ${through}.`
+      : `Payment confirmed. Your ${leagueName} entry is active through ${through}.`,
+    actionUrl,
+    channels: ["IN_APP", "EMAIL"],
+    metadata: {
+      paymentId: payment.id,
+      productId: product.id,
+      productType: product.type,
+      leagueId: product.leagueId,
+      entitlementId: result.entitlement.id,
+      validTo: result.validTo,
+    },
+  }).catch((err) =>
+    console.error("[Payment] Failed to send product notification:", err)
+  );
+}
+
 // ---------------------------------------------------------------------------
 // charge.refunded
 // ---------------------------------------------------------------------------
+
+/**
+ * What grantProduct did to the dues UserMembership row, stored in Entitlement.meta.
+ * `writtenValidTo` is absent on records made before it existed; those wrote the
+ * entitlement's own end date.
+ */
+type MembershipChange = {
+  id: string;
+  action: "created" | "extended";
+  previousValidTo: string | null;
+  writtenValidTo?: string | null;
+};
 
 async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
   // Find payment by the payment_intent stored in providerRef
@@ -283,6 +672,13 @@ async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
     where: { providerRef: charge.payment_intent as string },
   });
   if (!payment) return; // Not a payment we track
+
+  // Stripe sends charge.refunded for partial refunds too; only a full refund
+  // (charge.refunded === true) takes the entitlement away.
+  const revoked =
+    payment.productId && charge.refunded
+      ? await revokeProduct(payment.id, payment.userId)
+      : [];
 
   await prisma.payment.update({
     where: { id: payment.id },
@@ -294,7 +690,89 @@ async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
     actionType: "PAYMENT_REFUNDED",
     entityType: "PAYMENT",
     entityId: payment.id,
-    summary: `Stripe charge refunded`,
-    metadata: { chargeId: charge.id },
+    targetUserId: payment.userId,
+    summary: revoked.length
+      ? `Stripe charge refunded; ${revoked.length} entitlement(s) revoked`
+      : `Stripe charge refunded`,
+    metadata: {
+      chargeId: charge.id,
+      fullRefund: charge.refunded,
+      amountRefunded: charge.amount_refunded,
+      revokedEntitlementIds: revoked,
+    },
+  });
+}
+
+/**
+ * Ends every entitlement a product payment granted, and undoes its dues
+ * dual-write on UserMembership, but only while the row still holds what this
+ * grant wrote: a later purchase or officer edit wins over an older refund.
+ * Returns the ids of the entitlements it revoked.
+ */
+async function revokeProduct(paymentId: string, userId: string): Promise<string[]> {
+  const now = new Date();
+  return prisma.$transaction(async (tx) => {
+    const entitlements = await tx.entitlement.findMany({
+      where: {
+        sourcePaymentId: paymentId,
+        OR: [{ validTo: null }, { validTo: { gt: now } }],
+      },
+    });
+
+    for (const e of entitlements) {
+      await tx.entitlement.update({ where: { id: e.id }, data: { validTo: now } });
+
+      const membership = (e.meta as { membership?: MembershipChange } | null)?.membership;
+      if (e.kind !== "lsr_member" || !membership) continue;
+
+      const row = await tx.userMembership.findFirst({
+        where: { id: membership.id, userId },
+      });
+      const written =
+        membership.writtenValidTo !== undefined
+          ? parseDate(membership.writtenValidTo)
+          : e.validTo;
+      if (!row || !sameInstant(row.validTo, written)) continue; // changed since: leave it
+
+      await tx.userMembership.update({
+        where: { id: row.id },
+        data: {
+          validTo:
+            membership.action === "extended" ? parseDate(membership.previousValidTo) : now,
+        },
+      });
+    }
+
+    return entitlements.map((e) => e.id);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// checkout.session.expired / async_payment_failed
+// ---------------------------------------------------------------------------
+
+/** A session that ended without payment: mark a still-pending Payment failed. */
+async function failPendingPayment(
+  session: Stripe.Checkout.Session,
+  actionType: "PAYMENT_EXPIRED" | "PAYMENT_FAILED",
+  summary: string
+): Promise<void> {
+  const payment = await findSessionPayment(session);
+  if (!payment) return;
+
+  const { count } = await prisma.payment.updateMany({
+    where: { id: payment.id, status: "pending" },
+    data: { status: "failed" },
+  });
+  if (count === 0) return; // already paid, refunded or failed
+
+  await createAuditLog({
+    actorUserId: null,
+    actionType,
+    entityType: "PAYMENT",
+    entityId: payment.id,
+    targetUserId: payment.userId,
+    summary,
+    metadata: { sessionId: session.id },
   });
 }

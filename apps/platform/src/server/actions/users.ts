@@ -4,6 +4,8 @@ import { prisma } from "@/server/db";
 import { requireOfficer, requireSystemAdmin } from "@/server/auth/guards";
 import { createAuditLog } from "@/server/audit/log";
 import { revalidatePath } from "next/cache";
+import { revalidateDriverList } from "@/server/cache/revalidate-public";
+import { syncManualMembershipEntitlement } from "@/server/services/membership.service";
 
 export type UpdateUserPayload = {
     displayName: string;
@@ -162,6 +164,10 @@ export async function updateUser(userId: string, payload: UpdateUserPayload) {
         }
     }
 
+    // 4b. Keep the lsr_member entitlement in step with a manual LSR membership:
+    // eligibility, /account and dues checkout read Entitlement, not UserMembership.
+    const entitlementSync = await syncManualMembershipEntitlement(userId, currentUser.id);
+
     // 5. Audit Log
     const beforeRoles = targetUser.roles.map(r => r.role.key).sort();
     const afterRoles = [...payload.roleKeys].sort();
@@ -203,6 +209,7 @@ export async function updateUser(userId: string, payload: UpdateUserPayload) {
             roles: afterRoles,
             membership: afterMembership,
         },
+        metadata: { entitlementSync },
     });
 
     revalidatePath(`/admin/users/${userId}/edit`);
@@ -211,4 +218,5 @@ export async function updateUser(userId: string, payload: UpdateUserPayload) {
     if (trimmedHandle !== targetUser.handle) {
         revalidatePath(`/drivers/${targetUser.handle}`);
     }
+    revalidateDriverList();
 }

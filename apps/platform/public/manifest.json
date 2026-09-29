@@ -1,0 +1,23 @@
+{
+  "name": "Longhorn Sim Racing",
+  "short_name": "LSR",
+  "description": "UT Austin's premier sim racing organization. Events, drivers, race results, and more.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1B1B1B",
+  "theme_color": "#FF8000",
+  "icons": [
+    {
+      "src": "/brand/logos/black_logo_white_square.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/logos/black_logo_white_square.webp",
+      "sizes": "any",
+      "type": "image/webp",
+      "purpose": "any"
+    }
+  ]
+}

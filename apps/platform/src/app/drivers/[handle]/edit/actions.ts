@@ -5,6 +5,7 @@ import { prisma } from '@/server/db';
 import { requireUser } from '@/server/auth/guards';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { revalidateDriverList } from '@/server/cache/revalidate-public';
 
 // Schema shared by the action
 const UserSchema = z.object({
@@ -24,11 +25,6 @@ const UserSchema = z.object({
   twitch: z.string().url().optional().or(z.literal('')).transform(v => v || null),
   youtube: z.string().url().optional().or(z.literal('')).transform(v => v || null),
 });
-
-
-
-
-
 
 import { getLeorgeGawrenceEnforcementUnitStatus } from '@/app/admin/tools/actions';
 
@@ -80,6 +76,7 @@ export async function updateProfile(formData: FormData) {
   });
 
   revalidatePath(`/drivers/${user.handle}`);
+  revalidateDriverList();
   redirect(`/drivers/${user.handle}`);
 }
 
@@ -97,6 +94,7 @@ export async function saveAvatar(url: string) {
   }
 
   revalidatePath(`/drivers/${user.handle}`);
+  revalidateDriverList();
 }
 
 export async function clearAvatar() {
@@ -112,7 +110,6 @@ export async function clearAvatar() {
     await prisma.$disconnect();
   }
 
-
   revalidatePath(`/drivers/${user.handle}`);
+  revalidateDriverList();
 }
-

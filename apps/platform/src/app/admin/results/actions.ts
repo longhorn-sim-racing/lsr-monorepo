@@ -5,6 +5,7 @@ import { prisma } from "@/server/db";
 import { revalidatePath } from "next/cache";
 import { RawResultUploadStatus } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
+import { revalidateAfterResultsIngestion } from "@/server/cache/revalidate-public";
 
 export async function uploadResult(formData: FormData) {
   const user = await requireOfficer();
@@ -543,5 +544,22 @@ export async function ingestUpload(uploadId: string) {
     timeout: 20000,
   });
 
+  // Look up event + season slugs so we can invalidate the right public pages.
+  const eventMeta = await prisma.event.findUnique({
+    where: { id: upload.eventId },
+    select: {
+      slug: true,
+      series: {
+        select: {
+          seasons: { select: { slug: true }, orderBy: { year: "desc" }, take: 1 },
+        },
+      },
+    },
+  });
+
   revalidatePath(`/admin/results/${uploadId}`);
+  revalidateAfterResultsIngestion({
+    eventSlug: eventMeta?.slug,
+    seriesSlug: eventMeta?.series?.seasons[0]?.slug,
+  });
 }

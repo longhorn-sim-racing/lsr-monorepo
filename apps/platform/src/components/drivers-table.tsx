@@ -2,12 +2,16 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { StatusIcons } from "@/components/status-indicators";
 import { getStatusIndicators, getActiveTierKey } from "@/lib/status-indicators";
+import { ROLE_LABEL, type RoleCode } from "@/lib/roles";
+
+const ALL_ROLES = Object.keys(ROLE_LABEL) as RoleCode[];
 
 type DriverRow = {
   id: string;
@@ -20,6 +24,11 @@ type DriverRow = {
   memberships?: { tier: { key: string }; validTo: Date | null }[];
   allTimePoints: number;
   rank: number;
+  racingNumber: number | null;
+  racingNumberColor?: string | null;
+  racingNumberFont?: string | null;
+  racingNumberItalic?: boolean | null;
+  racingNumberBorder?: boolean | null;
 };
 
 type SortConfig = {
@@ -29,6 +38,31 @@ type SortConfig = {
 
 export function DriversTable({ drivers }: { drivers: DriverRow[] }) {
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: "rank", direction: "asc" });
+
+  const searchParams = useSearchParams();
+  const q = (searchParams?.get("q") ?? "").trim().toLowerCase();
+  const selectedRolesKey = (searchParams?.getAll("role") ?? []).join(",");
+
+  const filteredDrivers = useMemo(() => {
+    const roles = selectedRolesKey
+      ? (selectedRolesKey.split(",").filter(Boolean) as string[])
+          .map((r) => r.toLowerCase())
+          .filter((r): r is RoleCode => ALL_ROLES.includes(r as RoleCode))
+      : [];
+
+    return drivers.filter((d) => {
+      if (q) {
+        const matchesName = d.displayName.toLowerCase().includes(q);
+        const matchesHandle = d.handle.toLowerCase().includes(q);
+        if (!matchesName && !matchesHandle) return false;
+      }
+      if (roles.length > 0) {
+        const hasRole = d.roles.some((r) => roles.includes(r.role.key as RoleCode));
+        if (!hasRole) return false;
+      }
+      return true;
+    });
+  }, [drivers, q, selectedRolesKey]);
 
   const handleSort = (key: string) => {
     setSortConfig((current) => ({
@@ -41,6 +75,8 @@ export function DriversTable({ drivers }: { drivers: DriverRow[] }) {
     switch (key) {
       case "rank":
         return row.rank;
+      case "number":
+        return row.racingNumber ?? Infinity; // so nulls go to the bottom
       case "driver":
         return row.displayName.toLowerCase();
       case "points":
@@ -50,7 +86,7 @@ export function DriversTable({ drivers }: { drivers: DriverRow[] }) {
     }
   };
 
-  const sortedDrivers = [...drivers].sort((a, b) => {
+  const sortedDrivers = [...filteredDrivers].sort((a, b) => {
     const aValue = getValue(a, sortConfig.key);
     const bValue = getValue(b, sortConfig.key);
 
@@ -110,6 +146,7 @@ export function DriversTable({ drivers }: { drivers: DriverRow[] }) {
             <thead className="bg-white/5 border-b border-white/10">
               <tr>
                 <SortHeader label="Pos" sortKey="rank" className="w-12 text-left" />
+                <SortHeader label="No." sortKey="number" className="w-16 text-center" align="center" />
                 <SortHeader label="Driver" sortKey="driver" className="text-left" />
                 <SortHeader
                   label="All Time Pts*"
@@ -146,6 +183,23 @@ export function DriversTable({ drivers }: { drivers: DriverRow[] }) {
                           }`}
                       >
                         {d.rank}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span
+                        className="font-display font-black text-lg"
+                        style={
+                          d.racingNumber !== null
+                            ? { 
+                                color: d.racingNumberColor || undefined, 
+                                fontFamily: d.racingNumberFont || undefined,
+                                fontStyle: d.racingNumberItalic ? 'italic' : 'normal',
+                                WebkitTextStroke: d.racingNumberBorder ? '1px white' : 'none'
+                              }
+                            : { color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }
+                        }
+                      >
+                        {d.racingNumber !== null ? `#${d.racingNumber}` : <span className="text-white/20">—</span>}
                       </span>
                     </td>
                     <td className="px-4 py-3">
