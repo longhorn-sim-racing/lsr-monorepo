@@ -14,11 +14,19 @@ export function PaymentsFilters() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
-  const [term, setTerm] = useState(searchParams.get("q") ?? "");
+  const urlQuery = searchParams.get("q") ?? "";
+  const [term, setTerm] = useState(urlQuery);
+  const [seenQuery, setSeenQuery] = useState(urlQuery);
+
+  // Follow URL changes made elsewhere (back button, sidebar link) without clobbering typing.
+  if (urlQuery !== seenQuery) {
+    setSeenQuery(urlQuery);
+    if (urlQuery !== term.trim()) setTerm(urlQuery);
+  }
 
   const status = searchParams.get("status") ?? "";
   const kind = searchParams.get("kind") ?? "";
-  const hasFilters = Boolean(status || kind || searchParams.get("q"));
+  const hasFilters = Boolean(status || kind || urlQuery);
 
   const navigate = (next: URLSearchParams) => {
     next.delete("page");
