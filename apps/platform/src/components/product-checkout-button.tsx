@@ -32,19 +32,21 @@ export function ProductCheckoutButton({
 
       if (!response.ok) {
         toast.error(data.message || "Could not start checkout");
+        setLoading(false);
         return;
       }
 
       if (typeof data.url !== "string") {
         toast.error("Could not start checkout");
+        setLoading(false);
         return;
       }
 
+      // Stay disabled through the redirect so a second click can't open a second session.
       window.location.href = data.url;
     } catch (error) {
       console.error("Failed to start product checkout", error);
       toast.error("An error occurred starting checkout");
-    } finally {
       setLoading(false);
     }
   };
