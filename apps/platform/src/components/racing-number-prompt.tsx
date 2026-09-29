@@ -188,7 +188,7 @@ export function RacingNumberDialog({
                   fontFamily: font,
                   fontStyle: isItalic ? "italic" : "normal",
                   fontWeight: 900,
-                  WebkitTextStroke: hasBorder ? "2px white" : "none",
+                  WebkitTextStroke: hasBorder ? "1px white" : "none",
                 }}
               >
                 {number || "42"}
