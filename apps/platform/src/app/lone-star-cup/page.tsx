@@ -19,6 +19,7 @@ import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { getActiveEntitlements } from "@/server/repos/membership.repo";
 import { priceForUser, productRequiresMembership } from "@/server/services/product-pricing";
 import { getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
+import { LSC_RULES_SLUG } from "@/lib/page-slugs";
 import { ProductCheckoutButton, ProductPaymentToast } from "@/components/product-checkout-button";
 import { Button } from "@/components/ui/button";
 
@@ -68,7 +69,7 @@ const LEAGUE_SLUG = "lone-star-cup";
 // Season-specific overview copy, keyed by season slug.
 const SEASON_BLURBS: Record<string, string> = {
   "lone-star-cup-s3":
-    "Season 3 runs ten rounds on Saturdays at 10am, September 19 through November 21, in the Mustang GT4 with mandatory pit stops. Round 7 is a Halloween night race at Mount Panorama. Your entry fee covers both the Lone Star Cup and the Formula Sunday League.",
+    "Season 3 runs ten rounds on Saturdays at 10am, September 19 through November 21, in the Mustang GT4. Round 7 is a Halloween night race at Mount Panorama. Your entry fee covers both the Lone Star Cup and the Formula Sunday League.",
 };
 
 /** "Lone Star Cup | Season 3" → "Season 3" */
@@ -108,9 +109,10 @@ async function loadLoneStarCup() {
     ]);
 
   // Returning drivers (in a past season's standings) see their lower rate.
-  const [entryPrice, application] = await Promise.all([
+  const [entryPrice, application, rulesPage] = await Promise.all([
     entryProduct ? priceForUser(entryProduct, session.user?.id ?? null) : null,
     session.user && openSeason ? getLeagueApplication(session.user.id, openSeason.id) : null,
+    prisma.page.findUnique({ where: { slug: LSC_RULES_SLUG }, select: { visibility: true } }),
   ]);
 
   return {
@@ -126,6 +128,7 @@ async function loadLoneStarCup() {
     openSeason,
     entitlements,
     application,
+    rulesPublished: rulesPage?.visibility === "public",
   };
 }
 
@@ -163,6 +166,7 @@ export default async function LoneStarCupPage() {
     openSeason,
     entitlements,
     application,
+    rulesPublished,
   } = data;
 
   // We only strictly require the current series to exist for the page to render meaningfully
@@ -209,6 +213,11 @@ export default async function LoneStarCupPage() {
               Lone Star Cup
             </h1>
             <p className="font-sans font-bold text-white/40 uppercase tracking-[0.3em] text-[10px] mt-4">Official Championship Series</p>
+            {rulesPublished && (
+              <Link href="/lone-star-cup/rules" className="mt-3 inline-block font-sans text-[10px] font-bold uppercase tracking-[0.2em] text-lsr-orange hover:text-white">
+                Read the rules →
+              </Link>
+            )}
           </div>
           <div className="w-full sm:w-auto">
             {isEntered ? (
@@ -274,7 +283,6 @@ export default async function LoneStarCupPage() {
                 </p>
                 {SEASON_BLURBS[currentSeason.slug] && (
                   <>
-                    <p>&nbsp;</p>
                     <p>{SEASON_BLURBS[currentSeason.slug]}</p>
                   </>
                 )}
