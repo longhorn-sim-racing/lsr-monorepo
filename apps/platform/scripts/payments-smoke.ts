@@ -162,11 +162,11 @@ async function main() {
   console.log(`user ${user.id} (${user.handle})`);
 
   try {
-    // ---- 1. LSC before dues is refused
+    // ---- 1. LSC before the entry form is refused
     await expectThrow(
-      "LSC entry without dues → 400",
+      "LSC entry without an entry form → 400",
       () => createProductCheckoutSession(user.id, "LEAGUE_FEE", "lone-star-cup"),
-      "membership is required"
+      "entry form"
     );
 
     // ---- 2. dues checkout
@@ -220,7 +220,16 @@ async function main() {
     // ---- 5. dues again is refused
     await expectThrow("dues again → 400", () => createProductCheckoutSession(user.id, "ANNUAL_DUES"), "already active");
 
-    // ---- 6. LSC entry now allowed
+    // ---- 6. LSC entry allowed once the entry form is in
+    const season = await prisma.season.findFirst({
+      where: { league: { slug: "lone-star-cup" }, OR: [{ endAt: null }, { endAt: { gte: now } }] },
+      orderBy: [{ endAt: { sort: "asc", nulls: "last" } }, { year: "desc" }],
+    });
+    check("an open Lone Star Cup season exists", !!season, "run: pnpm --filter @lsr/platform exec tsx scripts/setup-lsc-season-3.ts --apply");
+    if (!season) return;
+    await prisma.leagueApplication.create({
+      data: { userId: user.id, seasonId: season.id, discordUsername: "payments-smoke", experience: "NONE", equipment: ["CONTROLLER"], canCommit: true },
+    });
     const lscUrl = await createProductCheckoutSession(user.id, "LEAGUE_FEE", "lone-star-cup");
     check("LSC checkout returns a Stripe URL", lscUrl.startsWith("https://checkout.stripe.com/"));
     const lscPayment = await prisma.payment.findFirst({ where: { userId: user.id, productId: lsc.id } });
@@ -228,10 +237,6 @@ async function main() {
     const pi2 = `pi_smoke_${ts}_2`;
     await sign(completedEvent(lscPayment!.providerRef!, lscPayment!.id, pi2, 2));
     const lscEnt = await prisma.entitlement.findFirst({ where: { userId: user.id, kind: "league_access" } });
-    const season = await prisma.season.findFirst({
-      where: { league: { slug: "lone-star-cup" }, OR: [{ endAt: null }, { endAt: { gte: now } }] },
-      orderBy: [{ endAt: { sort: "asc", nulls: "last" } }, { year: "desc" }],
-    });
     const expectedTo = season?.endAt ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
     check(
       "Entitlement league_access through Season.endAt (or Dec 31)",

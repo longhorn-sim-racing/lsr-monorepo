@@ -129,6 +129,28 @@ async function main() {
     create: { title: "Lone Star Cup Season 2", slug: "lone-star-cup-s2", visibility: "public" },
   });
 
+  // ---- Past Lone Star Cup seasons (S3 comes from scripts/setup-lsc-season-3.ts) ----
+  for (const s of [
+    { slug: "lone-star-cup-s1", name: "Lone Star Cup | Season 1", year: 2025, startAt: "2025-10-01", endAt: "2025-12-07" },
+    { slug: "lone-star-cup-s2", name: "Lone Star Cup | Season 2", year: 2026, startAt: "2026-02-06", endAt: "2026-04-26" },
+  ]) {
+    const series = await prisma.eventSeries.findUnique({ where: { slug: s.slug } });
+    await prisma.season.upsert({
+      where: { slug: s.slug },
+      update: {},
+      create: {
+        leagueId: loneStarCup.id,
+        seriesId: series?.id,
+        name: s.name,
+        slug: s.slug,
+        year: s.year,
+        startAt: new Date(`${s.startAt}T00:00:00Z`),
+        endAt: new Date(`${s.endAt}T23:59:59Z`),
+        visibility: "public",
+      },
+    });
+  }
+
   // ---- Optional initial Season ----
   await prisma.season.upsert({
     where: { slug: "lone-star-cup-2025" },
