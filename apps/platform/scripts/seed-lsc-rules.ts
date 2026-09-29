@@ -10,6 +10,8 @@
  *
  * Reads no .env file; DIRECT_URL is preferred over DATABASE_URL when both are set.
  */
+export {}; // a module, so these names don't clash with other scripts
+
 const APPLY = process.argv.includes("--apply");
 
 if (process.env.DIRECT_URL) process.env.DATABASE_URL = process.env.DIRECT_URL;
