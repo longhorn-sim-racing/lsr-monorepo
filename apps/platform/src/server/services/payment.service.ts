@@ -510,7 +510,7 @@ const parseDate = (iso: string | null) => (iso === null ? null : new Date(iso));
 
 /**
  * Turns a paid product-backed Payment into an Entitlement (plus a UserMembership
- * row for dues, so the existing badge and admin tier view stay correct), then
+ * row for dues, which /admin/users reads for the tier), then
  * audits and notifies. Grants nothing when the payment can't be claimed.
  */
 async function grantProduct(
@@ -566,7 +566,7 @@ async function grantProduct(
     if (product.type === "ANNUAL_DUES") {
       const validTo = grantValidTo;
 
-      // Dual-write: the badge (user-menu, layout) and /admin/users read UserMembership.
+      // Dual-write: /admin/users and the tier view read UserMembership.
       // Never shortens a membership, and records exactly what it wrote so a refund
       // can undo this change and nothing else (see revokeProduct).
       let membership: MembershipChange | null = null;
