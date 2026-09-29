@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/server/auth/session"; // Assuming this exists or similar
 import { prisma } from "@/server/db";
 import { registerForEvent } from "@/server/services/registration.service";
+import { pickRacingNumberStyle, racingNumberSelect } from "@/lib/racing-number";
 
 type Params = {
   params: Promise<{ slug: string }>;
@@ -23,6 +24,7 @@ export async function GET(req: NextRequest, { params }: Params) {
               displayName: true,
               avatarUrl: true,
               handle: true,
+              ...racingNumberSelect,
             },
           },
         },
@@ -89,6 +91,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     displayName: reg.user.displayName,
     avatarUrl: reg.user.avatarUrl,
     profileLink: `/drivers/${reg.user.handle}`, // Assuming handle is used for profile links
+    ...pickRacingNumberStyle(reg.user),
   }));
 
   return NextResponse.json(snapshot);
@@ -130,7 +133,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         include: {
           registrations: {
             where: { status: "REGISTERED" },
-            include: { user: { select: { displayName: true, avatarUrl: true, handle: true } } },
+            include: { user: { select: { displayName: true, avatarUrl: true, handle: true, ...racingNumberSelect } } },
           },
           _count: {
             select: { registrations: { where: { status: "WAITLISTED" } } },
@@ -159,6 +162,7 @@ export async function POST(req: NextRequest, { params }: Params) {
             displayName: reg.user.displayName,
             avatarUrl: reg.user.avatarUrl,
             profileLink: `/drivers/${reg.user.handle}`,
+            ...pickRacingNumberStyle(reg.user),
         })),
     };
 
