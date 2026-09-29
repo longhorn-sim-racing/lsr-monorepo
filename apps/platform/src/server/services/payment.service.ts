@@ -1,6 +1,6 @@
 import { getStripe } from "@/lib/stripe";
 import { prisma } from "@/server/db";
-import { RegistrationStatus } from "@prisma/client";
+import { Prisma, RegistrationStatus, type Payment } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
 import { sendNotification } from "@/server/services/notification.service";
 import { formatInTimeZone } from "date-fns-tz";
@@ -259,37 +259,83 @@ export async function handleStripeWebhook(
   const event = getStripe().webhooks.constructEvent(rawBody, signature, webhookSecret);
 
   switch (event.type) {
-    case "checkout.session.completed":
-      await handleCheckoutCompleted(
-        event.data.object as Stripe.Checkout.Session
+    case "checkout.session.completed": {
+      // Delayed payment methods (bank debits and the like) complete the session
+      // before the money arrives; those finish with async_payment_succeeded or
+      // async_payment_failed instead, so only a paid session grants anything here.
+      const session = event.data.object as Stripe.Checkout.Session;
+      if (session.payment_status === "paid") await handleCheckoutPaid(session);
+      break;
+    }
+    case "checkout.session.async_payment_succeeded":
+      await handleCheckoutPaid(event.data.object as Stripe.Checkout.Session);
+      break;
+    case "checkout.session.async_payment_failed":
+      await failPendingPayment(
+        event.data.object as Stripe.Checkout.Session,
+        "PAYMENT_FAILED",
+        "Delayed payment failed"
+      );
+      break;
+    case "checkout.session.expired":
+      await failPendingPayment(
+        event.data.object as Stripe.Checkout.Session,
+        "PAYMENT_EXPIRED",
+        "Stripe checkout session expired before payment"
       );
       break;
     case "charge.refunded":
       await handleChargeRefunded(event.data.object as Stripe.Charge);
       break;
-    case "checkout.session.expired":
-      await handleCheckoutExpired(event.data.object as Stripe.Checkout.Session);
-      break;
   }
 }
 
-// ---------------------------------------------------------------------------
-// checkout.session.completed
-// ---------------------------------------------------------------------------
-
-async function handleCheckoutCompleted(
-  session: Stripe.Checkout.Session
-): Promise<void> {
+/**
+ * The Payment a session was created for, or null for a session this app didn't
+ * create (a Payment Link, `stripe trigger`, another environment's checkout).
+ * Those are ignored rather than rejected, so Stripe doesn't retry them for days.
+ */
+async function findSessionPayment(session: Stripe.Checkout.Session): Promise<Payment | null> {
   const paymentId = session.metadata?.paymentId;
-  if (!paymentId) {
-    throw new Error("No paymentId in Stripe session metadata");
-  }
+  if (!paymentId) return null;
 
   const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
-  if (!payment) throw new Error(`Payment ${paymentId} not found`);
+  if (!payment) {
+    console.warn(`[Stripe Webhook] Payment ${paymentId} not found; ignoring session ${session.id}`);
+  }
+  return payment;
+}
 
-  // Idempotency: don't process twice
-  if (payment.status === "succeeded") return;
+/**
+ * Atomically moves a Payment from pending to succeeded. Returns false when the
+ * payment was already claimed (a duplicate or concurrent delivery) or has ended
+ * (refunded, expired, failed), in which case the caller must grant nothing.
+ * Runs inside the grant's transaction, so the claim and the grant commit together.
+ */
+async function claimPayment(
+  tx: Prisma.TransactionClient,
+  paymentId: string,
+  session: Stripe.Checkout.Session,
+  paidAt: Date
+): Promise<boolean> {
+  const { count } = await tx.payment.updateMany({
+    where: { id: paymentId, status: "pending" },
+    data: {
+      status: "succeeded",
+      paidAt,
+      providerRef: (session.payment_intent as string) ?? session.id,
+    },
+  });
+  return count === 1;
+}
+
+// ---------------------------------------------------------------------------
+// Paid checkout → seat or entitlement
+// ---------------------------------------------------------------------------
+
+async function handleCheckoutPaid(session: Stripe.Checkout.Session): Promise<void> {
+  const payment = await findSessionPayment(session);
+  if (!payment) return;
 
   // Product-backed payments (dues, league entry) become entitlements.
   if (payment.productId) {
@@ -300,6 +346,13 @@ async function handleCheckoutCompleted(
     return;
   }
 
+  await grantEventSeat(payment, session);
+}
+
+async function grantEventSeat(
+  payment: Payment,
+  session: Stripe.Checkout.Session
+): Promise<void> {
   const meta = payment.metadata as {
     eventId: string;
     eventSlug: string;
@@ -309,16 +362,8 @@ async function handleCheckoutCompleted(
   let registrationStatus: RegistrationStatus = "REGISTERED";
   let waitlistOrder: number | null = null;
 
-  await prisma.$transaction(async (tx) => {
-    // Update payment
-    await tx.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: "succeeded",
-        paidAt: new Date(),
-        providerRef: (session.payment_intent as string) ?? session.id,
-      },
-    });
+  const claimed = await prisma.$transaction(async (tx) => {
+    if (!(await claimPayment(tx, payment.id, session, new Date()))) return false;
 
     // Lock event row for capacity check
     await tx.$executeRaw`SELECT 1 FROM "Event" WHERE id = ${meta.eventId} FOR UPDATE`;
@@ -353,7 +398,7 @@ async function handleCheckoutCompleted(
           status: registrationStatus,
           waitlistOrder:
             registrationStatus === "WAITLISTED" ? waitlistOrder : null,
-          sourcePaymentId: paymentId,
+          sourcePaymentId: payment.id,
         },
       });
     } else {
@@ -364,21 +409,23 @@ async function handleCheckoutCompleted(
           status: registrationStatus,
           waitlistOrder:
             registrationStatus === "WAITLISTED" ? waitlistOrder : null,
-          sourcePaymentId: paymentId,
+          sourcePaymentId: payment.id,
         },
       });
     }
 
     // NOTE: Do NOT call reconcileEvent here. For paid events, auto-promotion
     // is disabled — officers handle waitlist manually.
+    return true;
   });
+  if (!claimed) return;
 
   // Audit log (after transaction)
   await createAuditLog({
     actorUserId: null,
     actionType: "PAYMENT_SUCCEEDED",
     entityType: "PAYMENT",
-    entityId: paymentId,
+    entityId: payment.id,
     targetUserId: payment.userId,
     summary: `Stripe checkout completed for event registration`,
     metadata: { sessionId: session.id, eventId: meta.eventId },
@@ -415,20 +462,28 @@ async function handleCheckoutCompleted(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Product payments → entitlements
-// ---------------------------------------------------------------------------
-
 /** End of the membership year (Aug 1 – Jul 31) that contains `now`. */
 function membershipValidTo(now: Date): Date {
   const startYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
   return new Date(startYear + 1, 6, 31, 23, 59, 59, 999);
 }
 
+/** Later end date wins; an open-ended row (validTo = null) beats any date. */
+function endsLater(a: { validTo: Date | null }, b: { validTo: Date | null }): boolean {
+  if (a.validTo === null) return b.validTo !== null;
+  if (b.validTo === null) return false;
+  return a.validTo > b.validTo;
+}
+
+const sameInstant = (a: Date | null, b: Date | null) =>
+  a === null || b === null ? a === b : a.getTime() === b.getTime();
+
+const parseDate = (iso: string | null) => (iso === null ? null : new Date(iso));
+
 /**
- * Turns a succeeded product-backed Payment into an Entitlement (plus a
- * UserMembership row for dues, so the existing badge and admin tier view stay
- * correct), then audits and notifies. Runs inside handleCheckoutCompleted.
+ * Turns a paid product-backed Payment into an Entitlement (plus a UserMembership
+ * row for dues, so the existing badge and admin tier view stay correct), then
+ * audits and notifies. Grants nothing when the payment can't be claimed.
  */
 async function grantProduct(
   payment: { id: string; userId: string; productId: string },
@@ -443,21 +498,14 @@ async function grantProduct(
   const now = new Date();
 
   const result = await prisma.$transaction(async (tx) => {
-    await tx.payment.update({
-      where: { id: payment.id },
-      data: {
-        status: "succeeded",
-        paidAt: now,
-        providerRef: (session.payment_intent as string) ?? session.id,
-      },
-    });
+    if (!(await claimPayment(tx, payment.id, session, now))) return null;
 
     if (product.type === "ANNUAL_DUES") {
       const validTo = membershipValidTo(now);
 
       // Dual-write: the badge (user-menu, layout) and /admin/users read UserMembership.
-      // Mirrors the extend-or-create logic in server/actions/users.ts, and records
-      // what it did so a refund can reverse exactly that (see revokeProduct).
+      // Never shortens a membership, and records exactly what it wrote so a refund
+      // can undo this change and nothing else (see revokeProduct).
       let membership: MembershipChange | null = null;
       const tier = await tx.membershipTier.findUnique({ where: { key: "LSR_MEMBER" } });
       if (tier) {
@@ -470,19 +518,26 @@ async function grantProduct(
           },
           orderBy: { validFrom: "desc" },
         });
-        if (active) {
+        if (!active) {
+          const created = await tx.userMembership.create({
+            data: { userId: payment.userId, tierId: tier.id, validFrom: now, validTo },
+          });
+          membership = {
+            id: created.id,
+            action: "created",
+            previousValidTo: null,
+            writtenValidTo: validTo.toISOString(),
+          };
+        } else if (endsLater({ validTo }, active)) {
           await tx.userMembership.update({ where: { id: active.id }, data: { validTo } });
           membership = {
             id: active.id,
             action: "extended",
             previousValidTo: active.validTo?.toISOString() ?? null,
+            writtenValidTo: validTo.toISOString(),
           };
-        } else {
-          const created = await tx.userMembership.create({
-            data: { userId: payment.userId, tierId: tier.id, validFrom: now, validTo },
-          });
-          membership = { id: created.id, action: "created", previousValidTo: null };
         }
+        // Otherwise the membership is open-ended or already runs later: leave it.
       }
 
       const entitlement = await tx.entitlement.create({
@@ -535,6 +590,7 @@ async function grantProduct(
 
     throw new Error(`Product type ${product.type} is not purchasable through checkout`);
   });
+  if (!result) return;
 
   // Audit log (after transaction)
   await createAuditLog({
@@ -589,11 +645,16 @@ async function grantProduct(
 // charge.refunded
 // ---------------------------------------------------------------------------
 
-/** What grantProduct did to the dues UserMembership row, stored in Entitlement.meta. */
+/**
+ * What grantProduct did to the dues UserMembership row, stored in Entitlement.meta.
+ * `writtenValidTo` is absent on records made before it existed; those wrote the
+ * entitlement's own end date.
+ */
 type MembershipChange = {
   id: string;
   action: "created" | "extended";
   previousValidTo: string | null;
+  writtenValidTo?: string | null;
 };
 
 async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
@@ -634,8 +695,9 @@ async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
 }
 
 /**
- * Ends every entitlement a product payment granted and undoes the dues
- * dual-write on UserMembership using what grantProduct recorded in meta.
+ * Ends every entitlement a product payment granted, and undoes its dues
+ * dual-write on UserMembership, but only while the row still holds what this
+ * grant wrote: a later purchase or officer edit wins over an older refund.
  * Returns the ids of the entitlements it revoked.
  */
 async function revokeProduct(paymentId: string, userId: string): Promise<string[]> {
@@ -652,24 +714,24 @@ async function revokeProduct(paymentId: string, userId: string): Promise<string[
       await tx.entitlement.update({ where: { id: e.id }, data: { validTo: now } });
 
       const membership = (e.meta as { membership?: MembershipChange } | null)?.membership;
-      if (e.kind === "lsr_member" && membership) {
-        const row = await tx.userMembership.findFirst({
-          where: { id: membership.id, userId },
-        });
-        if (row) {
-          await tx.userMembership.update({
-            where: { id: row.id },
-            data: {
-              validTo:
-                membership.action === "extended"
-                  ? membership.previousValidTo
-                    ? new Date(membership.previousValidTo)
-                    : null
-                  : now,
-            },
-          });
-        }
-      }
+      if (e.kind !== "lsr_member" || !membership) continue;
+
+      const row = await tx.userMembership.findFirst({
+        where: { id: membership.id, userId },
+      });
+      const written =
+        membership.writtenValidTo !== undefined
+          ? parseDate(membership.writtenValidTo)
+          : e.validTo;
+      if (!row || !sameInstant(row.validTo, written)) continue; // changed since: leave it
+
+      await tx.userMembership.update({
+        where: { id: row.id },
+        data: {
+          validTo:
+            membership.action === "extended" ? parseDate(membership.previousValidTo) : now,
+        },
+      });
     }
 
     return entitlements.map((e) => e.id);
@@ -677,29 +739,31 @@ async function revokeProduct(paymentId: string, userId: string): Promise<string[
 }
 
 // ---------------------------------------------------------------------------
-// checkout.session.expired
+// checkout.session.expired / async_payment_failed
 // ---------------------------------------------------------------------------
 
-/** An abandoned Checkout Session: mark the still-pending Payment failed. */
-async function handleCheckoutExpired(session: Stripe.Checkout.Session): Promise<void> {
-  const paymentId = session.metadata?.paymentId;
-  if (!paymentId) return;
+/** A session that ended without payment: mark a still-pending Payment failed. */
+async function failPendingPayment(
+  session: Stripe.Checkout.Session,
+  actionType: "PAYMENT_EXPIRED" | "PAYMENT_FAILED",
+  summary: string
+): Promise<void> {
+  const payment = await findSessionPayment(session);
+  if (!payment) return;
 
-  const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
-  if (!payment || payment.status !== "pending") return;
-
-  await prisma.payment.update({
-    where: { id: paymentId },
+  const { count } = await prisma.payment.updateMany({
+    where: { id: payment.id, status: "pending" },
     data: { status: "failed" },
   });
+  if (count === 0) return; // already paid, refunded or failed
 
   await createAuditLog({
     actorUserId: null,
-    actionType: "PAYMENT_EXPIRED",
+    actionType,
     entityType: "PAYMENT",
-    entityId: paymentId,
+    entityId: payment.id,
     targetUserId: payment.userId,
-    summary: `Stripe checkout session expired before payment`,
+    summary,
     metadata: { sessionId: session.id },
   });
 }
