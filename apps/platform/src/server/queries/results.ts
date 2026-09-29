@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db";
+import { cache } from "react";
 
 export async function getIngestedResultsByEventId(eventId: string) {
   return prisma.raceSession.findMany({
@@ -30,3 +31,15 @@ export async function getIngestedResultsByEventId(eventId: string) {
     },
   });
 }
+
+export const getLapDataBySessionId = cache(async (sessionId: string) => {
+  return prisma.raceLap.findMany({
+    where: { sessionId },
+    include: {
+      participant: {
+        include: { user: true, carMapping: true },
+      },
+    },
+    orderBy: [{ lapNumber: "asc" }, { timestamp: "asc" }],
+  });
+});
