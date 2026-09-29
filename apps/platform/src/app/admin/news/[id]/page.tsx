@@ -1,12 +1,14 @@
 import { notFound } from "next/navigation"
 import { prisma } from "@/server/db"
 import { PostForm } from "../_components/post-form"
+import { requireOfficerPage } from "@/server/auth/guards";
 
 interface PageProps {
   params: Promise<{ id: string }>
 }
 
 export default async function EditPostPage({ params }: PageProps) {
+  await requireOfficerPage();
   const { id } = await params
   
   // Fetch post with relational data (tags via EntityTag)

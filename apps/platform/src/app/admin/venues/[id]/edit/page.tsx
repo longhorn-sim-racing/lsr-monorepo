@@ -2,12 +2,14 @@
 import { getVenue } from "@/server/queries/venue";
 import { VenueForm } from "@/components/admin/venue-form";
 import { notFound } from "next/navigation";
+import { requireOfficerPage } from "@/server/auth/guards";
 
 type EditVenueArgs = {
   params: Promise<{ id: string }>;
 };
 
 export default async function EditVenuePage({ params }: EditVenueArgs) {
+  await requireOfficerPage();
   const { id } = await params;
   const venue = await getVenue(id);
 

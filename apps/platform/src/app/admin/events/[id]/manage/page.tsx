@@ -10,8 +10,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { LiveTailButton } from "@/components/admin/live-tail-button";
+import { requireOfficerPage } from "@/server/auth/guards";
 
 export default async function ManageEventPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireOfficerPage();
   const { id } = await params;
 
   // 1. Fetch Event & Registration Data (Combined logic or separate)

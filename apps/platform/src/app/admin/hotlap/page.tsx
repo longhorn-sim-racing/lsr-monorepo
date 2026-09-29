@@ -1,7 +1,9 @@
 import { getHotlapSettings } from "./actions";
 import HotlapForm from "./hotlap-form";
+import { requireOfficerPage } from "@/server/auth/guards";
 
 export default async function AdminHotlapPage() {
+  await requireOfficerPage();
   const settings = await getHotlapSettings();
 
   return (

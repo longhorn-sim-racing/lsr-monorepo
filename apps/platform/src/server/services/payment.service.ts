@@ -6,6 +6,7 @@ import { sendNotification } from "@/server/services/notification.service";
 import { formatInTimeZone } from "date-fns-tz";
 import { priceForUser, productRequiresMembership } from "@/server/services/product-pricing";
 import { getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
+import { expireOpenCheckouts } from "@/server/services/checkout-sessions";
 import type Stripe from "stripe";
 
 // ---------------------------------------------------------------------------
@@ -192,6 +193,9 @@ export async function createProductCheckoutSession(
       throw new Error("Fill out the entry form before paying.");
     }
   }
+
+  // One open checkout per product, so an old tab can't be paid as well.
+  await expireOpenCheckouts(userId, { productId: product.id });
 
   // Returning drivers can get a lower league rate (see product-pricing.ts).
   const price = await priceForUser(product, userId);
@@ -524,8 +528,43 @@ async function grantProduct(
   const result = await prisma.$transaction(async (tx) => {
     if (!(await claimPayment(tx, payment.id, session, now))) return null;
 
+    // What this payment buys: dues run to the end of the membership year; league entry
+    // runs to the end of the league's open season.
+    const season =
+      product.type === "LEAGUE_FEE" && product.leagueId
+        ? await getOpenLeagueSeason(product.leagueId, now, tx)
+        : null;
+    const grantValidTo =
+      product.type === "ANNUAL_DUES"
+        ? membershipValidTo(now)
+        : season?.endAt ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+
+    // Paid for something they already have for at least as long (e.g. an officer
+    // entered them while this checkout was open). Keep the payment on record, grant
+    // nothing more, and flag it so an officer can refund it in Stripe. Refunds are
+    // never automatic. A shorter existing entitlement doesn't count: the grant below
+    // extends it instead.
+    const existing = await tx.entitlement.findFirst({
+      where: {
+        userId: payment.userId,
+        kind: product.type === "ANNUAL_DUES" ? "lsr_member" : "league_access",
+        ...(product.type === "LEAGUE_FEE" ? { leagueId: product.leagueId } : {}),
+        validFrom: { lte: now },
+        OR: [{ validTo: null }, { validTo: { gte: grantValidTo } }],
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      const { metadata } = await tx.payment.findUniqueOrThrow({ where: { id: payment.id }, select: { metadata: true } });
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: { metadata: { ...((metadata as Prisma.JsonObject | null) ?? {}), duplicateOfEntitlementId: existing.id } },
+      });
+      return { duplicateOf: existing.id };
+    }
+
     if (product.type === "ANNUAL_DUES") {
-      const validTo = membershipValidTo(now);
+      const validTo = grantValidTo;
 
       // Dual-write: the badge (user-menu, layout) and /admin/users read UserMembership.
       // Never shortens a membership, and records exactly what it wrote so a refund
@@ -582,10 +621,7 @@ async function grantProduct(
     if (product.type === "LEAGUE_FEE") {
       if (!product.leagueId) throw new Error(`Product ${product.id} has no league`);
 
-      // Entry runs to the end of the league's open season.
-      const season = await getOpenLeagueSeason(product.leagueId, now, tx);
-      const validTo =
-        season?.endAt ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+      const validTo = grantValidTo;
 
       const entitlement = await tx.entitlement.create({
         data: {
@@ -606,6 +642,19 @@ async function grantProduct(
     throw new Error(`Product type ${product.type} is not purchasable through checkout`);
   });
   if (!result) return;
+
+  if ("duplicateOf" in result) {
+    await createAuditLog({
+      actorUserId: null,
+      actionType: "PAYMENT_DUPLICATE",
+      entityType: "PAYMENT",
+      entityId: payment.id,
+      targetUserId: payment.userId,
+      summary: `Paid for ${product.name} while already entitled; refund this payment in Stripe`,
+      metadata: { sessionId: session.id, productId: product.id, duplicateOfEntitlementId: result.duplicateOf },
+    });
+    return;
+  }
 
   // Audit log (after transaction)
   await createAuditLog({

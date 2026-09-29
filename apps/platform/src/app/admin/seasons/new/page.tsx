@@ -1,8 +1,10 @@
 import { getAllSeries } from "@/server/queries/series";
 import { SeasonForm } from "../form";
 import { prisma } from "@/server/db";
+import { requireOfficerPage } from "@/server/auth/guards";
 
 export default async function NewSeasonPage() {
+  await requireOfficerPage();
   const [series, leagues] = await Promise.all([
     getAllSeries(),
     prisma.league.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),

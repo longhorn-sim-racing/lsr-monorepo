@@ -3,12 +3,14 @@ import { getSeasonById } from "@/server/queries/seasons";
 import { SeasonForm } from "../../form";
 import { notFound } from "next/navigation";
 import { prisma } from "@/server/db";
+import { requireOfficerPage } from "@/server/auth/guards";
 
 export default async function EditSeasonPage({
   params,
 }: {
   params: { id: string };
 }) {
+  await requireOfficerPage();
   const awaitedParams = await params;
   const [season, series, leagues] = await Promise.all([
     getSeasonById(awaitedParams.id),

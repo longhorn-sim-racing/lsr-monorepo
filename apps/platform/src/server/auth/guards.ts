@@ -1,6 +1,7 @@
 // src/server/auth/guards.ts
 import { getSessionUser } from './session';
 import { User } from '@prisma/client';
+import { redirect } from 'next/navigation';
 
 class NotAuthenticatedError extends Error {
   constructor(message = 'You must be logged in to perform this action.') {
@@ -60,4 +61,17 @@ export async function requireOfficer(): Promise<User> {
 
 export async function requireSystemAdmin(): Promise<User> {
   return requireRole('admin');
+}
+
+/**
+ * For admin pages. The admin layout checks too, but layouts don't re-run on every
+ * render (a client can ask for just the page segment), so each page checks itself.
+ * Redirects like the layout instead of throwing.
+ */
+export async function requireOfficerPage(): Promise<User> {
+  try {
+    return await requireOfficer();
+  } catch {
+    redirect('/403');
+  }
 }

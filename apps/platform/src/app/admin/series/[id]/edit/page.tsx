@@ -1,12 +1,14 @@
 import { getSeries } from "@/server/queries/series";
 import { SeriesForm } from "@/components/admin/series-form";
 import { notFound } from "next/navigation";
+import { requireOfficerPage } from "@/server/auth/guards";
 
 type EditSeriesArgs = {
   params: Promise<{ id: string }>;
 };
 
 export default async function EditSeriesPage({ params }: EditSeriesArgs) {
+  await requireOfficerPage();
   const { id } = await params;
   const series = await getSeries(id);
 

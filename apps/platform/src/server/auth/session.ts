@@ -1,6 +1,7 @@
 // src/server/auth/session.ts
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { after } from 'next/server';
 import { prisma } from '@/server/db';
 import { User } from '@prisma/client';
 import { slugify } from '@/lib/slug';
@@ -103,8 +104,9 @@ export async function getSessionUser(): Promise<SessionUser> {
           },
         },
       });
-      // New driver joined the roster — bust the cached /drivers page.
-      if (dbUser) revalidateDriverList();
+      // New driver joined the roster — bust the cached /drivers page. This usually runs
+      // while a page renders, where revalidation isn't allowed, so do it after the response.
+      if (dbUser) after(() => revalidateDriverList());
     } catch (error) {
       console.error('[getSessionUser] Failed to provision missing user:', error);
       // Fallthrough to return null

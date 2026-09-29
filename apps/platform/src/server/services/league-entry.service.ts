@@ -1,6 +1,7 @@
 import { Prisma, type LeagueApplicationSource } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { createAuditLog } from "@/server/audit/log";
+import { expireOpenCheckouts } from "@/server/services/checkout-sessions";
 import type { LeagueApplicationInput } from "@/schemas/league-application.schema";
 
 type Db = Prisma.TransactionClient | typeof prisma;
@@ -129,6 +130,9 @@ export async function grantManualLeagueEntry(params: {
     });
   });
 
+  // They're in now; an old unpaid checkout tab shouldn't be payable on top of this.
+  await expireOpenCheckouts(userId, { leagueId });
+
   await createAuditLog({
     actorUserId,
     actionType: "LEAGUE_ENTRY_GRANTED",
@@ -149,6 +153,15 @@ export async function revokeManualLeagueEntry(entitlementId: string, actorUserId
   if (!before || before.kind !== "league_access") throw new Error("Entry not found.");
   if (before.sourcePaymentId) {
     throw new Error("This entry was paid through Stripe. Refund it in Stripe to end it.");
+  }
+  // They also paid while this manual entry existed (flagged as a duplicate). Ending it
+  // would leave a paying driver with no entry.
+  const paidDuplicate = await prisma.payment.findFirst({
+    where: { status: "succeeded", metadata: { path: ["duplicateOfEntitlementId"], equals: entitlementId } },
+    select: { id: true },
+  });
+  if (paidDuplicate) {
+    throw new Error("This driver also paid through Stripe. Keep this entry, or refund that payment in Stripe first.");
   }
 
   const after = await prisma.entitlement.update({
