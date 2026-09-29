@@ -9,6 +9,7 @@ import { MarketingToggle } from '@/components/marketing-toggle';
 import { ConfirmSubmitButton } from '@/components/confirm-submit-button';
 import { NotificationPreferences } from '@/components/notification-preferences';
 import { UpdateRacingNumberButton } from '@/components/racing-number-prompt';
+import { RacingNumber } from '@/components/racing-number';
 import { prisma } from '@/server/db';
 import { getActiveEntitlements } from '@/server/repos/membership.repo';
 import { ProductCheckoutButton, ProductPaymentToast } from '@/components/product-checkout-button';
@@ -112,17 +113,7 @@ export default async function AccountPage() {
                   <div 
                     className="text-2xl flex-1 px-3 py-2 bg-white/5 border border-white/10 flex items-center"
                   >
-                    <span 
-                      style={user.racingNumber !== null ? { 
-                        color: user.racingNumberColor || undefined, 
-                        fontFamily: user.racingNumberFont || undefined,
-                        fontStyle: user.racingNumberItalic ? 'italic' : 'normal',
-                        fontWeight: 900,
-                        WebkitTextStroke: user.racingNumberBorder ? '1px white' : 'none',
-                      } : { color: 'rgba(255,255,255,0.4)' }}
-                    >
-                      {user.racingNumber !== null ? `#${user.racingNumber}` : 'None'}
-                    </span>
+                    <RacingNumber user={user} size="md" fallback={<span className="text-white/40">None</span>} />
                   </div>
                   <UpdateRacingNumberButton user={user} />
                 </div>
