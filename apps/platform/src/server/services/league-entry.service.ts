@@ -154,6 +154,15 @@ export async function revokeManualLeagueEntry(entitlementId: string, actorUserId
   if (before.sourcePaymentId) {
     throw new Error("This entry was paid through Stripe. Refund it in Stripe to end it.");
   }
+  // They also paid while this manual entry existed (flagged as a duplicate). Ending it
+  // would leave a paying driver with no entry.
+  const paidDuplicate = await prisma.payment.findFirst({
+    where: { status: "succeeded", metadata: { path: ["duplicateOfEntitlementId"], equals: entitlementId } },
+    select: { id: true },
+  });
+  if (paidDuplicate) {
+    throw new Error("This driver also paid through Stripe. Keep this entry, or refund that payment in Stripe first.");
+  }
 
   const after = await prisma.entitlement.update({
     where: { id: entitlementId },

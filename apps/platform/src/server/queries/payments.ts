@@ -64,8 +64,36 @@ export async function getAdminPayments(filters: PaymentFilters) {
     }),
   ]);
 
+  // A payment flagged as a duplicate only needs a refund while the entitlement it
+  // duplicated is still in force; if that one ended, this payment is their only claim.
+  const duplicateOf = payments
+    .map((p) => (p.metadata as Record<string, unknown> | null)?.duplicateOfEntitlementId)
+    .filter((id): id is string => typeof id === "string");
+  const now = new Date();
+  const stillActive = new Set(
+    duplicateOf.length
+      ? (
+          await prisma.entitlement.findMany({
+            where: { id: { in: duplicateOf }, OR: [{ validTo: null }, { validTo: { gte: now } }] },
+            select: { id: true },
+          })
+        ).map((e) => e.id)
+      : []
+  );
+
   return {
-    payments,
+    payments: payments.map((p) => {
+      const dupId = (p.metadata as Record<string, unknown> | null)?.duplicateOfEntitlementId;
+      return {
+        ...p,
+        duplicate:
+          typeof dupId !== "string" || p.status !== "succeeded"
+            ? null
+            : stillActive.has(dupId)
+              ? ("refund" as const)
+              : ("no-entry" as const),
+      };
+    }),
     total,
     succeededCount: succeeded._count,
     succeededCents: succeeded._sum.amountCents ?? 0,

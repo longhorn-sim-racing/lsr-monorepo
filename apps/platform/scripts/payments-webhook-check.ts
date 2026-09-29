@@ -220,8 +220,14 @@ async function main() {
     const lsc = await prisma.product.findFirst({ where: { type: "LEAGUE_FEE", league: { slug: "lone-star-cup" } } });
     if (lsc?.leagueId) {
       const u8 = await mkUser("dupe");
+      // Like a real manual entry: runs to the end of the open season.
+      const { getOpenLeagueSeason } = await import("../src/server/services/league-entry.service");
+      const openSeason = await getOpenLeagueSeason(lsc.leagueId);
       const manual = await prisma.entitlement.create({
-        data: { userId: u8, kind: "league_access", leagueId: lsc.leagueId, scope: "season", validFrom: new Date(), validTo: new Date(Date.now() + 30 * day), meta: { source: "manual" } },
+        data: {
+          userId: u8, kind: "league_access", leagueId: lsc.leagueId, scope: "season", validFrom: new Date(),
+          validTo: openSeason?.endAt ?? new Date(new Date().getFullYear(), 11, 31, 23, 59, 59, 999), meta: { source: "manual" },
+        },
       });
       const p8 = await mkPayment(u8, lsc.id);
       await send("checkout.session.completed", session(p8.id, `pi_${ts}_9b`));
@@ -232,6 +238,27 @@ async function main() {
         after?.status === "succeeded" && entries === 1 &&
           (after.metadata as Record<string, unknown>)?.duplicateOfEntitlementId === manual.id && dupeAudit === 1,
         `status=${after?.status} entries=${entries} audits=${dupeAudit}`);
+
+      // An officer refunds the flagged payment in Stripe: it's marked refunded and the
+      // entry it duplicated is untouched.
+      await send("charge.refunded", refund(`pi_${ts}_9b`));
+      const manualAfter = await prisma.entitlement.findUnique({ where: { id: manual.id } });
+      check("refunding a flagged duplicate: refunded, original entry untouched",
+        (await statusOf(p8.id)) === "refunded" && manualAfter?.validTo?.getTime() === manual.validTo?.getTime());
+
+      // A shorter existing entry doesn't make a payment a duplicate; the payment grants.
+      const u10 = await mkUser("short");
+      await prisma.entitlement.create({
+        data: { userId: u10, kind: "league_access", leagueId: lsc.leagueId, scope: "season", validFrom: new Date(), validTo: new Date(Date.now() + 60_000), meta: { source: "manual" } },
+      });
+      const p10 = await mkPayment(u10, lsc.id);
+      await send("checkout.session.completed", session(p10.id, `pi_${ts}_9c`));
+      const p10After = await prisma.payment.findUnique({ where: { id: p10.id } });
+      const u10Entries = await prisma.entitlement.count({ where: { userId: u10, kind: "league_access" } });
+      check("shorter existing entry: payment grants, not flagged",
+        p10After?.status === "succeeded" && u10Entries === 2 &&
+          (p10After.metadata as Record<string, unknown> | null)?.duplicateOfEntitlementId === undefined,
+        `entries=${u10Entries}`);
     } else {
       check("LSC product seeded (for the duplicate-payment case)", false, "run: prisma db seed");
     }

@@ -528,16 +528,29 @@ async function grantProduct(
   const result = await prisma.$transaction(async (tx) => {
     if (!(await claimPayment(tx, payment.id, session, now))) return null;
 
-    // Paid for something they already have (e.g. an officer entered them while this
-    // checkout was open). Keep the payment on record, grant nothing more, and flag it
-    // so an officer can refund it in Stripe. Refunds are never automatic.
+    // What this payment buys: dues run to the end of the membership year; league entry
+    // runs to the end of the league's open season.
+    const season =
+      product.type === "LEAGUE_FEE" && product.leagueId
+        ? await getOpenLeagueSeason(product.leagueId, now, tx)
+        : null;
+    const grantValidTo =
+      product.type === "ANNUAL_DUES"
+        ? membershipValidTo(now)
+        : season?.endAt ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+
+    // Paid for something they already have for at least as long (e.g. an officer
+    // entered them while this checkout was open). Keep the payment on record, grant
+    // nothing more, and flag it so an officer can refund it in Stripe. Refunds are
+    // never automatic. A shorter existing entitlement doesn't count: the grant below
+    // extends it instead.
     const existing = await tx.entitlement.findFirst({
       where: {
         userId: payment.userId,
         kind: product.type === "ANNUAL_DUES" ? "lsr_member" : "league_access",
         ...(product.type === "LEAGUE_FEE" ? { leagueId: product.leagueId } : {}),
         validFrom: { lte: now },
-        OR: [{ validTo: null }, { validTo: { gte: now } }],
+        OR: [{ validTo: null }, { validTo: { gte: grantValidTo } }],
       },
       select: { id: true },
     });
@@ -551,7 +564,7 @@ async function grantProduct(
     }
 
     if (product.type === "ANNUAL_DUES") {
-      const validTo = membershipValidTo(now);
+      const validTo = grantValidTo;
 
       // Dual-write: the badge (user-menu, layout) and /admin/users read UserMembership.
       // Never shortens a membership, and records exactly what it wrote so a refund
@@ -608,10 +621,7 @@ async function grantProduct(
     if (product.type === "LEAGUE_FEE") {
       if (!product.leagueId) throw new Error(`Product ${product.id} has no league`);
 
-      // Entry runs to the end of the league's open season.
-      const season = await getOpenLeagueSeason(product.leagueId, now, tx);
-      const validTo =
-        season?.endAt ?? new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+      const validTo = grantValidTo;
 
       const entitlement = await tx.entitlement.create({
         data: {
