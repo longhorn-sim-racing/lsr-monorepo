@@ -10,6 +10,12 @@ export const PAYMENT_KIND_LABELS = {
 
 export type PaymentKind = keyof typeof PAYMENT_KIND_LABELS;
 
+export const PRODUCT_TYPE_LABELS: Record<ProductType, string> = {
+  ANNUAL_DUES: "Annual dues",
+  LEAGUE_FEE: "League fee",
+  EVENT_FEE: "Event fee",
+};
+
 export function isPaymentStatus(value: string | undefined): value is PaymentStatus {
   return PAYMENT_STATUSES.includes(value as PaymentStatus);
 }

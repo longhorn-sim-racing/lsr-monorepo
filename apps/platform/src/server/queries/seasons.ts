@@ -9,6 +9,13 @@ export async function getAllSeasons() {
   });
 }
 
+export async function getSeasonSlugOptions() {
+  return prisma.season.findMany({
+    select: { slug: true, name: true, year: true },
+    orderBy: [{ year: "desc" }, { name: "asc" }],
+  });
+}
+
 export async function getSeasonById(id: string) {
   return prisma.season.findUnique({
     where: { id },
