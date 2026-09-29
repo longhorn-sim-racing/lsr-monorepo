@@ -35,3 +35,11 @@ STRIPE_TEST_SECRET_KEY=sk_test_… pnpm --filter @lsr/platform exec tsx scripts/
 ```
 
 Run it first; it takes about ten seconds. Steps 9–10 and the page states still need the browser.
+
+## Webhook edge cases, offline
+
+`apps/platform/scripts/payments-webhook-check.ts` replays the cases from the #95 review against the local database: duplicate and concurrent deliveries, redelivery after a refund, unpaid and delayed payments, refunds after a later membership change, never shortening a membership, and sessions we didn't create. No Stripe key or network needed.
+
+```
+pnpm --filter @lsr/platform exec tsx scripts/payments-webhook-check.ts
+```
