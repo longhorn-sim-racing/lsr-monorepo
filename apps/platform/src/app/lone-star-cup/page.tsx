@@ -17,6 +17,7 @@ import { DatabaseUnavailable } from "@/components/database-unavailable";
 import { ChampionshipChart } from "@/components/championship-chart";
 import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { getActiveEntitlements } from "@/server/repos/membership.repo";
+import { priceForUser, type ProductPrice } from "@/server/services/product-pricing";
 import { ProductCheckoutButton, ProductPaymentToast } from "@/components/product-checkout-button";
 import { Button } from "@/components/ui/button";
 
@@ -64,6 +65,7 @@ async function getSeriesWithPodiums(slug: string) {
 export default async function LoneStarCupPage() {
   let currentSeries, currentStandings, s1Series, s1Standings, currentProgression, session, league, entryProduct;
   let entitlements: Awaited<ReturnType<typeof getActiveEntitlements>> = [];
+  let entryPrice: ProductPrice | null = null;
   try {
     [currentSeries, currentStandings, s1Series, s1Standings, currentProgression, session, league, entryProduct] = await Promise.all([
       getSeriesWithPodiums("lone-star-cup-s2"),
@@ -79,6 +81,10 @@ export default async function LoneStarCupPage() {
     ]);
     if (session.user) {
       entitlements = await getActiveEntitlements(session.user.id);
+    }
+    if (entryProduct) {
+      // Returning drivers (in a past season's standings) see their lower rate.
+      entryPrice = await priceForUser(entryProduct, session.user?.id ?? null);
     }
   } catch (error) {
     console.error('[LoneStarCup] Failed to load series data:', error);
@@ -155,8 +161,17 @@ export default async function LoneStarCupPage() {
               </Button>
             ) : isEntered ? (
               <p className="font-sans text-sm font-bold text-lsr-orange">You&apos;re entered</p>
-            ) : entryProduct ? (
-              <ProductCheckoutButton product="LEAGUE_FEE" league="lone-star-cup" label="Enter the Lone Star Cup" priceCents={entryProduct.amountCents} />
+            ) : entryProduct && entryPrice ? (
+              <div className="flex flex-col gap-2 sm:items-end">
+                <ProductCheckoutButton product="LEAGUE_FEE" league="lone-star-cup" label="Enter the Lone Star Cup" priceCents={entryPrice.amountCents} />
+                {entryPrice.returningAmountCents !== null && (
+                  <p className="font-sans text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
+                    {entryPrice.tier === "returning"
+                      ? "Returning driver rate applied"
+                      : `Returning drivers pay $${(entryPrice.returningAmountCents / 100).toFixed(2)}`}
+                  </p>
+                )}
+              </div>
             ) : (
               <p className="font-sans text-sm text-white/60">Entry is currently unavailable.</p>
             )}
