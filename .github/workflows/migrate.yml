@@ -5,10 +5,15 @@ on:
     branches: [main]
     paths:
       - 'apps/platform/prisma/migrations/**'
+  workflow_dispatch:
 
 concurrency:
   group: db-migrate
   cancel-in-progress: false
+
+# The PRODUCTION_* secrets must use the Supabase session pooler
+# (aws-1-us-east-2.pooler.supabase.com:5432). The direct db.<ref>.supabase.co
+# host is IPv6-only and GitHub runners can't reach it.
 
 jobs:
   migrate:
@@ -30,21 +35,40 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The runner ships pg_dump 16, which refuses to dump the Postgres 17 server.
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+
+      # This repo is public, so the backup is only uploaded encrypted.
       - name: Backup production database
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
-          pg_dump "$DATABASE_URL" \
+          if [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "BACKUP_PASSPHRASE is not set; refusing to upload an unencrypted backup from a public repo."
+            exit 1
+          fi
+          /usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" \
             --format=custom \
             --no-owner \
             --no-privileges \
             -f backup.dump
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 -o backup.dump.gpg backup.dump
+          rm backup.dump
 
       - name: Upload backup artifact
         uses: actions/upload-artifact@v4
         with:
           name: db-backup-${{ github.sha }}
-          path: backup.dump
+          path: backup.dump.gpg
           retention-days: 90
 
       - name: Run migrations
