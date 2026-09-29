@@ -1,3 +1,4 @@
+import { requireOfficer } from "@/server/auth/guards";
 import { getEntrantRows, getLeagueSeasonsForAdmin } from "@/server/queries/league-entrants";
 import { LeagueEntriesConsole } from "@/components/admin/league-entries-console";
 
@@ -6,6 +7,8 @@ export default async function LeagueEntriesAdminPage({
 }: {
   searchParams: Promise<{ season?: string }>;
 }) {
+  // The admin layout checks too, but layouts don't re-run on every render; this page returns contact details.
+  await requireOfficer();
   const { season: seasonSlug } = await searchParams;
   const data = await getLeagueSeasonsForAdmin("lone-star-cup");
   if (!data || !data.seasons.length) {

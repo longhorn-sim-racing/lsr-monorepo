@@ -6,11 +6,11 @@ import { UserIcon, ArrowUpDown, ArrowUp, ArrowDown, Maximize2, Minimize2, Search
 import Link from "next/link";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { RacingNumber } from "@/components/racing-number";
+import { RacingNumber, type RacingNumberStyle } from "@/components/racing-number";
 
 type ResultWithParticipant = RaceResult & {
   participant: RaceParticipant & {
-    user: User | null;
+    user: (Pick<User, "id" | "handle" | "displayName" | "avatarUrl"> & RacingNumberStyle) | null;
     carMapping: CarMapping | null;
   };
 };

@@ -229,10 +229,12 @@ export async function listSeasonEntrants(seasonId: string) {
     }
   >();
   for (const a of applications) rows.set(a.userId, { user: a.user, application: a, entry: null });
+  // Prefer an entry in force over an ended one, a paid one over a manual one, then the latest.
+  const rank = (e: (typeof entitlements)[number]) =>
+    (isActive(e) ? 2 : 0) + (e.sourcePaymentId ? 1 : 0);
   for (const e of entitlements) {
     const row = rows.get(e.userId) ?? { user: e.user, application: null, entry: null };
-    // Prefer the entry that's in force; otherwise keep the latest one.
-    if (!row.entry || (isActive(e) && !isActive(row.entry)) || (!isActive(row.entry) && e.validFrom > row.entry.validFrom)) {
+    if (!row.entry || rank(e) > rank(row.entry) || (rank(e) === rank(row.entry) && e.validFrom > row.entry.validFrom)) {
       row.entry = e;
     }
     rows.set(e.userId, row);

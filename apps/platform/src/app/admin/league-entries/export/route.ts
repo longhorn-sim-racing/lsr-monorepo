@@ -5,7 +5,9 @@ import { getEntrantRows } from "@/server/queries/league-entrants";
 import { equipmentLabel, experienceLabel } from "@/schemas/league-application.schema";
 
 const csvCell = (value: unknown) => {
-  const s = value === null || value === undefined ? "" : String(value);
+  let s = value === null || value === undefined ? "" : String(value);
+  // Drivers write some of these fields; don't let Sheets/Excel run them as formulas.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 

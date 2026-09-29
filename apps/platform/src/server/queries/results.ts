@@ -1,5 +1,15 @@
 import { prisma } from "@/server/db";
 import { cache } from "react";
+import { racingNumberSelect } from "@/lib/racing-number";
+
+// Results render on public pages, so only load what the page shows (no email or EID).
+const publicUserSelect = {
+  id: true,
+  handle: true,
+  displayName: true,
+  avatarUrl: true,
+  ...racingNumberSelect,
+} as const;
 
 export async function getIngestedResultsByEventId(eventId: string) {
   return prisma.raceSession.findMany({
@@ -16,7 +26,7 @@ export async function getIngestedResultsByEventId(eventId: string) {
         include: {
           participant: {
             include: {
-              user: true,
+              user: { select: publicUserSelect },
               carMapping: true,
             },
           },
@@ -37,7 +47,7 @@ export const getLapDataBySessionId = cache(async (sessionId: string) => {
     where: { sessionId },
     include: {
       participant: {
-        include: { user: true, carMapping: true },
+        include: { user: { select: publicUserSelect }, carMapping: true },
       },
     },
     orderBy: [{ lapNumber: "asc" }, { timestamp: "asc" }],
