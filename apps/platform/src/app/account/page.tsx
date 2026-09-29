@@ -51,7 +51,8 @@ export default async function AccountPage() {
 
         <div className="w-full h-px bg-white/5" />
 
-        {/* MEMBERSHIP */}
+        {/* MEMBERSHIP: only when someone holds one or dues are on sale (no dues some semesters) */}
+        {(membership || dues) && (
         <section className="space-y-6">
           <h2 className="font-sans font-bold text-xs text-lsr-orange uppercase tracking-[0.2em]">Membership</h2>
           <div className="rounded-none border border-white/5 bg-white/[0.03] p-8">
@@ -62,14 +63,10 @@ export default async function AccountPage() {
                   ? ` through ${membership.validTo.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`
                   : ''}
               </p>
-            ) : (
+            ) : dues ? (
               <div className="mt-4 space-y-4">
                 <p className="font-sans text-sm text-white/70">Pay your annual dues to become an LSR Member.</p>
-                {dues ? (
-                  <ProductCheckoutButton product="ANNUAL_DUES" label="Pay dues" priceCents={dues.amountCents} />
-                ) : (
-                  <p className="font-sans text-sm text-white/50">Dues payment is currently unavailable.</p>
-                )}
+                <ProductCheckoutButton product="ANNUAL_DUES" label="Pay dues" priceCents={dues.amountCents} />
                 <p className="font-sans text-xs leading-relaxed text-white/50">
                   For payment issues or refunds, contact{' '}
                   <a href="mailto:info@longhornsimracing.org" className="border-b border-white/10 text-white/70 transition-colors hover:border-lsr-orange hover:text-lsr-orange">
@@ -77,9 +74,10 @@ export default async function AccountPage() {
                   </a>.
                 </p>
               </div>
-            )}
+            ) : null}
           </div>
         </section>
+        )}
 
         {/* ACCOUNT SETTINGS */}
         <section className="space-y-6">
