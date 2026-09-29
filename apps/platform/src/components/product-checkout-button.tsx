@@ -5,12 +5,41 @@ import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
+type CheckoutProduct = "ANNUAL_DUES" | "LEAGUE_FEE";
+
 type ProductCheckoutButtonProps = {
-  product: "ANNUAL_DUES" | "LEAGUE_FEE";
+  product: CheckoutProduct;
   league?: string;
   label: string;
   priceCents: number;
 };
+
+/**
+ * Opens Stripe Checkout for a product. Resolves false (after a toast) when checkout
+ * couldn't start; on success the browser is already navigating away.
+ */
+export async function startProductCheckout(product: CheckoutProduct, league?: string): Promise<boolean> {
+  try {
+    const response = await fetch("/api/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product, league }),
+    });
+    const data = await response.json();
+
+    if (!response.ok || typeof data.url !== "string") {
+      toast.error(data.message || "Could not start checkout");
+      return false;
+    }
+
+    window.location.href = data.url;
+    return true;
+  } catch (error) {
+    console.error("Failed to start product checkout", error);
+    toast.error("An error occurred starting checkout");
+    return false;
+  }
+}
 
 export function ProductCheckoutButton({
   product,
@@ -22,33 +51,8 @@ export function ProductCheckoutButton({
 
   const handleCheckout = async () => {
     setLoading(true);
-    try {
-      const response = await fetch("/api/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ product, league }),
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        toast.error(data.message || "Could not start checkout");
-        setLoading(false);
-        return;
-      }
-
-      if (typeof data.url !== "string") {
-        toast.error("Could not start checkout");
-        setLoading(false);
-        return;
-      }
-
-      // Stay disabled through the redirect so a second click can't open a second session.
-      window.location.href = data.url;
-    } catch (error) {
-      console.error("Failed to start product checkout", error);
-      toast.error("An error occurred starting checkout");
-      setLoading(false);
-    }
+    // Stay disabled through the redirect so a second click can't open a second session.
+    if (!(await startProductCheckout(product, league))) setLoading(false);
   };
 
   return (

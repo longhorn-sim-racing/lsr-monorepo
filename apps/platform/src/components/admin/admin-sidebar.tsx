@@ -18,6 +18,9 @@ import {
   Bell,
   IdCard,
   Timer,
+  Flag,
+  CreditCard,
+  Package,
 } from "lucide-react";
 
 const pinnedItems = [
@@ -30,9 +33,12 @@ const navItems = [
   { title: "Events", href: "/admin/events", icon: Calendar },
   { title: "Gallery", href: "/admin/gallery", icon: ImageIcon },
   { title: "Hotlap", href: "/admin/hotlap", icon: Timer },
+  { title: "LSC Entrants", href: "/admin/league-entries", icon: Flag },
   { title: "Misc. Tools", href: "/admin/tools", icon: Wrench },
   { title: "News", href: "/admin/news", icon: Newspaper },
   { title: "Notifications", href: "/admin/notifications", icon: Bell },
+  { title: "Payments", href: "/admin/payments", icon: CreditCard },
+  { title: "Products", href: "/admin/products", icon: Package },
   { title: "Results", href: "/admin/results", icon: FileSpreadsheet },
   { title: "Seasons", href: "/admin/seasons", icon: Trophy },
   { title: "Series", href: "/admin/series", icon: LayoutDashboard },

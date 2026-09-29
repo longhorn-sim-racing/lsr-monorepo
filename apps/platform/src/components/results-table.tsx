@@ -6,10 +6,11 @@ import { UserIcon, ArrowUpDown, ArrowUp, ArrowDown, Maximize2, Minimize2, Search
 import Link from "next/link";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { RacingNumber, type RacingNumberStyle } from "@/components/racing-number";
 
 type ResultWithParticipant = RaceResult & {
   participant: RaceParticipant & {
-    user: User | null;
+    user: (Pick<User, "id" | "handle" | "displayName" | "avatarUrl"> & RacingNumberStyle) | null;
     carMapping: CarMapping | null;
   };
 };
@@ -157,7 +158,10 @@ export function ResultsTable({ results, title, showPoints = true, sessionType = 
                     {user.displayName.substring(0, 2).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
-                <span className="font-sans font-bold text-sm text-white truncate">{user.displayName}</span>
+                <span className="flex items-baseline gap-1.5 min-w-0">
+                  <span className="font-sans font-bold text-sm text-white truncate">{user.displayName}</span>
+                  <RacingNumber user={user} size="xs" className="shrink-0" />
+                </span>
               </Link>
             ) : (
               <div className="flex items-center gap-2 min-w-0">
@@ -283,8 +287,11 @@ export function ResultsTable({ results, title, showPoints = true, sessionType = 
                                 {user.displayName.substring(0, 2).toUpperCase()}
                                 </AvatarFallback>
                             </Avatar>
-                            <span className="font-sans font-bold text-white group-hover:text-lsr-orange transition-colors">
-                                {user.displayName}
+                            <span className="flex items-baseline gap-2">
+                                <span className="font-sans font-bold text-white group-hover:text-lsr-orange transition-colors">
+                                    {user.displayName}
+                                </span>
+                                <RacingNumber user={user} size="xs" />
                             </span>
                             </Link>
                         </>

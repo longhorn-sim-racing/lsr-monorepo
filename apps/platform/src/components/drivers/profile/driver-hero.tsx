@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/tooltip";
 import { StatusBadges } from "@/components/status-indicators";
 import { getStatusIndicators, getActiveTierKey } from "@/lib/status-indicators";
+import { RacingNumber } from "@/components/racing-number";
 
 type DriverHeroProps = {
   user: User & {
@@ -99,9 +100,12 @@ export function DriverHero({ user, isOwner, totalRegistrations }: DriverHeroProp
               )}
             </div>
 
-            <h1 className="font-display font-black italic text-3xl sm:text-4xl md:text-7xl text-white uppercase tracking-normal leading-[0.9] md:leading-[0.85] mb-1 md:mb-2 break-words">
-              {user.displayName}
-            </h1>
+            <div className="flex flex-wrap items-baseline gap-x-3 md:gap-x-5 gap-y-1 mb-1 md:mb-2">
+              <RacingNumber user={user} size="xl" />
+              <h1 className="font-display font-black italic text-3xl sm:text-4xl md:text-7xl text-white uppercase tracking-normal leading-[0.9] md:leading-[0.85] min-w-0 break-words">
+                {user.displayName}
+              </h1>
+            </div>
             <p className="font-mono text-lsr-orange text-xs md:text-base tracking-widest truncate">@{user.handle}</p>
 
             {/* Desktop Badges + Membership Info */}

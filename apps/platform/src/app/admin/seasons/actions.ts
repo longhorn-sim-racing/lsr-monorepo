@@ -6,15 +6,19 @@ import { revalidatePath } from "next/cache";
 import { revalidateDriverList, revalidateSeriesPages } from "@/server/cache/revalidate-public";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { fromZonedTime } from "date-fns-tz";
 import { createAuditLog } from "@/server/audit/log";
 
+// Season dates are Central-time days; the end date runs to the end of that day so a
+// season (and league entry into it) doesn't close the morning of its last race.
 const seasonSchema = z.object({
   name: z.string().min(1),
   slug: z.string().min(1),
   year: z.coerce.number().int().min(2000),
   seriesId: z.string().optional(),
-  startAt: z.string().optional().transform(val => val ? new Date(val) : null),
-  endAt: z.string().optional().transform(val => val ? new Date(val) : null),
+  leagueId: z.string().optional(),
+  startAt: z.string().optional().transform(val => val ? fromZonedTime(`${val}T00:00:00`, "America/Chicago") : null),
+  endAt: z.string().optional().transform(val => val ? fromZonedTime(`${val}T23:59:59.999`, "America/Chicago") : null),
   pointsRule: z.string().optional(),
 });
 
@@ -26,6 +30,7 @@ export async function createSeason(formData: FormData) {
       slug: formData.get("slug"),
       year: formData.get("year"),
       seriesId: formData.get("seriesId") || undefined,
+      leagueId: formData.get("leagueId") || undefined,
       startAt: formData.get("startAt"),
       endAt: formData.get("endAt"),
       pointsRule: formData.get("pointsRule"),
@@ -40,7 +45,7 @@ export async function createSeason(formData: FormData) {
       startAt: data.startAt,
       endAt: data.endAt,
       pointsRule: data.pointsRule ? { system: data.pointsRule } : undefined,
-      leagueId: null,
+      leagueId: data.leagueId ?? null,
     },
   });
 
@@ -66,6 +71,7 @@ export async function updateSeason(id: string, formData: FormData) {
         slug: formData.get("slug"),
         year: formData.get("year"),
         seriesId: formData.get("seriesId") || undefined,
+        leagueId: formData.get("leagueId") || undefined,
         startAt: formData.get("startAt"),
         endAt: formData.get("endAt"),
         pointsRule: formData.get("pointsRule"),
@@ -80,6 +86,7 @@ export async function updateSeason(id: string, formData: FormData) {
             slug: data.slug,
             year: data.year,
             seriesId: data.seriesId,
+            leagueId: data.leagueId ?? null,
             startAt: data.startAt,
             endAt: data.endAt,
             pointsRule: data.pointsRule ? { system: data.pointsRule } : undefined,

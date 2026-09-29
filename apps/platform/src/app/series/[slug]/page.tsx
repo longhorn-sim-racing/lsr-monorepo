@@ -14,6 +14,7 @@ import { getStandings } from "@/server/queries/standings";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Metadata } from "next";
 import { DatabaseUnavailable } from "@/components/database-unavailable";
+import { RacingNumber, type RacingNumberStyle } from "@/components/racing-number";
 
 export const revalidate = 3600;
 
@@ -242,10 +243,15 @@ export default async function SeriesPage({ params }: SeriesPageArgs) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5 font-sans text-white/80">
-                        {standings.map((standing: { driver: { id: string, name: string }, car: string | undefined, starts: number, wins: number, podiums: number, points: number }, index) => (
+                        {standings.map((standing: { driver: { id: string, name: string } & RacingNumberStyle, car: string | undefined, starts: number, wins: number, podiums: number, points: number }, index) => (
                           <tr key={standing.driver.id} className="hover:bg-white/[0.02]">
                             <td className="p-4 font-bold text-white">{index + 1}</td>
-                            <td className="p-4 font-bold text-white uppercase tracking-tight">{standing.driver.name}</td>
+                            <td className="p-4">
+                              <span className="flex items-baseline gap-2">
+                                <span className="font-bold text-white uppercase tracking-tight">{standing.driver.name}</span>
+                                <RacingNumber user={standing.driver} size="xs" />
+                              </span>
+                            </td>
                             <td className="p-4 text-xs text-white/50 uppercase">{standing.car}</td>
                             <td className="p-4 text-center text-white/50">{standing.starts}</td>
                             <td className="p-4 text-center text-white/50">{standing.wins}</td>

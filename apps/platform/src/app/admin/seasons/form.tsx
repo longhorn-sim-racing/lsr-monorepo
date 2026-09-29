@@ -7,6 +7,7 @@ import { createSeason, updateSeason, recomputeStandings } from "./actions";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { Season, EventSeries } from "@prisma/client";
+import { formatInTimeZone } from "date-fns-tz";
 
 function SubmitButton({ isEditing }: { isEditing: boolean }) {
   const { pending } = useFormStatus();
@@ -19,20 +20,22 @@ function SubmitButton({ isEditing }: { isEditing: boolean }) {
 
 export function SeasonForm({ 
     initialData,
-    seriesList 
-}: { 
+    seriesList,
+    leagues,
+}: {
     initialData?: Season | null,
-    seriesList: EventSeries[]
+    seriesList: EventSeries[],
+    leagues: { id: string; name: string }[]
 }) {
   const action = initialData ? updateSeason.bind(null, initialData.id) : createSeason;
   
   // Helper to safely access nested JSON or property
   const defaultPointsRule = (initialData?.pointsRule as any)?.system || "F1";
 
-  // Helper for date input format YYYY-MM-DD
+  // Helper for date input format YYYY-MM-DD (season dates are Central time)
   const formatDate = (date: Date | null | undefined) => {
       if (!date) return "";
-      return new Date(date).toISOString().split('T')[0];
+      return formatInTimeZone(new Date(date), "America/Chicago", "yyyy-MM-dd");
   }
   
   const handleRecompute = async () => {
@@ -98,6 +101,26 @@ export function SeasonForm({
                     ))}
                 </select>
             </div>
+        </div>
+
+        <div className="space-y-2">
+            <Label htmlFor="leagueId">League</Label>
+            <select
+                id="leagueId"
+                name="leagueId"
+                defaultValue={initialData?.leagueId || ""}
+                className="flex h-10 w-full rounded-md border border-input bg-black/20 px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+                <option value="">-- No league --</option>
+                {leagues.map((l) => (
+                <option key={l.id} value={l.id}>
+                    {l.name}
+                </option>
+                ))}
+            </select>
+            <p className="text-xs text-white/40">
+                Link league seasons so the league page shows them and its entry fee buys the next one that hasn&apos;t ended.
+            </p>
         </div>
 
         <div className="grid grid-cols-2 gap-4">

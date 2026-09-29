@@ -17,7 +17,8 @@ import { DatabaseUnavailable } from "@/components/database-unavailable";
 import { ChampionshipChart } from "@/components/championship-chart";
 import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { getActiveEntitlements } from "@/server/repos/membership.repo";
-import { priceForUser, type ProductPrice } from "@/server/services/product-pricing";
+import { priceForUser, productRequiresMembership } from "@/server/services/product-pricing";
+import { getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
 import { ProductCheckoutButton, ProductPaymentToast } from "@/components/product-checkout-button";
 import { Button } from "@/components/ui/button";
 
@@ -62,30 +63,76 @@ async function getSeriesWithPodiums(slug: string) {
   });
 }
 
-export default async function LoneStarCupPage() {
-  let currentSeries, currentStandings, s1Series, s1Standings, currentProgression, session, league, entryProduct;
-  let entitlements: Awaited<ReturnType<typeof getActiveEntitlements>> = [];
-  let entryPrice: ProductPrice | null = null;
-  try {
-    [currentSeries, currentStandings, s1Series, s1Standings, currentProgression, session, league, entryProduct] = await Promise.all([
-      getSeriesWithPodiums("lone-star-cup-s2"),
-      getStandings("lone-star-cup-s2"),
-      getSeriesWithPodiums("lone-star-cup-s1"),
-      getStandings("lone-star-cup-s1"),
-      getPointsProgression("lone-star-cup-s2"),
-      getCachedSessionUser(),
-      prisma.league.findUnique({ where: { slug: "lone-star-cup" }, select: { id: true } }),
-      prisma.product.findFirst({
-        where: { type: "LEAGUE_FEE", league: { slug: "lone-star-cup" }, active: true },
-      }),
+const LEAGUE_SLUG = "lone-star-cup";
+
+// Season-specific overview copy, keyed by season slug.
+const SEASON_BLURBS: Record<string, string> = {
+  "lone-star-cup-s3":
+    "Season 3 runs ten rounds on Saturdays at 10am, September 19 through November 21, in the Mustang GT4 with mandatory pit stops. Round 7 is a Halloween night race at Mount Panorama. Your entry fee covers both the Lone Star Cup and the Formula Sunday League.",
+};
+
+/** "Lone Star Cup | Season 3" → "Season 3" */
+const seasonLabel = (name: string) => name.split("|").pop()!.trim();
+
+async function loadLoneStarCup() {
+  const [session, league] = await Promise.all([
+    getCachedSessionUser(),
+    prisma.league.findUnique({ where: { slug: LEAGUE_SLUG }, select: { id: true } }),
+  ]);
+  // The newest season is current; the rest make up the archive.
+  const seasons = league
+    ? await prisma.season.findMany({
+        where: { leagueId: league.id, visibility: "public", seriesId: { not: null } },
+        include: { series: { select: { slug: true } } },
+        orderBy: [{ startAt: { sort: "desc", nulls: "last" } }, { year: "desc" }],
+      })
+    : [];
+  const [currentSeason, ...pastSeasons] = seasons;
+
+  const [currentSeries, currentStandings, currentProgression, archive, entryProduct, openSeason, entitlements] =
+    await Promise.all([
+      currentSeason ? getSeriesWithPodiums(currentSeason.series!.slug) : null,
+      currentSeason ? getStandings(currentSeason.series!.slug) : [],
+      currentSeason ? getPointsProgression(currentSeason.slug) : null,
+      Promise.all(
+        pastSeasons.map(async (s) => ({
+          id: s.id,
+          label: seasonLabel(s.name),
+          series: await getSeriesWithPodiums(s.series!.slug),
+          standings: await getStandings(s.series!.slug),
+        }))
+      ),
+      prisma.product.findFirst({ where: { type: "LEAGUE_FEE", league: { slug: LEAGUE_SLUG }, active: true } }),
+      league ? getOpenLeagueSeason(league.id) : null,
+      session.user ? getActiveEntitlements(session.user.id) : [],
     ]);
-    if (session.user) {
-      entitlements = await getActiveEntitlements(session.user.id);
-    }
-    if (entryProduct) {
-      // Returning drivers (in a past season's standings) see their lower rate.
-      entryPrice = await priceForUser(entryProduct, session.user?.id ?? null);
-    }
+
+  // Returning drivers (in a past season's standings) see their lower rate.
+  const [entryPrice, application] = await Promise.all([
+    entryProduct ? priceForUser(entryProduct, session.user?.id ?? null) : null,
+    session.user && openSeason ? getLeagueApplication(session.user.id, openSeason.id) : null,
+  ]);
+
+  return {
+    session,
+    league,
+    currentSeason,
+    currentSeries,
+    currentStandings,
+    currentProgression,
+    archivedSeasons: archive.filter((s) => s.series),
+    entryProduct,
+    entryPrice,
+    openSeason,
+    entitlements,
+    application,
+  };
+}
+
+export default async function LoneStarCupPage() {
+  let data: Awaited<ReturnType<typeof loadLoneStarCup>>;
+  try {
+    data = await loadLoneStarCup();
   } catch (error) {
     console.error('[LoneStarCup] Failed to load series data:', error);
     return (
@@ -103,26 +150,35 @@ export default async function LoneStarCupPage() {
     );
   }
 
+  const {
+    session,
+    league,
+    currentSeason,
+    currentSeries,
+    currentStandings,
+    currentProgression,
+    archivedSeasons,
+    entryProduct,
+    entryPrice,
+    openSeason,
+    entitlements,
+    application,
+  } = data;
+
   // We only strictly require the current series to exist for the page to render meaningfully
-  if (!currentSeries) {
+  if (!currentSeason || !currentSeries) {
     return notFound();
   }
 
-  // Pending #82: the current plan requires paid dues before league entry.
-  const needsMembership = !!session.user && !entitlements.some((entitlement) => entitlement.kind === "lsr_member");
+  const needsMembership =
+    !!entryProduct &&
+    productRequiresMembership(entryProduct) &&
+    !entitlements.some((entitlement) => entitlement.kind === "lsr_member");
   const isEntered = !!league && entitlements.some(
     (entitlement) => entitlement.kind === "league_access" && entitlement.leagueId === league.id,
   );
-
-  // Archive structure for extensibility
-  const archivedSeasons = [
-    { 
-      id: "s1", 
-      label: "Season 1", 
-      series: s1Series, 
-      standings: s1Standings 
-    }
-  ].filter(s => s.series);
+  const currentLabel = seasonLabel(currentSeason.name);
+  const priceText = entryPrice ? `$${(entryPrice.amountCents / 100).toFixed(2)}` : "";
 
   // Logic for Next/Previous Round
   const now = new Date();
@@ -156,12 +212,15 @@ export default async function LoneStarCupPage() {
           </div>
           <div className="w-full sm:w-auto">
             {isEntered ? (
-              <p className="font-sans text-sm font-bold text-lsr-orange">You&apos;re entered</p>
-            ) : !entryProduct || !entryPrice ? (
+              <div className="flex flex-col gap-1 sm:items-end">
+                <p className="font-sans text-sm font-bold text-lsr-orange">You&apos;re entered</p>
+                <p className="font-sans text-xs text-white/50">The comp team will give you the LSC role on Discord.</p>
+              </div>
+            ) : !openSeason || !entryProduct || !entryPrice ? (
               <p className="font-sans text-sm text-white/60">Entry is currently unavailable.</p>
             ) : !session.user ? (
               <Button asChild className="h-12 rounded-none bg-lsr-orange px-6 font-sans text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-white hover:text-lsr-charcoal">
-                <Link href="/auth/signin?next=/lone-star-cup">Sign in to enter</Link>
+                <Link href="/auth/signin?next=/lone-star-cup/enter">Sign in to enter</Link>
               </Button>
             ) : needsMembership ? (
               <Button asChild className="h-12 rounded-none bg-lsr-orange px-6 font-sans text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-white hover:text-lsr-charcoal">
@@ -169,7 +228,18 @@ export default async function LoneStarCupPage() {
               </Button>
             ) : (
               <div className="flex flex-col gap-2 sm:items-end">
-                <ProductCheckoutButton product="LEAGUE_FEE" league="lone-star-cup" label="Enter the Lone Star Cup" priceCents={entryPrice.amountCents} />
+                {application ? (
+                  <>
+                    <ProductCheckoutButton product="LEAGUE_FEE" league="lone-star-cup" label="Pay entry fee" priceCents={entryPrice.amountCents} />
+                    <Link href="/lone-star-cup/enter" className="font-sans text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 transition-colors hover:text-lsr-orange">
+                      Edit entry form
+                    </Link>
+                  </>
+                ) : (
+                  <Button asChild className="h-auto min-h-12 rounded-none bg-lsr-orange px-6 py-3 font-sans text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-white hover:text-lsr-charcoal">
+                    <Link href="/lone-star-cup/enter">Enter the Lone Star Cup — {priceText}</Link>
+                  </Button>
+                )}
                 {entryPrice.returningAmountCents !== null && (
                   <p className="font-sans text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
                     {entryPrice.tier === "returning"
@@ -177,6 +247,12 @@ export default async function LoneStarCupPage() {
                       : `Returning drivers pay $${(entryPrice.returningAmountCents / 100).toFixed(2)}`}
                   </p>
                 )}
+                <p className="font-sans text-[10px] text-white/40">
+                  Payment issues or refunds:{" "}
+                  <a href="mailto:info@longhornsimracing.org" className="text-white/60 transition-colors hover:text-lsr-orange">
+                    info@longhornsimracing.org
+                  </a>
+                </p>
               </div>
             )}
           </div>
@@ -196,20 +272,22 @@ export default async function LoneStarCupPage() {
                 <p>
                   The Lone Star Cup, not only an introduction to the competitive world of Sim Racing but also a platform to show your skills. This league brings together members of all experience levels, from season veterans to those taking their first turns on a track. Participation in this league involves an entry fee and is meant to help build a community built on sportsmanship and shared passion for the art of racing. You will go head to head in an environment that is built on encouragement and willingness to help newcomers.
                 </p>
-                <p>&nbsp;</p>
-                <p>
-                  This season we will take you around 10 tracks, with the final racing being at the Nurburgring or for many The Green Hell. This season we are doing something new with a "Mystery Race" where the track won't be revealed until the DAY OF the race (4/04). Good luck and happy racing.
-                </p>
+                {SEASON_BLURBS[currentSeason.slug] && (
+                  <>
+                    <p>&nbsp;</p>
+                    <p>{SEASON_BLURBS[currentSeason.slug]}</p>
+                  </>
+                )}
               </div>
             </section>
 
             <Tabs defaultValue="current" className="w-full">
               <TabsList className="w-full justify-start bg-transparent border-b border-white/10 rounded-none h-auto p-0 gap-8">
-                <TabsTrigger value="current" className="rounded-none border-b-2 border-transparent data-[state=active]:border-lsr-orange data-[state=active]:bg-transparent data-[state=active]:text-lsr-orange font-sans font-bold uppercase tracking-widest text-xs px-0 py-4 transition-all">Current Season (S2)</TabsTrigger>
+                <TabsTrigger value="current" className="rounded-none border-b-2 border-transparent data-[state=active]:border-lsr-orange data-[state=active]:bg-transparent data-[state=active]:text-lsr-orange font-sans font-bold uppercase tracking-widest text-xs px-0 py-4 transition-all">Current Season ({currentLabel})</TabsTrigger>
                 <TabsTrigger value="history" className="rounded-none border-b-2 border-transparent data-[state=active]:border-lsr-orange data-[state=active]:bg-transparent data-[state=active]:text-lsr-orange font-sans font-bold uppercase tracking-widest text-xs px-0 py-4 transition-all">Archive</TabsTrigger>
               </TabsList>
               
-              {/* CURRENT SEASON (S2) */}
+              {/* CURRENT SEASON */}
               <TabsContent value="current" className="pt-8 outline-none">
                 <div className="bg-white/[0.02] border border-white/10 p-6 md:p-8 space-y-12">
                     {/* Dashboard / Next Round */}
@@ -510,9 +588,34 @@ export default async function LoneStarCupPage() {
               </div>
             </section>
 
-            <div className="border border-white/10 p-1 bg-white/[0.02]">
-              <Image src="/images/LSCSchedule26.png" alt="LSC Calendar" width={1200} height={800} className="w-full h-auto opacity-80" />
-            </div>
+            {currentSeries.events.length > 0 && (
+              <section>
+                <h3 className="font-display font-black italic text-2xl text-white uppercase tracking-normal mb-6 border-b border-white/10 pb-4">
+                  {currentLabel} <span className="text-lsr-orange">Schedule</span>
+                </h3>
+                <ol className="space-y-2">
+                  {currentSeries.events.map((event, i) => {
+                    const done = new Date(event.startsAtUtc) < new Date();
+                    return (
+                      <li key={event.id}>
+                        <Link
+                          href={`/events/${event.slug}`}
+                          className={`flex items-baseline gap-3 border border-white/10 bg-black/20 px-3 py-2 transition-colors hover:border-lsr-orange/50 ${done ? "opacity-50" : ""}`}
+                        >
+                          <span className="w-5 font-mono text-[10px] text-white/40">{i + 1}</span>
+                          <span className="flex-1 truncate font-sans text-xs font-bold uppercase tracking-tight text-white">
+                            {event.title.includes("@") ? event.title.split("@").pop()!.trim() : event.title}
+                          </span>
+                          <span className="font-mono text-[10px] text-lsr-orange">
+                            {new Date(event.startsAtUtc).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Chicago" })}
+                          </span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </section>
+            )}
 
             {currentProgression && (
               <ChampionshipChart progression={currentProgression} />

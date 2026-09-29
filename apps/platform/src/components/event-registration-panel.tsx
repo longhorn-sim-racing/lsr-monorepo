@@ -8,8 +8,9 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { RacingNumber, type RacingNumberStyle } from "@/components/racing-number";
 
-type Attendee = {
+type Attendee = RacingNumberStyle & {
   displayName: string;
   avatarUrl: string | null;
   profileLink: string;
@@ -258,6 +259,7 @@ export function EventRegistrationPanel({ eventSlug, userLoggedIn }: { eventSlug:
                         <span className="text-xs font-bold text-white/70 group-hover:text-white transition-colors truncate">
                             {attendee.displayName}
                         </span>
+                        <RacingNumber user={attendee} size="xs" className="text-xs shrink-0" />
                     </Link>
                 ))}
             </div>
