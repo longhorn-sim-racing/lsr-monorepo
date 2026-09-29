@@ -44,6 +44,21 @@ if (!(process.env.STRIPE_SECRET_KEY ?? "").startsWith("sk_test_")) {
   );
   process.exit(1);
 }
+// This script writes throwaway rows; never let an env file point it at a shared database.
+const dbHost = (() => {
+  try {
+    return new URL(process.env.DATABASE_URL ?? "").hostname;
+  } catch {
+    return "";
+  }
+})();
+if (!["127.0.0.1", "localhost"].includes(dbHost)) {
+  console.error(
+    `Refusing to run: DATABASE_URL points at "${dbHost || "nothing"}", not a local database. ` +
+      "Pass DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres in the environment."
+  );
+  process.exit(1);
+}
 // The webhook secret only has to match what we sign with below.
 process.env.STRIPE_WEBHOOK_SECRET = `whsec_smoke_${Date.now()}`;
 process.env.NEXT_PUBLIC_SITE_URL ??= "http://localhost:3000";

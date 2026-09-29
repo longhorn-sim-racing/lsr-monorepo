@@ -31,7 +31,7 @@ Anything that fails here is a blocker for the merge, not a follow-up.
 `apps/platform/scripts/payments-smoke.ts` drives the service layer directly: real Stripe **test-mode** Checkout Sessions, then signed `checkout.session.completed` / `charge.refunded` / `checkout.session.expired` events fed into `handleStripeWebhook()`, asserting every row the checklist expects. It refuses to run against a live key.
 
 ```
-STRIPE_TEST_SECRET_KEY=sk_test_… pnpm --filter @lsr/platform exec tsx scripts/payments-smoke.ts
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres STRIPE_TEST_SECRET_KEY=sk_test_… pnpm --filter @lsr/platform exec tsx scripts/payments-smoke.ts
 ```
 
 Run it first; it takes about ten seconds. Steps 9–10 and the page states still need the browser.
@@ -41,5 +41,5 @@ Run it first; it takes about ten seconds. Steps 9–10 and the page states still
 `apps/platform/scripts/payments-webhook-check.ts` replays the cases from the #95 review against the local database: duplicate and concurrent deliveries, redelivery after a refund, unpaid and delayed payments, refunds after a later membership change, never shortening a membership, and sessions we didn't create. No Stripe key or network needed.
 
 ```
-pnpm --filter @lsr/platform exec tsx scripts/payments-webhook-check.ts
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres pnpm --filter @lsr/platform exec tsx scripts/payments-webhook-check.ts
 ```
