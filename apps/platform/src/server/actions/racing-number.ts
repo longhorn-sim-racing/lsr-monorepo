@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { requireUser } from "@/server/auth/guards";
 import { revalidatePath } from "next/cache";
@@ -42,8 +43,9 @@ export async function setRacingNumberAction(input: z.infer<typeof schema>) {
         racingNumberBorder: parsed.data.racingNumberBorder,
       },
     });
-  } catch (error: any) {
-    if (error.code === "P2002") {
+  } catch (error) {
+    // Unique constraint: someone claimed the number between the check above and this write.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       throw new Error("This racing number is already reserved by another driver.");
     }
     throw error;

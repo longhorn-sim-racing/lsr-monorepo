@@ -11,6 +11,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { setRacingNumberAction } from "@/server/actions/racing-number";
 import { toast } from "sonner";
 
+/** A driver's racing number and how it's styled; any User row satisfies it. */
+export type RacingNumberStyle = {
+  racingNumber?: number | null;
+  racingNumberColor?: string | null;
+  racingNumberFont?: string | null;
+  racingNumberItalic?: boolean | null;
+  racingNumberBorder?: boolean | null;
+};
+
 export function RacingNumberDialog({
   open,
   setOpen,
@@ -20,13 +29,7 @@ export function RacingNumberDialog({
 }: {
   open: boolean;
   setOpen: (open: boolean) => void;
-  initialData?: {
-    racingNumber?: number | null;
-    racingNumberColor?: string | null;
-    racingNumberFont?: string | null;
-    racingNumberItalic?: boolean | null;
-    racingNumberBorder?: boolean | null;
-  };
+  initialData?: RacingNumberStyle;
   isUpdateMode?: boolean;
   onSuccess?: () => void;
 }) {
@@ -77,8 +80,8 @@ export function RacingNumberDialog({
       setOpen(false);
       if (onSuccess) onSuccess();
       router.refresh();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to save number. It might be taken.");
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to save number. It might be taken.");
     } finally {
       setLoading(false);
     }
@@ -242,7 +245,7 @@ export function RacingNumberPrompt({
   return <RacingNumberDialog open={open} setOpen={setOpen} isUpdateMode={false} />;
 }
 
-export function UpdateRacingNumberButton({ user }: { user: any }) {
+export function UpdateRacingNumberButton({ user }: { user: RacingNumberStyle }) {
   const [open, setOpen] = useState(false);
 
   return (
