@@ -24,8 +24,14 @@ export function PageForm({ id, initial }: { id: string | null; initial: PageInpu
 
   async function save(visibility = form.visibility) {
     setSaving(true);
-    const result = await savePage(id, { ...form, visibility });
-    setSaving(false);
+    let result: Awaited<ReturnType<typeof savePage>>;
+    try {
+      result = await savePage(id, { ...form, visibility });
+    } catch {
+      result = { ok: false, error: "Couldn't reach the server. Your text is still here; try again." };
+    } finally {
+      setSaving(false);
+    }
     if (!result.ok) return toast.error(result.error);
     setForm((f) => ({ ...f, visibility }));
     toast.success(visibility === "public" && form.visibility !== "public" ? "Published" : "Saved");
@@ -62,7 +68,13 @@ export function PageForm({ id, initial }: { id: string | null; initial: PageInpu
         </div>
         <div className="space-y-1">
           <label className={labelClass} htmlFor="page-slug">Slug</label>
-          <input id="page-slug" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} className={fieldClass} />
+          <input
+            id="page-slug"
+            value={form.slug}
+            onChange={(e) => setForm({ ...form, slug: e.target.value })}
+            readOnly={!!id && !!PUBLIC_PATHS[initial.slug]}
+            className={`${fieldClass} read-only:opacity-60`}
+          />
           <p className="text-[11px] text-white/30">{publicPath ? `Shown at ${publicPath}` : "Not shown anywhere on the site yet."}</p>
         </div>
       </div>

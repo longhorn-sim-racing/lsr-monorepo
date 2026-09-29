@@ -26,6 +26,7 @@ const DRAFT = `# Lone Star Cup Rules
 _Season 3 · Fall 2026_
 
 > **Draft for the comp team. Settle these, then delete this box and publish:**
+> - **Which version is current?** This follows the "LSC Schedule 2026 Fall" Google Doc (edited 9/14). An older PDF copy on SharePoint (8/23) says 45/15/45-minute sessions and already allows wing angle.
 > - **Setup:** the general notes say only ABS, TC and brake bias can change, but Section 0 also allows the wing level. Which is it?
 > - **Pit stops:** are they mandatory? The notes say "I would like mandatory pitstops."
 > - **Damage:** the notes say "lightly enabled (if possible, if not just enabled)." What's the final setting?
@@ -71,7 +72,7 @@ If you're found changing any other part of the setup, you'll get a warning and m
 
 ## Incidents and penalties
 
-- Report incidents in the incident reporting channel on Discord.
+- Report incidents in the incident reporting channel.
 - Race control gives warnings and penalties as it sees fit.
 - If you spot a problem with a track or the track UI, tell the comp team and they'll fix it as soon as they can.
 

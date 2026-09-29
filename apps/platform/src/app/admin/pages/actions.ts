@@ -6,6 +6,9 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { requireOfficer } from "@/server/auth/guards";
 import { createAuditLog } from "@/server/audit/log";
+import { LSC_RULES_SLUG } from "@/lib/page-slugs";
+
+const LOCKED_SLUGS = [LSC_RULES_SLUG];
 
 const pageSchema = z.object({
   title: z.string().trim().min(1, "Give the page a title.").max(200),
@@ -24,13 +27,22 @@ export type PageInput = z.infer<typeof pageSchema>;
 type Result = { ok: true; id: string } | { ok: false; error: string };
 
 export async function savePage(id: string | null, input: PageInput): Promise<Result> {
-  const user = await requireOfficer();
+  let user;
+  try {
+    user = await requireOfficer();
+  } catch {
+    return { ok: false, error: "You're signed out or no longer an officer. Copy your text, sign in again, and retry." };
+  }
   const parsed = pageSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form." };
 
   try {
     const before = id ? await prisma.page.findUnique({ where: { id } }) : null;
     if (id && !before) return { ok: false, error: "Page not found." };
+    // The site links to these by slug; renaming one would silently break the page and its links.
+    if (before && LOCKED_SLUGS.includes(before.slug) && parsed.data.slug !== before.slug) {
+      return { ok: false, error: `The slug "${before.slug}" is used by the site and can't be changed.` };
+    }
 
     const page = id
       ? await prisma.page.update({ where: { id }, data: { ...parsed.data, authorId: user.id } })

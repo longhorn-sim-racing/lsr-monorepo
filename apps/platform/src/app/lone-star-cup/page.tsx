@@ -19,7 +19,7 @@ import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { getActiveEntitlements } from "@/server/repos/membership.repo";
 import { priceForUser, productRequiresMembership } from "@/server/services/product-pricing";
 import { getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
-import { LSC_RULES_SLUG } from "@/lib/pages";
+import { LSC_RULES_SLUG } from "@/lib/page-slugs";
 import { ProductCheckoutButton, ProductPaymentToast } from "@/components/product-checkout-button";
 import { Button } from "@/components/ui/button";
 
@@ -69,7 +69,7 @@ const LEAGUE_SLUG = "lone-star-cup";
 // Season-specific overview copy, keyed by season slug.
 const SEASON_BLURBS: Record<string, string> = {
   "lone-star-cup-s3":
-    "Season 3 runs ten rounds on Saturdays at 10am, September 19 through November 21, in the Mustang GT4 with mandatory pit stops. Round 7 is a Halloween night race at Mount Panorama. Your entry fee covers both the Lone Star Cup and the Formula Sunday League.",
+    "Season 3 runs ten rounds on Saturdays at 10am, September 19 through November 21, in the Mustang GT4. Round 7 is a Halloween night race at Mount Panorama. Your entry fee covers both the Lone Star Cup and the Formula Sunday League.",
 };
 
 /** "Lone Star Cup | Season 3" → "Season 3" */
@@ -107,12 +107,12 @@ async function loadLoneStarCup() {
       league ? getOpenLeagueSeason(league.id) : null,
       session.user ? getActiveEntitlements(session.user.id) : [],
     ]);
-  const rulesPage = await prisma.page.findUnique({ where: { slug: LSC_RULES_SLUG }, select: { visibility: true } });
 
   // Returning drivers (in a past season's standings) see their lower rate.
-  const [entryPrice, application] = await Promise.all([
+  const [entryPrice, application, rulesPage] = await Promise.all([
     entryProduct ? priceForUser(entryProduct, session.user?.id ?? null) : null,
     session.user && openSeason ? getLeagueApplication(session.user.id, openSeason.id) : null,
+    prisma.page.findUnique({ where: { slug: LSC_RULES_SLUG }, select: { visibility: true } }),
   ]);
 
   return {
@@ -283,7 +283,6 @@ export default async function LoneStarCupPage() {
                 </p>
                 {SEASON_BLURBS[currentSeason.slug] && (
                   <>
-                    <p>&nbsp;</p>
                     <p>{SEASON_BLURBS[currentSeason.slug]}</p>
                   </>
                 )}

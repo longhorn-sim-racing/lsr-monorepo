@@ -7,7 +7,7 @@ import { getActiveEntitlements } from "@/server/repos/membership.repo";
 import { priceForUser, productRequiresMembership } from "@/server/services/product-pricing";
 import { getActiveLeagueEntry, getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
 import { LeagueEntryForm } from "@/components/league-entry-form";
-import { LSC_RULES_SLUG } from "@/lib/pages";
+import { LSC_RULES_SLUG } from "@/lib/page-slugs";
 import { UpdateRacingNumberButton } from "@/components/racing-number-prompt";
 import { Button } from "@/components/ui/button";
 

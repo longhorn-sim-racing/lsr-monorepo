@@ -3,8 +3,7 @@ import remarkGfm from "remark-gfm"
 import rehypeSlug from "rehype-slug"
 import { prisma } from "@/server/db"
 
-/** Content pages officers edit in /admin/pages (the LSC rules, for now). */
-export const LSC_RULES_SLUG = "lone-star-cup-rules"
+export { LSC_RULES_SLUG } from "@/lib/page-slugs"
 
 export async function getPageBySlug(slug: string) {
   return prisma.page.findUnique({ where: { slug } })
