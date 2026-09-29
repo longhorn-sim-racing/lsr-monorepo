@@ -107,6 +107,26 @@ enum EntitlementScope {
   lifetime
 }
 
+enum SimExperience {
+  NONE
+  CASUAL
+  SIM_RACER
+  COMPETITIVE
+}
+
+enum RacingEquipment {
+  WHEEL
+  PEDALS
+  CONTROLLER
+  KEYBOARD
+}
+
+enum LeagueApplicationSource {
+  SITE
+  ADMIN
+  GOOGLE_FORM
+}
+
 enum NotificationChannel {
   IN_APP
   EMAIL
@@ -164,6 +184,7 @@ model User {
   rawResultUploads       RawResultUpload[]
   driverIdentities       DriverIdentity[]
   raceParticipants       RaceParticipant[]
+  leagueApplications     LeagueApplication[]
 
   // Notification relations
   notifications          Notification[]
@@ -345,13 +366,38 @@ model Season {
   pointsRule Json?
   visibility Visibility @default(public)
 
-  league  League?  @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  series  EventSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
-  rounds  Round[]
-  entries Entry[]
+  league       League?             @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  series       EventSeries?        @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  rounds       Round[]
+  entries      Entry[]
+  applications LeagueApplication[]
 
   @@index([leagueId, year])
   @@index([seriesId])
+}
+
+// A driver's entry form for one league season (replaces the comp team's Google Form).
+// Whether they've paid lives on their league_access Entitlement, not here.
+model LeagueApplication {
+  id              String                  @id @default(uuid())
+  userId          String
+  seasonId        String
+  discordUsername String
+  experience      SimExperience
+  equipment       RacingEquipment[]
+  canCommit       Boolean
+  school          String? // null = UT Austin
+  notes           String?
+  source          LeagueApplicationSource @default(SITE)
+  createdById     String? // the admin who backfilled it, when source isn't SITE
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  season Season @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, seasonId])
+  @@index([seasonId])
 }
 
 model Round {
