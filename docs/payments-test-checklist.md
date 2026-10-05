@@ -14,12 +14,12 @@ handlers ignore them by design. Drive the real objects instead, as noted in step
 | # | Do | Expect |
 |---|---|---|
 | 1 | Fresh user → `/account` → **Pay dues** | Redirect to Stripe. `Payment` row is `pending` with `productId` set. |
-| 2 | Complete the payment | Back on `/account?payment=success`. After the webhook: `Payment` `succeeded`; `Entitlement` `lsr_member` valid to Jul 31; `UserMembership` `LSR_MEMBER` active; `AuditLog` `PAYMENT_SUCCEEDED`; in-app + email `DUES_CONFIRMED`; member badge shows. |
+| 2 | Complete the payment | Back on `/account?payment=success`. After the webhook: `Payment` `succeeded`; `Entitlement` `lsr_member` valid to Jul 31; `UserMembership` `LSR_MEMBER` active; `AuditLog` `PAYMENT_SUCCEEDED`; in-app + email `DUES_CONFIRMED`; `/account` shows the membership as active. |
 | 3 | Same user → **Pay dues** again | `400` "Your LSR membership is already active." |
 | 4 | New user → `/lone-star-cup` → **Enter** | Goes to `/lone-star-cup/enter`. Submitting the form saves a `LeagueApplication` for the open season, then opens Stripe. Calling `/api/checkout` for `LEAGUE_FEE` without a form → `400` "Fill out the entry form before paying." With **Require paid LSR dues** ticked on the product in `/admin/products`, a non-member sees **Membership required** instead. |
 | 5 | Complete the LSC payment | `Entitlement` `league_access` for `lone-star-cup` valid to the open `Season.endAt` (Dec 31 if none); `LEAGUE_REGISTERED` notification mentioning the Discord role; page shows **You're entered**; the driver shows as **Paid** in `/admin/league-entries`. |
-| 6 | Replay the completed event: `stripe events resend <evt_…>` | No new rows. Handler returns early on `status === "succeeded"`. |
-| 7 | Full refund of step 2's charge: `stripe refunds create --payment-intent <pi_…>` (or the dashboard) | `Payment` `refunded`; entitlement `validTo` = now; the dues `UserMembership` is expired (created) or restored to its previous `validTo` (extended); badge gone on next load; `AuditLog` lists the revoked entitlement id. |
+| 6 | Replay the completed event: `stripe events resend <evt_…>` | No new rows. The payment can only move from `pending` to `succeeded` once, so a replay grants nothing. |
+| 7 | Full refund of step 2's charge: `stripe refunds create --payment-intent <pi_…>` (or the dashboard) | `Payment` `refunded`; entitlement `validTo` = now; the dues `UserMembership` is expired (created) or restored to its previous `validTo` (extended); `/account` no longer shows it as active; `AuditLog` lists the revoked entitlement id. |
 | 8 | Start a checkout, don't pay, then `stripe checkout sessions expire <cs_…>` | `Payment` `failed`; `AuditLog` `PAYMENT_EXPIRED`. |
 | 9 | Paid event registration (existing flow) | Unchanged: `REGISTERED`, `REGISTRATION_CONFIRMED`, seat counted. |
 | 10 | Officer → `/admin/payments` | Rows from steps 2, 5, 7, 8 with the right status and a working Stripe link. |
