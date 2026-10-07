@@ -4,13 +4,12 @@ import { type CookieOptions, createServerClient } from '@supabase/ssr';
 import { prisma } from '@/server/db';
 import { slugify } from '@/lib/slug';
 import { revalidateDriverList } from '@/server/cache/revalidate-public';
+import { safeNextPath } from '@/lib/safe-redirect';
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
   const next = searchParams.get('next');
-
-  console.log('[Auth Callback] Params:', { code, next, url: request.url });
 
   if (!code) {
     return NextResponse.redirect(`${origin}/auth/auth-code-error?error=No code provided`);
@@ -97,9 +96,8 @@ export async function GET(request: Request) {
       revalidateDriverList();
     }
 
-    const next = searchParams.get('next');
-    const redirectUrl = next ? `${origin}${next}` : `${origin}/drivers/${result.user.handle}`;
-    return NextResponse.redirect(redirectUrl);
+    const redirectPath = safeNextPath(next, `/drivers/${result.user.handle}`);
+    return NextResponse.redirect(`${origin}${redirectPath}`);
 
   } catch (dbError) {
     console.error('[Auth Callback] A database error occurred:', dbError);

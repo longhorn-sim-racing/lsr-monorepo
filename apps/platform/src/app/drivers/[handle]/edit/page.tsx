@@ -33,7 +33,7 @@ export default async function EditDriverPage({
 
   const { user: sessionUser } = await getCachedSessionUser();
   if (!sessionUser) {
-    redirect('/login');
+    redirect(`/auth/signin?next=/drivers/${encodeURIComponent(handle)}/edit`);
   }
 
   if (sessionUser.id !== pageUser.id) {

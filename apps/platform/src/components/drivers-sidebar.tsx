@@ -5,7 +5,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Event, RaceResult, RaceParticipant, User, Round, Season, EventSeries } from "@prisma/client";
+import type { Event, RaceResult, RaceParticipant, Round, Season, EventSeries } from "@prisma/client";
+import type { PublicUser } from "@/lib/public-user";
 
 // Define a type that covers the specific data structure we fetch
 type SidebarEvent = Event & {
@@ -14,7 +15,7 @@ type SidebarEvent = Event & {
   ingestedSessions: {
     results: (RaceResult & {
       participant: RaceParticipant & {
-        user: User | null;
+        user: PublicUser | null;
       };
     })[];
   }[];

@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function AccountPage() {
   const { user } = await getCachedSessionUser();
-  if (!user) redirect('/login');
+  if (!user) redirect('/auth/signin?next=/account');
 
   const [notificationPrefs, entitlements, dues] = await Promise.all([
     prisma.notificationPreference.findUnique({ where: { userId: user.id } }),

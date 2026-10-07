@@ -22,6 +22,7 @@ import { getLeagueApplication, getOpenLeagueSeason } from "@/server/services/lea
 import { LSC_RULES_SLUG } from "@/lib/page-slugs";
 import { ProductCheckoutButton, ProductPaymentToast } from "@/components/product-checkout-button";
 import { Button } from "@/components/ui/button";
+import { publicUserSelect } from "@/lib/public-user";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +53,7 @@ async function getSeriesWithPodiums(slug: string) {
                 take: 3,
                 include: {
                   participant: {
-                    include: { user: true }
+                    include: { user: { select: publicUserSelect } }
                   }
                 }
               }
