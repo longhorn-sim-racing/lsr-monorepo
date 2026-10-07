@@ -2,7 +2,6 @@ import Link from "next/link"
 import SectionReveal from "./SectionReveal"
 import type { PublicUser } from "@/lib/public-user"
 import Image from "next/image"
-import { Trophy } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { RacingNumber } from "@/components/racing-number"
 

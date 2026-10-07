@@ -6,7 +6,7 @@ import { VariantSelector } from "./VariantSelector";
 import { AddToCartButton } from "./AddToCartButton";
 import { MobileStickyAddToCart } from "./MobileStickyAddToCart";
 import { AnimatedPrice } from "./Price";
-import { RecentlyViewed, useTrackProductView } from "./RecentlyViewed";
+import { useTrackProductView } from "./RecentlyViewed";
 import { SizeGuide } from "./SizeGuide";
 import { WishlistButton } from "./WishlistButton";
 import { cleanProductDescription, hasOnDemandBoilerplate, ON_DEMAND_TEXT } from "@/lib/product-content";

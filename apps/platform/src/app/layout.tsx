@@ -1,6 +1,5 @@
 import "./globals.css"
 import { Metadata, Viewport } from "next"
-import { ThemeProvider } from "@/components/theme-provider"
 import { Montserrat, Kanit } from "next/font/google"
 import { SiteHeader } from "@/components/site-header"
 import { Analytics } from "@vercel/analytics/react"
@@ -152,17 +151,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       type="application/ld+json"
       dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
     />
-    <ThemeProvider>
-      <CartProvider>
-        {/* <MaintenanceBanner /> */}
-        <LiveBanner />
-        <SiteHeader user={user} roles={roles} activeTierKey={activeTierKey} />
-        <main className="flex-1">{children}</main>
-        <SiteFooter />
-        <Toaster position="bottom-right" />
-        <RacingNumberPrompt userId={user?.id ?? null} hasRacingNumber={user?.racingNumber != null} />
-      </CartProvider>
-    </ThemeProvider>
+    <CartProvider>
+      {/* <MaintenanceBanner /> */}
+      <LiveBanner />
+      <SiteHeader user={user} roles={roles} activeTierKey={activeTierKey} />
+      <main className="flex-1">{children}</main>
+      <SiteFooter />
+      <Toaster position="bottom-right" />
+      <RacingNumberPrompt userId={user?.id ?? null} hasRacingNumber={user?.racingNumber != null} />
+    </CartProvider>
     <Analytics />
     <SpeedInsights />
     </body>

@@ -2,7 +2,7 @@
 
 import { ProductVariant } from "@/lib/shopify/types";
 import { useCart } from "@/lib/shopify/CartContext";
-import { Loader2, Trash2, Plus, Minus, ShoppingBag } from "lucide-react";
+import { Loader2, Trash2, Plus, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 

@@ -34,12 +34,3 @@ export function addRecentlyViewed(product: RecentProduct): void {
     // Ignore storage errors
   }
 }
-
-export function clearRecentlyViewed(): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Ignore storage errors
-  }
-}

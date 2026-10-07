@@ -9,13 +9,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { updateImageCredit } from '@/app/admin/gallery/actions';
 import { GalleryImage } from '@prisma/client';
-import { CreditCard, Pen } from 'lucide-react';
 
 interface CreditDialogProps {
   image: GalleryImage;

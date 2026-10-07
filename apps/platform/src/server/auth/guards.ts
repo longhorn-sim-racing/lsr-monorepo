@@ -59,10 +59,6 @@ export async function requireOfficer(): Promise<User> {
   return requireRole(['admin', 'officer']);
 }
 
-export async function requireSystemAdmin(): Promise<User> {
-  return requireRole('admin');
-}
-
 /**
  * For admin pages. The admin layout checks too, but layouts don't re-run on every
  * render (a client can ask for just the page segment), so each page checks itself.

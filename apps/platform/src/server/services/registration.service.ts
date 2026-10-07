@@ -440,19 +440,3 @@ export async function adminOverrideRegistration(
     console.error("[Notification] Error sending notifications:", err);
   }
 }
-
-/**
- * Admin: Reorder Waitlist
- * Sets a specific user's position, shifting others if necessary.
- * Warning: This is a heavy operation if the list is long, but waitlists are usually small.
- */
-export async function adminReorderWaitlist(
-  eventId: string,
-  userId: string,
-  newPosition: number
-) {
-  // TODO: Implement complex reordering if needed.
-  // For V1, simplest approach is: swap or insert-and-shift.
-  // This is left as a placeholder for specific "Reorder" UI implementation.
-  // Ideally, the UI sends the full ordered list of IDs, and we update them all.
-}

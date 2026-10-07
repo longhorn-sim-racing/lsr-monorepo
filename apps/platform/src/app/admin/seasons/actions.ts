@@ -59,7 +59,7 @@ export async function createSeason(formData: FormData) {
   });
 
   revalidatePath("/admin/seasons");
-  revalidateSeriesPages(season.slug);
+  revalidateSeriesPages();
   redirect("/admin/seasons");
 }
 
@@ -76,8 +76,6 @@ export async function updateSeason(id: string, formData: FormData) {
         endAt: formData.get("endAt"),
         pointsRule: formData.get("pointsRule"),
     });
-
-    const prev = await prisma.season.findUnique({ where: { id }, select: { slug: true } });
 
     await prisma.season.update({
         where: { id },
@@ -103,15 +101,12 @@ export async function updateSeason(id: string, formData: FormData) {
     });
 
     revalidatePath("/admin/seasons");
-    revalidateSeriesPages(data.slug);
-    if (prev && prev.slug !== data.slug) revalidateSeriesPages(prev.slug);
+    revalidateSeriesPages();
     redirect("/admin/seasons");
 }
 
 export async function deleteSeason(id: string) {
     const user = await requireOfficer();
-
-    const prev = await prisma.season.findUnique({ where: { id }, select: { slug: true } });
 
     await prisma.season.delete({ where: { id } });
 
@@ -124,7 +119,7 @@ export async function deleteSeason(id: string) {
     });
 
     revalidatePath("/admin/seasons");
-    if (prev) revalidateSeriesPages(prev.slug);
+    revalidateSeriesPages();
 }
 
 export async function recomputeStandings(seasonId: string) {
@@ -321,5 +316,5 @@ export async function recomputeStandings(seasonId: string) {
 
     revalidatePath(`/admin/seasons`);
     revalidateDriverList();
-    revalidateSeriesPages(season.slug);
+    revalidateSeriesPages();
 }

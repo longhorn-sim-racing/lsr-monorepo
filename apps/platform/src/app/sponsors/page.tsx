@@ -1,8 +1,7 @@
-import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import Image from "next/image"
-import { Check, Download, ExternalLink, ArrowRight, Building2, Users, Trophy, Cpu } from "lucide-react"
+import { Check, Download, ExternalLink, Building2, Users, Trophy } from "lucide-react"
 import { Metadata } from "next"
 
 type Partner = {

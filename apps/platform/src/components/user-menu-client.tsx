@@ -107,7 +107,7 @@ export function UserMenuClient({
               <DropdownMenuSeparator className="bg-white/5" />
 
               <DropdownMenuItem
-                onSelect={() => router.push(user.handle ? `/drivers/${user.handle}` : "/drivers/me")}
+                onSelect={() => router.push(`/drivers/${user.handle}`)}
                 className="rounded-none font-sans font-bold text-[10px] uppercase tracking-widest py-3 focus:bg-lsr-orange focus:text-white cursor-pointer"
               >
                 <UserIcon className="mr-2 h-3 w-3" />

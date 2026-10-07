@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db";
-import { CheckinMethod, Prisma } from "@prisma/client";
+import { CheckinMethod } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
 
 /**

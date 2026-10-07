@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { ProductVariant, Money } from "@/lib/shopify/types";
 import { useCart } from "@/lib/shopify/CartContext";
 import { Price } from "./Price";
-import { Loader2, Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
+import { Loader2, Minus, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";

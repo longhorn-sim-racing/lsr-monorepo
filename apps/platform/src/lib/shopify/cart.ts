@@ -54,7 +54,7 @@ export async function addLines(
   cartId: string,
   lines: { merchandiseId: string; quantity: number }[]
 ): Promise<Cart> {
-  const res = await shopifyFetch<any>({
+  await shopifyFetch<any>({
     query: CART_LINES_ADD_MUTATION,
     variables: {
       cartId,
@@ -81,7 +81,7 @@ export async function updateLines(
   cartId: string,
   lines: { id: string; quantity: number }[]
 ): Promise<Cart> {
-  const res = await shopifyFetch<any>({
+  await shopifyFetch<any>({
     query: CART_LINES_UPDATE_MUTATION,
     variables: {
       cartId,
@@ -97,7 +97,7 @@ export async function updateLines(
 }
 
 export async function removeLines(cartId: string, lineIds: string[]): Promise<Cart> {
-  const res = await shopifyFetch<any>({
+  await shopifyFetch<any>({
     query: CART_LINES_REMOVE_MUTATION,
     variables: {
       cartId,

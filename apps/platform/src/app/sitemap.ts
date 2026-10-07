@@ -26,7 +26,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let driverRoutes: MetadataRoute.Sitemap = [];
   let eventRoutes: MetadataRoute.Sitemap = [];
   let postRoutes: MetadataRoute.Sitemap = [];
-  let seriesRoutes: MetadataRoute.Sitemap = [];
   let productRoutes: MetadataRoute.Sitemap = [];
 
   try {
@@ -65,23 +64,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "never" as const,
       priority: 0.7,
     }))
-
-    // 5. Dynamic: Event Series
-    const series = await prisma.eventSeries.findMany({
-      where: { visibility: "public" },
-      select: { slug: true, updatedAt: true },
-    })
-    seriesRoutes = series.map((s) => ({
-      url: `${base}/series/${s.slug}`,
-      lastModified: s.updatedAt,
-      changeFrequency: "weekly" as const,
-      priority: 0.6,
-    }))
   } catch (error) {
     console.error("[Sitemap] Failed to fetch dynamic routes:", error);
   }
 
-  // 6. Dynamic: Shop Products
+  // 5. Dynamic: Shop Products
   const SHOP_ENABLED = process.env.NEXT_PUBLIC_SHOP_ENABLED === "true";
 
   if (SHOP_ENABLED) {
@@ -103,7 +90,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...driverRoutes,
     ...eventRoutes,
     ...postRoutes,
-    ...seriesRoutes,
     ...productRoutes,
   ]
 }

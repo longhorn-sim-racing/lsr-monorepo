@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useDebounce } from "use-debounce";
-import { Loader2, RefreshCw, Search, Terminal, Filter, X } from "lucide-react";
+import { Loader2, RefreshCw, Search, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AuditLog } from "@prisma/client";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";

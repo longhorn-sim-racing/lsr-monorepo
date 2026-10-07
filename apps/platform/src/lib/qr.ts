@@ -10,14 +10,3 @@ export async function generateQrCodeDataUrl(text: string): Promise<string> {
       }
   });
 }
-
-export async function generateQrCodeSvg(text: string): Promise<string> {
-    return QRCode.toString(text, { 
-        type: 'svg',
-        margin: 2,
-        color: {
-            dark: '#000000',
-            light: '#ffffff',
-        }
-    });
-}

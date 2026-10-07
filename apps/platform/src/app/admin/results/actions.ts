@@ -3,7 +3,6 @@
 import { requireOfficer } from "@/server/auth/guards";
 import { prisma } from "@/server/db";
 import { revalidatePath } from "next/cache";
-import { RawResultUploadStatus } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
 import { revalidateAfterResultsIngestion } from "@/server/cache/revalidate-public";
 
@@ -284,7 +283,6 @@ export async function ingestUpload(uploadId: string) {
     // 2. Process Participants (Cars) & Map Identity
     const carIdToParticipantId = new Map<number, string>();
     const guidToParticipantId = new Map<string, string>();
-    const carIdToGameCarName = new Map<number, string>();
 
     const cars = Array.isArray(data.Cars) ? data.Cars : [];
     const driverGuids = cars.map((c: any) => c.Driver?.Guid).filter(Boolean);
@@ -544,22 +542,14 @@ export async function ingestUpload(uploadId: string) {
     timeout: 20000,
   });
 
-  // Look up event + season slugs so we can invalidate the right public pages.
+  // Look up the event slug so we can invalidate the right public pages.
   const eventMeta = await prisma.event.findUnique({
     where: { id: upload.eventId },
-    select: {
-      slug: true,
-      series: {
-        select: {
-          seasons: { select: { slug: true }, orderBy: { year: "desc" }, take: 1 },
-        },
-      },
-    },
+    select: { slug: true },
   });
 
   revalidatePath(`/admin/results/${uploadId}`);
   revalidateAfterResultsIngestion({
     eventSlug: eventMeta?.slug,
-    seriesSlug: eventMeta?.series?.seasons[0]?.slug,
   });
 }

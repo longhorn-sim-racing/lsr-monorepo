@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db";
-import { NotificationChannel, NotificationStatus, Prisma } from "@prisma/client";
+import { NotificationChannel, Prisma } from "@prisma/client";
 import { sendEmail } from "@/lib/email/resend";
 import { getEmailTemplate } from "@/lib/email/templates";
 

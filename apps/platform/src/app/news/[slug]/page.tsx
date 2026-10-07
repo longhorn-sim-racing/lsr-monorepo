@@ -1,8 +1,6 @@
-import { notFound } from "next/navigation"
 import { getAllPosts, getPostContent } from "@/lib/news"
 import Link from "next/link"
 
-import { Separator } from "@/components/ui/separator"
 import { Metadata } from "next"
 import { DatabaseUnavailable } from "@/components/database-unavailable"
 

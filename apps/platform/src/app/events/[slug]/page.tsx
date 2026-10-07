@@ -3,11 +3,9 @@ import { getIngestedResultsByEventId, getLapDataBySessionId } from "@/server/que
 import { LapPositionChart, type LapPositionData } from "@/components/lap-position-chart";
 import { notFound } from "next/navigation";
 import Image from "next/image";
-import { Badge } from "@/components/ui/badge";
-import { Calendar, Clock, MapPin, Send, Trophy, QrCode, CreditCard, Copy, ExternalLink } from "lucide-react";
+import { Calendar, Clock, MapPin, QrCode, CreditCard } from "lucide-react";
 import Link from "next/link";
 import { LocalTime, LocalTimeRange } from "@/components/ui/local-time";
-import { Button } from "@/components/ui/button";
 import { VenueActions } from "@/components/venue-actions";
 import { ResultsTable } from "@/components/results-table";
 import { EventRegistrationPanel } from "@/components/event-registration-panel";

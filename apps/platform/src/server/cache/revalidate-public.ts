@@ -16,8 +16,7 @@ export function revalidateEventDetail(slug: string) {
   revalidatePath(`/events/${slug}`);
 }
 
-export function revalidateSeriesPages(slug?: string) {
-  if (slug) revalidatePath(`/series/${slug}`);
+export function revalidateSeriesPages() {
   revalidatePath("/lone-star-cup");
 }
 
@@ -31,10 +30,9 @@ export function revalidateNewsPost(slug: string) {
 
 export function revalidateAfterResultsIngestion(opts: {
   eventSlug?: string | null;
-  seriesSlug?: string | null;
 }) {
   revalidateDriverList();
   if (opts.eventSlug) revalidateEventDetail(opts.eventSlug);
   revalidateEventList();
-  revalidateSeriesPages(opts.seriesSlug ?? undefined);
+  revalidateSeriesPages();
 }

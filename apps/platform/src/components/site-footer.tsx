@@ -1,8 +1,7 @@
 import Link from "next/link"
-import { Rss, ExternalLink, Linkedin } from "lucide-react"
+import { Rss, ExternalLink } from "lucide-react"
 import { BrandIcon } from "@/components/brand-icon"
-import { siInstagram, siYoutube, siTwitch, siDiscord } from "simple-icons/icons"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { siInstagram, siTwitch, siDiscord } from "simple-icons/icons"
 
 export function SiteFooter() {
   const year = new Date().getFullYear()
