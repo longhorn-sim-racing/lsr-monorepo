@@ -25,6 +25,7 @@ package-lock.json
 .DS_Store
 *.pem
 .claude/settings.local.json
+.claude/worktrees/
 
 # debug
 npm-debug.log*

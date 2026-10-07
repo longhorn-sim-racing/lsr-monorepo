@@ -1,0 +1,18 @@
+{
+  "v": 4,
+  "createdOnFiles": { "v": 1, "at": "[now, RFC 3339]" },
+  "lists": "css",
+  "title": "Tech Team Weekly — [M/D]",
+  "cover": "cover",
+  "order": ["cover", "recap", "plan", "decide", "next", "wrap"],
+  "sections": {
+    "s1": { "description": "[One sentence: welcome and recap]", "start": "cover" },
+    "s2": { "description": "[One sentence: the main topic]", "start": "plan" },
+    "s3": { "description": "[One sentence: decisions and what's next]", "start": "decide" }
+  },
+  "faces": {
+    "kanit": { "family": "Kanit", "href": "https://fonts.googleapis.com/css2?family=Kanit:ital,wght@1,800;1,900&display=swap" },
+    "montserrat": { "family": "Montserrat", "href": "https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" }
+  },
+  "designSystems": []
+}
