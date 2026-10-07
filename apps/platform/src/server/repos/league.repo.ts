@@ -1,5 +1,6 @@
 // src/server/repos/league.repo.ts
 import { prisma } from '@/server/db';
+import { publicUserSelect } from '@/lib/public-user';
 
 export async function getLeagueBySlug(slug: string) {
   return prisma.league.findUnique({ where: { slug } });
@@ -37,7 +38,7 @@ export async function listEntriesForSeason(seasonId: string) {
   return prisma.entry.findMany({
     where: { seasonId },
     include: {
-      user: true,
+      user: { select: publicUserSelect },
       team: true,
       class: true,
     },
@@ -50,7 +51,7 @@ export async function listResultsForSession(sessionId: string) {
     include: {
       entry: {
         include: {
-          user: true,
+          user: { select: publicUserSelect },
           team: true,
           class: true,
         },

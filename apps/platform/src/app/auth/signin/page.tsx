@@ -47,7 +47,7 @@ export default function SignInPage() {
         </p>
         
         <div className="grid gap-6">
-          <GoogleButton next={searchParams.get("next") ?? undefined} />
+          <GoogleButton next={searchParams.get("next") ? next : undefined} />
           
           <div className="relative my-3">
             <div className="absolute inset-0 flex items-center">
