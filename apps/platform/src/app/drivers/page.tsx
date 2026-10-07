@@ -5,6 +5,7 @@ import { DriversTable } from '@/components/drivers-table';
 import { DriversSidebar } from '@/components/drivers-sidebar';
 import { Metadata } from 'next';
 import { DatabaseUnavailable } from '@/components/database-unavailable';
+import { publicUserSelect } from '@/lib/public-user';
 
 export const metadata: Metadata = {
   title: "Driver Roster",
@@ -41,13 +42,17 @@ export default async function DriversIndexPage() {
 }
 
 async function renderDriversPage() {
+  // The roster table is a client component, so load only public fields (no email or EID).
   const allDrivers = await prisma.user.findMany({
     where: {
       status: { not: 'deleted' },
     },
-    include: {
-      roles: { include: { role: true } },
-      memberships: { include: { tier: true } }
+    select: {
+      ...publicUserSelect,
+      status: true,
+      officerTitle: true,
+      roles: { select: { role: { select: { key: true } } } },
+      memberships: { select: { validTo: true, tier: { select: { key: true } } } },
     },
   });
 
@@ -99,7 +104,7 @@ async function renderDriversPage() {
             take: 3,
             include: {
               participant: {
-                include: { user: true }
+                include: { user: { select: publicUserSelect } }
               }
             }
           }
@@ -123,7 +128,7 @@ async function renderDriversPage() {
       round: { include: { season: true } },
       ingestedSessions: {
         // Included to satisfy type, returns empty usually
-        include: { results: { include: { participant: { include: { user: true } } } } }
+        include: { results: { include: { participant: { include: { user: { select: publicUserSelect } } } } } }
       }
     }
   });

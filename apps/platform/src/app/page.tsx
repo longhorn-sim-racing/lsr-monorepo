@@ -6,6 +6,10 @@ import { getAllGalleryImages } from "@/server/queries/gallery"
 import { getSystemSetting, SETTINGS, type HotlapSettings } from "@/lib/email/settings"
 import { Event, EventSeries, Venue } from "@prisma/client"
 import { Metadata } from "next"
+import { publicUserSelect } from "@/lib/public-user"
+
+/** The homepage leaderboard shows this many drivers; only these are sent to the browser. */
+const LEADERBOARD_SIZE = 5
 
 export const metadata: Metadata = {
   title: "Longhorn Sim Racing | UT Austin Simulation Racing",
@@ -68,9 +72,11 @@ export default async function Home() {
   )
 }
 
+/** Top drivers by all-time points. Public fields only: this goes to a client component. */
 async function loadDriverLeaderboard() {
   const rawDrivers = await prisma.user.findMany({
     where: { status: { not: "deleted" } },
+    select: publicUserSelect,
   });
 
   const driverIds = rawDrivers.map(d => d.id);
@@ -88,5 +94,5 @@ async function loadDriverLeaderboard() {
   })).sort((a, b) => {
     if (b.allTimePoints !== a.allTimePoints) return b.allTimePoints - a.allTimePoints;
     return a.displayName.localeCompare(b.displayName);
-  });
+  }).slice(0, LEADERBOARD_SIZE);
 }

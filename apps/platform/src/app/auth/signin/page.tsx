@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GoogleButton } from "@/components/google-button";
+import { safeNextPath } from "@/lib/safe-redirect";
 import Link from "next/link";
 
 export default function SignInPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/";
+  const next = safeNextPath(searchParams.get("next"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, startTransition] = useTransition();
@@ -46,7 +47,7 @@ export default function SignInPage() {
         </p>
         
         <div className="grid gap-6">
-          <GoogleButton next={searchParams.get("next") ?? undefined} />
+          <GoogleButton next={searchParams.get("next") ? next : undefined} />
           
           <div className="relative my-3">
             <div className="absolute inset-0 flex items-center">

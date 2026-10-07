@@ -13,7 +13,7 @@ export default async function NotificationsPage({
   searchParams: Promise<{ page?: string }>;
 }) {
   const { user } = await getCachedSessionUser();
-  if (!user) redirect("/login");
+  if (!user) redirect("/auth/signin?next=/account/notifications");
 
   const params = await searchParams;
   const page = Math.max(1, parseInt(params.page ?? "1", 10));
