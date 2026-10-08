@@ -13,6 +13,7 @@ import { prisma } from "@/server/db";
 import { Toaster } from "@/components/ui/sonner";
 import { CartProvider } from "@/lib/shopify/CartContext";
 import { RacingNumberPrompt } from "@/components/racing-number-prompt";
+import { unstable_rethrow } from "next/navigation";
 
 const montserrat = Montserrat({
   subsets: ["latin"],
@@ -136,6 +137,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       activeTierKey = activeMembership?.tier.key ?? null;
     }
   } catch (error) {
+    // Next signals "render this page dynamically" (and redirects/notFound) by throwing; let those through
+    unstable_rethrow(error);
     console.warn('[RootLayout] Failed to load session/membership — rendering degraded shell:', error);
   }
 
