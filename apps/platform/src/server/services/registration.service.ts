@@ -51,19 +51,14 @@ async function reconcileEvent(tx: Prisma.TransactionClient, eventId: string): Pr
   const event = await tx.event.findUnique({ where: { id: eventId } });
   if (!event) throw new Error("Event not found during reconciliation");
 
-  // Never auto-promote on paid events (a waitlisted person hasn't paid yet), or when
-  // an officer turned auto-promotion off for this event. Officers promote by hand.
+  // Never auto-promote on paid events: a waitlisted person hasn't paid yet. Officers promote by hand.
   if (event.registrationFeeCents != null && event.registrationFeeCents > 0) {
-    return [];
-  }
-  if (!event.waitlistAutoPromote) {
     return [];
   }
 
   const promotedUserIds: string[] = [];
 
-  // If no limit, everyone should be registered.
-  // (In practice, if we switch from Limited to Unlimited, we might want to promote everyone)
+  // No limit: there's nothing to wait for, so everyone is registered whatever the toggle says.
   if (event.registrationMax === null) {
     const waitlisted = await tx.eventRegistration.findMany({
       where: { eventId, status: "WAITLISTED" },
@@ -84,7 +79,11 @@ async function reconcileEvent(tx: Prisma.TransactionClient, eventId: string): Pr
     return promotedUserIds;
   }
 
-  // Limited Capacity
+  // Limited capacity: only fill open spots when auto-promotion is on for this event.
+  if (!event.waitlistAutoPromote) {
+    return [];
+  }
+
   const registeredCount = await tx.eventRegistration.count({
     where: { eventId, status: "REGISTERED" },
   });
@@ -221,11 +220,11 @@ export async function registerForEvent(
       // Check if user is ALREADY registered, they take up a slot, so count remains same for them
       const isAlreadyRegistered = currentReg?.status === "REGISTERED";
 
-      // If others are already waiting (auto-promote is off), newcomers queue behind them
-      // instead of taking a freed spot first.
+      // If others are already waiting (auto-promote is off), nobody takes a freed spot ahead
+      // of them, including someone already on the waitlist (they keep their place below).
       const othersWaiting =
-        event.registrationWaitlistEnabled && !isAlreadyRegistered && currentReg?.status !== "WAITLISTED"
-          ? await tx.eventRegistration.count({ where: { eventId, status: "WAITLISTED" } })
+        event.registrationWaitlistEnabled && !isAlreadyRegistered
+          ? await tx.eventRegistration.count({ where: { eventId, status: "WAITLISTED", userId: { not: userId } } })
           : 0;
 
       if (!isAlreadyRegistered && (registeredCount >= event.registrationMax || othersWaiting > 0)) {

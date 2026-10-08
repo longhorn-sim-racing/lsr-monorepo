@@ -115,8 +115,28 @@ export async function updateEventStatus(eventId: string, status: EventStatus, pu
   redirect("/admin/events");
 }
 
+/**
+ * Capacity raised (or made unlimited) or the fee removed: spots may have opened for
+ * people on the waitlist, so the caller should reconcile.
+ */
+function waitlistNeedsRefill(
+  before: { registrationMax: number | null; registrationFeeCents: number | null } | null,
+  registrationMax: number | null,
+  registrationFeeCents: number | null
+) {
+  if (!before) return false;
+  const capacityRaised =
+    before.registrationMax != null && (registrationMax === null || registrationMax > before.registrationMax);
+  const madeFree = (before.registrationFeeCents ?? 0) > 0 && registrationFeeCents === null;
+  return capacityRaised || madeFree;
+}
+
 export async function updateEvent(id: string, formData: FormData) {
   const user = await requireOfficer();
+  const before = await prisma.event.findUnique({
+    where: { id },
+    select: { registrationMax: true, registrationFeeCents: true },
+  });
 
   const seriesId = formData.get("seriesId") as string;
   const venueId = formData.get("venueId") as string;
@@ -176,6 +196,10 @@ export async function updateEvent(id: string, formData: FormData) {
     data: eventUpdateData,
     select: { slug: true, seriesId: true },
   });
+
+  if (waitlistNeedsRefill(before, eventUpdateData.registrationMax, registrationFeeCents)) {
+    await reconcileEventWaitlist(id);
+  }
 
   await createAuditLog({
     actorUserId: user.id,
@@ -256,15 +280,11 @@ export async function updateEventRegistrationConfig(eventId: string, formData: F
     select: { slug: true },
   });
 
-  // Capacity raised (or made unlimited), auto-promote switched on, or the fee removed:
-  // fill open spots from the waitlist
-  const capacityRaised =
-    event?.registrationMax != null &&
-    (configData.registrationMax === null || configData.registrationMax > event.registrationMax);
   const autoPromoteSwitchedOn = event != null && !event.waitlistAutoPromote && waitlistAutoPromote;
-  const madeFree = (event?.registrationFeeCents ?? 0) > 0 && registrationFeeCents === null;
   const promotedUserIds =
-    capacityRaised || autoPromoteSwitchedOn || madeFree ? await reconcileEventWaitlist(eventId) : [];
+    autoPromoteSwitchedOn || waitlistNeedsRefill(event, configData.registrationMax, registrationFeeCents)
+      ? await reconcileEventWaitlist(eventId)
+      : [];
 
   await createAuditLog({
     actorUserId: user.id,
@@ -290,7 +310,7 @@ export async function overrideRegistrationStatus(eventId: string, userId: string
   await adminOverrideRegistration(user.id, userId, eventId, status, reason);
 
   const ev = await prisma.event.findUnique({ where: { id: eventId }, select: { slug: true } });
-  revalidatePath(`/admin/events/${eventId}`);
+  revalidatePath(`/admin/events/${eventId}/manage`);
   revalidateEventList();
   if (ev) revalidateEventDetail(ev.slug);
 }
@@ -322,7 +342,7 @@ export async function reorderWaitlist(eventId: string, orderedRegistrationIds: s
     }
   });
 
-  revalidatePath(`/admin/events/${eventId}`);
+  revalidatePath(`/admin/events/${eventId}/manage`);
 }
 
 export async function removeRegistration(eventId: string, userId: string) {

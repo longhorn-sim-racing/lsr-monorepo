@@ -409,7 +409,6 @@ model Entry {
   @@index([seasonId])
 }
 
-// ---------- Tracks & Cars ----------
 
 // ---------- Events & Eligibility ----------
 model EventSeries {

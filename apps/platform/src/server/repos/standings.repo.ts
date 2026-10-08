@@ -2,25 +2,31 @@ import { prisma } from '@/server/db';
 import { pickRacingNumberStyle } from '@/lib/racing-number';
 import { publicUserSelect } from '@/lib/public-user';
 
+const seasonStandingsInclude = {
+    entries: {
+        include: {
+            user: { select: publicUserSelect },
+        },
+        orderBy: [
+            { rank: 'asc' as const }, // Prefer explicit rank
+            { totalPoints: 'desc' as const } // Fallback
+        ]
+    }
+};
+
 /**
  * Standings for a season, from the per-season Entry totals that "recompute standings"
- * writes. Accepts the season's slug or its event series' slug (they match for the LSC).
+ * writes. Accepts the season's slug or, failing that, its event series' slug (they
+ * match for the LSC).
  */
 export async function getStandings(slug: string) {
-  const season = await prisma.season.findFirst({
-      where: { OR: [{ slug }, { series: { slug } }] },
-      include: {
-          entries: {
-              include: {
-                  user: { select: publicUserSelect },
-              },
-              orderBy: [
-                  { rank: 'asc' }, // Prefer explicit rank
-                  { totalPoints: 'desc' } // Fallback
-              ]
-          }
-      }
-  });
+  const season =
+      (await prisma.season.findUnique({ where: { slug }, include: seasonStandingsInclude })) ??
+      (await prisma.season.findFirst({
+          where: { series: { slug } },
+          orderBy: { year: 'desc' },
+          include: seasonStandingsInclude,
+      }));
 
   if (!season) return [];
 
