@@ -1,24 +1,172 @@
 import Image from "next/image"
+import Link from "next/link"
 import { Metadata } from "next"
+import { ArrowRight, ArrowUpRight, CalendarDays, MessageSquare } from "lucide-react"
+import { EventStatus } from "@prisma/client"
+import { Button } from "@/components/ui/button"
+import { prisma } from "@/server/db"
+import { getCachedSessionUser } from "@/server/auth/cached-session"
+import { publicEventWhere } from "@/lib/events"
+import { OFFICERS, TEAMS, type Officer, type Team } from "./roster"
+import { CreateAccountButton } from "./create-account-button"
 
 export const metadata: Metadata = {
   title: "About Us",
-  description: "Learn about the mission, vision, and the student team behind Longhorn Sim Racing.",
+  description:
+    "Longhorn Sim Racing is UT Austin's student-run sim racing club: the Lone Star Cup league, seat time on club rigs, community events and the officer teams that run it all.",
   alternates: {
     canonical: "/about",
   },
 };
 
-export default function AboutPage() {
+const DISCORD_URL = "https://discord.gg/5Uv9YwpnFz"
+
+const PILLARS = [
+  {
+    kicker: "Race",
+    title: "The Lone Star Cup",
+    body: "Our in-house league, now in its third season. Ten Saturday rounds a semester with real race control and stewarding, open to every skill level.",
+    href: "/lone-star-cup",
+    cta: "See the championship",
+    image: "/images/gal_03.jpeg",
+  },
+  {
+    kicker: "Drive",
+    title: "Seat Time",
+    body: "Get behind the wheel on the club sim rig in the Longhorn Gaming lounge, join time trials and pick up racecraft from drivers who've been there.",
+    href: "/events",
+    cta: "Find a session",
+    image: "/images/gal_08.jpeg",
+  },
+  {
+    kicker: "Hang out",
+    title: "Community",
+    body: "Watch parties, sim nights and socials, plus days at the track volunteering at events around Austin.",
+    href: "/events",
+    cta: "Upcoming events",
+    image: "/images/gal_11.jpg",
+  },
+  {
+    kicker: "Build",
+    title: "Run the Club",
+    body: "Students run every part of LSR: the league, sponsorships, media and the software behind this site. Join a team and get real experience.",
+    href: "#teams",
+    cta: "Meet the teams",
+    image: "/images/gal_05.JPG",
+  },
+]
+
+const PARTNER_ORGS = ["Longhorn Racing", "Longhorn Car Club", "Longhorn Baja Racing", "Longhorn Lemons"]
+
+const teamById = new Map(TEAMS.map((team) => [team.id, team]))
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/)
+  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase()
+}
+
+async function getStats() {
+  const now = new Date()
+  const [members, eventsHosted] = await Promise.all([
+    prisma.user.count({ where: { status: "active" } }),
+    prisma.event.count({
+      where: {
+        AND: [
+          publicEventWhere(now),
+          { startsAtUtc: { lt: now }, status: { notIn: [EventStatus.CANCELLED, EventStatus.POSTPONED] } },
+        ],
+      },
+    }),
+  ])
+  return { members, eventsHosted }
+}
+
+function SectionHeading({ kicker, children, id }: { kicker: string; children: React.ReactNode; id?: string }) {
+  return (
+    <div id={id} className="scroll-mt-24 mb-10 md:mb-12">
+      <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-3">{kicker}</p>
+      <h2 className="font-display font-black italic text-4xl md:text-5xl text-white uppercase tracking-normal leading-[0.95]">
+        {children}
+      </h2>
+    </div>
+  )
+}
+
+/** Board tile: the officer's photo, or an initials tile until one exists. */
+function Portrait({ officer, team }: { officer: Officer; team: Team }) {
+  return (
+    <div className="group">
+      <div className="relative aspect-[4/5] overflow-hidden border border-white/10 bg-gradient-to-br from-white/[0.07] via-white/[0.02] to-transparent transition-colors group-hover:border-lsr-orange/50">
+        {officer.photo ? (
+          <Image
+            src={officer.photo}
+            alt={officer.name}
+            fill
+            sizes="(min-width: 1024px) 25vw, 50vw"
+            className="object-cover object-[center_25%]"
+          />
+        ) : (
+          <>
+            <div className="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-lsr-orange/10 blur-3xl transition-opacity duration-300 group-hover:opacity-100 opacity-60" />
+            <div className="absolute inset-0 opacity-[0.04] [background-image:repeating-linear-gradient(45deg,white_0px,white_1px,transparent_1px,transparent_12px)]" />
+            <span
+              aria-hidden
+              className="absolute inset-0 flex items-center justify-center font-display font-black italic text-6xl md:text-8xl text-white/20 transition-colors duration-300 group-hover:text-lsr-orange/80"
+            >
+              {initials(officer.name)}
+            </span>
+          </>
+        )}
+        <span className="absolute top-3 left-3 bg-lsr-charcoal/80 px-2 py-1 font-sans font-black text-[9px] uppercase tracking-[0.2em] text-white/70">
+          {team.code}
+        </span>
+        <div className="absolute bottom-0 left-0 h-1 w-10 bg-lsr-orange transition-all duration-300 group-hover:w-full" />
+      </div>
+      <h3 className="mt-4 font-display font-black italic text-lg md:text-2xl text-white uppercase tracking-normal leading-tight">
+        {officer.name}
+      </h3>
+      <p className="mt-1 font-sans font-bold text-[10px] md:text-xs uppercase tracking-[0.2em] text-lsr-orange">
+        {officer.title}
+      </p>
+    </div>
+  )
+}
+
+/** Small square avatar for the team lists. */
+function Avatar({ officer }: { officer: Officer }) {
+  return (
+    <div className="relative h-10 w-10 shrink-0 overflow-hidden border border-white/10 bg-white/[0.05]">
+      {officer.photo ? (
+        <Image src={officer.photo} alt="" fill sizes="40px" className="object-cover" />
+      ) : (
+        <span aria-hidden className="absolute inset-0 flex items-center justify-center font-display font-black italic text-sm text-white/40">
+          {initials(officer.name)}
+        </span>
+      )}
+    </div>
+  )
+}
+
+export default async function AboutPage() {
+  const [stats, { user: viewer }] = await Promise.all([getStats(), getCachedSessionUser()])
+  const board = OFFICERS.filter((officer) => officer.board)
+
+  const statItems = [
+    { value: "2024", label: "Founded" },
+    { value: stats.members.toLocaleString("en-US"), label: "Members" },
+    { value: stats.eventsHosted.toLocaleString("en-US"), label: "Events hosted" },
+    { value: "S3", label: "Lone Star Cup" },
+  ]
+
   return (
     <main className="bg-lsr-charcoal text-white min-h-screen">
       {/* Hero Section */}
       <div className="relative border-b border-white/10 overflow-hidden">
         <div className="absolute inset-0 z-0">
-          <Image 
-            src="/images/lsr-hero.webp" 
-            alt="Hero Background" 
-            fill 
+          <Image
+            src="/images/lsr-hero.webp"
+            alt="Hero Background"
+            fill
             className="object-cover opacity-40 grayscale-[0.5]"
             priority
             fetchPriority="high"
@@ -26,7 +174,7 @@ export default function AboutPage() {
           <div className="absolute inset-0 bg-gradient-to-b from-lsr-charcoal/80 via-lsr-charcoal/60 to-lsr-charcoal" />
         </div>
         <div className="absolute inset-0 opacity-[0.03] mix-blend-overlay [background-image:repeating-linear-gradient(45deg,white_0px,white_1px,transparent_1px,transparent_10px)] pointer-events-none" />
-        
+
         <div className="relative z-10 mx-auto max-w-6xl px-6 md:px-8 py-20 md:py-28">
           <div className="max-w-4xl">
             <h1 className="font-display font-black italic text-5xl md:text-7xl text-white uppercase tracking-normal leading-[0.9] mb-8">
@@ -39,254 +187,207 @@ export default function AboutPage() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20 space-y-20">
-        
-        {/* Purpose & Vision */}
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-12 items-start">
-          <div>
-            <h2 className="font-display font-black italic text-3xl md:text-4xl text-white uppercase tracking-normal mb-6">
-              Purpose & <span className="text-lsr-orange">Vision</span>
-            </h2>
-            <div className="h-1 w-20 bg-lsr-orange mb-8" />
-            <p className="font-sans text-white/70 text-lg leading-relaxed">
-              We are establishing LSR as a premier collegiate motorsport organization at UT Austin and a legitimate member of the Austin motorsports community.
+      {/* Stats */}
+      <section aria-label="LSR at a glance" className="border-b border-white/10 bg-black/20">
+        <dl className="mx-auto max-w-6xl grid grid-cols-2 md:grid-cols-4">
+          {statItems.map((stat, i) => (
+            <div
+              key={stat.label}
+              className={`flex flex-col px-6 md:px-8 py-8 md:py-10 border-white/10 ${i % 2 === 0 ? "border-r" : ""} ${i < 2 ? "border-b md:border-b-0" : ""} ${i === 1 ? "md:border-r" : ""}`}
+            >
+              <dt className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/40 order-2 mt-3">{stat.label}</dt>
+              <dd className="font-display font-black italic text-4xl md:text-6xl text-white leading-none order-1">{stat.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      <div className="mx-auto max-w-6xl px-6 md:px-8 py-16 md:py-24 space-y-24 md:space-y-32">
+        {/* What we do */}
+        <section>
+          <div className="grid gap-6 md:grid-cols-[1fr_1fr] md:items-end mb-10 md:mb-12">
+            <SectionHeading kicker="What we do">
+              On track and <span className="text-lsr-orange">off it</span>
+            </SectionHeading>
+            <p className="font-sans text-white/60 text-base md:text-lg leading-relaxed md:mb-12">
+              Founded in 2024 and run entirely by students, LSR is a 501(c)(3) nonprofit open to every Longhorn,
+              whether you&apos;ve never touched a wheel or you&apos;re chasing tenths.
             </p>
           </div>
-          <div className="space-y-6">
-            <div className="border border-white/10 bg-white/[0.02] p-6 group hover:border-lsr-orange/50 transition-colors">
-              <h3 className="font-sans font-bold text-sm uppercase tracking-widest text-white mb-2">Interdisciplinary</h3>
-              <p className="font-sans text-white/60 text-sm">
-                Creating opportunities across business, engineering, media, and communications.
-              </p>
-            </div>
-            <div className="border border-white/10 bg-white/[0.02] p-6 group hover:border-lsr-orange/50 transition-colors">
-              <h3 className="font-sans font-bold text-sm uppercase tracking-widest text-white mb-2">Career Launchpad</h3>
-              <p className="font-sans text-white/60 text-sm">
-                Building careers in motorsports through networking, internships, and hands-on experience.
-              </p>
-            </div>
+
+          <div className="grid gap-4 md:gap-6 md:grid-cols-2">
+            {PILLARS.map((pillar, i) => (
+              <Link
+                key={pillar.title}
+                href={pillar.href}
+                className="group relative flex min-h-[340px] md:min-h-[380px] flex-col justify-end overflow-hidden border border-white/10 transition-colors hover:border-lsr-orange/50"
+              >
+                <Image
+                  src={pillar.image}
+                  alt=""
+                  fill
+                  sizes="(min-width: 768px) 50vw, 100vw"
+                  className="object-cover opacity-75 grayscale-[0.2] transition-all duration-500 group-hover:scale-105 group-hover:opacity-90"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-lsr-charcoal via-lsr-charcoal/75 via-45% to-transparent" />
+                <div className="relative p-6 md:p-8">
+                  <div className="flex items-baseline gap-3 mb-3">
+                    <span className="font-display font-black italic text-2xl text-lsr-orange">0{i + 1}</span>
+                    <span className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/50">{pillar.kicker}</span>
+                  </div>
+                  <h3 className="font-display font-black italic text-3xl md:text-4xl text-white uppercase tracking-normal mb-3">
+                    {pillar.title}
+                  </h3>
+                  <p className="font-sans text-sm md:text-base text-white/70 leading-relaxed max-w-md">{pillar.body}</p>
+                  <span className="mt-6 inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white group-hover:text-lsr-orange transition-colors">
+                    {pillar.cta}
+                    <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+                  </span>
+                </div>
+              </Link>
+            ))}
           </div>
         </section>
 
-        {/* Officer Team */}
+        {/* Leadership */}
         <section>
-          <h2 className="font-display font-black italic text-3xl md:text-5xl text-white uppercase tracking-normal mb-10 border-b border-white/10 pb-6">
-            Officer <span className="text-lsr-orange">Team</span>
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {/* Dylan Foley */}
-            <div className="group">
-              <div className="relative aspect-[3/4] border border-white/10 bg-black overflow-hidden mb-6">
-                <div className="absolute inset-0 bg-white/5 flex items-center justify-center">
-                  <span className="font-sans font-bold text-[10px] uppercase tracking-widest text-white/20">Image Pending</span>
-                </div>
-                {/* Image placeholder - uncomment when available
-                <Image src="/images/dylan.jpg" alt="Dylan Foley" fill className="object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                */}
+          <SectionHeading kicker="Leadership">
+            The <span className="text-lsr-orange">Board</span>
+          </SectionHeading>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-10 md:gap-x-6">
+            {board.map((officer) => (
+              <Portrait key={officer.name} officer={officer} team={teamById.get(officer.team)!} />
+            ))}
+            <a
+              href={DISCORD_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex aspect-[4/5] flex-col justify-between border border-dashed border-white/15 p-5 md:p-6 transition-colors hover:border-lsr-orange hover:bg-lsr-orange/5"
+            >
+              <span className="font-sans font-black text-[9px] uppercase tracking-[0.2em] text-white/40">Open seat</span>
+              <div>
+                <p className="font-display font-black italic text-2xl md:text-3xl text-white uppercase leading-none">
+                  Your name <span className="text-lsr-orange">here</span>
+                </p>
+                <p className="mt-3 font-sans text-xs md:text-sm text-white/50 leading-relaxed">
+                  Every team takes new officers. Ask about open roles on Discord.
+                </p>
+                <ArrowUpRight className="mt-4 h-5 w-5 text-white/40 transition-colors group-hover:text-lsr-orange" />
               </div>
-              <h3 className="font-display font-black italic text-2xl text-white uppercase tracking-normal">Dylan Foley</h3>
-              <p className="font-sans font-bold text-xs uppercase tracking-[0.2em] text-lsr-orange mb-4">President</p>
-              <p className="font-sans text-sm text-white/60 leading-relaxed">
-                Leading the strategic vision and organizational growth of LSR. Dedicated to building partnerships and fostering a competitive spirit within the team.
-              </p>
-            </div>
-
-            {/* Cooper Tomlin */}
-            <div className="group">
-              <div className="relative aspect-[3/4] border border-white/10 bg-black overflow-hidden mb-6">
-                <div className="absolute inset-0 bg-white/5 flex items-center justify-center">
-                  <span className="font-sans font-bold text-[10px] uppercase tracking-widest text-white/20">Image Pending</span>
-                </div>
-                {/* Image placeholder - uncomment when available
-                <Image src="/images/cooper.jpg" alt="Cooper Tomlin" fill className="object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                */}
-              </div>
-              <h3 className="font-display font-black italic text-2xl text-white uppercase tracking-normal">Cooper Tomlin</h3>
-              <p className="font-sans font-bold text-xs uppercase tracking-[0.2em] text-lsr-orange mb-4">Chief Financial Officer</p>
-              <p className="font-sans text-sm text-white/60 leading-relaxed">
-                Managing financial operations and sponsorship acquisitions. Focused on ensuring sustainable growth and resource allocation for all team initiatives.
-              </p>
-            </div>
-
-            {/* Gray Marshall */}
-            <div className="group">
-              <div className="relative aspect-[3/4] border border-white/10 bg-black overflow-hidden mb-6">
-                <div className="absolute inset-0 bg-white/5 flex items-center justify-center">
-                  <span className="font-sans font-bold text-[10px] uppercase tracking-widest text-white/20">Image Pending</span>
-                </div>
-                {/* Image placeholder - uncomment when available
-                <Image src="/images/gray.jpg" alt="Gray Marshall" fill className="object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                */}
-              </div>
-              <h3 className="font-display font-black italic text-2xl text-white uppercase tracking-normal">Gray Marshall</h3>
-              <p className="font-sans font-bold text-xs uppercase tracking-[0.2em] text-lsr-orange mb-4">Chief Technology Officer</p>
-              <p className="font-sans text-sm text-white/60 leading-relaxed">
-                Overseeing technical infrastructure and digital presence. Driving innovation in simulation hardware and software integration for the team.
-              </p>
-            </div>
-          </div>
-
-          {/* Full Team Table */}
-          <div className="mt-20 border border-white/10 bg-white/[0.02]">
-            <div className="bg-white/5 p-4 border-b border-white/10">
-              <h3 className="font-sans font-black text-[10px] uppercase tracking-[0.3em] text-white/40">Full Leadership Roster</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left font-sans text-sm">
-                <thead>
-                  <tr className="border-b border-white/10 text-[9px] uppercase tracking-widest text-white/20 font-black">
-                    <th className="p-4 px-6">Officer</th>
-                    <th className="p-4 px-6">Departmental Role</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {[
-                    { name: "Dylan Foley", role: "President" },
-                    { name: "Cooper Tomlin", role: "Chief Financial Officer" },
-                    { name: "Gray Marshall", role: "Chief Technology Officer" },
-                    { name: "Grant Ruhland", role: "Director of Community" },
-                    { name: "Alexis Voisin", role: "Director of External Affairs" },
-                    { name: "Bryan Reyes", role: "Head of Competition" },
-                    { name: "Jaylon Collins", role: "Head of Recruitment" },
-                    { name: "Armando Martinez", role: "Competition Lead" },
-                    { name: "Constanza Jongkind", role: "Media Engineer" },
-                    { name: "George Lawrence", role: "Community Lead" },
-                    { name: "Anya Shevaun Rodricks", role: "Community Lead" },
-                    { name: "Diane Chagoya", role: "Graphic Designer" },
-                    { name: "Tina Choi", role: "Brand Designer" },
-                    { name: "Chingiz Asgarli", role: "Photographer / Videographer" },
-                    { name: "Leisha Jhamnani", role: "Photographer / Videographer" },
-                    { name: "Anuja Manjrekar", role: "Photographer / Videographer" },
-                    { name: "Harshika Mandula", role: "Photographer / Videographer" },
-                    { name: "Boen Kelly", role: "Business Associate" },
-                  ].map((officer, i) => (
-                    <tr key={i} className="hover:bg-white/[0.02] transition-colors group">
-                      <td className="p-4 px-6 font-bold text-white group-hover:text-lsr-orange transition-colors uppercase tracking-tight">{officer.name}</td>
-                      <td className="p-4 px-6 text-white/40 font-medium uppercase text-[10px] tracking-widest">{officer.role}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            </a>
           </div>
         </section>
 
-        {/* Strategy */}
-        <section className="border border-white/10 bg-white/[0.02] p-8 md:p-12 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-lsr-orange/5 rounded-full blur-[100px] pointer-events-none" />
-          
-          <h2 className="font-display font-black italic text-3xl md:text-4xl text-white uppercase tracking-normal mb-8 relative z-10">
-            Collaboration <span className="text-lsr-orange">Strategy</span>
-          </h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-12 relative z-10">
-            <div>
-              <p className="font-sans font-bold text-xs uppercase tracking-[0.2em] text-white/40 mb-4">Partner Organizations</p>
-              <ul className="space-y-3 font-sans text-white/80 font-bold">
-                <li className="flex items-center gap-3">
-                  <span className="h-1.5 w-1.5 bg-lsr-orange rounded-full" />
-                  Longhorn Racing (LHR)
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="h-1.5 w-1.5 bg-lsr-orange rounded-full" />
-                  Longhorn Car Club (LCC)
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="h-1.5 w-1.5 bg-lsr-orange rounded-full" />
-                  Longhorn Lemons / Orange Dames
-                </li>
-                <li className="flex items-center gap-3">
-                  <span className="h-1.5 w-1.5 bg-lsr-orange rounded-full" />
-                  Longhorn Baja (LBR)
-                </li>
-              </ul>
-            </div>
-            <div>
-              <p className="font-sans font-bold text-xs uppercase tracking-[0.2em] text-white/40 mb-4">Joint Initiatives</p>
-              <div className="space-y-4">
-                <div className="flex gap-4">
-                  <div className="font-display font-black italic text-2xl text-white/20">01</div>
-                  <div>
-                    <h4 className="font-sans font-bold text-white text-sm uppercase tracking-wide">Shared Events</h4>
-                    <p className="font-sans text-white/60 text-xs mt-1">Collaborative race weekends and community gatherings.</p>
-                  </div>
-                </div>
-                <div className="flex gap-4">
-                  <div className="font-display font-black italic text-2xl text-white/20">02</div>
-                  <div>
-                    <h4 className="font-sans font-bold text-white text-sm uppercase tracking-wide">Cross-Disciplinary</h4>
-                    <p className="font-sans text-white/60 text-xs mt-1">Engineering and business projects spanning multiple teams.</p>
-                  </div>
-                </div>
-                <div className="flex gap-4">
-                  <div className="font-display font-black italic text-2xl text-white/20">03</div>
-                  <div>
-                    <h4 className="font-sans font-bold text-white text-sm uppercase tracking-wide">Outreach</h4>
-                    <p className="font-sans text-white/60 text-xs mt-1">Unified campaigns to grow the campus motorsport culture.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Roadmap */}
+        {/* Teams */}
         <section>
-          <div className="flex items-end justify-between mb-10 border-b border-white/10 pb-6">
-            <h2 className="font-display font-black italic text-3xl md:text-5xl text-white uppercase tracking-normal">
-              Development <span className="text-lsr-orange">Phases</span>
+          <SectionHeading kicker="Who does what" id="teams">
+            The <span className="text-lsr-orange">Teams</span>
+          </SectionHeading>
+          <div className="grid gap-4 md:gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {TEAMS.map((team) => {
+              const members = OFFICERS.filter((officer) => officer.team === team.id)
+              return (
+                <article key={team.id} className="flex flex-col border border-white/10 bg-white/[0.02] p-6 md:p-7">
+                  <div className="flex items-center justify-between mb-5">
+                    <span className="font-sans font-black text-[9px] uppercase tracking-[0.2em] text-lsr-orange border border-lsr-orange/30 px-2 py-1">
+                      {team.code}
+                    </span>
+                    <span className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/30">
+                      {members.length} {members.length === 1 ? "officer" : "officers"}
+                    </span>
+                  </div>
+                  <h3 className="font-display font-black italic text-3xl text-white uppercase tracking-normal">{team.name}</h3>
+                  <p className="mt-2 font-sans text-sm text-white/55 leading-relaxed">{team.blurb}</p>
+                  <ul className="mt-6 pt-6 border-t border-white/10 space-y-3">
+                    {members.map((officer) => (
+                      <li key={officer.name} className="flex items-center gap-3">
+                        <Avatar officer={officer} />
+                        <div className="min-w-0">
+                          <p className="font-sans font-bold text-sm text-white truncate">{officer.name}</p>
+                          <p
+                            className={`font-sans font-bold text-[10px] uppercase tracking-[0.15em] ${
+                              officer.title === "Officer" ? "text-white/35" : "text-lsr-orange"
+                            }`}
+                          >
+                            {officer.title}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </article>
+              )
+            })}
+          </div>
+        </section>
+
+        {/* Around campus */}
+        <section className="grid gap-8 md:grid-cols-[1fr_2fr] md:items-center border-y border-white/10 py-10 md:py-12">
+          <div>
+            <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-3">Around campus</p>
+            <p className="font-sans text-white/60 text-sm md:text-base leading-relaxed">
+              We work alongside UT&apos;s other motorsport orgs on events, recruiting and sim-to-real projects.
+            </p>
+            <Link
+              href="/sponsors"
+              className="mt-4 inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white hover:text-lsr-orange transition-colors"
+            >
+              Our sponsors
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+          <ul className="grid grid-cols-2 gap-3">
+            {PARTNER_ORGS.map((org) => (
+              <li
+                key={org}
+                className="border border-white/10 bg-white/[0.02] px-4 py-5 md:px-6 font-display font-black italic text-base md:text-xl text-white/80 uppercase leading-tight"
+              >
+                {org}
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        {/* Join */}
+        <section className="relative overflow-hidden border border-white/10 bg-white/[0.02] p-8 md:p-14">
+          <div className="absolute top-0 left-0 h-1 w-full bg-gradient-to-r from-lsr-orange via-lsr-orange/40 to-transparent" />
+          <div className="absolute -bottom-24 -right-24 h-64 w-64 rounded-full bg-lsr-orange/10 blur-[100px] pointer-events-none" />
+          <div className="relative max-w-2xl">
+            <h2 className="font-display font-black italic text-4xl md:text-6xl text-white uppercase tracking-normal leading-[0.95]">
+              Get on the <span className="text-lsr-orange">grid</span>
             </h2>
-            <span className="hidden md:block font-sans font-bold text-xs uppercase tracking-[0.2em] text-white/40">2025 — 2027+</span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Phase 1 */}
-            <div className="border border-white/10 bg-lsr-charcoal p-6 group hover:border-lsr-orange transition-colors">
-              <div className="flex justify-between items-start mb-6">
-                <span className="font-display font-black italic text-4xl text-white/10 group-hover:text-lsr-orange/20 transition-colors">01</span>
-                <span className="font-sans font-bold text-[9px] uppercase tracking-widest text-lsr-orange border border-lsr-orange/30 px-2 py-1">Current Phase</span>
-              </div>
-              <h3 className="font-sans font-black text-xl text-white uppercase tracking-tight mb-2">Foundation</h3>
-              <p className="font-sans font-bold text-xs text-white/40 uppercase tracking-widest mb-6">Fall 2025 – Spring 2026</p>
-              <ul className="space-y-3">
-                <li className="text-sm text-white/70 font-sans leading-snug">• Secure campus facility space</li>
-                <li className="text-sm text-white/70 font-sans leading-snug">• Install initial simulator fleet</li>
-                <li className="text-sm text-white/70 font-sans leading-snug">• Launch media & engineering teams</li>
-                <li className="text-sm text-white/70 font-sans leading-snug">• Host industry partner events</li>
-              </ul>
-            </div>
-
-            {/* Phase 2 */}
-            <div className="border border-white/10 bg-lsr-charcoal p-6 group hover:border-white/30 transition-colors">
-              <div className="flex justify-between items-start mb-6">
-                <span className="font-display font-black italic text-4xl text-white/10 group-hover:text-white/20 transition-colors">02</span>
-              </div>
-              <h3 className="font-sans font-black text-xl text-white uppercase tracking-tight mb-2">Expansion</h3>
-              <p className="font-sans font-bold text-xs text-white/40 uppercase tracking-widest mb-6">2026 – 2027</p>
-              <ul className="space-y-3">
-                <li className="text-sm text-white/70 font-sans leading-snug">• Expand simulator capacity</li>
-                <li className="text-sm text-white/70 font-sans leading-snug">• Formalize mentorship pipelines</li>
-                <li className="text-sm text-white/70 font-sans leading-snug">• Enter competitive leagues</li>
-                <li className="text-sm text-white/70 font-sans leading-snug">• WRL Entry Target (Dec 2026)</li>
-              </ul>
-            </div>
-
-            {/* Phase 3 */}
-            <div className="border border-white/10 bg-lsr-charcoal p-6 group hover:border-white/30 transition-colors">
-              <div className="flex justify-between items-start mb-6">
-                <span className="font-display font-black italic text-4xl text-white/10 group-hover:text-white/20 transition-colors">03</span>
-              </div>
-              <h3 className="font-sans font-black text-xl text-white uppercase tracking-tight mb-2">Legacy</h3>
-              <p className="font-sans font-bold text-xs text-white/40 uppercase tracking-widest mb-6">2027 Onward</p>
-              <ul className="space-y-3">
-                <li className="text-sm text-white/70 font-sans leading-snug">• Sustain sponsorship ecosystem</li>
-                <li className="text-sm text-white/70 font-sans leading-snug">• Strong alumni engagement</li>
-                <li className="text-sm text-white/70 font-sans leading-snug">• National collegiate recognition</li>
-              </ul>
+            <p className="mt-5 font-sans text-white/60 text-base md:text-lg leading-relaxed">
+              {viewer
+                ? "You're already a member. Come say hi on Discord and grab a spot at the next event."
+                : "Your account on this site is your LSR membership. Make one, join the Discord and come to an event."}
+            </p>
+            <div className="mt-8 flex flex-col sm:flex-row gap-3">
+              {!viewer && <CreateAccountButton />}
+              <Button
+                asChild
+                className={`rounded-none font-bold uppercase tracking-widest text-[10px] h-12 px-8 transition-all ${
+                  viewer
+                    ? "bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal"
+                    : "border border-white/15 bg-transparent text-white hover:bg-white hover:text-lsr-charcoal"
+                }`}
+              >
+                <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer">
+                  <MessageSquare className="w-3.5 h-3.5 mr-2" />
+                  Join the Discord
+                </a>
+              </Button>
+              <Button
+                asChild
+                className="rounded-none border border-white/15 bg-transparent text-white hover:bg-white hover:text-lsr-charcoal font-bold uppercase tracking-widest text-[10px] h-12 px-8 transition-all"
+              >
+                <Link href="/events">
+                  <CalendarDays className="w-3.5 h-3.5 mr-2" />
+                  Upcoming events
+                </Link>
+              </Button>
             </div>
           </div>
         </section>
-
       </div>
     </main>
   )
