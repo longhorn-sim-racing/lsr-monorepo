@@ -2,6 +2,7 @@ import { prisma } from "@/server/db";
 import { RegistrationStatus, Prisma, Event } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
 import { sendNotification } from "@/server/services/notification.service";
+import { runAfterResponse } from "@/server/after-response";
 import { formatInTimeZone } from "date-fns-tz";
 
 /**
@@ -15,28 +16,37 @@ type PromotionNotificationEvent = Pick<
 >;
 
 /**
- * Notifies users who were auto-promoted off the waitlist (fire and forget).
- * Call after the transaction that promoted them has committed.
+ * Notifies users who were auto-promoted off the waitlist, after the response is sent.
+ * Call after the transaction that promoted them has committed. Never throws.
  */
-export function notifyPromotedUsers(event: PromotionNotificationEvent, promotedUserIds: string[]) {
-  for (const promotedUserId of promotedUserIds) {
-    sendNotification({
-      userId: promotedUserId,
-      type: "WAITLIST_PROMOTED",
-      title: `You're in! Promoted from waitlist`,
-      body: `A spot opened up for ${event.title}.`,
-      actionUrl: `/events/${event.slug}`,
-      channels: ["IN_APP", "EMAIL"],
-      metadata: {
-        eventId: event.id,
-        title: event.title,
-        startsAt: event.startsAtUtc,
-        timezone: event.timezone || "America/Chicago",
-        slug: event.slug,
-        heroImageUrl: event.heroImageUrl,
-      },
-    }).catch((err) => console.error("[Notification] Failed to send waitlist promotion notification:", err));
-  }
+export async function notifyPromotedUsers(
+  event: PromotionNotificationEvent,
+  promotedUserIds: string[]
+): Promise<void> {
+  await Promise.all(
+    promotedUserIds.map((promotedUserId) =>
+      runAfterResponse(
+        () =>
+          sendNotification({
+            userId: promotedUserId,
+            type: "WAITLIST_PROMOTED",
+            title: `You're in! Promoted from waitlist`,
+            body: `A spot opened up for ${event.title}.`,
+            actionUrl: `/events/${event.slug}`,
+            channels: ["IN_APP", "EMAIL"],
+            metadata: {
+              eventId: event.id,
+              title: event.title,
+              startsAt: event.startsAtUtc,
+              timezone: event.timezone || "America/Chicago",
+              slug: event.slug,
+              heroImageUrl: event.heroImageUrl,
+            },
+          }),
+        "[Notification] Failed to send waitlist promotion notification:"
+      )
+    )
+  );
 }
 
 /**
@@ -288,32 +298,36 @@ export async function registerForEvent(
     return { status: targetStatus, event, promotedUserIds };
   });
 
-  // Send notifications after transaction commits (fire and forget)
+  // Send notifications after the transaction commits, once the response is out
   try {
     // Notify the registering user if they got registered
     if (result.status === "REGISTERED") {
       const tz = result.event.timezone || "America/Chicago";
       const eventDate = formatInTimeZone(result.event.startsAtUtc, tz, "EEEE, MMMM d 'at' h:mm a");
-      sendNotification({
-        userId,
-        type: "REGISTRATION_CONFIRMED",
-        title: `You're registered for ${result.event.title}!`,
-        body: `See you on ${eventDate}.`,
-        actionUrl: `/events/${result.event.slug}`,
-        channels: ["IN_APP", "EMAIL"],
-        metadata: {
-          eventId,
-          title: result.event.title,
-          startsAt: result.event.startsAtUtc,
-          timezone: tz,
-          slug: result.event.slug,
-          heroImageUrl: result.event.heroImageUrl,
-        },
-      }).catch((err) => console.error("[Notification] Failed to send registration notification:", err));
+      await runAfterResponse(
+        () =>
+          sendNotification({
+            userId,
+            type: "REGISTRATION_CONFIRMED",
+            title: `You're registered for ${result.event.title}!`,
+            body: `See you on ${eventDate}.`,
+            actionUrl: `/events/${result.event.slug}`,
+            channels: ["IN_APP", "EMAIL"],
+            metadata: {
+              eventId,
+              title: result.event.title,
+              startsAt: result.event.startsAtUtc,
+              timezone: tz,
+              slug: result.event.slug,
+              heroImageUrl: result.event.heroImageUrl,
+            },
+          }),
+        "[Notification] Failed to send registration notification:"
+      );
     }
 
     // Notify users who got promoted from waitlist
-    notifyPromotedUsers(result.event, result.promotedUserIds);
+    await notifyPromotedUsers(result.event, result.promotedUserIds);
   } catch (err) {
     // Don't fail the registration if notifications fail
     console.error("[Notification] Error sending notifications:", err);
@@ -414,32 +428,34 @@ export async function adminOverrideRegistration(
     return { event, wasPromotedByAdmin, promotedUserIds };
   });
 
-  // Send notifications after transaction commits (fire and forget)
+  // Send notifications after the transaction commits, once the response is out
   try {
     // Notify user if they were promoted by admin
     if (result.wasPromotedByAdmin) {
-      sendNotification({
-        userId: targetUserId,
-        type: "WAITLIST_PROMOTED",
-        title: `You're in! Promoted from waitlist`,
-        body: `An admin has registered you for ${result.event.title}.`,
-        actionUrl: `/events/${result.event.slug}`,
-        channels: ["IN_APP", "EMAIL"],
-        metadata: {
-          eventId,
-          title: result.event.title,
-          startsAt: result.event.startsAtUtc,
-          timezone: result.event.timezone || "America/Chicago",
-          slug: result.event.slug,
-          heroImageUrl: result.event.heroImageUrl,
-        },
-      }).catch((err) =>
-        console.error("[Notification] Failed to send admin promotion notification:", err)
+      await runAfterResponse(
+        () =>
+          sendNotification({
+            userId: targetUserId,
+            type: "WAITLIST_PROMOTED",
+            title: `You're in! Promoted from waitlist`,
+            body: `An admin has registered you for ${result.event.title}.`,
+            actionUrl: `/events/${result.event.slug}`,
+            channels: ["IN_APP", "EMAIL"],
+            metadata: {
+              eventId,
+              title: result.event.title,
+              startsAt: result.event.startsAtUtc,
+              timezone: result.event.timezone || "America/Chicago",
+              slug: result.event.slug,
+              heroImageUrl: result.event.heroImageUrl,
+            },
+          }),
+        "[Notification] Failed to send admin promotion notification:"
       );
     }
 
     // Notify users who got auto-promoted from waitlist
-    notifyPromotedUsers(result.event, result.promotedUserIds);
+    await notifyPromotedUsers(result.event, result.promotedUserIds);
   } catch (err) {
     console.error("[Notification] Error sending notifications:", err);
   }
@@ -500,7 +516,7 @@ export async function adminRemoveRegistration({
     return { event, promotedUserIds };
   });
 
-  notifyPromotedUsers(result.event, result.promotedUserIds);
+  await notifyPromotedUsers(result.event, result.promotedUserIds);
 
   return { slug: result.event.slug };
 }
@@ -520,7 +536,7 @@ export async function reconcileEventWaitlist(eventId: string): Promise<string[]>
     return { event, promotedUserIds };
   });
 
-  notifyPromotedUsers(result.event, result.promotedUserIds);
+  await notifyPromotedUsers(result.event, result.promotedUserIds);
 
   return result.promotedUserIds;
 }

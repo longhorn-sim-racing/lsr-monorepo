@@ -1,7 +1,8 @@
 import { prisma } from "@/server/db";
 import { NotificationChannel, Prisma } from "@prisma/client";
-import { sendEmail } from "@/lib/email/resend";
+import { sendEmail, type SendEmailResult } from "@/lib/email/resend";
 import { getEmailTemplate } from "@/lib/email/templates";
+import { subHours, subMinutes } from "date-fns";
 
 export type NotificationType =
   | "REGISTRATION_CONFIRMED"
@@ -161,15 +162,26 @@ function shouldSendEmail(
   }
 }
 
+// Unscheduled notifications are sent the moment they're created. One still PENDING a few
+// minutes later lost its send (#52), so the cron retries it, but only for 48 hours: older
+// ones are stale (e.g. a confirmation for an event that's over) and we'd rather not send them.
+const UNSCHEDULED_RETRY_AFTER_MINUTES = 5;
+const UNSCHEDULED_MAX_AGE_HOURS = 48;
+
 /**
  * Process all pending notifications for a user.
+ * Skips unscheduled rows older than UNSCHEDULED_MAX_AGE_HOURS (see above).
  */
 export async function processUserNotifications(userId: string): Promise<void> {
+  const now = new Date();
   const notifications = await prisma.notification.findMany({
     where: {
       userId,
       status: "PENDING",
-      OR: [{ scheduledFor: null }, { scheduledFor: { lte: new Date() } }],
+      OR: [
+        { scheduledFor: null, createdAt: { gte: subHours(now, UNSCHEDULED_MAX_AGE_HOURS) } },
+        { scheduledFor: { lte: now } },
+      ],
     },
     include: { user: true },
   });
@@ -194,35 +206,63 @@ export async function processScheduledNotifications(): Promise<number> {
 
   let processed = 0;
   for (const notification of notifications) {
-    await processNotification(notification);
-    processed++;
+    if (await processNotification(notification)) processed++;
   }
 
   return processed;
 }
 
 /**
- * Process a single notification.
+ * Retry unscheduled notifications whose immediate send never happened (for cron job).
+ * Only rows created between UNSCHEDULED_RETRY_AFTER_MINUTES and UNSCHEDULED_MAX_AGE_HOURS ago.
  */
-async function processNotification(
-  notification: Prisma.NotificationGetPayload<{ include: { user: true } }>
-): Promise<void> {
-  if (notification.channel === "EMAIL") {
-    await processEmailNotification(notification);
-  } else {
-    // IN_APP notifications just get marked as sent
-    await prisma.notification.update({
-      where: { id: notification.id },
-      data: {
-        status: "SENT",
-        sentAt: new Date(),
+export async function processStuckNotifications(): Promise<number> {
+  const now = new Date();
+  const notifications = await prisma.notification.findMany({
+    where: {
+      status: "PENDING",
+      scheduledFor: null,
+      createdAt: {
+        lte: subMinutes(now, UNSCHEDULED_RETRY_AFTER_MINUTES),
+        gte: subHours(now, UNSCHEDULED_MAX_AGE_HOURS),
       },
-    });
+    },
+    include: { user: true },
+    orderBy: { createdAt: "asc" },
+    take: 100, // Process in batches
+  });
+
+  let processed = 0;
+  for (const notification of notifications) {
+    if (await processNotification(notification)) processed++;
   }
+
+  return processed;
 }
 
 /**
- * Process an email notification.
+ * Process a single notification. It's claimed first with a conditional PENDING → SENT
+ * update, so when two paths pick up the same row (the user's own flush and the cron
+ * retry) only one delivers it. Returns false when another path already claimed it.
+ */
+async function processNotification(
+  notification: Prisma.NotificationGetPayload<{ include: { user: true } }>
+): Promise<boolean> {
+  const { count } = await prisma.notification.updateMany({
+    where: { id: notification.id, status: "PENDING" },
+    // IN_APP notifications are delivered by this update; an email's sentAt waits for Resend.
+    data: { status: "SENT", sentAt: notification.channel === "EMAIL" ? null : new Date() },
+  });
+  if (count === 0) return false;
+
+  if (notification.channel === "EMAIL") {
+    await processEmailNotification(notification);
+  }
+  return true;
+}
+
+/**
+ * Process an email notification (already claimed by processNotification).
  */
 async function processEmailNotification(
   notification: Prisma.NotificationGetPayload<{ include: { user: true } }>
@@ -238,20 +278,27 @@ async function processEmailNotification(
     actionUrl = `${baseUrl.replace(/\/$/, "")}${actionUrl}`;
   }
 
-  const template = getEmailTemplate({
-    type: notification.type,
-    title: notification.title,
-    body: notification.body,
-    actionUrl,
-    metadata: notification.metadata as Record<string, unknown> | undefined,
-  });
+  let result: SendEmailResult;
+  try {
+    const template = getEmailTemplate({
+      type: notification.type,
+      title: notification.title,
+      body: notification.body,
+      actionUrl,
+      metadata: notification.metadata as Record<string, unknown> | undefined,
+    });
 
-  const result = await sendEmail({
-    to: notification.user.email,
-    subject: notification.title,
-    html: template.html,
-    text: template.text,
-  });
+    result = await sendEmail({
+      to: notification.user.email,
+      subject: notification.title,
+      html: template.html,
+      text: template.text,
+    });
+  } catch (error) {
+    // Claimed but not sent: mark it FAILED (retryable by an officer) instead of leaving it SENT.
+    console.error(`[Notification] Email ${notification.id} threw before sending:`, error);
+    result = { success: false, error: String(error) };
+  }
 
   await prisma.notification.update({
     where: { id: notification.id },

@@ -3,6 +3,7 @@ import { prisma } from "@/server/db";
 import { Prisma, RegistrationStatus, type Payment } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
 import { sendNotification } from "@/server/services/notification.service";
+import { runAfterResponse } from "@/server/after-response";
 import { formatInTimeZone } from "date-fns-tz";
 import { priceForUser, productRequiresMembership } from "@/server/services/product-pricing";
 import { getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
@@ -459,33 +460,32 @@ async function grantEventSeat(
     metadata: { sessionId: session.id, eventId: meta.eventId },
   });
 
-  // Send notification (fire and forget)
+  // Send notification once the response is out
   const event = await prisma.event.findUnique({
     where: { id: meta.eventId },
   });
   if (event && registrationStatus === "REGISTERED") {
     const tz = event.timezone || "America/Chicago";
     const eventDate = formatInTimeZone(event.startsAtUtc, tz, "EEEE, MMMM d 'at' h:mm a");
-    sendNotification({
-      userId: payment.userId,
-      type: "REGISTRATION_CONFIRMED",
-      title: `You're registered for ${event.title}!`,
-      body: `Payment confirmed. See you on ${eventDate}.`,
-      actionUrl: `/events/${event.slug}`,
-      channels: ["IN_APP", "EMAIL"],
-      metadata: {
-        eventId: meta.eventId,
-        title: event.title,
-        startsAt: event.startsAtUtc,
-        timezone: tz,
-        slug: event.slug,
-        heroImageUrl: event.heroImageUrl,
-      },
-    }).catch((err) =>
-      console.error(
-        "[Payment] Failed to send registration notification:",
-        err
-      )
+    await runAfterResponse(
+      () =>
+        sendNotification({
+          userId: payment.userId,
+          type: "REGISTRATION_CONFIRMED",
+          title: `You're registered for ${event.title}!`,
+          body: `Payment confirmed. See you on ${eventDate}.`,
+          actionUrl: `/events/${event.slug}`,
+          channels: ["IN_APP", "EMAIL"],
+          metadata: {
+            eventId: meta.eventId,
+            title: event.title,
+            startsAt: event.startsAtUtc,
+            timezone: tz,
+            slug: event.slug,
+            heroImageUrl: event.heroImageUrl,
+          },
+        }),
+      "[Payment] Failed to send registration notification:"
     );
   }
 }
@@ -675,7 +675,7 @@ async function grantProduct(
     after: result.entitlement,
   });
 
-  // Send notification (fire and forget)
+  // Send notification once the response is out
   const isDues = product.type === "ANNUAL_DUES";
   const through = formatInTimeZone(result.validTo, "America/Chicago", "MMMM d, yyyy");
   const leagueName = product.league?.name ?? "the league";
@@ -683,25 +683,27 @@ async function grantProduct(
     ? "/account"
     : (product.league?.slug && PRODUCT_RETURN_PATHS[product.league.slug]) || "/account";
 
-  sendNotification({
-    userId: payment.userId,
-    type: isDues ? "DUES_CONFIRMED" : "LEAGUE_REGISTERED",
-    title: isDues ? "You're an LSR member!" : `You're entered in ${leagueName}!`,
-    body: isDues
-      ? `Payment confirmed. Your membership is active through ${through}.`
-      : `Payment confirmed. Your ${leagueName} entry is active through ${through}. Next, the comp team will give you the ${leagueName} role on Discord, which unlocks the track and car downloads.`,
-    actionUrl,
-    channels: ["IN_APP", "EMAIL"],
-    metadata: {
-      paymentId: payment.id,
-      productId: product.id,
-      productType: product.type,
-      leagueId: product.leagueId,
-      entitlementId: result.entitlement.id,
-      validTo: result.validTo,
-    },
-  }).catch((err) =>
-    console.error("[Payment] Failed to send product notification:", err)
+  await runAfterResponse(
+    () =>
+      sendNotification({
+        userId: payment.userId,
+        type: isDues ? "DUES_CONFIRMED" : "LEAGUE_REGISTERED",
+        title: isDues ? "You're an LSR member!" : `You're entered in ${leagueName}!`,
+        body: isDues
+          ? `Payment confirmed. Your membership is active through ${through}.`
+          : `Payment confirmed. Your ${leagueName} entry is active through ${through}. Next, the comp team will give you the ${leagueName} role on Discord, which unlocks the track and car downloads.`,
+        actionUrl,
+        channels: ["IN_APP", "EMAIL"],
+        metadata: {
+          paymentId: payment.id,
+          productId: product.id,
+          productType: product.type,
+          leagueId: product.leagueId,
+          entitlementId: result.entitlement.id,
+          validTo: result.validTo,
+        },
+      }),
+    "[Payment] Failed to send product notification:"
   );
 }
 

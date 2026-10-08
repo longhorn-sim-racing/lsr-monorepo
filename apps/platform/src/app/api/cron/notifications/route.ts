@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
-import { processScheduledNotifications, sendNotification } from "@/server/services/notification.service";
+import {
+  processScheduledNotifications,
+  processStuckNotifications,
+  sendNotification,
+} from "@/server/services/notification.service";
 import { addHours, subHours } from "date-fns";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Allow up to 60 seconds for the cron job
 
 /**
- * Cron job to process scheduled notifications and create event reminders.
+ * Cron job to process scheduled notifications, retry recent unscheduled ones whose
+ * immediate send was dropped, and create event reminders.
  * Called every 15 minutes by GitHub Actions (see .github/workflows/notification-cron.yml).
  */
 export async function GET(request: Request) {
@@ -22,6 +27,7 @@ export async function GET(request: Request) {
 
   const results = {
     processedNotifications: 0,
+    retriedNotifications: 0,
     scheduledReminders: 0,
     errors: [] as string[],
   };
@@ -35,7 +41,15 @@ export async function GET(request: Request) {
   }
 
   try {
-    // 2. Schedule 24-hour reminders for upcoming events
+    // 2. Retry recent unscheduled notifications still PENDING (their send was dropped)
+    results.retriedNotifications = await processStuckNotifications();
+  } catch (error) {
+    console.error("[Cron] Failed to retry stuck notifications:", error);
+    results.errors.push(`Retry stuck notifications: ${String(error)}`);
+  }
+
+  try {
+    // 3. Schedule 24-hour reminders for upcoming events
     results.scheduledReminders = await scheduleEventReminders();
   } catch (error) {
     console.error("[Cron] Failed to schedule event reminders:", error);
