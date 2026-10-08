@@ -5,12 +5,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Event, RaceResult, RaceParticipant, Round, Season, EventSeries } from "@prisma/client";
+import type { Event, RaceResult, RaceParticipant, EventSeries } from "@prisma/client";
 import type { PublicUser } from "@/lib/public-user";
 
 // Define a type that covers the specific data structure we fetch
 type SidebarEvent = Event & {
-  round: (Round & { season: Season }) | null;
   series: EventSeries | null;
   ingestedSessions: {
     results: (RaceResult & {
@@ -63,7 +62,7 @@ function Tile({
   // Derive data
   const session = event?.ingestedSessions?.[0];
   const podium = session?.results || [];
-  const seasonName = event?.round?.season?.name || event?.series?.title; 
+  const seasonName = event?.series?.title;
 
   return (
     <div className="border border-white/10 bg-white/[0.02] p-4 md:p-6">

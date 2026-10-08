@@ -63,10 +63,8 @@ export function productRequiresMembership(product: Pick<Product, "type" | "metad
 }
 
 /**
- * True when the user has a standings entry in any of the given seasons.
- * Mirrors both paths in standings.repo: a Season's own entries (matched by the
- * season's slug or its series' slug), and legacy results reached through
- * Round → Event → EventSeries.
+ * True when the user has a standings entry in any of the given seasons, matched
+ * by the season's slug or its series' slug (the same lookup standings.repo uses).
  */
 export async function isReturningDriver(
   userId: string,
@@ -78,13 +76,6 @@ export async function isReturningDriver(
       OR: [
         { season: { slug: { in: seasonSlugs } } },
         { season: { series: { slug: { in: seasonSlugs } } } },
-        {
-          results: {
-            some: {
-              session: { round: { event: { series: { slug: { in: seasonSlugs } } } } },
-            },
-          },
-        },
       ],
     },
     select: { id: true },
