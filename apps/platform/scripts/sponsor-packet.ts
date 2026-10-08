@@ -14,7 +14,7 @@
  * previewing in a browser.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -80,9 +80,13 @@ function chromePath(): string {
     "C:/Program Files/Google/Chrome/Application/chrome.exe",
     "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
     "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+    "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/usr/bin/google-chrome",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "/usr/bin/google-chrome-stable",
     "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
   ];
   const found = candidates.find((path) => path && existsSync(path));
   if (!found) throw new Error("No Chrome or Edge found; set CHROME_PATH");
@@ -308,6 +312,8 @@ async function main() {
     return;
   }
 
+  // Chrome can exit 0 without printing, so start from no file to tell the two apart (git has the old one)
+  rmSync(OUT, { force: true });
   const result = spawnSync(
     chromePath(),
     [

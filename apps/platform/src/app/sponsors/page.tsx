@@ -37,7 +37,7 @@ const partnerListJsonLd = {
     item: {
       "@type": "Organization",
       name: p.name,
-      logo: `${SITE_URL}${p.logo}`,
+      logo: `${SITE_URL}${p.lightLogo ?? p.logo}`,
       ...(p.url ? { url: p.url } : {}),
       ...(p.description ? { description: p.description } : {}),
     },
@@ -558,8 +558,8 @@ export default async function SponsorsPage() {
                     <th scope="col" className="p-3 sm:p-4">Benefit</th>
                     {TIERS.map((tier) => (
                       <th key={tier.id} scope="col" className="px-1 py-3 sm:p-4 text-center w-[12%] sm:w-[16%]">
-                        <abbr title={tier.name} className="no-underline sm:hidden">{tier.short[0]}</abbr>
-                        <span className="hidden sm:inline">{tier.short}</span>
+                        <span aria-hidden className="sm:hidden">{tier.short[0]}</span>
+                        <span className="sr-only sm:not-sr-only">{tier.short}</span>
                       </th>
                     ))}
                   </tr>
@@ -571,9 +571,15 @@ export default async function SponsorsPage() {
                       {TIERS.map((tier, i) => (
                         <td key={tier.id} className="px-1 py-3 sm:p-4 text-center">
                           {i >= tierIndex(row.from) ? (
-                            <Check className="h-4 w-4 mx-auto text-lsr-orange" aria-label="Included" />
+                            <>
+                              <Check aria-hidden className="h-4 w-4 mx-auto text-lsr-orange" />
+                              <span className="sr-only">Included</span>
+                            </>
                           ) : (
-                            <Minus className="h-4 w-4 mx-auto text-white/15" aria-label="Not included" />
+                            <>
+                              <Minus aria-hidden className="h-4 w-4 mx-auto text-white/15" />
+                              <span className="sr-only">Not included</span>
+                            </>
                           )}
                         </td>
                       ))}
@@ -639,7 +645,7 @@ export default async function SponsorsPage() {
                 <div>
                   <dt className="font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange">Logo format</dt>
                   <dd className="mt-1 text-white/65 leading-relaxed">
-                    <span className="text-white font-bold">PNG</span> or <span className="text-white font-bold">JPG</span>, high resolution. If we can’t work with your logo, we may not be able to include it.
+                    Logos must be submitted in <span className="text-white font-bold">PNG</span> or <span className="text-white font-bold">JPG</span> format and be a high resolution image. If we can’t work with your logo, we may not be able to include it.
                   </dd>
                 </div>
                 <div>
