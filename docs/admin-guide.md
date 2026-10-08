@@ -99,10 +99,7 @@ Series (e.g., "Pro Championship")
    - **Year**: Calendar year
    - **Series**: Which series this season belongs to
    - **Start/End Date**: When the season runs
-   - **Points Ruleset**: How points are awarded
-     - **F1**: Standard F1 points (25, 18, 15, 12, 10, 8, 6, 4, 2, 1)
-     - **Half Points**: 50% of F1 values
-     - **None**: No automatic points
+   - **Default Points Ruleset**: Saved with the season for reference. Points are actually awarded by the ruleset you pick when you ingest each results upload (see below)
 
 ### Importing Race Results
 
@@ -110,7 +107,10 @@ Series (e.g., "Pro Championship")
 2. Click **Upload** and select your JSON results file
 3. The system will parse the file and show a preview
 4. Assign the results to an event
-5. Select the points ruleset
+5. Select the points ruleset for this upload. This is what awards points:
+   - **F1**: Standard F1 points (25, 18, 15, 12, 10, 8, 6, 4, 2, 1)
+   - **Half Points**: about half the F1 values
+   - **None**: No points (practice and qualifying sessions never award points)
 6. Click **Ingest** to process the results
 
 Once ingested, standings are automatically calculated.

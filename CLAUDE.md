@@ -136,6 +136,7 @@ Production credentials live only in Vercel — never in local env files.
 - Work is tracked on the [GitHub Project board](https://github.com/orgs/longhorn-sim-racing/projects/1)
 - Tasks are tracked as [GitHub Issues](https://github.com/longhorn-sim-racing/lsr-monorepo/issues)
 - Branch naming: `short-description` (e.g., `fix-officer-images`) or `<issue-number>-short-description` for issue work
+- Open a **draft** PR as soon as you start on an issue so others can see what's in progress. CI and Vercel previews skip drafts; when you mark it ready for review, push a commit (an empty one is fine) so the Vercel preview builds
 - Include `Closes #<number>` in PR descriptions to auto-close issues on merge
 - Migrations deploy separately from the app (see `docs/deployment.md`), so keep them compatible with the code already running
 - See `docs/onboarding.md` for the full contributor workflow

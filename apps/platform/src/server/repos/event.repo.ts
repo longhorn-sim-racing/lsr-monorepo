@@ -1,15 +1,10 @@
 // src/server/repos/event.repo.ts
 import { prisma } from '@/server/db';
+import { publicEventWhere } from '@/lib/events';
 
 export async function listAllEvents() {
-  const now = new Date();
   return prisma.event.findMany({
-    where: {
-      OR: [
-        { status: { in: ['PUBLISHED', 'CANCELLED', 'POSTPONED', 'IN_PROGRESS', 'COMPLETED'] } },
-        { status: 'SCHEDULED', publishedAt: { lte: now } }
-      ]
-    },
+    where: publicEventWhere(),
     orderBy: { startsAtUtc: 'asc' },
     include: {
       venue: true,
@@ -34,10 +29,10 @@ export async function listLiveEvents() {
     where: {
       startsAtUtc: { lte: now },
       endsAtUtc: { gte: now },
-      OR: [
-        { status: { in: ['PUBLISHED', 'IN_PROGRESS'] } },
-        { status: 'SCHEDULED', publishedAt: { lte: now } }
-      ]
+      AND: [
+        publicEventWhere(now),
+        { status: { in: ['PUBLISHED', 'IN_PROGRESS', 'SCHEDULED'] } },
+      ],
     },
   });
 }
@@ -54,7 +49,6 @@ export async function getEventBySlug(slug: string) {
     include: {
       venue: true,
       series: true,
-      eligibility: true,
       registrations: {
         include: {
           user: {

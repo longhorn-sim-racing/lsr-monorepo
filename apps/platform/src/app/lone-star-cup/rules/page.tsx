@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { requireOfficer } from "@/server/auth/guards";
+import { isViewerOfficer } from "@/server/auth/guards";
 import { getPageBySlug, LSC_RULES_SLUG, renderPageMarkdown } from "@/lib/pages";
 
 export const dynamic = "force-dynamic";
@@ -12,20 +12,12 @@ export const metadata: Metadata = {
   alternates: { canonical: "/lone-star-cup/rules" },
 };
 
-async function viewerIsOfficer() {
-  try {
-    await requireOfficer();
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export default async function LoneStarCupRulesPage() {
   const page = await getPageBySlug(LSC_RULES_SLUG);
   // Drafts (not public yet) are only visible to officers, so the comp team can review them here.
   const isDraft = !!page && page.visibility !== "public";
-  if (!page || (isDraft && !(await viewerIsOfficer()))) notFound();
+  if (!page || (isDraft && !(await isViewerOfficer()))) notFound();
 
   const content = await renderPageMarkdown(page.bodyMd);
 

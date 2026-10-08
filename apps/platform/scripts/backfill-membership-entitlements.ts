@@ -2,9 +2,8 @@
  * One-off backfill for the payments cutover (#88).
  *
  * Members granted LSR_MEMBER by hand (a UserMembership row set in /admin/users)
- * have no Entitlement, and Entitlement is what gates `requiresLsrMember`
- * events, drives the /account membership card, and stops a member paying dues
- * twice. This creates a matching `lsr_member` Entitlement for every LSR_MEMBER
+ * have no Entitlement, and Entitlement is what drives the /account membership
+ * card and stops a member paying dues twice. This creates a matching `lsr_member` Entitlement for every LSR_MEMBER
  * membership that hasn't expired, unless the user already holds an active one.
  *
  * Dry run by default: prints the plan and writes nothing.

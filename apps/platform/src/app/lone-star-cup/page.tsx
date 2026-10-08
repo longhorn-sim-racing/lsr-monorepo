@@ -23,6 +23,7 @@ import { LSC_RULES_SLUG } from "@/lib/page-slugs";
 import { ProductCheckoutButton, ProductPaymentToast } from "@/components/product-checkout-button";
 import { Button } from "@/components/ui/button";
 import { publicUserSelect } from "@/lib/public-user";
+import { publicEventWhere } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,7 @@ async function getSeriesWithPodiums(slug: string) {
     where: { slug },
     include: {
       events: {
+        where: publicEventWhere(),
         orderBy: { startsAtUtc: "asc" },
         include: {
           venue: true,

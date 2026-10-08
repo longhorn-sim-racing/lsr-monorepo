@@ -19,8 +19,8 @@ const sameInstant = (a: Date | null, b: Date | null) =>
 /**
  * Keeps a manually granted LSR membership and its `lsr_member` Entitlement in
  * step. Officers grant, extend and revoke membership by editing the
- * UserMembership row in /admin/users, but event eligibility, the /account card
- * and dues checkout read Entitlement. Called after every admin edit.
+ * UserMembership row in /admin/users, but the /account card and dues checkout
+ * read Entitlement. Called after every admin edit.
  *
  * Derives the result from the user's current state rather than the form:
  * - an active *paid* lsr_member entitlement (sourcePaymentId set) is left alone;

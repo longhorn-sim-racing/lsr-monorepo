@@ -105,7 +105,7 @@ We track tasks and bugs as [GitHub Issues](https://github.com/longhorn-sim-racin
    ```bash
    git commit -m "Fix officer image placeholders (#24)"
    ```
-4. **Open a Pull Request** — Push your branch and open a PR against `main`. Include `Closes #24` in the PR description to auto-close the issue when merged.
+4. **Open a Pull Request** — Push your branch and open a **draft** PR against `main` as soon as you start, so others can see what you're working on. Include `Closes #24` in the PR description to auto-close the issue when merged. Mark it ready for review when it's done; CI and the Vercel preview skip drafts, so push a commit (an empty one is fine) after marking it ready to get the preview.
 5. **Code review & merge** — Same review process as the branch workflow above.
 
 ### Tips
@@ -115,7 +115,7 @@ We track tasks and bugs as [GitHub Issues](https://github.com/longhorn-sim-racin
 
 ## How CI works
 
-The CI pipeline (`.github/workflows/ci.yml`) runs on every push to `main` and on all pull requests. After installing dependencies and generating the Prisma client, it runs three checks:
+The CI pipeline (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests (draft PRs are skipped until they're marked ready for review). After installing dependencies and generating the Prisma client, it runs three checks:
 
 1. **Lint** -- ESLint across the platform app
 2. **Type check** -- `tsc --noEmit` for TypeScript correctness

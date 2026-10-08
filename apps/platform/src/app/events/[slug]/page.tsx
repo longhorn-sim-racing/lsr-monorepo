@@ -10,16 +10,19 @@ import { VenueActions } from "@/components/venue-actions";
 import { ResultsTable } from "@/components/results-table";
 import { EventRegistrationPanel } from "@/components/event-registration-panel";
 import { getSessionUser } from "@/server/auth/session";
+import { isViewerOfficer } from "@/server/auth/guards";
 import { Metadata } from "next";
-import { isEventLive } from "@/lib/events";
+import { isEventLive, isEventPublic } from "@/lib/events";
 import { StreamPlayer } from "@/components/stream-player";
 import { DatabaseUnavailable } from "@/components/database-unavailable";
 
-export const revalidate = 3600;
+// Per request, not ISR: an officer's draft preview must never be cached for everyone else.
+export const dynamic = "force-dynamic";
 
 type EventPageArgs = {
   params: Promise<{ slug: string }>;
 };
+
 
 export async function generateMetadata({
   params,
@@ -33,7 +36,7 @@ export async function generateMetadata({
     event = null;
   }
 
-  if (!event) {
+  if (!event || (!isEventPublic(event) && !(await isViewerOfficer()))) {
     return {
       title: "Event",
       alternates: { canonical: `/events/${slug}` },
@@ -83,6 +86,10 @@ export default async function EventPage({ params }: EventPageArgs) {
   }
 
   if (!event) {
+    return notFound();
+  }
+  const isDraft = !isEventPublic(event);
+  if (isDraft && !(await isViewerOfficer())) {
     return notFound();
   }
 
@@ -309,6 +316,13 @@ export default async function EventPage({ params }: EventPageArgs) {
             Return to Calendar
           </Link>
         </div>
+
+        {isDraft && (
+          <div className="mb-8 border border-amber-500/30 bg-amber-500/10 px-4 py-3 font-sans text-xs text-amber-200">
+            Draft: only officers can see this event. Edit it in{" "}
+            <Link href={`/admin/events/${event.id}/edit`} className="underline hover:text-white">Admin → Events</Link>.
+          </div>
+        )}
 
         {event.heroImageUrl && (
           <div className="aspect-[21/9] w-full border border-white/10 bg-black relative overflow-hidden group mb-12">

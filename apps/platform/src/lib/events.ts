@@ -1,4 +1,4 @@
-import { EventStatus } from "@prisma/client";
+import { EventStatus, Visibility, type Prisma } from "@prisma/client";
 
 export function getEffectiveEventStatus(event: {
   status: EventStatus;
@@ -40,11 +40,26 @@ export function getEffectiveEventStatus(event: {
   return status;
 }
 
-export function isEventPublic(event: { status: EventStatus; publishedAt?: Date | null }): boolean {
+// "Public" = visible to everyone: not a draft, a SCHEDULED event only once its publish
+// time has passed, and public visibility. Keep these two in sync.
+export function publicEventWhere(now = new Date()): Prisma.EventWhereInput {
+  return {
+    visibility: Visibility.public,
+    OR: [
+      { status: { notIn: [EventStatus.DRAFT, EventStatus.SCHEDULED] } },
+      { status: EventStatus.SCHEDULED, publishedAt: { lte: now } },
+    ],
+  };
+}
+
+export function isEventPublic(
+  event: { status: EventStatus; publishedAt?: Date | null; visibility: Visibility },
+  now = new Date()
+): boolean {
+  if (event.visibility !== Visibility.public) return false;
   if (event.status === EventStatus.DRAFT) return false;
   if (event.status === EventStatus.SCHEDULED) {
-    // Only public if the scheduled publish time has passed
-    return !!(event.publishedAt && new Date() >= event.publishedAt);
+    return !!(event.publishedAt && now >= event.publishedAt);
   }
   return true; // PUBLISHED, CANCELLED, POSTPONED (and legacy states) are public
 }

@@ -4,6 +4,8 @@ import { getSessionUser } from "@/server/auth/session"; // Assuming this exists 
 import { prisma } from "@/server/db";
 import { registerForEvent } from "@/server/services/registration.service";
 import { pickRacingNumberStyle, racingNumberSelect } from "@/lib/racing-number";
+import { isEventPublic } from "@/lib/events";
+import { isViewerOfficer } from "@/server/auth/guards";
 
 type Params = {
   params: Promise<{ slug: string }>;
@@ -37,7 +39,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     },
   });
 
-  if (!event) {
+  if (!event || (!isEventPublic(event) && !(await isViewerOfficer()))) {
     return NextResponse.json({ message: "Event not found" }, { status: 404 });
   }
 
@@ -106,7 +108,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const event = await prisma.event.findUnique({ where: { slug } });
-  if (!event) {
+  if (!event || (!isEventPublic(event) && !(await isViewerOfficer()))) {
     return NextResponse.json({ message: "Event not found" }, { status: 404 });
   }
 

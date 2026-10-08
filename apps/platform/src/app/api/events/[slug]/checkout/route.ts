@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/server/auth/session";
 import { createEventCheckoutSession } from "@/server/services/payment.service";
+import { prisma } from "@/server/db";
+import { isEventPublic } from "@/lib/events";
+import { isViewerOfficer } from "@/server/auth/guards";
 
 type Params = {
   params: Promise<{ slug: string }>;
@@ -12,6 +15,14 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   if (!user) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  }
+
+  const event = await prisma.event.findUnique({
+    where: { slug },
+    select: { status: true, publishedAt: true, visibility: true },
+  });
+  if (!event || (!isEventPublic(event) && !(await isViewerOfficer()))) {
+    return NextResponse.json({ message: "Event not found" }, { status: 404 });
   }
 
   try {

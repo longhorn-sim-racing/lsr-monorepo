@@ -3,7 +3,20 @@ import remarkGfm from "remark-gfm"
 import rehypeSlug from "rehype-slug"
 import rehypeAutolinkHeadings from "rehype-autolink-headings"
 import { prisma } from "@/server/db"
-import { notFound } from "next/navigation"
+import { Visibility, type Prisma } from "@prisma/client"
+
+// Published = publish date set and already passed (a future date is scheduled), public visibility.
+// Keep these two in sync.
+export function publishedPostWhere(now = new Date()): Prisma.PostWhereInput {
+  return { publishedAt: { lte: now }, visibility: Visibility.public }
+}
+
+export function isPostPublished(
+  post: { publishedAt: Date | null; visibility: Visibility },
+  now = new Date()
+): boolean {
+  return post.visibility === Visibility.public && !!post.publishedAt && post.publishedAt <= now
+}
 
 export type NewsFrontmatter = {
   title: string
@@ -17,9 +30,7 @@ export type NewsFrontmatter = {
 export async function getAllPosts() {
   const posts = await prisma.post.findMany({
     orderBy: { publishedAt: 'desc' },
-    where: {
-      publishedAt: { not: null } // Only show published posts publicly
-    },
+    where: publishedPostWhere(),
     include: {
       author: true
     }
@@ -54,13 +65,15 @@ export async function getAllPosts() {
   });
 }
 
+// Returns drafts too (frontmatter.published is false) so officers can preview them;
+// the page decides who may see an unpublished post.
 export async function getPostContent(slug: string) {
   const post = await prisma.post.findUnique({
     where: { slug },
     include: { author: true }
   });
 
-  if (!post) notFound();
+  if (!post) return null;
 
   // Fetch tags for this specific post
   const entityTags = await prisma.entityTag.findMany({
@@ -90,9 +103,9 @@ export async function getPostContent(slug: string) {
     date: post.publishedAt?.toISOString() ?? new Date().toISOString(),
     excerpt: post.excerpt ?? undefined,
     author: post.author?.displayName ?? "LSR Team",
-    published: true,
+    published: isPostPublished(post),
     tags: tags
   }
 
-  return { content: mdx.content, frontmatter }
+  return { id: post.id, content: mdx.content, frontmatter }
 }

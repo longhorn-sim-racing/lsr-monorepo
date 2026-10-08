@@ -1,4 +1,5 @@
 import { cache } from 'react';
+import { publicEventWhere } from '@/lib/events';
 import { getStandings as getStandingsFromRepo } from '@/server/repos/standings.repo';
 import { prisma } from '@/server/db';
 
@@ -20,6 +21,7 @@ export const getPointsProgression = cache(async (seriesSlug: string): Promise<Po
 
   const events = await prisma.event.findMany({
     where: {
+      ...publicEventWhere(),
       seriesId: season.seriesId,
       startsAtUtc: {
         gte: season.startAt || undefined,
