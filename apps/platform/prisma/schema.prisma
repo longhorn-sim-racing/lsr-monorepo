@@ -466,6 +466,7 @@ model Event {
 
   rawResultUploads RawResultUpload[]
   ingestedSessions RaceSession[]
+  galleryAlbums    GalleryAlbum[]
 
   publishedAt DateTime?
   updatedAt   DateTime  @updatedAt
@@ -579,8 +580,31 @@ model GalleryImage {
   creditName String?
   creditUrl  String?
   order     Int      @default(0)
+  // Pixel size from Cloudinary, so the gallery can lay photos out before they load
+  width     Int?
+  height    Int?
+  albumId   String?
+  album     GalleryAlbum? @relation(fields: [albumId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([albumId, order])
+}
+
+/// A set of gallery photos from one shoot or event. Albums sort by date, newest first.
+model GalleryAlbum {
+  id          String         @id @default(uuid())
+  slug        String         @unique
+  title       String
+  description String?
+  date        DateTime?
+  eventId     String?
+  event       Event?         @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  images      GalleryImage[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([date])
 }
 
 enum RawResultUploadStatus {
