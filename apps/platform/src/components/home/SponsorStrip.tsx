@@ -1,32 +1,7 @@
 import Link from "next/link"
 import Image from "next/image"
 import SectionReveal from "./SectionReveal"
-
-type GoldSponsor = {
-  name: string
-  logo: string
-  href: string
-  title?: string
-}
-
-const goldSponsors: GoldSponsor[] = [
-  {
-    name: "Race Club Austin",
-    logo: "/sponsors/raceclub.png",
-    href: "https://www.raceclubsim.com/?utm_source=longhornsimracing.org&utm_medium=referral&utm_campaign=sponsor-homepage",
-  },
-  {
-    name: "Driven to Care",
-    logo: "/sponsors/driventocare.png",
-    href: "https://www.driventocare.org/?utm_source=longhornsimracing.org&utm_medium=referral&utm_campaign=sponsor-homepage",
-  },
-  {
-    name: "PitLane Systems",
-    logo: "/sponsors/pitlane.png",
-    href: "https://www.pitlanesystems.com/?utm_source=longhornsimracing.org&utm_medium=referral&utm_campaign=sponsor-homepage",
-    title: "Official Broadcast Partner",
-  },
-]
+import { GOLD_SPONSORS, sponsorHref } from "@/lib/sponsors"
 
 export default function SponsorStrip({ index }: { index: number }) {
   return (
@@ -50,10 +25,10 @@ export default function SponsorStrip({ index }: { index: number }) {
         </div>
 
         <div className="relative z-10 flex flex-col sm:flex-row items-center justify-center flex-wrap gap-x-10 md:gap-x-16 gap-y-10">
-          {goldSponsors.map((sponsor) => (
+          {GOLD_SPONSORS.map((sponsor) => (
             <Link
               key={sponsor.name}
-              href={sponsor.href}
+              href={sponsor.url ? sponsorHref(sponsor.url, "sponsor-homepage") : "/sponsors"}
               target="_blank"
               rel="noopener noreferrer"
               className="group flex flex-col items-center gap-3 shrink-0"

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { prisma } from "@/server/db"
 import { getCachedSessionUser } from "@/server/auth/cached-session"
 import { publicEventWhere } from "@/lib/events"
+import { GOLD_SPONSORS, sponsorHref } from "@/lib/sponsors"
 import { OFFICERS, TEAMS, type Officer, type Team } from "./roster"
 import { CreateAccountButton } from "./create-account-button"
 
@@ -56,7 +57,13 @@ const PILLARS = [
   },
 ]
 
-const PARTNER_ORGS = ["Longhorn Racing", "Longhorn Car Club", "Longhorn Baja Racing", "Longhorn Lemons"]
+// UT motorsport orgs we work with. Logos come from each org's own site or HornsLink page.
+const CAMPUS_PARTNERS = [
+  { name: "Longhorn Racing", detail: "Formula SAE & solar", logo: "/partners/longhorn-racing.png", href: "https://longhornracing.org/" },
+  { name: "Longhorn Baja Racing", detail: "Baja SAE", logo: "/partners/longhorn-baja-racing.png", href: "https://www.instagram.com/longhornbaja/" },
+  { name: "Longhorn Car Club", detail: "Car meets & culture", logo: "/partners/longhorn-car-club.png", href: "https://texaslcc.com/" },
+  { name: "Orange Dames", detail: "Longhorn Lemons Racing", logo: "/partners/orange-dames.png", href: "https://sites.utexas.edu/orangedames/" },
+]
 
 const teamById = new Map(TEAMS.map((team) => [team.id, team]))
 
@@ -144,6 +151,31 @@ function Avatar({ officer }: { officer: Officer }) {
         </span>
       )}
     </div>
+  )
+}
+
+function LogoTile({ name, logo, href, detail, title }: { name: string; logo: string; href: string; detail?: string; title?: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group relative flex flex-col border border-white/10 bg-white/[0.02] p-5 md:p-6 transition-colors hover:border-lsr-orange/50 hover:bg-white/[0.04]"
+    >
+      <ArrowUpRight className="absolute top-4 right-4 h-4 w-4 text-white/20 transition-colors group-hover:text-lsr-orange" />
+      <span className="h-4 font-sans font-black text-[9px] uppercase tracking-[0.2em] text-lsr-orange">{title}</span>
+      <div className="relative my-5 h-20 md:h-24 w-full">
+        <Image
+          src={logo}
+          alt={name}
+          fill
+          sizes="(min-width: 1024px) 240px, 45vw"
+          className="object-contain transition-transform duration-300 group-hover:scale-105"
+        />
+      </div>
+      <p className="font-sans font-bold text-xs md:text-sm uppercase tracking-wide text-white">{name}</p>
+      {detail && <p className="mt-1 font-sans text-[11px] md:text-xs text-white/40">{detail}</p>}
+    </a>
   )
 }
 
@@ -321,31 +353,49 @@ export default async function AboutPage() {
           </div>
         </section>
 
-        {/* Around campus */}
-        <section className="grid gap-8 md:grid-cols-[1fr_2fr] md:items-center border-y border-white/10 py-10 md:py-12">
+        {/* Partners and sponsors */}
+        <section className="space-y-16 md:space-y-20">
           <div>
-            <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-3">Around campus</p>
-            <p className="font-sans text-white/60 text-sm md:text-base leading-relaxed">
-              We work alongside UT&apos;s other motorsport orgs on events, recruiting and sim-to-real projects.
-            </p>
-            <Link
-              href="/sponsors"
-              className="mt-4 inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white hover:text-lsr-orange transition-colors"
-            >
-              Our sponsors
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
+            <div className="grid gap-6 md:grid-cols-[1fr_1fr] md:items-end mb-10 md:mb-12">
+              <SectionHeading kicker="Around campus">
+                Campus <span className="text-lsr-orange">partners</span>
+              </SectionHeading>
+              <p className="font-sans text-white/60 text-base md:text-lg leading-relaxed md:mb-12">
+                We work alongside UT&apos;s other motorsport orgs on events, recruiting and sim-to-real projects.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+              {CAMPUS_PARTNERS.map((partner) => (
+                <LogoTile key={partner.name} {...partner} />
+              ))}
+            </div>
           </div>
-          <ul className="grid grid-cols-2 gap-3">
-            {PARTNER_ORGS.map((org) => (
-              <li
-                key={org}
-                className="border border-white/10 bg-white/[0.02] px-4 py-5 md:px-6 font-display font-black italic text-base md:text-xl text-white/80 uppercase leading-tight"
+
+          <div>
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10 md:mb-12">
+              <SectionHeading kicker="Backed by">
+                Our <span className="text-lsr-orange">sponsors</span>
+              </SectionHeading>
+              <Link
+                href="/sponsors"
+                className="group inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange hover:text-white transition-colors md:mb-12"
               >
-                {org}
-              </li>
-            ))}
-          </ul>
+                Become a partner
+                <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+              {GOLD_SPONSORS.map((sponsor) => (
+                <LogoTile
+                  key={sponsor.name}
+                  name={sponsor.name}
+                  logo={sponsor.logo}
+                  title={sponsor.title}
+                  href={sponsor.url ? sponsorHref(sponsor.url, "sponsor-about") : "/sponsors"}
+                />
+              ))}
+            </div>
+          </div>
         </section>
 
         {/* Join */}
