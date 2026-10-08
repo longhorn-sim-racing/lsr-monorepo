@@ -40,7 +40,10 @@ export async function GET(request: Request) {
     
     // Handle cross-device email verification where PKCE verifier is missing
     if (errorMessage.includes('both auth code and code verifier should be non-empty')) {
-      return NextResponse.redirect(`${origin}/?verified=true&message=Email+verified.+Please+sign+in.`);
+      // Keep the destination so the sign-in dialog can send them there afterwards
+      const safeNext = safeNextPath(next, '');
+      const nextParam = safeNext ? `&next=${encodeURIComponent(safeNext)}` : '';
+      return NextResponse.redirect(`${origin}/?verified=true&message=Email+verified.+Please+sign+in.${nextParam}`);
     }
 
     return NextResponse.redirect(`${origin}/auth/auth-code-error?error=${errorMessage}`);

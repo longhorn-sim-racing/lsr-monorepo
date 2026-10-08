@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { GoogleButton } from "@/components/google-button"
+import { safeNextPath } from "@/lib/safe-redirect"
 
 type TabKey = "signin" | "signup"
 
@@ -38,8 +39,18 @@ export function AuthDialog() {
   const [eid, setEid] = useState("")
   const [marketing, setMarketing] = useState(true);
 
+  // Where to send the user once they're signed in. A page can pass it when it opens the
+  // dialog (`new CustomEvent("open-auth-dialog", { detail: { next: "/apply/start" } })`);
+  // otherwise it comes from a `?next=` on the current URL (e.g. /auth/signin?next=...).
+  // Only same-site paths survive safeNextPath; undefined means "stay where you are".
+  const [nextOverride, setNextOverride] = useState<string | undefined>()
+  const next = safeNextPath(nextOverride ?? searchParams?.get("next"), "") || undefined
+
   useEffect(() => {
-    const handleOpen = () => setOpen(true)
+    const handleOpen = (e: Event) => {
+      setNextOverride((e as CustomEvent<{ next?: string } | undefined>).detail?.next)
+      setOpen(true)
+    }
     window.addEventListener("open-auth-dialog", handleOpen)
     return () => window.removeEventListener("open-auth-dialog", handleOpen)
   }, [])
@@ -60,7 +71,7 @@ export function AuthDialog() {
     e.preventDefault();
     startTransition(async () => {
       const origin = process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin;
-      const redirectTo = `${origin.replace(/\/$/, '')}/auth/callback`;
+      const redirectTo = `${origin.replace(/\/$/, '')}/auth/callback${next ? `?next=${encodeURIComponent(next)}` : ''}`;
       const { error } = await supabase.auth.signUp({
         email,
         password,
@@ -93,7 +104,9 @@ export function AuthDialog() {
         return alert("Please verify your email before signing in.");
       }
 
-      // Refresh the page to re-run Server Components with the new session
+      // Go where the user was headed (if anywhere), then refresh so Server Components
+      // re-run with the new session
+      if (next) router.push(next);
       router.refresh();
       setOpen(false);
     });
@@ -114,7 +127,13 @@ export function AuthDialog() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(isOpen) => {
+        setOpen(isOpen)
+        if (!isOpen) setNextOverride(undefined) // don't leak one page's destination into the next open
+      }}
+    >
       <DialogTrigger asChild>
         <Button size="sm" onClick={() => setTab("signup")} className="rounded-none bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal font-bold uppercase tracking-widest text-[10px] h-9 px-3 md:px-6 transition-all">
           <span className="sm:hidden">Sign In</span>
@@ -144,7 +163,7 @@ export function AuthDialog() {
             <TabsContent value="signup" className="mt-8 outline-none flex-grow">
             <div className="grid gap-6">
               {/* Google first */}
-              <GoogleButton />
+              <GoogleButton next={next} />
 
               <OrDivider />
 
@@ -224,7 +243,7 @@ export function AuthDialog() {
           <TabsContent value="signin" className="mt-8 outline-none">
             <div className="grid gap-6">
               {/* Google first */}
-              <GoogleButton />
+              <GoogleButton next={next} />
 
               <OrDivider />
 
