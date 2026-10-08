@@ -464,18 +464,22 @@ async function grantEventSeat(
   const event = await prisma.event.findUnique({
     where: { id: meta.eventId },
   });
-  if (event && registrationStatus === "REGISTERED") {
+  if (event) {
     const tz = event.timezone || "America/Chicago";
     const eventDate = formatInTimeZone(event.startsAtUtc, tz, "EEEE, MMMM d 'at' h:mm a");
+    const registered = registrationStatus === "REGISTERED";
     await runAfterResponse(
       () =>
         sendNotification({
           userId: payment.userId,
-          type: "REGISTRATION_CONFIRMED",
-          title: `You're registered for ${event.title}!`,
-          body: `Payment confirmed. See you on ${eventDate}.`,
+          type: registered ? "REGISTRATION_CONFIRMED" : "PAYMENT_WAITLISTED",
+          title: registered ? `You're registered for ${event.title}!` : `Payment received for ${event.title}`,
+          body: registered
+            ? `Payment confirmed. See you on ${eventDate}.`
+            : `Payment confirmed, but ${event.title} filled up while you were checking out, so you're on the waitlist. An officer will follow up with you.`,
           actionUrl: `/events/${event.slug}`,
           channels: ["IN_APP", "EMAIL"],
+          receipt: true,
           metadata: {
             eventId: meta.eventId,
             title: event.title,
@@ -694,6 +698,7 @@ async function grantProduct(
           : `Payment confirmed. Your ${leagueName} entry is active through ${through}. Next, the comp team will give you the ${leagueName} role on Discord, which unlocks the track and car downloads.`,
         actionUrl,
         channels: ["IN_APP", "EMAIL"],
+        receipt: true,
         metadata: {
           paymentId: payment.id,
           productId: product.id,

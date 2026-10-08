@@ -127,9 +127,9 @@ export default async function AccountPage() {
           {/* Master Email Toggle */}
           <form action={updateMarketingOptIn} className="rounded-none border border-white/5 bg-white/[0.03] p-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div>
-              <h3 className="font-display font-bold italic text-xl text-white uppercase tracking-tight">Email Notifications</h3>
+              <h3 className="font-display font-bold italic text-xl text-white uppercase tracking-tight">Club Updates</h3>
               <p className="font-sans text-sm text-white/50 mt-2 max-w-md">
-                Enable email notifications and marketing updates. Turning this off disables all emails.
+                News, new events, results and announcements from LSR. Turning this off doesn&apos;t stop payment receipts or emails about events you&apos;ve signed up for.
               </p>
             </div>
             <div className="flex items-center gap-6">
@@ -148,18 +148,15 @@ export default async function AccountPage() {
             <div className="mb-6">
               <h3 className="font-display font-bold italic text-xl text-white uppercase tracking-tight">Notification Types</h3>
               <p className="font-sans text-sm text-white/50 mt-2 max-w-md">
-                Choose which email notifications you want to receive.
+                Choose which email notifications you want to receive. Payment receipts are always emailed.
                 {!user.marketingOptIn && (
                   <span className="block mt-2 text-lsr-orange">
-                    Enable email notifications above to customize these settings.
+                    New events and race results also need club updates turned on.
                   </span>
                 )}
               </p>
             </div>
-            <NotificationPreferences
-              preferences={preferences}
-              disabled={!user.marketingOptIn}
-            />
+            <NotificationPreferences preferences={preferences} />
           </form>
         </section>
 
