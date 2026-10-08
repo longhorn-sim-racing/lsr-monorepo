@@ -7,7 +7,7 @@ How code gets from your branch to production.
 The LSR Platform is hosted on **Vercel**. Deployments are automated:
 
 - **Push to `main`** triggers a production deployment.
-- **Pull requests** get automatic preview deployments with unique URLs.
+- **Pull requests** get automatic preview deployments with unique URLs once they're out of draft.
 - **CI checks** run on every PR once it's out of draft; don't merge one with a failing check.
 - **Database migrations** run from a separate GitHub Actions workflow when a push to `main` changes `prisma/migrations/` (see [Database migrations](#database-migrations)).
 
@@ -34,7 +34,7 @@ CI uses concurrency groups per branch. If you push again while CI is running, th
 
 ## PR preview deployments
 
-When you open a pull request, Vercel automatically builds and deploys a preview at a unique URL. Use this to:
+When you open a pull request, Vercel automatically builds and deploys a preview at a unique URL. Draft PRs are skipped by `apps/platform/scripts/vercel-ignore-build.mjs` (the `ignoreCommand` in `apps/platform/vercel.json`); marking a draft ready doesn't push a commit, so push one (even `git commit --allow-empty`) to get its preview. Use the preview to:
 
 - Test your changes in a production-like environment
 - Share the preview link with reviewers

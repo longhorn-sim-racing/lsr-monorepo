@@ -6,6 +6,7 @@ import { DriversSidebar } from '@/components/drivers-sidebar';
 import { Metadata } from 'next';
 import { DatabaseUnavailable } from '@/components/database-unavailable';
 import { publicUserSelect } from '@/lib/public-user';
+import { publicEventWhere } from '@/lib/events';
 
 export const metadata: Metadata = {
   title: "Driver Roster",
@@ -115,8 +116,8 @@ async function renderDriversPage() {
   // Fetch Upcoming Event
   const upcomingEvent = await prisma.event.findFirst({
     where: {
+      AND: [publicEventWhere(now), { status: { not: "CANCELLED" } }],
       startsAtUtc: { gt: now },
-      status: { notIn: ["DRAFT", "CANCELLED"] },
       series: {
         slug: { contains: "lone-star-cup" }
       }

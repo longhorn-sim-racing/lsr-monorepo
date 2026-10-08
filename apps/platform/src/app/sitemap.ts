@@ -1,6 +1,8 @@
 import type { MetadataRoute } from "next"
 import { prisma } from "@/server/db"
 import { getProducts } from "@/lib/shopify/catalog"
+import { publicEventWhere } from "@/lib/events"
+import { publishedPostWhere } from "@/lib/news"
 
 export const dynamic = 'force-dynamic'
 
@@ -43,7 +45,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
     // 3. Dynamic: Events
     const events = await prisma.event.findMany({
-      where: { visibility: "public" },
+      where: publicEventWhere(),
       select: { slug: true, updatedAt: true },
     })
     eventRoutes = events.map((event) => ({
@@ -55,7 +57,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
     // 4. Dynamic: News Posts
     const posts = await prisma.post.findMany({
-      where: { publishedAt: { not: null }, visibility: "public" },
+      where: publishedPostWhere(),
       select: { slug: true, updatedAt: true },
     })
     postRoutes = posts.map((post) => ({

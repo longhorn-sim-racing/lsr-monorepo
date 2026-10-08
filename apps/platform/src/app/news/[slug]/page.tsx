@@ -1,10 +1,14 @@
 import { getAllPosts, getPostContent } from "@/lib/news"
 import Link from "next/link"
+import { notFound } from "next/navigation"
 
 import { Metadata } from "next"
 import { DatabaseUnavailable } from "@/components/database-unavailable"
+import { isViewerOfficer } from "@/server/auth/guards"
 
-export const revalidate = 60;
+// Per request, not ISR: an officer's draft preview must never be cached for everyone else.
+export const dynamic = "force-dynamic";
+
 
 export async function generateMetadata({
   params,
@@ -20,7 +24,7 @@ export async function generateMetadata({
     postData = null;
   }
 
-  if (!postData) {
+  if (!postData || (!postData.frontmatter.published && !(await isViewerOfficer()))) {
     return {
       title: "News",
       alternates: { canonical: `/news/${slug}` },
@@ -52,15 +56,6 @@ export async function generateMetadata({
   };
 }
 
-export async function generateStaticParams() {
-  try {
-    const posts = await getAllPosts()
-    return posts.map(({ slug }) => ({ slug }))
-  } catch {
-    return []
-  }
-}
-
 type RouteParams = { slug: string }
 
 export default async function NewsPostPage({
@@ -87,6 +82,10 @@ export default async function NewsPostPage({
       </main>
     );
   }
+
+  if (!postData) notFound()
+  const isDraft = !postData.frontmatter.published
+  if (isDraft && !(await isViewerOfficer())) notFound()
 
   const { content, frontmatter } = postData
   const relatedPosts = allPosts.filter(p => p.slug !== slug).slice(0, 3)
@@ -144,6 +143,13 @@ export default async function NewsPostPage({
             Back to News
           </Link>
         </div>
+
+        {isDraft && (
+          <div className="mb-8 border border-amber-500/30 bg-amber-500/10 px-4 py-3 font-sans text-xs text-amber-200">
+            Draft: only officers can see this post. Edit it in{" "}
+            <Link href={`/admin/news/${postData.id}`} className="underline hover:text-white">Admin → News</Link>.
+          </div>
+        )}
 
         <header className="mb-12 border-b border-white/10 pb-12">
           <div className="flex items-center gap-4 text-[10px] font-sans font-bold uppercase tracking-[0.2em] text-lsr-orange mb-6">

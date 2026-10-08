@@ -2,6 +2,7 @@
 import { getSessionUser } from './session';
 import { User } from '@prisma/client';
 import { redirect } from 'next/navigation';
+import { cache } from 'react';
 
 class NotAuthenticatedError extends Error {
   constructor(message = 'You must be logged in to perform this action.') {
@@ -71,3 +72,16 @@ export async function requireOfficerPage(): Promise<User> {
     redirect('/403');
   }
 }
+
+/**
+ * True when the signed-in viewer is an officer or admin (allowlist included). Never
+ * throws; for public pages and routes that show officers more, like draft previews.
+ */
+export const isViewerOfficer = cache(async (): Promise<boolean> => {
+  try {
+    await requireOfficer();
+    return true;
+  } catch {
+    return false;
+  }
+});
