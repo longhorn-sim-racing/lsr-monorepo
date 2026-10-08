@@ -1,6 +1,7 @@
-// Sponsorship packages, from the Business team's sponsor packet (public/SPONSOR_BENEFITS.pdf).
-// The tier cards and the comparison table both read from here, so change benefits in one place
-// and keep the packet in step. Benefits are contractual: check with Business before editing.
+// Sponsorship packages, from the Business team's sponsor packet. The tier cards, the comparison
+// table and the packet itself (public/SPONSOR_BENEFITS.pdf) all read from here; after a change,
+// re-render the packet with `pnpm --filter @lsr/platform sponsor-packet`. Benefits are
+// contractual: check with Business before editing.
 
 export type TierId = "friend" | "silver" | "gold" | "platinum"
 
