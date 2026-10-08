@@ -32,7 +32,7 @@ export function GalleryBrowser({ albums, initialAlbum }: { albums: GalleryAlbumS
       {/* Album filter */}
       {albums.length > 1 && (
         <div id="albums" className="scroll-mt-24 -mx-6 md:mx-0 mb-10 md:mb-14">
-          <div className="flex gap-2 overflow-x-auto px-6 md:px-0 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-wrap">
+          <div className="flex gap-2 overflow-x-auto px-6 md:px-0 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-wrap md:gap-1.5">
             <Chip label="All albums" count={albums.reduce((n, a) => n + a.photos.length, 0)} active={!active} onClick={() => selectAlbum(null)} />
             {albums.map((album) => (
               <Chip
@@ -127,7 +127,7 @@ function Chip({ label, count, active, onClick }: { label: string; count: number;
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`shrink-0 inline-flex items-center gap-2 border px-4 h-10 font-sans font-bold text-[10px] uppercase tracking-[0.15em] transition-colors ${
+      className={`shrink-0 inline-flex items-center gap-2 border px-3 h-9 font-sans font-bold text-[10px] uppercase tracking-[0.12em] transition-colors ${
         active ? "border-lsr-orange bg-lsr-orange text-white" : "border-white/15 text-white/70 hover:border-white/40 hover:text-white"
       }`}
     >

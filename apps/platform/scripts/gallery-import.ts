@@ -14,6 +14,9 @@
  *                  "alt": null, "creditName": null, "creditUrl": null }]
  *   }
  *
+ * A photo that's already in Cloudinary can be listed with "publicId" (plus width/height)
+ * instead of "file"; it's linked into the album without uploading again.
+ *
  * Photos keep the manifest's order within each album. Resize them first (2400px on the long
  * edge is plenty); Cloudinary serves smaller versions on demand.
  */
@@ -25,7 +28,10 @@ import { PrismaClient } from "@prisma/client";
 type ManifestAlbum = { slug: string; title: string; date: string | null; description?: string | null };
 type ManifestPhoto = {
   album: string;
-  file: string;
+  /** Local file to upload, or */
+  file?: string;
+  /** an image already in Cloudinary */
+  publicId?: string;
   width?: number;
   height?: number;
   alt?: string | null;
@@ -96,20 +102,23 @@ async function main() {
   for (const photo of manifest.photos) {
     const order = (orderInAlbum.get(photo.album) ?? 0) + 1;
     orderInAlbum.set(photo.album, order);
-    const publicId = `gallery/${photo.album}/${slugify(basename(photo.file, extname(photo.file)))}`;
+    if (!photo.file && !photo.publicId) throw new Error(`Photo in ${photo.album} needs a file or a publicId`);
+    const publicId = photo.publicId ?? `gallery/${photo.album}/${slugify(basename(photo.file!, extname(photo.file!)))}`;
 
     if (await prisma.galleryImage.findUnique({ where: { publicId } })) {
       skipped++;
       continue;
     }
     if (dryRun) {
-      console.log(`[dry-run] ${publicId} <- ${photo.file}`);
+      console.log(`[dry-run] ${publicId} <- ${photo.file ?? "(already in Cloudinary)"}`);
       continue;
     }
     const albumId = albumIds.get(photo.album);
-    if (!albumId) throw new Error(`Photo ${photo.file} names unknown album ${photo.album}`);
+    if (!albumId) throw new Error(`Photo ${publicId} names unknown album ${photo.album}`);
 
-    const uploaded = await upload(photo.file, publicId);
+    const uploaded = photo.file
+      ? await upload(photo.file, publicId)
+      : { publicId, width: photo.width ?? null, height: photo.height ?? null };
     await prisma.galleryImage.create({
       data: {
         publicId: uploaded.publicId,

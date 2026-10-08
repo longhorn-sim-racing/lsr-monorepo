@@ -84,12 +84,13 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
               fill
               sizes="100vw"
               priority
-              className="object-cover opacity-50"
+              className="object-cover opacity-70"
             />
           ) : (
             <Image src="/images/lsr-hero2.webp" alt="" fill sizes="100vw" priority className="object-cover opacity-40" />
           )}
-          <div className="absolute inset-0 bg-gradient-to-b from-lsr-charcoal/70 via-lsr-charcoal/40 to-lsr-charcoal" />
+          <div className="absolute inset-0 bg-gradient-to-b from-lsr-charcoal/60 via-lsr-charcoal/25 to-lsr-charcoal" />
+          <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal/70 via-lsr-charcoal/20 to-transparent" />
         </div>
         <div className="absolute inset-0 opacity-[0.03] mix-blend-overlay [background-image:repeating-linear-gradient(45deg,white_0px,white_1px,transparent_1px,transparent_10px)] pointer-events-none" />
 
