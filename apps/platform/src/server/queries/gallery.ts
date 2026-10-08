@@ -27,3 +27,11 @@ export async function getUnsortedGalleryImages() {
     orderBy: { order: "asc" },
   });
 }
+
+/** A handful of recent photos for the homepage ribbon: newest albums first. */
+export async function getFeaturedGalleryImages(limit = 12) {
+  return prisma.galleryImage.findMany({
+    orderBy: [{ album: { date: { sort: "desc", nulls: "last" } } }, { order: "asc" }],
+    take: limit,
+  });
+}

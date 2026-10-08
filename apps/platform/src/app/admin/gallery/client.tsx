@@ -2,8 +2,8 @@
 
 import { useRef, useState, useTransition, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { createImage, deleteImage, updateImageOrder } from '@/app/admin/gallery/actions';
-import { GalleryImage } from '@prisma/client';
+import { createImage, deleteImage, moveImageToAlbum, updateImageOrder } from '@/app/admin/gallery/actions';
+import type { GalleryAlbum, GalleryImage } from '@prisma/client';
 import Image from 'next/image';
 import { ConfirmSubmitButton } from '@/components/confirm-submit-button';
 import {
@@ -26,25 +26,33 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { CreditDialog } from './_components/credit-dialog';
-import { Image as ImageIcon, Search, Plus, Trash2, Edit, GripVertical, Loader2 } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { AlbumDialog, type EventOption } from './_components/album-dialog';
+import { Image as ImageIcon, Search, Plus, Trash2, Edit, GripVertical, Loader2, FolderPlus, Settings2 } from 'lucide-react';
+import { cloudinaryUrl } from '@/lib/cloudinary';
 import { cn } from "@/lib/utils";
+
+/** Which photos are showing: everything, the unsorted ones, or one album (by id). */
+type View = 'all' | 'unsorted' | string;
 
 // --- Sortable Item Component ---
 function SortableGalleryItem({
   image,
   index,
+  albums,
   isOverlay = false,
+  sortable = true,
   onDelete,
-  cloudName,
+  onMove,
   isPending,
   onEditCredit
 }: {
   image: GalleryImage;
   index: number;
+  albums: GalleryAlbum[];
   isOverlay?: boolean;
+  sortable?: boolean;
   onDelete?: (id: string) => void;
-  cloudName: string;
+  onMove?: (id: string, albumId: string | null) => void;
   isPending?: boolean;
   onEditCredit?: (image: GalleryImage) => void;
 }) {
@@ -55,7 +63,7 @@ function SortableGalleryItem({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: image.id });
+  } = useSortable({ id: image.id, disabled: !sortable });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -75,7 +83,7 @@ function SortableGalleryItem({
         </div>
 
         {/* Drag Handle */}
-        {!isOverlay && (
+        {!isOverlay && sortable && (
             <div
                 {...attributes}
                 {...listeners}
@@ -88,13 +96,29 @@ function SortableGalleryItem({
         {/* Image */}
         <div className="relative aspect-video w-full bg-black/20">
           <Image
-              src={`https://res.cloudinary.com/${cloudName}/image/upload/w_400,h_300,c_fill,q_auto/${image.publicId}`}
+              src={cloudinaryUrl(image.publicId, { width: 400, height: 300, crop: 'fill' })}
               alt={image.alt ?? image.creditName ?? 'Gallery image'}
               fill
+              unoptimized
               className="object-cover pointer-events-none"
-              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
           />
         </div>
+
+        {/* Album */}
+        {onMove && (
+          <select
+            value={image.albumId ?? ''}
+            onChange={(e) => onMove(image.id, e.target.value || null)}
+            disabled={isPending}
+            className="w-full border-t border-white/10 bg-black/40 px-2 py-1.5 text-[10px] text-white/70 focus:outline-none"
+            aria-label="Album"
+          >
+            <option value="">Unsorted</option>
+            {albums.map((album) => (
+              <option key={album.id} value={album.id}>{album.title}</option>
+            ))}
+          </select>
+        )}
 
         {/* Footer Info */}
         <div className="p-2 border-t border-white/10 bg-white/5 flex items-center justify-between gap-2 h-10">
@@ -159,23 +183,40 @@ function SortableGalleryItem({
 }
 
 // --- Main Client Component ---
-export function GalleryAdminClient({ images: initialImages }: { images: GalleryImage[] }) {
+export function GalleryAdminClient({
+  images: initialImages,
+  albums: initialAlbums,
+  events,
+}: {
+  images: GalleryImage[];
+  albums: GalleryAlbum[];
+  events: EventOption[];
+}) {
   const [images, setImages] = useState(initialImages);
-  
+  const [albums, setAlbums] = useState(initialAlbums);
+
   // Sync state when props change
   useEffect(() => {
     setImages(initialImages);
   }, [initialImages]);
+  useEffect(() => {
+    setAlbums(initialAlbums);
+  }, [initialAlbums]);
 
+  const [view, setView] = useState<View>('all');
   const [activeId, setActiveId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [isUploading, setIsUploading] = useState(false);
+  const [upload, setUpload] = useState<{ done: number; total: number } | null>(null);
   const [search, setSearch] = useState("");
   const [editImage, setEditImage] = useState<GalleryImage | null>(null);
+  const [albumDialog, setAlbumDialog] = useState<{ album: GalleryAlbum | null } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME!;
   const preset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!;
+
+  const currentAlbum = albums.find((album) => album.id === view) ?? null;
+  const uploadAlbumId = view === 'all' || view === 'unsorted' ? null : view;
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -188,52 +229,55 @@ export function GalleryAdminClient({ images: initialImages }: { images: GalleryI
     })
   );
 
+  const viewImages = useMemo(() => {
+    const inView =
+      view === 'all' ? images : images.filter((img) => (view === 'unsorted' ? img.albumId === null : img.albumId === view));
+    return [...inView].sort((a, b) => a.order - b.order);
+  }, [images, view]);
+
   const filteredImages = useMemo(() => {
-      if (!search) return images;
+      if (!search) return viewImages;
       const q = search.toLowerCase();
-      return images.filter(img => 
+      return viewImages.filter(img =>
           (img.alt || "").toLowerCase().includes(q) ||
           (img.creditName || "").toLowerCase().includes(q)
       );
-  }, [images, search]);
+  }, [viewImages, search]);
 
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Reordering only makes sense inside one album (or the unsorted pile), unfiltered
+  const sortable = view !== 'all' && !search;
 
-    setIsUploading(true);
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('upload_preset', preset);
+  const countFor = (albumId: string | null) => images.filter((img) => img.albumId === albumId).length;
 
-    try {
-        const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/upload`, {
-            method: 'POST',
-            body: fd,
-        });
+  async function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (files.length === 0) return;
+
+    setUpload({ done: 0, total: files.length });
+    const failed: string[] = [];
+    for (const file of files) {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('upload_preset', preset);
+      try {
+        const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/upload`, { method: 'POST', body: fd });
         const json = await res.json();
-        if (!json.public_id) {
-            alert('Upload failed.');
-            return;
-        }
-
-        startTransition(async () => {
-            const newImage = await createImage(json.public_id);
-            if (newImage) {
-                // Optimistic update
-                setImages((prev) => [...prev, newImage]);
-            }
+        if (!json.public_id) throw new Error(json.error?.message ?? 'Upload failed');
+        const newImage = await createImage(json.public_id, {
+          albumId: uploadAlbumId,
+          width: json.width ?? null,
+          height: json.height ?? null,
         });
-    } catch (e) {
-        console.error(e);
-        alert('Upload error');
-    } finally {
-        setIsUploading(false);
+        setImages((prev) => [...prev, newImage]);
+      } catch (error) {
+        console.error(error);
+        failed.push(file.name);
+      }
+      setUpload((u) => (u ? { ...u, done: u.done + 1 } : u));
     }
-  }
-
-  function chooseFile() {
-    inputRef.current?.click();
+    setUpload(null);
+    if (failed.length) alert(`These didn't upload: ${failed.join(', ')}`);
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -244,19 +288,19 @@ export function GalleryAdminClient({ images: initialImages }: { images: GalleryI
     const { active, over } = event;
 
     if (over && active.id !== over.id) {
-      const oldIndex = images.findIndex((item) => item.id === active.id);
-      const newIndex = images.findIndex((item) => item.id === over.id);
+      const oldIndex = viewImages.findIndex((item) => item.id === active.id);
+      const newIndex = viewImages.findIndex((item) => item.id === over.id);
 
       if (oldIndex !== -1 && newIndex !== -1) {
-          const newOrder = arrayMove(images, oldIndex, newIndex);
-          setImages(newOrder);
+          const updates = arrayMove(viewImages, oldIndex, newIndex).map((img, index) => ({
+              id: img.id,
+              order: index + 1
+          }));
+          const orderById = new Map(updates.map((u) => [u.id, u.order]));
+          setImages((prev) => prev.map((img) => (orderById.has(img.id) ? { ...img, order: orderById.get(img.id)! } : img)));
 
           // Server action
           startTransition(async () => {
-              const updates = newOrder.map((img, index) => ({
-                  id: img.id,
-                  order: index + 1
-              }));
               await updateImageOrder(updates);
           });
       }
@@ -268,36 +312,58 @@ export function GalleryAdminClient({ images: initialImages }: { images: GalleryI
   const handleDelete = (id: string) => {
       // Optimistic delete
       setImages((prev) => prev.filter((img) => img.id !== id));
-      
+
       startTransition(async () => {
           await deleteImage(id);
       });
   }
 
+  const handleMove = (id: string, albumId: string | null) => {
+      startTransition(async () => {
+          const moved = await moveImageToAlbum(id, albumId);
+          setImages((prev) => prev.map((img) => (img.id === id ? moved : img)));
+      });
+  }
+
+  const navItem = (key: View, label: string, count: number) => (
+    <button
+      key={key}
+      type="button"
+      onClick={() => setView(key)}
+      className={cn(
+        "w-full flex items-center justify-between gap-2 px-3 py-2 rounded text-left text-xs transition-colors",
+        view === key ? "bg-lsr-orange/15 text-white border border-lsr-orange/40" : "text-white/60 hover:text-white hover:bg-white/5 border border-transparent"
+      )}
+    >
+      <span className="truncate">{label}</span>
+      <span className="text-[10px] text-white/40">{count}</span>
+    </button>
+  );
+
   return (
     <div className="flex flex-col h-[calc(100vh-6rem)] border border-white/10 bg-black/40 rounded-lg overflow-hidden font-mono text-sm">
       {/* Toolbar */}
       <div className="bg-white/5 p-3 border-b border-white/10 flex items-center gap-4 flex-wrap">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger>
-              <div className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded border border-white/10 cursor-help">
-                <ImageIcon size={14} className="text-lsr-orange" />
-                <span className="font-bold text-white/80 tracking-wider uppercase">Gallery</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-xs bg-black/90 border-white/10 text-white p-3">
-              <p className="font-bold mb-1 text-lsr-orange">Gallery Console</p>
-              <p className="text-xs text-white/80">
-                Manage images shown on the public gallery. Drag to reorder.
-              </p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <div className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded border border-white/10">
+          <ImageIcon size={14} className="text-lsr-orange" />
+          <span className="font-bold text-white/80 tracking-wider uppercase">Gallery</span>
+        </div>
 
-        <div className="h-6 w-px bg-white/10 mx-2" />
+        {/* Album picker on small screens */}
+        <select
+          value={view}
+          onChange={(e) => setView(e.target.value)}
+          className="md:hidden bg-black/50 border border-white/10 rounded px-2 py-1.5 text-xs text-white"
+          aria-label="Album"
+        >
+          <option value="all">All photos ({images.length})</option>
+          <option value="unsorted">Unsorted ({countFor(null)})</option>
+          {albums.map((album) => (
+            <option key={album.id} value={album.id}>{album.title} ({countFor(album.id)})</option>
+          ))}
+        </select>
 
-        <div className="flex items-center gap-2 relative flex-1 max-w-md">
+        <div className="flex items-center gap-2 relative flex-1 min-w-[10rem] max-w-md">
           <Search size={14} className="absolute left-3 text-white/40" />
           <input
             value={search}
@@ -309,42 +375,79 @@ export function GalleryAdminClient({ images: initialImages }: { images: GalleryI
 
         <div className="flex-1" />
 
-        <input ref={inputRef} type="file" accept="image/*" hidden onChange={onFile} />
-        <Button 
-            size="sm" 
-            onClick={chooseFile} 
-            disabled={isUploading || isPending}
+        {currentAlbum && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setAlbumDialog({ album: currentAlbum })}
+            className="border-white/15 bg-transparent text-white/80 font-bold uppercase tracking-wider text-xs h-8"
+          >
+            <Settings2 size={14} className="mr-2" /> Album settings
+          </Button>
+        )}
+
+        <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={onFiles} />
+        <Button
+            size="sm"
+            onClick={() => inputRef.current?.click()}
+            disabled={!!upload || view === 'all'}
+            title={view === 'all' ? 'Pick an album (or Unsorted) to upload into' : undefined}
             className="bg-lsr-orange hover:bg-lsr-orange/90 text-white border-0 font-bold uppercase tracking-wider text-xs h-8"
         >
-          {isUploading ? (
+          {upload ? (
               <>
-                <Loader2 size={14} className="mr-2 animate-spin" /> Uploading...
+                <Loader2 size={14} className="mr-2 animate-spin" /> Uploading {upload.done + 1}/{upload.total}
               </>
           ) : (
               <>
-                <Plus size={14} className="mr-2" /> Upload Image
+                <Plus size={14} className="mr-2" /> Upload photos
               </>
           )}
         </Button>
       </div>
 
-      {/* Content Area */}
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex flex-1 min-h-0">
+        {/* Albums */}
+        <aside className="hidden md:flex w-60 shrink-0 flex-col gap-1 border-r border-white/10 p-3 overflow-auto">
+          {navItem('all', 'All photos', images.length)}
+          {navItem('unsorted', 'Unsorted', countFor(null))}
+          <div className="mt-3 mb-1 flex items-center justify-between px-1">
+            <span className="text-[10px] uppercase tracking-wider text-white/40">Albums</span>
+            <button
+              type="button"
+              onClick={() => setAlbumDialog({ album: null })}
+              className="text-white/50 hover:text-lsr-orange transition-colors"
+              title="New album"
+            >
+              <FolderPlus size={14} />
+            </button>
+          </div>
+          {albums.map((album) => navItem(album.id, album.title, countFor(album.id)))}
+          {albums.length === 0 && <p className="px-3 text-[10px] text-white/30">No albums yet</p>}
+        </aside>
+
+        {/* Content Area */}
+        <div className="flex-1 overflow-auto p-4">
+          {view === 'all' && images.length > 0 && (
+            <p className="mb-3 text-[10px] text-white/40">Pick an album to upload into it or reorder its photos.</p>
+          )}
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            <SortableContext items={images} strategy={rectSortingStrategy}>
+            <SortableContext items={filteredImages} strategy={rectSortingStrategy}>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                 {filteredImages.map((image, index) => (
                   <SortableGalleryItem
                     key={image.id}
                     image={image}
                     index={index}
-                    cloudName={cloudName}
+                    albums={albums}
+                    sortable={sortable}
                     onDelete={handleDelete}
+                    onMove={handleMove}
                     isPending={isPending}
                     onEditCredit={setEditImage}
                   />
@@ -356,22 +459,42 @@ export function GalleryAdminClient({ images: initialImages }: { images: GalleryI
               {activeId ? (
                 <SortableGalleryItem
                   image={images.find((i) => i.id === activeId)!}
-                  index={images.findIndex((i) => i.id === activeId)}
+                  index={filteredImages.findIndex((i) => i.id === activeId)}
+                  albums={albums}
                   isOverlay
-                  cloudName={cloudName}
                 />
               ) : null}
             </DragOverlay>
           </DndContext>
+          {filteredImages.length === 0 && (
+            <p className="py-16 text-center text-xs text-white/30">No photos here yet.</p>
+          )}
+        </div>
       </div>
-      
+
       {editImage && (
-        <CreditDialog 
-            image={editImage} 
-            isOpen={!!editImage} 
-            onOpenChange={(open) => !open && setEditImage(null)} 
+        <CreditDialog
+            image={editImage}
+            isOpen={!!editImage}
+            onOpenChange={(open) => !open && setEditImage(null)}
         />
       )}
+
+      <AlbumDialog
+        album={albumDialog?.album ?? null}
+        events={events}
+        isOpen={albumDialog !== null}
+        onOpenChange={(open) => !open && setAlbumDialog(null)}
+        onSaved={(saved) => {
+          setAlbums((prev) => (prev.some((a) => a.id === saved.id) ? prev.map((a) => (a.id === saved.id ? saved : a)) : [saved, ...prev]));
+          setView(saved.id);
+        }}
+        onDeleted={(id) => {
+          setAlbums((prev) => prev.filter((a) => a.id !== id));
+          setImages((prev) => prev.map((img) => (img.albumId === id ? { ...img, albumId: null } : img)));
+          setView('unsorted');
+        }}
+      />
     </div>
   );
 }

@@ -2,7 +2,7 @@ import HomePageClient from "@/components/home-page-client"
 import { getAllPosts } from "@/lib/news"
 import { prisma } from "@/server/db"
 import { getNextEventForHomepage } from "@/server/queries/events"
-import { getAllGalleryImages } from "@/server/queries/gallery"
+import { getFeaturedGalleryImages } from "@/server/queries/gallery"
 import { getSystemSetting, SETTINGS, type HotlapSettings } from "@/lib/email/settings"
 import { Event, EventSeries, Venue } from "@prisma/client"
 import { Metadata } from "next"
@@ -29,7 +29,7 @@ export default async function Home() {
       console.error('[Home] Failed to load events:', e);
       return [];
     }),
-    getAllGalleryImages().catch((e) => {
+    getFeaturedGalleryImages().catch((e) => {
       console.error('[Home] Failed to load gallery:', e);
       return [];
     }),
