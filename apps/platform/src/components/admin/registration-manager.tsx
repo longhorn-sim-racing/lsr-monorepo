@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { RegistrationStatus, User, EventRegistration } from "@prisma/client";
+import { User, EventRegistration } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {

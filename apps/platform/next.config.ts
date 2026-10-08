@@ -9,6 +9,11 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "cdn.shopify.com" },
     ],
   },
+  async redirects() {
+    return [
+      { source: "/series/:slug", destination: "/lone-star-cup", permanent: true },
+    ];
+  },
 }
 
 export default nextConfig;

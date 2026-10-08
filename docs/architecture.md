@@ -55,7 +55,7 @@ The app uses file-system routing via the Next.js App Router. Key route groups:
 | `/` | Homepage |
 | `/events`, `/events/[slug]` | Event listings and detail pages |
 | `/drivers`, `/drivers/[handle]` | Driver directory and profiles |
-| `/series/[slug]` | Racing series with standings |
+| `/lone-star-cup` | Lone Star Cup season hub, entry form and rules (`/series/*` redirects here) |
 | `/news`, `/news/[slug]` | News articles |
 | `/shop`, `/shop/products/[handle]` | Merchandise store |
 | `/gallery` | Photo gallery |
@@ -71,7 +71,7 @@ The app uses file-system routing via the Next.js App Router. Key route groups:
 Components are organized by feature domain:
 
 - **`admin/`** -- Admin console components (event forms, user management, results ingestion)
-- **`home/`** -- Homepage sections (hero, leaderboard, schedule preview, sponsor strip)
+- **`home/`** -- Homepage sections (hero, next event, leaderboard, sponsor strip)
 - **`drivers/`** -- Driver profile components
 - **`events/`** -- Event check-in UI
 - **`shop/`** -- E-commerce components (cart, product cards, wishlist)
@@ -111,23 +111,24 @@ Prisma Client                        ← Database access
 
 **Actions (`actions/`)** -- Next.js Server Actions for mutations. Each action validates auth, calls the service layer, writes an audit log, and calls `revalidatePath`.
 
-**Auth (`auth/`)** -- Session management via `getSessionUser()` and `getCachedSessionUser()`. Authorization guards like `requireAdmin()` check role-based access.
+**Auth (`auth/`)** -- Session management via `getSessionUser()` and `getCachedSessionUser()`. Guards in `guards.ts` (`requireUser`, `requireRole`, `requireOfficer`, and `requireOfficerPage` for admin pages) check role-based access.
+
+**Database (`db.ts`)** -- The shared Prisma client.
 
 ## Utilities (`src/lib/`)
 
-- **Supabase clients** -- `supabase-browser.ts`, `supabase-server.ts`, `supabase-rsc.ts` for different runtime contexts
-- **Prisma client** -- `prisma.ts` for database access
-- **Roles** -- `roles.ts` defines: `member`, `competition`, `officer`, `president`, `alumni`, `admin`
-- **Authorization** -- `authz.ts` with `isAdmin()`, `requireAdmin()` helpers
+- **Supabase client** -- `supabase-browser.ts` for the browser; the server client is created in `server/auth/session.ts` and the auth callback
+- **Roles** -- `roles.ts` defines `officer`, `admin`, `lsc_driver` and `collegiate_driver`
+- **Public user fields** -- `public-user.ts` (`publicUserSelect`): the only user fields a public page may send to the browser
 - **Integrations** -- `shopify/` (product catalog, cart), `stripe.ts` (payments), `email/` (Resend transactional email)
 - **Helpers** -- date formatting, slug generation, QR codes, status indicators
 
 ## Validation (`src/schemas/`)
 
 Zod schemas for form validation and Server Action input:
-- `event.schema.ts` -- Event creation/editing
+- `league-application.schema.ts` -- League entry form
 - `news.schema.ts` -- News post creation
-- `result.schema.ts` -- Race result validation
+- `product.schema.ts` -- Product edits in `/admin/products`
 
 ## Database
 

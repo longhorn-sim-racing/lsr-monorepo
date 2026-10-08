@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { format } from "date-fns";
-import { Notification, User } from "@prisma/client";
+import { Notification } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Clock, Mail, Bell, X } from "lucide-react";
 import { cancelScheduledNotification } from "../actions";

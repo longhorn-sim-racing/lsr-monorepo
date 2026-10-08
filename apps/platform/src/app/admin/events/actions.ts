@@ -85,7 +85,6 @@ export async function createEvent(formData: FormData) {
 }
 
 import { EventStatus } from "@prisma/client";
-import { getEventById } from "@/server/repos/event.repo";
 
 export async function updateEventStatus(eventId: string, status: EventStatus, publishedAt?: Date) {
   const user = await requireOfficer();
@@ -114,12 +113,6 @@ export async function updateEventStatus(eventId: string, status: EventStatus, pu
   revalidateEventList();
   revalidateEventDetail(updated.slug);
   redirect("/admin/events");
-}
-
-
-export async function getEvent(id: string) {
-  await requireOfficer();
-  return await getEventById(id);
 }
 
 export async function updateEvent(id: string, formData: FormData) {
@@ -181,7 +174,7 @@ export async function updateEvent(id: string, formData: FormData) {
   const updated = await prisma.event.update({
     where: { id },
     data: eventUpdateData,
-    select: { slug: true, series: { select: { slug: true } } },
+    select: { slug: true, seriesId: true },
   });
 
   await createAuditLog({
@@ -196,7 +189,7 @@ export async function updateEvent(id: string, formData: FormData) {
   revalidatePath("/admin/events");
   revalidateEventList();
   revalidateEventDetail(updated.slug);
-  if (updated.series?.slug) revalidateSeriesPages(updated.series.slug);
+  if (updated.seriesId) revalidateSeriesPages();
   redirect("/admin/events");
 }
 
@@ -205,7 +198,7 @@ export async function deleteEvent(eventId: string) {
 
   const deleted = await prisma.event.delete({
     where: { id: eventId },
-    select: { slug: true, series: { select: { slug: true } } },
+    select: { slug: true, seriesId: true },
   });
 
   await createAuditLog({
@@ -219,7 +212,7 @@ export async function deleteEvent(eventId: string) {
   revalidatePath("/admin/events");
   revalidateEventList();
   revalidateEventDetail(deleted.slug);
-  if (deleted.series?.slug) revalidateSeriesPages(deleted.series.slug);
+  if (deleted.seriesId) revalidateSeriesPages();
 }
 
 import { adminOverrideRegistration } from "@/server/services/registration.service";
@@ -326,8 +319,6 @@ export async function removeRegistration(eventId: string, userId: string) {
   
 
   import { updateAttendanceConfig, checkInUser, removeCheckIn } from "@/server/services/attendance.service";
-
-  import { CheckinMethod } from "@prisma/client";
 
   
 

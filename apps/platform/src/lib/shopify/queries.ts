@@ -1,12 +1,3 @@
-const imageFragment = `
-  image {
-    url
-    altText
-    width
-    height
-  }
-`;
-
 const moneyFragment = `
   price {
     amount

@@ -4,7 +4,6 @@ import { prisma } from "@/server/db";
 import { requireOfficer } from "@/server/auth/guards";
 import { revalidatePath } from "next/cache";
 import {
-  sendNotification,
   sendBulkNotification,
   cancelNotification,
   retryNotification,

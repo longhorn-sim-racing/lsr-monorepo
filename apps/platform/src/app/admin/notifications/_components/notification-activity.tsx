@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { format } from "date-fns";
-import { Notification, User } from "@prisma/client";
+import { Notification } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -11,9 +11,6 @@ import {
   Mail,
   Bell,
   RefreshCw,
-  CheckCircle,
-  XCircle,
-  Clock,
   Trash2,
   Eye,
   EyeOff,
@@ -69,19 +66,6 @@ export function NotificationActivity({
       setItems((prev) => prev.filter((n) => n.id !== id));
     } finally {
       setDeleting(null);
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "SENT":
-        return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case "FAILED":
-        return <XCircle className="h-4 w-4 text-red-500" />;
-      case "PENDING":
-        return <Clock className="h-4 w-4 text-yellow-500" />;
-      default:
-        return null;
     }
   };
 

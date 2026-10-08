@@ -19,8 +19,7 @@ This is the official web platform for **Longhorn Sim Racing** at UT Austin. It i
 *   `apps/platform/src/components`: React components.
     *   `apps/platform/src/components/ui`: Reusable UI components (shadcn/ui).
 *   `apps/platform/src/lib`: Shared utilities, configuration, and business logic.
-    *   `apps/platform/src/lib/prisma.ts`: Prisma client instance.
-    *   `apps/platform/src/lib/supabase-*.ts`: Supabase client initialization (client/server/rsc).
+    *   `apps/platform/src/lib/supabase-browser.ts`: Supabase browser client.
 *   `apps/platform/src/server`: Server-side specific logic (Actions, Queries, Repos, Services).
 *   `apps/platform/prisma`: Database schema, migrations, and seed scripts.
 *   `apps/platform/public`: Static assets.

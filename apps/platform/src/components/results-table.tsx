@@ -2,7 +2,7 @@
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { type RaceResult, type RaceParticipant, type User, type CarMapping } from "@prisma/client";
-import { UserIcon, ArrowUpDown, ArrowUp, ArrowDown, Maximize2, Minimize2, Search, Trophy, Medal, Flag, Timer, Cone, ChevronDown, ChevronUp, Minus } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, Maximize2, Minimize2, Search, Medal, Flag, Timer, Cone, ChevronDown, ChevronUp, Minus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { cn } from "@/lib/utils";

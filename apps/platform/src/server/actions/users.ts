@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/server/db";
-import { requireOfficer, requireSystemAdmin } from "@/server/auth/guards";
+import { requireOfficer } from "@/server/auth/guards";
 import { createAuditLog } from "@/server/audit/log";
 import { revalidatePath } from "next/cache";
 import { revalidateDriverList } from "@/server/cache/revalidate-public";

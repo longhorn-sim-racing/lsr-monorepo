@@ -1,5 +1,4 @@
 import { Calendar, Clock, MapPin, Send } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { LocalTime, LocalTimeRange } from "@/components/ui/local-time"
 import Image from "next/image"
 import SectionReveal from "./SectionReveal"

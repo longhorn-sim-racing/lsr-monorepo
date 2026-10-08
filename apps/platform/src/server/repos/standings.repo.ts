@@ -136,8 +136,3 @@ export async function getStandings(slug: string) {
 
   return standings;
 }
-
-export async function getStandingsForSeason(_seasonId: string) {
-  // TODO: Implement the logic to fetch and calculate standings for a season.
-  return [];
-}
