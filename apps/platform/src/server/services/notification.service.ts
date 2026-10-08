@@ -13,6 +13,7 @@ export type NotificationType =
   | "RESULTS_POSTED"
   | "DUES_CONFIRMED"
   | "LEAGUE_REGISTERED"
+  | "PAYMENT_WAITLISTED" // paid, but the event filled during checkout
   | "CUSTOM";
 
 export type SendNotificationParams = {

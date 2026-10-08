@@ -13,7 +13,6 @@ type NotificationPreferencesProps = {
     emailEventPosted: boolean;
     emailResultsPosted: boolean;
   };
-  disabled?: boolean;
 };
 
 const PREFERENCE_CONFIG = [
@@ -46,7 +45,6 @@ const PREFERENCE_CONFIG = [
 
 export function NotificationPreferences({
   preferences,
-  disabled = false,
 }: NotificationPreferencesProps) {
   const [values, setValues] = useState(preferences);
   const [isDirty, setIsDirty] = useState(false);
@@ -78,13 +76,12 @@ export function NotificationPreferences({
               onCheckedChange={(checked) =>
                 handleChange(pref.key, checked === true)
               }
-              disabled={disabled}
               className="mt-1 rounded-none border-white/30 data-[state=checked]:bg-lsr-orange data-[state=checked]:border-lsr-orange"
             />
             <div className="flex-1">
               <Label
                 htmlFor={pref.key}
-                className={`font-sans font-bold text-sm cursor-pointer ${disabled ? "text-white/40" : "text-white"}`}
+                className="font-sans font-bold text-sm cursor-pointer text-white"
               >
                 {pref.label}
               </Label>
@@ -97,7 +94,7 @@ export function NotificationPreferences({
       <Button
         type="submit"
         size="sm"
-        disabled={disabled || !isDirty}
+        disabled={!isDirty}
         className="rounded-none bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal font-bold uppercase tracking-widest text-[10px] h-10 transition-all px-6 disabled:opacity-50"
       >
         Save Preferences
