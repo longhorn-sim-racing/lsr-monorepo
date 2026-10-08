@@ -48,23 +48,31 @@ export function InstagramAdmin({ status, imagesReady, posts }: { status: Status;
 
   function connect() {
     startTransition(async () => {
-      const result = await connectInstagramAction(token);
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
+      try {
+        const result = await connectInstagramAction(token);
+        if (!result.ok) {
+          toast.error(result.error);
+          return;
+        }
+        setToken("");
+        setReplacing(false);
+        toast.success(`Connected @${result.username}. ${syncSummary(result.sync)}`);
+      } catch {
+        toast.error("Something went wrong. If it says connected after a refresh, it worked.");
       }
-      setToken("");
-      setReplacing(false);
-      toast.success(`Connected @${result.username}. ${syncSummary(result.sync)}`);
       router.refresh();
     });
   }
 
   function sync() {
     startTransition(async () => {
-      const result = await syncInstagramAction();
-      if (result.ok) toast.success(syncSummary(result));
-      else toast.error(result.error ?? "Not connected");
+      try {
+        const result = await syncInstagramAction();
+        if (result.ok) toast.success(syncSummary(result));
+        else toast.error(result.error ?? "Not connected");
+      } catch {
+        toast.error("The check didn't finish. It runs again on its own within the hour.");
+      }
       router.refresh();
     });
   }
@@ -72,15 +80,24 @@ export function InstagramAdmin({ status, imagesReady, posts }: { status: Status;
   function disconnect() {
     if (!window.confirm("Disconnect Instagram? Posts already on the site stay until you hide them.")) return;
     startTransition(async () => {
-      await disconnectInstagramAction();
-      toast.success("Disconnected");
+      try {
+        await disconnectInstagramAction();
+        toast.success("Disconnected");
+      } catch {
+        toast.error("Couldn't disconnect. Try again.");
+      }
       router.refresh();
     });
   }
 
   function toggleHidden(post: Post) {
     startTransition(async () => {
-      await setInstagramPostHiddenAction(post.id, !post.hidden);
+      try {
+        const result = await setInstagramPostHiddenAction(post.id, !post.hidden);
+        if (!result.ok) toast.error(result.error);
+      } catch {
+        toast.error("Couldn't update that post. Try again.");
+      }
       router.refresh();
     });
   }

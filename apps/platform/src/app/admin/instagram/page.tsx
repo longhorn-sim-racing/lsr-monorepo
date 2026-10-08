@@ -7,6 +7,8 @@ import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import { InstagramAdmin } from "./client";
 
 export const dynamic = "force-dynamic";
+// Connecting runs the first sync, which can copy up to 24 images
+export const maxDuration = 60;
 
 function ago(iso?: string | null) {
   return iso ? formatDistanceToNow(new Date(iso), { addSuffix: true }) : null;

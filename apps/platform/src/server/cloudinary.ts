@@ -38,3 +38,26 @@ export async function uploadRemoteImage(url: string, publicId: string) {
   if (!res.ok || !json.public_id) throw new Error(json.error?.message ?? `Cloudinary upload failed (${res.status})`)
   return { publicId: json.public_id, width: json.width ?? null, height: json.height ?? null }
 }
+
+/** Delete an image uploaded by the server (best effort: a failure is reported, not thrown). */
+export async function destroyImage(publicId: string): Promise<boolean> {
+  const cloud = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
+  const apiKey = process.env.CLOUDINARY_API_KEY
+  const apiSecret = process.env.CLOUDINARY_API_SECRET
+  if (!cloud || !apiKey || !apiSecret) return false
+
+  const params: Record<string, string> = { public_id: publicId, timestamp: String(Math.floor(Date.now() / 1000)) }
+  const toSign = Object.keys(params).sort().map((key) => `${key}=${params[key]}`).join("&")
+  const form = new FormData()
+  for (const [key, value] of Object.entries(params)) form.append(key, value)
+  form.append("api_key", apiKey)
+  form.append("signature", createHash("sha1").update(toSign + apiSecret).digest("hex"))
+
+  try {
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${cloud}/image/destroy`, { method: "POST", body: form })
+    const json = (await res.json()) as { result?: string }
+    return res.ok && (json.result === "ok" || json.result === "not found")
+  } catch {
+    return false
+  }
+}

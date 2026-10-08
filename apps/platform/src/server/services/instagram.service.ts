@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db"
-import { uploadRemoteImage } from "@/server/cloudinary"
+import { destroyImage, uploadRemoteImage } from "@/server/cloudinary"
 import { getProfile, getRecentMedia, InstagramApiError, refreshToken, stillImageUrl } from "@/lib/instagram"
 
 // The club Instagram feed: an officer pastes an access token once (Admin → Instagram), then an
@@ -97,8 +97,23 @@ export async function disconnectInstagram() {
   await writeSettings({ ...settings, lastError: null, lastErrorAt: null })
 }
 
+/** Hidden or shown on the site. Returns false if the post is gone (a sync removed it meanwhile). */
 export async function setInstagramPostHidden(id: string, hidden: boolean) {
-  return prisma.instagramPost.update({ where: { id }, data: { hidden } })
+  const { count } = await prisma.instagramPost.updateMany({ where: { id }, data: { hidden } })
+  return count > 0
+}
+
+/**
+ * Record how a sync went. Re-reads the settings first, so a token pasted or disconnected
+ * while the sync ran isn't overwritten with the one the sync started with.
+ */
+async function recordSync(status: Pick<InstagramSettings, "lastSyncAt" | "lastError" | "lastErrorAt">) {
+  await writeSettings({ ...(await readSettings()), ...status })
+}
+
+/** Run `task` over `items`, a few at a time. */
+async function inBatches<T>(items: T[], size: number, task: (item: T) => Promise<void>) {
+  for (let i = 0; i < items.length; i += size) await Promise.all(items.slice(i, i + size).map(task))
 }
 
 /** Copy new posts from Instagram, update edited captions, drop deleted posts, and renew the token when due. */
@@ -108,18 +123,25 @@ export async function syncInstagram(): Promise<InstagramSyncResult> {
   if (!settings.token) return { ...result, ok: false, skipped: "not-connected" }
 
   const now = new Date()
+  let token = settings.token
   try {
     const refreshedAt = settings.tokenRefreshedAt ? new Date(settings.tokenRefreshedAt).getTime() : 0
     if (now.getTime() - refreshedAt > REFRESH_AFTER) {
-      const fresh = await refreshToken(settings.token)
-      settings.token = fresh.access_token
-      settings.tokenRefreshedAt = now.toISOString()
-      settings.tokenExpiresAt = new Date(now.getTime() + fresh.expires_in * 1000).toISOString()
-      // Save straight away so a failure further down can't lose the new token
-      await writeSettings(settings)
+      const fresh = await refreshToken(token)
+      token = fresh.access_token
+      const latest = await readSettings()
+      // Only store the renewed token if nobody replaced or removed the old one meanwhile
+      if (latest.token === settings.token) {
+        await writeSettings({
+          ...latest,
+          token,
+          tokenRefreshedAt: now.toISOString(),
+          tokenExpiresAt: new Date(now.getTime() + fresh.expires_in * 1000).toISOString(),
+        })
+      }
     }
 
-    const media = await getRecentMedia(settings.token, SYNC_LIMIT)
+    const media = await getRecentMedia(token, SYNC_LIMIT)
     const existing = new Map(
       (
         await prisma.instagramPost.findMany({
@@ -129,55 +151,60 @@ export async function syncInstagram(): Promise<InstagramSyncResult> {
       ).map((post) => [post.id, post]),
     )
 
+    // Copy each new image once (Instagram's own image links expire), a few at a time so a
+    // first sync of 24 posts fits comfortably in one request
+    const images = new Map<string, { publicId: string; width: number | null; height: number | null }>()
     const imageErrors: string[] = []
-    for (const item of media) {
-      const previous = existing.get(item.id)
-      let image: { publicId: string; width: number | null; height: number | null } | null = null
-
-      // Copy the image once; Instagram's own image links expire after a while
-      if (!previous?.publicId) {
+    await inBatches(
+      media.filter((item) => !existing.get(item.id)?.publicId),
+      4,
+      async (item) => {
         const source = stillImageUrl(item)
-        if (source) {
-          try {
-            image = await uploadRemoteImage(source, `instagram/${item.id}`)
-          } catch (error) {
-            imageErrors.push(error instanceof Error ? error.message : String(error))
-          }
+        if (!source) return
+        try {
+          images.set(item.id, await uploadRemoteImage(source, `instagram/${item.id}`))
+        } catch (error) {
+          imageErrors.push(error instanceof Error ? error.message : String(error))
         }
-      }
+      },
+    )
 
+    for (const item of media) {
       const fields = {
         permalink: item.permalink,
         caption: item.caption ?? null,
         mediaType: item.media_type,
         postedAt: new Date(item.timestamp),
-        ...(image ?? {}),
+        ...(images.get(item.id) ?? {}),
       }
       await prisma.instagramPost.upsert({ where: { id: item.id }, update: fields, create: { id: item.id, ...fields } })
-      if (previous) result.updated++
+      if (existing.has(item.id)) result.updated++
       else result.added++
     }
 
-    // A post deleted on Instagram comes off the site too. Only look within the window just
-    // fetched, so older posts aren't mistaken for deleted ones.
+    // A post deleted on Instagram comes off the site, image and all. Only look within the
+    // window just fetched, so older posts aren't mistaken for deleted ones.
     if (media.length > 0) {
       const oldest = new Date(Math.min(...media.map((item) => new Date(item.timestamp).getTime())))
-      const { count } = await prisma.instagramPost.deleteMany({
+      const gone = await prisma.instagramPost.findMany({
         where: { postedAt: { gte: oldest }, id: { notIn: media.map((item) => item.id) } },
+        select: { id: true, publicId: true },
       })
+      for (const post of gone) {
+        if (post.publicId?.startsWith("instagram/")) await destroyImage(post.publicId)
+      }
+      const { count } = await prisma.instagramPost.deleteMany({ where: { id: { in: gone.map((post) => post.id) } } })
       result.removed = count
     }
 
-    settings.lastSyncAt = now.toISOString()
     if (imageErrors.length > 0) {
-      settings.lastError = `Couldn't copy ${imageErrors.length} image${imageErrors.length === 1 ? "" : "s"}: ${imageErrors[0]}`
-      settings.lastErrorAt = now.toISOString()
-      result.error = settings.lastError
-    } else {
-      settings.lastError = null
-      settings.lastErrorAt = null
+      result.error = `Couldn't copy ${imageErrors.length} image${imageErrors.length === 1 ? "" : "s"}: ${imageErrors[0]}`
     }
-    await writeSettings(settings)
+    await recordSync({
+      lastSyncAt: now.toISOString(),
+      lastError: result.error ?? null,
+      lastErrorAt: result.error ? now.toISOString() : null,
+    })
     return result
   } catch (error) {
     const message =
@@ -186,9 +213,7 @@ export async function syncInstagram(): Promise<InstagramSyncResult> {
         : error instanceof Error
           ? error.message
           : String(error)
-    settings.lastError = message
-    settings.lastErrorAt = now.toISOString()
-    await writeSettings(settings)
+    await recordSync({ lastError: message, lastErrorAt: now.toISOString() })
     return { ...result, ok: false, error: message }
   }
 }

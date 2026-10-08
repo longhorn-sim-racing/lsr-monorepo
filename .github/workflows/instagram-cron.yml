@@ -30,6 +30,6 @@ jobs:
             echo "::error::Instagram sync request failed with status $http_code"
             exit 1
           fi
-          if echo "$body" | grep -q '"error"'; then
+          if echo "$body" | grep -q '"problem":true'; then
             echo "::warning::Instagram sync reported a problem; see Admin → Instagram on the site"
           fi
