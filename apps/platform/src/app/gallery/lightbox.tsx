@@ -1,10 +1,9 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useRef } from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { Camera, ChevronLeft, ChevronRight, X } from "lucide-react"
 import { CloudinaryImage } from "@/components/cloudinary-image"
-import { cloudinaryUrl } from "@/lib/cloudinary"
 import type { GalleryPhoto } from "./types"
 
 const SWIPE_PX = 50
@@ -28,15 +27,12 @@ export function Lightbox({
     onIndexChange((index + delta + photos.length) % photos.length)
   }
 
-  // Warm the cache for the neighbours so arrowing through feels instant.
-  useEffect(() => {
-    if (index === null || photos.length < 2) return
-    for (const d of [1, -1]) {
-      const next = photos[(index + d + photos.length) % photos.length]
-      const img = new window.Image()
-      img.src = cloudinaryUrl(next.publicId, { width: 1920 })
-    }
-  }, [index, photos])
+  // Neighbours, loaded off-screen with the same sizes so the browser fetches the same
+  // file it will show next and arrowing through feels instant.
+  const neighbours =
+    index === null || photos.length < 2
+      ? []
+      : [photos[(index + 1) % photos.length], photos[(index - 1 + photos.length) % photos.length]]
 
   return (
     <DialogPrimitive.Root open={photo !== null} onOpenChange={(open) => !open && onClose()}>
@@ -74,7 +70,7 @@ export function Lightbox({
 
               {/* Photo */}
               <div
-                className="relative flex-1 min-h-0 mx-2 md:mx-16 select-none touch-pan-y"
+                className="relative flex-1 min-h-0 mx-2 md:mx-16 select-none touch-pan-y touch-pinch-zoom"
                 onTouchStart={(e) => (touchStartX.current = e.touches[0].clientX)}
                 onTouchEnd={(e) => {
                   if (touchStartX.current === null) return
@@ -90,8 +86,13 @@ export function Lightbox({
                   fill
                   sizes="100vw"
                   className="object-contain animate-in fade-in-0 duration-300"
-                  priority
+                  preload
                 />
+              </div>
+              <div aria-hidden className="pointer-events-none fixed -left-[9999px] top-0 h-10 w-10 opacity-0">
+                {neighbours.map((n) => (
+                  <CloudinaryImage key={n.id} publicId={n.publicId} alt="" fill sizes="100vw" loading="eager" />
+                ))}
               </div>
 
               {/* Bottom bar */}

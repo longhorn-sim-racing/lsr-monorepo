@@ -320,8 +320,13 @@ export function GalleryAdminClient({
 
   const handleMove = (id: string, albumId: string | null) => {
       startTransition(async () => {
-          const moved = await moveImageToAlbum(id, albumId);
-          setImages((prev) => prev.map((img) => (img.id === id ? moved : img)));
+          try {
+              const moved = await moveImageToAlbum(id, albumId);
+              setImages((prev) => prev.map((img) => (img.id === id ? moved : img)));
+          } catch (error) {
+              console.error(error);
+              alert("Couldn't move that photo. Try again.");
+          }
       });
   }
 

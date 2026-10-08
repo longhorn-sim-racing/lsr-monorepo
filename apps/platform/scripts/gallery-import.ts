@@ -3,7 +3,10 @@
  * creates the GalleryAlbum / GalleryImage rows. Safe to re-run: albums are matched by slug
  * and photos by Cloudinary public id, so anything already imported is skipped.
  *
- *   pnpm --filter @lsr/platform exec tsx scripts/gallery-import.ts <manifest.json> [--dry-run]
+ *   pnpm --filter @lsr/platform exec tsx scripts/gallery-import.ts <manifest.json> [--dry-run] [--yes]
+ *
+ * It prints the database host first and refuses to write to anything but a local database
+ * unless you pass --yes.
  *
  * Needs DATABASE_URL, NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and
  * CLOUDINARY_API_SECRET in the environment. The manifest looks like:
@@ -21,7 +24,7 @@
  * edge is plenty); Cloudinary serves smaller versions on demand.
  */
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, extname } from "node:path";
 import { PrismaClient } from "@prisma/client";
 
@@ -41,8 +44,9 @@ type ManifestPhoto = {
 
 const [manifestPath, ...flags] = process.argv.slice(2);
 const dryRun = flags.includes("--dry-run");
+const confirmed = flags.includes("--yes");
 if (!manifestPath) {
-  console.error("Usage: tsx scripts/gallery-import.ts <manifest.json> [--dry-run]");
+  console.error("Usage: tsx scripts/gallery-import.ts <manifest.json> [--dry-run] [--yes]");
   process.exit(1);
 }
 
@@ -51,6 +55,20 @@ const apiKey = process.env.CLOUDINARY_API_KEY;
 const apiSecret = process.env.CLOUDINARY_API_SECRET;
 if (!cloud || !apiKey || !apiSecret || !process.env.DATABASE_URL) {
   console.error("Missing DATABASE_URL, NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY or CLOUDINARY_API_SECRET");
+  process.exit(1);
+}
+
+const dbHost = (() => {
+  try {
+    return new URL(process.env.DATABASE_URL!).hostname;
+  } catch {
+    return "(unparseable DATABASE_URL)";
+  }
+})();
+const isLocalDb = ["127.0.0.1", "localhost", "::1"].includes(dbHost);
+console.log(`Database: ${dbHost}${isLocalDb ? " (local)" : ""}${dryRun ? " [dry run]" : ""}`);
+if (!isLocalDb && !dryRun && !confirmed) {
+  console.error("Not a local database. Re-run with --yes to write to it.");
   process.exit(1);
 }
 
@@ -80,7 +98,31 @@ async function upload(file: string, publicId: string) {
   return { publicId: json.public_id, width: json.width ?? null, height: json.height ?? null };
 }
 
+function publicIdFor(photo: ManifestPhoto) {
+  if (!photo.file && !photo.publicId) throw new Error(`Photo in ${photo.album} needs a file or a publicId`);
+  return photo.publicId ?? `gallery/${photo.album}/${slugify(basename(photo.file!, extname(photo.file!)))}`;
+}
+
+/** Catch manifest mistakes before anything is uploaded or written. */
+function validate() {
+  const albumSlugs = new Set(manifest.albums.map((a) => a.slug));
+  const seen = new Set<string>();
+  const problems: string[] = [];
+  for (const photo of manifest.photos) {
+    if (!albumSlugs.has(photo.album)) problems.push(`unknown album "${photo.album}"`);
+    const id = publicIdFor(photo);
+    if (seen.has(id)) problems.push(`two photos would share the id ${id} (rename one file)`);
+    seen.add(id);
+    if (photo.file && !existsSync(photo.file)) problems.push(`missing file ${photo.file}`);
+  }
+  if (problems.length) {
+    console.error(["Manifest problems:", ...problems].join("\n  "));
+    process.exit(1);
+  }
+}
+
 async function main() {
+  validate();
   const albumIds = new Map<string, string>();
   for (const album of manifest.albums) {
     const data = {
@@ -98,23 +140,29 @@ async function main() {
 
   const orderInAlbum = new Map<string, number>();
   let created = 0;
+  let moved = 0;
   let skipped = 0;
   for (const photo of manifest.photos) {
     const order = (orderInAlbum.get(photo.album) ?? 0) + 1;
     orderInAlbum.set(photo.album, order);
-    if (!photo.file && !photo.publicId) throw new Error(`Photo in ${photo.album} needs a file or a publicId`);
-    const publicId = photo.publicId ?? `gallery/${photo.album}/${slugify(basename(photo.file!, extname(photo.file!)))}`;
+    const publicId = publicIdFor(photo);
 
-    if (await prisma.galleryImage.findUnique({ where: { publicId } })) {
-      skipped++;
-      continue;
-    }
+    const existing = await prisma.galleryImage.findUnique({ where: { publicId } });
     if (dryRun) {
-      console.log(`[dry-run] ${publicId} <- ${photo.file ?? "(already in Cloudinary)"}`);
+      console.log(`[dry-run] ${publicId} <- ${existing ? "(already a gallery photo)" : photo.file ?? "(already in Cloudinary)"}`);
       continue;
     }
-    const albumId = albumIds.get(photo.album);
-    if (!albumId) throw new Error(`Photo ${publicId} names unknown album ${photo.album}`);
+    const albumId = albumIds.get(photo.album)!;
+    if (existing) {
+      // Already in the gallery: make sure it sits in this album, at this position.
+      if (existing.albumId !== albumId || existing.order !== order) {
+        await prisma.galleryImage.update({ where: { id: existing.id }, data: { albumId, order } });
+        moved++;
+      } else {
+        skipped++;
+      }
+      continue;
+    }
 
     const uploaded = photo.file
       ? await upload(photo.file, publicId)
@@ -134,7 +182,7 @@ async function main() {
     created++;
     if (created % 10 === 0) console.log(`  ${created} uploaded...`);
   }
-  console.log(`Done: ${created} photos added, ${skipped} already there.`);
+  console.log(`Done: ${created} photos added, ${moved} moved into their album, ${skipped} already in place.`);
 }
 
 main()

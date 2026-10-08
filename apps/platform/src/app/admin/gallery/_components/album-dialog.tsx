@@ -65,17 +65,25 @@ export function AlbumDialog({
   const applyCredit = () =>
     album &&
     startTransition(async () => {
-      const count = await setAlbumCredit(album.id, creditName || null, creditUrl || null);
-      setMessage(`Credit set on ${count} photo${count === 1 ? '' : 's'}.`);
+      try {
+        const count = await setAlbumCredit(album.id, creditName || null, creditUrl || null);
+        setMessage(`Credit set on ${count} photo${count === 1 ? '' : 's'}.`);
+      } catch {
+        setMessage('Could not set the credit. Try again.');
+      }
     });
 
   const remove = () =>
     album &&
     window.confirm(`Delete "${album.title}"? Its photos stay in the gallery as unsorted.`) &&
     startTransition(async () => {
-      await deleteAlbum(album.id);
-      onDeleted(album.id);
-      onOpenChange(false);
+      try {
+        await deleteAlbum(album.id);
+        onDeleted(album.id);
+        onOpenChange(false);
+      } catch {
+        setMessage('Could not delete the album. Try again.');
+      }
     });
 
   return (

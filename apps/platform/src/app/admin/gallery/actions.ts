@@ -137,12 +137,16 @@ function slugify(title: string) {
     .replace(/[^\w\s-]/g, "")
     .trim()
     .replace(/[\s_-]+/g, "-")
-    .slice(0, 60) || "album";
+    .slice(0, 60)
+    .replace(/^-+|-+$/g, "") || "album";
 }
+
+// /gallery shows photos without an album under this slug
+const RESERVED_SLUGS = new Set(["unsorted"]);
 
 async function uniqueSlug(title: string, excludeId?: string) {
   const base = slugify(title);
-  for (let n = 1; ; n++) {
+  for (let n = RESERVED_SLUGS.has(base) ? 2 : 1; ; n++) {
     const slug = n === 1 ? base : `${base}-${n}`;
     const taken = await prisma.galleryAlbum.findFirst({ where: { slug, ...(excludeId ? { id: { not: excludeId } } : {}) } });
     if (!taken) return slug;
@@ -213,6 +217,9 @@ export async function updateAlbum(id: string, input: AlbumInput) {
 export async function deleteAlbum(id: string) {
   const user = await requireOfficer();
 
+  // Its photos become unsorted; move them after the ones already there, keeping their order.
+  const offset = (await nextOrder(null)) - 1;
+  await prisma.$executeRaw`UPDATE "GalleryImage" SET "order" = "order" + ${offset} WHERE "albumId" = ${id}`;
   const album = await prisma.galleryAlbum.delete({ where: { id } });
 
   await createAuditLog({

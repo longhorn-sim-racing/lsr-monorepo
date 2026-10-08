@@ -4,6 +4,8 @@ export type GalleryPhoto = {
   alt: string
   width: number
   height: number
+  /** False for older rows without a stored size (width/height are a 3:2 guess) */
+  sized: boolean
   creditName: string | null
   creditUrl: string | null
   albumSlug: string

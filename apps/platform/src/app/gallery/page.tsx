@@ -20,6 +20,8 @@ export const metadata: Metadata = {
 };
 
 const INSTAGRAM_URL = "https://instagram.com/longhorn_sim_racing"
+// Photos not in an album show under this slug; album slugs can't use it (see admin actions).
+const UNSORTED_SLUG = "unsorted"
 // Old rows predate stored sizes; assume a landscape 3:2 photo until they're backfilled.
 const FALLBACK_SIZE = { width: 1500, height: 1000 }
 
@@ -30,6 +32,7 @@ function toPhoto(image: GalleryImage, albumSlug: string, albumTitle: string): Ga
     alt: image.alt || `Longhorn Sim Racing: ${albumTitle}`,
     width: image.width ?? FALLBACK_SIZE.width,
     height: image.height ?? FALLBACK_SIZE.height,
+    sized: Boolean(image.width && image.height),
     creditName: image.creditName,
     creditUrl: image.creditUrl,
     albumSlug,
@@ -50,12 +53,12 @@ async function loadAlbums(): Promise<GalleryAlbumSummary[]> {
     }))
     if (unsorted.length > 0) {
       summaries.push({
-        slug: "more",
+        slug: UNSORTED_SLUG,
         title: "More photos",
         dateLabel: null,
         description: null,
         eventHref: null,
-        photos: unsorted.map((image) => toPhoto(image, "more", "More photos")),
+        photos: unsorted.map((image) => toPhoto(image, UNSORTED_SLUG, "More photos")),
       })
     }
     return summaries
@@ -69,7 +72,7 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
   const [{ album: initialAlbum }, albums] = await Promise.all([searchParams, loadAlbums()])
   const photoCount = albums.reduce((n, album) => n + album.photos.length, 0)
   // Hero: the first landscape photo of the newest album.
-  const cover = albums.flatMap((album) => album.photos).find((photo) => photo.width > photo.height)
+  const cover = albums.flatMap((album) => album.photos).find((photo) => photo.sized && photo.width > photo.height)
   const videos = galleryItems.filter((item) => item.type !== "image")
 
   return (
@@ -83,11 +86,11 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
               alt=""
               fill
               sizes="100vw"
-              priority
+              preload
               className="object-cover opacity-70"
             />
           ) : (
-            <Image src="/images/lsr-hero2.webp" alt="" fill sizes="100vw" priority className="object-cover opacity-40" />
+            <Image src="/images/lsr-hero2.webp" alt="" fill sizes="100vw" preload className="object-cover opacity-40" />
           )}
           <div className="absolute inset-0 bg-gradient-to-b from-lsr-charcoal/60 via-lsr-charcoal/25 to-lsr-charcoal" />
           <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal/70 via-lsr-charcoal/20 to-transparent" />
