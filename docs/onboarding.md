@@ -115,7 +115,7 @@ We track tasks and bugs as [GitHub Issues](https://github.com/longhorn-sim-racin
 
 ## How CI works
 
-The CI pipeline (`.github/workflows/ci.yml`) runs on every push to `main` and on all pull requests. After installing dependencies and generating the Prisma client, it runs three checks:
+The CI pipeline (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests (draft PRs are skipped until they're marked ready for review). After installing dependencies and generating the Prisma client, it runs three checks:
 
 1. **Lint** -- ESLint across the platform app
 2. **Type check** -- `tsc --noEmit` for TypeScript correctness

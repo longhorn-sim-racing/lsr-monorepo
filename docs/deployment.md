@@ -8,12 +8,12 @@ The LSR Platform is hosted on **Vercel**. Deployments are automated:
 
 - **Push to `main`** triggers a production deployment.
 - **Pull requests** get automatic preview deployments with unique URLs.
-- **CI checks** run on every PR; don't merge one with a failing check.
+- **CI checks** run on every PR once it's out of draft; don't merge one with a failing check.
 - **Database migrations** run from a separate GitHub Actions workflow when a push to `main` changes `prisma/migrations/` (see [Database migrations](#database-migrations)).
 
 ## CI pipeline
 
-The CI workflow (`.github/workflows/ci.yml`) runs on every push to `main` and on all pull requests targeting `main`.
+The CI workflow (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests targeting `main`. It skips draft PRs and runs as soon as a draft is marked ready for review.
 
 ### Steps
 
