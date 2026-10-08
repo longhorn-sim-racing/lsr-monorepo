@@ -821,7 +821,8 @@ model NotificationPreference {
   id                      String   @id @default(uuid())
   userId                  String   @unique
 
-  // Email notifications (requires marketingOptIn on User)
+  // Email notifications. New events and results also need marketingOptIn on User;
+  // payment receipts ignore all of these (see notification.service.ts)
   emailRegistration       Boolean  @default(true)
   emailWaitlistPromotion  Boolean  @default(true)
   emailEventReminder      Boolean  @default(false)  // Off by default

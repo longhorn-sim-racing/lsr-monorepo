@@ -24,6 +24,8 @@ export type SendNotificationParams = {
   metadata?: Record<string, unknown>;
   channels: NotificationChannel[];
   scheduledFor?: Date;
+  /** A payment receipt: always emailed, whatever the member's email settings. */
+  receipt?: boolean;
 };
 
 /**
@@ -39,6 +41,7 @@ export async function sendNotification({
   metadata,
   channels,
   scheduledFor,
+  receipt = false,
 }: SendNotificationParams): Promise<void> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -53,7 +56,7 @@ export async function sendNotification({
   // Create notification for each channel
   for (const channel of channels) {
     // Check if user wants this email type
-    if (channel === "EMAIL" && !shouldSendEmail(user, type)) {
+    if (channel === "EMAIL" && !receipt && !shouldSendEmail(user, type)) {
       console.log(`[Notification] User ${userId} opted out of ${type} emails`);
       continue;
     }
@@ -91,7 +94,7 @@ export async function sendBulkNotification({
   metadata,
   channels,
   scheduledFor,
-}: Omit<SendNotificationParams, "userId"> & { userIds: string[] }): Promise<void> {
+}: Omit<SendNotificationParams, "userId" | "receipt"> & { userIds: string[] }): Promise<void> {
   for (const userId of userIds) {
     await sendNotification({
       userId,
@@ -106,8 +109,18 @@ export async function sendBulkNotification({
   }
 }
 
+// Announcement-style emails: these also need the marketing opt-in. Everything else is about
+// the member's own registrations and only follows its own setting below.
+const MARKETING_TYPES: ReadonlySet<NotificationType> = new Set([
+  "EVENT_POSTED",
+  "REGISTRATION_OPENED",
+  "RESULTS_POSTED",
+  "CUSTOM",
+]);
+
 /**
  * Check if user should receive email for this notification type.
+ * Payment receipts skip this check (see `receipt` on sendNotification).
  */
 function shouldSendEmail(
   user: {
@@ -122,8 +135,7 @@ function shouldSendEmail(
   },
   type: NotificationType
 ): boolean {
-  // Master opt-out check
-  if (!user.marketingOptIn) {
+  if (MARKETING_TYPES.has(type) && !user.marketingOptIn) {
     return false;
   }
 
@@ -155,7 +167,7 @@ function shouldSendEmail(
     case "RESULTS_POSTED":
       return prefs.emailResultsPosted;
     case "CUSTOM":
-      // Custom notifications always allowed if master opt-in is true
+      // Officer announcements: only the marketing opt-in (checked above) applies
       return true;
     default:
       return true;

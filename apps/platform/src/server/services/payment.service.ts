@@ -476,6 +476,7 @@ async function grantEventSeat(
           body: `Payment confirmed. See you on ${eventDate}.`,
           actionUrl: `/events/${event.slug}`,
           channels: ["IN_APP", "EMAIL"],
+          receipt: true,
           metadata: {
             eventId: meta.eventId,
             title: event.title,
@@ -694,6 +695,7 @@ async function grantProduct(
           : `Payment confirmed. Your ${leagueName} entry is active through ${through}. Next, the comp team will give you the ${leagueName} role on Discord, which unlocks the track and car downloads.`,
         actionUrl,
         channels: ["IN_APP", "EMAIL"],
+        receipt: true,
         metadata: {
           paymentId: payment.id,
           productId: product.id,
