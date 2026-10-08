@@ -5,13 +5,13 @@ import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious
 import { galleryItems as staticGalleryItems, GalleryItem } from "@/lib/gallery"
 import { GalleryImage } from "@prisma/client"
 import { Camera } from "lucide-react"
+import { cloudinaryUrl } from "@/lib/cloudinary"
 
 export default function GalleryRibbon({ index, galleryImages }: { index: number, galleryImages: GalleryImage[] }) {
-  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME!;
-  
+  // Cropped to the 16:9 tiles by Cloudinary, so these skip Next's optimizer (unoptimized below)
   const dbItems: GalleryItem[] = galleryImages.map(img => ({
     type: "image",
-    src: `https://res.cloudinary.com/${cloudName}/image/upload/v1/${img.publicId}`,
+    src: cloudinaryUrl(img.publicId, { width: 960, height: 540, crop: "fill" }),
     alt: img.alt ?? "Gallery Image",
     credit: img.creditName ? {
       name: img.creditName,
@@ -53,8 +53,9 @@ export default function GalleryRibbon({ index, galleryImages }: { index: number,
                       <Image
                         src={item.src}
                         alt={item.alt}
-                        width={800}
-                        height={600}
+                        width={960}
+                        height={540}
+                        unoptimized
                         className="object-cover w-full h-full opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-700"
                       />
                       {item.credit && (
