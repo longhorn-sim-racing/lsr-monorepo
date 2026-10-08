@@ -145,7 +145,6 @@ model User {
   signedUpAt DateTime @default(now())
 
   // Relations
-  authIdentities         AuthIdentity[]
   roles                  UserRole[]
   payments               Payment[]
   entitlements           Entitlement[]
@@ -159,7 +158,6 @@ model User {
   
   auditLogs              AuditLog[]       @relation("AuditActor")
   auditLogsTargeted      AuditLog[]       @relation("AuditTarget")
-  mediaOwned             Media[]          @relation("MediaOwner")
   rawResultUploads       RawResultUpload[]
   driverIdentities       DriverIdentity[]
   raceParticipants       RaceParticipant[]
@@ -179,7 +177,6 @@ model Role {
   description String
 
   users                 UserRole[]
-  eligibilityMinRoleFor EventEligibility[] @relation("EligibilityMinRole") // <-- back-relation for min role gate
 }
 
 model UserRole {
@@ -193,20 +190,6 @@ model UserRole {
 
   @@id([userId, roleId])
   @@index([roleId])
-}
-
-model AuthIdentity {
-  id             String @id @default(uuid())
-  userId         String
-  provider       String
-  providerUserId String
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-
-  @@unique([provider, providerUserId])
-  @@index([userId])
 }
 
 model AuditLog {
@@ -328,7 +311,6 @@ model League {
   seasons              Season[]
   products             Product[]          @relation("EntitlementLeague")
   entitlements         Entitlement[]      @relation("EntitlementLeague") // <-- back-relation
-  eventEligibilityRefs EventEligibility[] @relation("EligibilityLeague") // <-- back-relation for event gate
 }
 
 model Season {
@@ -381,12 +363,10 @@ model Entry {
   seasonId         String
   userId           String?
   number           Int?
-  nickname         String?
   isEligiblePoints Boolean @default(true)
 
   // Aggregated Stats (Computed)
   totalPoints   Int     @default(0)
-  roundsCounted Int     @default(0)
   totalCuts     Int     @default(0)
   totalCollisions Int   @default(0)
   totalPositionsGained Int @default(0)
@@ -409,8 +389,7 @@ model Entry {
   @@index([seasonId])
 }
 
-
-// ---------- Events & Eligibility ----------
+// ---------- Events ----------
 model EventSeries {
   id         String     @id @default(uuid())
   title      String
@@ -433,7 +412,6 @@ model Venue {
   postalCode   String?
   country      String?
   room         String?
-  geo          Json?
   googleMapsUrl String?
   appleMapsUrl  String?
 
@@ -479,13 +457,10 @@ model Event {
 
   meetingUrl         String?
   streamUrl          String?
-  dialIn             String?
-  accessInstructions String?
 
   series EventSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
   venue  Venue?       @relation(fields: [venueId], references: [id], onDelete: SetNull)
 
-  eligibility   EventEligibility?
   registrations EventRegistration[] // Renamed from rsvps
   attendances   EventAttendance[]
 
@@ -498,22 +473,6 @@ model Event {
 
   @@index([startsAtUtc])
   @@index([status, startsAtUtc])
-}
-
-model EventEligibility {
-  eventId           String  @id
-  allowsGeneral     Boolean @default(true)
-  requiresLsrMember Boolean @default(false)
-  requiresLeagueId  String?
-  minRoleId         String?
-  eligibilityJson   Json?
-
-  event   Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  league  League? @relation("EligibilityLeague", fields: [requiresLeagueId], references: [id], onDelete: SetNull) // <-- named & back-rel
-  minRole Role?   @relation("EligibilityMinRole", fields: [minRoleId], references: [id], onDelete: SetNull) // <-- named & back-rel
-
-  @@index([requiresLeagueId])
-  @@index([minRoleId])
 }
 
 model EventRegistration {
@@ -581,21 +540,6 @@ model Page {
   authorId   String?
 
   author    User?    @relation("PageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Media {
-  id         String  @id @default(uuid())
-  title      String?
-  storageUrl String
-  width      Int?
-  height     Int?
-  alt        String?
-  ownerId    String?
-
-  owner User? @relation("MediaOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

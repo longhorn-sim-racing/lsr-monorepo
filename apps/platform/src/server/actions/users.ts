@@ -165,7 +165,7 @@ export async function updateUser(userId: string, payload: UpdateUserPayload) {
     }
 
     // 4b. Keep the lsr_member entitlement in step with a manual LSR membership:
-    // eligibility, /account and dues checkout read Entitlement, not UserMembership.
+    // /account and dues checkout read Entitlement, not UserMembership.
     const entitlementSync = await syncManualMembershipEntitlement(userId, currentUser.id);
 
     // 5. Audit Log

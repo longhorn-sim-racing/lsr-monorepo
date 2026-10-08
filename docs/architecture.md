@@ -134,9 +134,9 @@ Zod schemas for form validation and Server Action input:
 
 The database schema is defined in `prisma/schema.prisma`. Key model groups:
 
-- **Identity**: `User`, `Role`, `UserRole`, `AuthIdentity`, `AuditLog`
+- **Identity**: `User`, `Role`, `UserRole`, `AuditLog`
 - **Payments & membership**: `Product`, `Payment`, `Entitlement`, `UserMembership`, `MembershipTier` (see [payments.md](./payments.md))
-- **Events**: `Event`, `EventSeries`, `Venue`, `EventRegistration`, `EventAttendance`, `EventEligibility`
+- **Events**: `Event`, `EventSeries`, `Venue`, `EventRegistration`, `EventAttendance`
 - **Competition**: `League`, `Season`, `Entry` (a driver's per-season standings aggregates), `LeagueApplication` (Lone Star Cup entry form)
 - **Race data**: `RawResultUpload` → `RaceSession`, `RaceParticipant`, `RaceResult`, `RaceLap`, `RaceEvent`, `ParseReport`; `DriverIdentity` and `CarMapping` map sim driver GUIDs and car names
 - **Content**: `Post`, `Page` (editable pages such as the Lone Star Cup rules), `GalleryImage`, `Media`, `Tag`
