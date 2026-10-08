@@ -3,41 +3,9 @@ import Link from "next/link"
 import Image from "next/image"
 import { Check, Download, ExternalLink, Building2, Users, Trophy } from "lucide-react"
 import { Metadata } from "next"
+import { SPONSORS, sponsorHref, type Sponsor } from "@/lib/sponsors"
 
-type Partner = {
-  name: string
-  logo: string
-  href?: string
-  description?: string
-  title?: string
-}
-
-const partners: Partner[] = [
-  {
-    name: "PitLane Systems",
-    logo: "/sponsors/pitlane.png",
-    href: "https://www.pitlanesystems.com/?utm_source=longhornsimracing.org&utm_medium=referral&utm_campaign=sponsor-page",
-    title: "Official Broadcast Partner",
-    description: "PitLane Systems builds the first unified broadcast director software for sim racing, consolidating camera control, overlays, timing data, and OBS into a single dashboard — bringing TV-grade production to our Assetto Corsa events.",
-  },
-  {
-    name: "Race Club Austin",
-    logo: "/sponsors/raceclub.png",
-    href: "https://www.raceclubsim.com/?utm_source=longhornsimracing.org&utm_medium=referral&utm_campaign=sponsor-page",
-  },
-  {
-    name: "Driven to Care",
-    logo: "/sponsors/driventocare.png",
-    href: "https://www.driventocare.org/?utm_source=longhornsimracing.org&utm_medium=referral&utm_campaign=sponsor-page",
-  },
-  {
-    name: "Yugo",
-    logo: "/sponsors/yugo.png",
-    description: "Yugo is a global student living brand and operator creating safe, supportive communities where students can connect and thrive.",
-  },
-]
-
-function PartnerCard({ partner }: { partner: Partner }) {
+function PartnerCard({ partner }: { partner: Sponsor }) {
   const content = (
     <>
       {partner.title && (
@@ -57,7 +25,7 @@ function PartnerCard({ partner }: { partner: Partner }) {
       {partner.description && (
         <p className="font-sans text-sm text-white/60 leading-relaxed max-w-md">{partner.description}</p>
       )}
-      {partner.href && (
+      {partner.url && (
         <span className="mt-4 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-lsr-orange group-hover:text-white transition-colors">
           Visit <ExternalLink className="h-3 w-3" />
         </span>
@@ -67,9 +35,9 @@ function PartnerCard({ partner }: { partner: Partner }) {
 
   const className = "group border border-white/10 bg-white/[0.02] p-8 flex flex-col items-center text-center hover:border-white/20 transition-colors"
 
-  if (partner.href) {
+  if (partner.url) {
     return (
-      <Link href={partner.href} target="_blank" rel="noopener noreferrer" className={className}>
+      <Link href={sponsorHref(partner.url, "sponsor-page")} target="_blank" rel="noopener noreferrer" className={className}>
         {content}
       </Link>
     )
@@ -85,7 +53,7 @@ function CurrentPartners() {
         Current <span className="text-lsr-orange">Partners</span>
       </h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {partners.map((partner) => (
+        {SPONSORS.map((partner) => (
           <PartnerCard key={partner.name} partner={partner} />
         ))}
       </div>
@@ -103,24 +71,19 @@ export const metadata: Metadata = {
 
 const SITE_URL = "https://www.longhornsimracing.org"
 
-function canonicalHref(href: string): string {
-  const u = new URL(href)
-  return `${u.origin}${u.pathname}`
-}
-
 const partnerListJsonLd = {
   "@context": "https://schema.org",
   "@type": "ItemList",
   name: "Longhorn Sim Racing Partners",
-  numberOfItems: partners.length,
-  itemListElement: partners.map((p, i) => ({
+  numberOfItems: SPONSORS.length,
+  itemListElement: SPONSORS.map((p, i) => ({
     "@type": "ListItem",
     position: i + 1,
     item: {
       "@type": "Organization",
       name: p.name,
       logo: `${SITE_URL}${p.logo}`,
-      ...(p.href ? { url: canonicalHref(p.href) } : {}),
+      ...(p.url ? { url: p.url } : {}),
       ...(p.description ? { description: p.description } : {}),
     },
   })),
