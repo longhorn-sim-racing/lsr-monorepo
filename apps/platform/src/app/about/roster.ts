@@ -63,7 +63,7 @@ export const TEAMS: Team[] = [
 ];
 
 export const OFFICERS: Officer[] = [
-  { name: "Dylan Foley", title: "President", team: "executive", board: true },
+  { name: "Dylan Foley", title: "President", team: "executive", board: true, photo: "/images/officers/dylan-foley.jpg" },
   { name: "Bryan Reyes", title: "Vice President", team: "executive", board: true, photo: "/images/officers/bryan-reyes.jpg" },
   { name: "Romer Pena", title: "Operations Lead", team: "executive" },
 
@@ -89,7 +89,7 @@ export const OFFICERS: Officer[] = [
   { name: "Jose Varela", title: "Officer", team: "business" },
   { name: "Cooper Tomlin", title: "Officer", team: "business" },
 
-  { name: "Gray Marshall", title: "Technology Lead", team: "technology", board: true },
+  { name: "Gray Marshall", title: "Technology Lead", team: "technology", board: true, photo: "/images/officers/gray-marshall.jpg" },
   { name: "Alexander Spears", title: "Officer", team: "technology" },
   { name: "Arav Agarwal", title: "Officer", team: "technology" },
 ];
