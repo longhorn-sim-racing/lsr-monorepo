@@ -34,7 +34,8 @@ export const SPONSORS: Sponsor[] = [
   },
   {
     name: "Driven to Care",
-    logo: "/sponsors/driventocare.png",
+    // Black ink recolored to white for the dark site; driventocare.png is the original
+    logo: "/sponsors/driventocare-reversed.png",
     tier: "gold",
     url: "https://www.driventocare.org/",
   },
