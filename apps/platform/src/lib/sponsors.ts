@@ -13,6 +13,8 @@ export type Sponsor = {
   /** Plain URL; use sponsorHref() to add the referral tags for a given page. */
   url?: string
   title?: string
+  /** The original logo, when `logo` is a white-ink copy for the dark site; used where it may show on white (structured data). */
+  lightLogo?: string
   description?: string
 }
 
@@ -34,7 +36,9 @@ export const SPONSORS: Sponsor[] = [
   },
   {
     name: "Driven to Care",
-    logo: "/sponsors/driventocare.png",
+    // Black ink recolored to white for the dark site; driventocare.png is the original
+    logo: "/sponsors/driventocare-reversed.png",
+    lightLogo: "/sponsors/driventocare.png",
     tier: "gold",
     url: "https://www.driventocare.org/",
   },
