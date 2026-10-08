@@ -8,7 +8,8 @@ The LSR Platform is hosted on **Vercel**. Deployments are automated:
 
 - **Push to `main`** triggers a production deployment.
 - **Pull requests** get automatic preview deployments with unique URLs.
-- **CI checks** must pass before a PR can be merged.
+- **CI checks** run on every PR; don't merge one with a failing check.
+- **Database migrations** run from a separate GitHub Actions workflow when a push to `main` changes `prisma/migrations/` (see [Database migrations](#database-migrations)).
 
 ## CI pipeline
 
@@ -20,11 +21,12 @@ The CI workflow (`.github/workflows/ci.yml`) runs on every push to `main` and on
 2. **Install pnpm** -- sets up the package manager
 3. **Setup Node.js 20** -- with pnpm dependency caching
 4. **Install dependencies** -- `pnpm install --frozen-lockfile`
-5. **Lint** -- ESLint across the platform app
-6. **Type check** -- `tsc --noEmit` for TypeScript correctness
-7. **Build** -- full production build to catch runtime errors
+5. **Generate Prisma client** -- `pnpm --filter @lsr/platform db:generate`
+6. **Lint** -- ESLint across the platform app
+7. **Type check** -- `tsc --noEmit` for TypeScript correctness
+8. **Build** -- full production build (with placeholder Supabase env vars) to catch build errors
 
-If any step fails, the PR cannot be merged.
+If any step fails, fix it before merging. CI isn't a required check on `main` (the ruleset requires a code owner's approval), so reviewers look for it.
 
 ### Concurrency
 
@@ -55,7 +57,8 @@ There is no manual deployment step. If you need to roll back, use Vercel's dashb
 ## Vercel configuration
 
 - **Root directory**: `apps/platform`
-- **Build command**: `pnpm build` (which runs `prisma generate` via the `prebuild` script, then `next build`)
+- **Build command**: `pnpm build` (set in `apps/platform/vercel.json`; runs `prisma generate` via the `prebuild` script, then `next build`)
+- **Install command**: `pnpm install --frozen-lockfile` (also in `vercel.json`)
 - **Output directory**: `.next` (auto-detected by Vercel)
 - **Node.js version**: 20
 
@@ -72,16 +75,18 @@ Migrations are applied automatically via the **Database Migrate** workflow (`.gi
 1. Create the migration locally: `pnpm --filter @lsr/platform db:migrate`
 2. Commit the generated migration file in `prisma/migrations/`.
 3. Open a PR and merge to `main`.
-4. The workflow detects changes in `prisma/migrations/`, backs up the production database, and runs `prisma migrate deploy`.
+4. The push to `main` changes `apps/platform/prisma/migrations/`, which starts the workflow. It backs up the production database and runs `prisma migrate deploy` (`pnpm --filter @lsr/platform db:deploy`). It can also be run by hand from the Actions tab.
 
-The backup is uploaded as a GitHub Actions artifact (retained 90 days), downloadable from the Actions tab.
+The backup is encrypted (with the `BACKUP_PASSPHRASE` secret) and uploaded as a GitHub Actions artifact (retained 90 days), downloadable from the Actions tab.
 
 ### Writing safe migrations
 
-Always make migrations **backwards-compatible**. The Vercel build runs after the migration, so there's a brief window where the old code serves traffic against the new schema.
+The migration workflow and the Vercel deployment both start from the same push to `main`, and **neither waits for the other**. For a few minutes, either the old code runs against the new schema or the new code runs against the old schema, depending on which finishes first. If the migration fails, the new code stays live against the old schema until someone fixes it.
 
-- **Adding** columns, tables, or indexes is always safe.
-- **Renaming or removing** columns requires two deploys: first remove the code reference, then remove the column in a follow-up PR.
+So a migration must be **compatible with the code that's already deployed**, or be shipped in two steps:
+
+- **Adding** tables, indexes, or nullable (or defaulted) columns is safe for the old code. New code that reads a new column will error until the migration lands, because Prisma selects every column by default; that window is usually short, but if it matters, merge the migration first and the code that uses it in a follow-up PR.
+- **Renaming or removing** columns or tables requires two deploys: first ship code that no longer uses them, then remove them in a follow-up PR.
 - Note the migration in your PR description so reviewers know to check it.
 
 ## Guidelines for safe releases
@@ -91,4 +96,3 @@ Always make migrations **backwards-compatible**. The Vercel build runs after the
 - If your change includes a database migration, note it in the PR description.
 - After merging, monitor the Vercel deployment for build errors.
 - If something breaks in production, use Vercel's instant rollback to redeploy the previous version while you fix the issue.
-- Use feature flags (`FeatureFlag` model) to ship code that isn't ready to be visible yet.

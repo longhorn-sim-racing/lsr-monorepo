@@ -8,19 +8,19 @@ The official web platform for [Longhorn Sim Racing](https://www.longhornsimracin
 lsr-monorepo/
 ├── apps/platform/       # Next.js web application
 ├── docs/                # Engineering and admin documentation
-├── scripts/             # Shared utility scripts
 └── .github/             # CI workflows and repo config
 ```
 
 ## Tech stack
 
-- **Monorepo**: pnpm workspaces + Turborepo
+- **Monorepo**: pnpm workspaces
 - **Framework**: Next.js 16 (App Router, React Server Components)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS v4 + shadcn/ui
 - **Database**: PostgreSQL via Supabase
 - **ORM**: Prisma
 - **Auth**: Supabase Auth
+- **Payments**: Stripe
 - **Deployment**: Vercel
 
 ## Quick start
@@ -34,7 +34,7 @@ pnpm install
 
 # Set up environment variables
 cp apps/platform/.env.example apps/platform/.env.local
-# Fill in Supabase credentials (ask team lead)
+# Fill in values from the local Supabase stack (see docs/local-dev.md)
 
 # Generate Prisma client
 pnpm --filter @lsr/platform db:generate
@@ -78,6 +78,8 @@ From `apps/platform/`:
 | [docs/deployment.md](docs/deployment.md) | CI/CD and deployment process |
 | [docs/admin-guide.md](docs/admin-guide.md) | Admin feature usage guide |
 | [docs/admin-quick-reference.md](docs/admin-quick-reference.md) | Quick admin task lookup |
+| [docs/payments.md](docs/payments.md) | How payments work (Stripe, products, entitlements) |
+| [docs/payments-test-checklist.md](docs/payments-test-checklist.md) | Payments test run before merging payment changes |
 
 ## Contributing
 

@@ -25,25 +25,24 @@ Next.js App Router (Server Components + Client Components)
 lsr-monorepo/
 ├── apps/platform/       # The web application (Next.js)
 ├── docs/                # Engineering and admin documentation
-├── scripts/             # Shared utility scripts
 └── .github/             # CI workflows, CODEOWNERS
 ```
 
-The monorepo uses **pnpm workspaces** with **Turborepo** for task orchestration. Currently there is one app (`@lsr/platform`). The structure supports adding more apps or shared packages in the future.
+The monorepo uses **pnpm workspaces**. Currently there is one app (`@lsr/platform`), and the root `package.json` scripts just run its scripts with `pnpm --filter`. The structure supports adding more apps or shared packages in the future.
 
 ## Application structure (`apps/platform/`)
 
 ```
 apps/platform/
 ├── src/
-│   ├── app/             # Next.js App Router (pages, layouts, API routes)
+│   ├── app/             # Next.js App Router (pages, layouts, API routes, most Server Actions)
 │   ├── components/      # React components
 │   ├── lib/             # Utilities and integrations
 │   ├── schemas/         # Zod validation schemas
 │   └── server/          # Server-side data layer
 ├── prisma/              # Database schema, migrations, seed scripts
 ├── public/              # Static assets (images, PDFs)
-└── scripts/             # App-specific utility scripts
+└── scripts/             # One-off and ops scripts, run with tsx
 ```
 
 ## Routing (`src/app/`)
@@ -82,10 +81,10 @@ The project uses **shadcn/ui** (new-york style) built on Radix UI primitives, st
 
 ## Server-side code (`src/server/`)
 
-Server code follows a layered architecture:
+Server code follows a layered architecture, though simpler actions skip straight to Prisma:
 
 ```
-Server Actions (src/server/actions/)
+Server Actions (src/app/**/actions.ts, src/server/actions/)
        │
        ▼
 Services (src/server/services/)      ← Business logic
@@ -94,24 +93,25 @@ Services (src/server/services/)      ← Business logic
 Repos (src/server/repos/)            ← CRUD operations
        │
        ▼
-Prisma Client                        ← Database access
+Prisma Client (src/server/db.ts)     ← Database access
 ```
 
 ### Layers
 
-**Queries (`queries/`)** -- Read-only data fetching functions wrapped with React `cache()` for request-scoped deduplication. Used directly in Server Components.
+**Queries (`queries/`)** -- Read-only data fetching functions used directly in Server Components. Some are wrapped with React `cache()` for request-scoped deduplication; not all are.
 
-**Repos (`repos/`)** -- Repository pattern for entity CRUD. Each repo encapsulates Prisma queries for a domain (events, users, seasons, etc.).
+**Repos (`repos/`)** -- Repository pattern for entity CRUD. A few domains have one (events, series, venues, standings, memberships); most code queries Prisma directly.
 
 **Services (`services/`)** -- Business logic that coordinates across repos. Key services:
 - `registration.service.ts` -- Event registration with database locks (`FOR UPDATE`) and FIFO waitlist promotion
 - `attendance.service.ts` -- Check-in workflows (QR and manual)
 - `notification.service.ts` -- Notification scheduling and dispatch
-- `payment.service.ts` -- Stripe payment processing
+- `payment.service.ts` -- Stripe payment processing (see [payments.md](./payments.md))
+- `league-entry.service.ts` -- Lone Star Cup entries
 
-**Actions (`actions/`)** -- Next.js Server Actions for mutations. Each action validates auth, calls the service layer, writes an audit log, and calls `revalidatePath`.
+**Actions** -- Next.js Server Actions for mutations. Most are colocated with their route as `src/app/**/actions.ts` (e.g. `src/app/admin/events/actions.ts`); a few shared ones live in `src/server/actions/`. Each action checks auth with a guard, does the work (through a service or repo, or Prisma directly), writes an audit log for admin changes (`audit/log.ts`), and calls `revalidatePath`.
 
-**Auth (`auth/`)** -- Session management via `getSessionUser()` and `getCachedSessionUser()`. Guards in `guards.ts` (`requireUser`, `requireRole`, `requireOfficer`, and `requireOfficerPage` for admin pages) check role-based access.
+**Auth (`auth/`)** -- Session management via `getSessionUser()` and `getCachedSessionUser()`. Guards in `guards.ts` (`requireUser`, `requireRole`, `requireOfficer`, and `requireOfficerPage` for admin pages) check role-based access. `requireRole` also admits emails in the `ADMIN_EMAILS` allowlist. Every admin page checks access itself, because the admin layout doesn't re-run when a client fetches just the page segment.
 
 **Database (`db.ts`)** -- The shared Prisma client.
 
@@ -134,13 +134,13 @@ Zod schemas for form validation and Server Action input:
 
 The database schema is defined in `prisma/schema.prisma`. Key model groups:
 
-- **Identity**: `User`, `UserRole`, `AuditLog`
-- **Membership**: `MembershipTier`, `UserMembership`, `Entitlement`, `Payment`
-- **Events**: `Event`, `EventSeries`, `Venue`, `EventRegistration`, `EventAttendance`
-- **Competition**: `League`, `Season`, `Round`, `Session`, `Entry`, `Result`
-- **Content**: `Post`, `Page`, `GalleryImage`, `Media`
-- **Notifications**: `Notification`, `NotificationPreference`
-- **Race data**: `RawResultUpload`, `RaceSession`, `RaceParticipant`, `RaceResult`, `RaceLap`
+- **Identity**: `User`, `Role`, `UserRole`, `AuthIdentity`, `AuditLog`
+- **Payments & membership**: `Product`, `Payment`, `Entitlement`, `UserMembership`, `MembershipTier` (see [payments.md](./payments.md))
+- **Events**: `Event`, `EventSeries`, `Venue`, `EventRegistration`, `EventAttendance`, `EventEligibility`
+- **Competition**: `League`, `Season`, `Entry` (a driver's per-season standings aggregates), `LeagueApplication` (Lone Star Cup entry form)
+- **Race data**: `RawResultUpload` → `RaceSession`, `RaceParticipant`, `RaceResult`, `RaceLap`, `RaceEvent`, `ParseReport`; `DriverIdentity` and `CarMapping` map sim driver GUIDs and car names
+- **Content**: `Post`, `Page` (editable pages such as the Lone Star Cup rules), `GalleryImage`, `Media`, `Tag`
+- **Notifications & settings**: `Notification`, `NotificationPreference`, `SystemSetting`, `FeatureFlag`
 
 Migrations live in `prisma/migrations/`. Apply with `pnpm --filter @lsr/platform db:migrate`.
 
@@ -159,6 +159,6 @@ Migrations live in `prisma/migrations/`. Apply with `pnpm --filter @lsr/platform
 
 - **React Server Components by default.** Only use `"use client"` when interactivity is required.
 - **Path alias:** `@/*` maps to `./src/*` (relative to `apps/platform/`).
-- **Audit logging:** All admin mutations write to the `AuditLog` table with before/after snapshots.
+- **Audit logging:** Admin mutations write to the `AuditLog` table with before/after snapshots (`createAuditLog` in `src/server/audit/log.ts`).
+- **Public user data:** Anything passed to a client component on a public page ends up in the HTML, so public queries select users through `publicUserSelect` (`src/lib/public-user.ts`), never full `User` rows.
 - **JIT user provisioning:** Users are auto-created in Prisma on their first Supabase authentication.
-- **Feature flags:** The `FeatureFlag` model enables toggling features without code changes.

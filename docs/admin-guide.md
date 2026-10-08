@@ -55,7 +55,8 @@ Enable registration to let members sign up for events.
    - **Enable Waitlist**: If capacity is reached, additional signups join a queue
 
 **Waitlist behavior:**
-- When someone cancels, the first person on the waitlist is automatically promoted
+- When a spot opens, the first person on the waitlist is automatically promoted
+- To promote by hand instead, turn off **Automatically move people up from the waitlist**. Paid events never auto-promote, since waitlisted people haven't paid yet
 - You can manually reorder the waitlist by dragging names
 - You can manually promote someone from the waitlist
 

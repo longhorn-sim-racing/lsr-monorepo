@@ -35,7 +35,7 @@ This pulls and starts Docker containers for PostgreSQL, Supabase Auth, Studio, a
 When it finishes, it prints connection details including:
 - **API URL** (e.g., `http://127.0.0.1:54321`)
 - **DB URL** (e.g., `postgresql://postgres:postgres@127.0.0.1:54322/postgres`)
-- **anon key** and **service_role key**
+- **anon key** (it also prints a service_role key; the app doesn't use it)
 
 You can retrieve these at any time with:
 
@@ -59,11 +59,13 @@ Fill in `apps/platform/.env.local` using the values from `supabase start` output
 # Supabase local URLs and keys
 NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:54321"
 NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJ..."   # from supabase status -o env (ANON_KEY)
-SUPABASE_SERVICE_ROLE_KEY="eyJ..."        # from supabase status -o env (SERVICE_ROLE_KEY)
 
 # Local database (same for both — no pooler needed locally)
 DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 DIRECT_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+
+# Base URL for links and redirects (keep it, or delete the line; don't leave it empty)
+NEXT_PUBLIC_SITE_URL="http://localhost:3000"
 
 # Admin email allowlist (comma-separated)
 ADMIN_EMAILS="your-email@utexas.edu"
@@ -76,7 +78,7 @@ DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 DIRECT_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 ```
 
-For other env vars (Cloudinary, Shopify, Stripe, Resend), ask the team lead. These are optional for most local development.
+For other env vars (Cloudinary, Shopify, Stripe, Resend), ask the team lead. These are optional for most local development. Stripe uses test-mode keys locally; see [payments.md](./payments.md).
 
 > **Never put production database credentials in your local env files.** Production credentials live only in Vercel.
 
