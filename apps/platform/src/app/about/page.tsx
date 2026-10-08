@@ -72,20 +72,26 @@ function initials(name: string) {
   return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase()
 }
 
-async function getStats() {
+/** Live counts for the stats strip; null if the database can't be reached, so the page still renders. */
+async function getStats(): Promise<{ members: number; eventsHosted: number } | null> {
   const now = new Date()
-  const [members, eventsHosted] = await Promise.all([
-    prisma.user.count({ where: { status: "active" } }),
-    prisma.event.count({
-      where: {
-        AND: [
-          publicEventWhere(now),
-          { startsAtUtc: { lt: now }, status: { notIn: [EventStatus.CANCELLED, EventStatus.POSTPONED] } },
-        ],
-      },
-    }),
-  ])
-  return { members, eventsHosted }
+  try {
+    const [members, eventsHosted] = await Promise.all([
+      prisma.user.count({ where: { status: "active" } }),
+      prisma.event.count({
+        where: {
+          AND: [
+            publicEventWhere(now),
+            { startsAtUtc: { lt: now }, status: { notIn: [EventStatus.CANCELLED, EventStatus.POSTPONED] } },
+          ],
+        },
+      }),
+    ])
+    return { members, eventsHosted }
+  } catch (error) {
+    console.error("[about] Failed to load stats:", error)
+    return null
+  }
 }
 
 function SectionHeading({ kicker, children, id }: { kicker: string; children: React.ReactNode; id?: string }) {
@@ -107,7 +113,7 @@ function Portrait({ officer, team }: { officer: Officer; team: Team }) {
         {officer.photo ? (
           <Image
             src={officer.photo}
-            alt={officer.name}
+            alt=""
             fill
             sizes="(min-width: 1024px) 25vw, 50vw"
             className="object-cover object-[center_25%]"
@@ -154,7 +160,21 @@ function Avatar({ officer }: { officer: Officer }) {
   )
 }
 
-function LogoTile({ name, logo, href, detail, title }: { name: string; logo: string; href: string; detail?: string; title?: string }) {
+function LogoTile({
+  name,
+  logo,
+  href,
+  detail,
+  title,
+  sizes,
+}: {
+  name: string
+  logo: string
+  href: string
+  detail?: string
+  title?: string
+  sizes: string
+}) {
   return (
     <a
       href={href}
@@ -163,13 +183,13 @@ function LogoTile({ name, logo, href, detail, title }: { name: string; logo: str
       className="group relative flex flex-col border border-white/10 bg-white/[0.02] p-5 md:p-6 transition-colors hover:border-lsr-orange/50 hover:bg-white/[0.04]"
     >
       <ArrowUpRight className="absolute top-4 right-4 h-4 w-4 text-white/20 transition-colors group-hover:text-lsr-orange" />
-      <span className="h-4 font-sans font-black text-[9px] uppercase tracking-[0.2em] text-lsr-orange">{title}</span>
+      <span className="min-h-4 pr-6 font-sans font-black text-[9px] uppercase tracking-[0.2em] text-lsr-orange">{title}</span>
       <div className="relative my-5 h-20 md:h-24 w-full">
         <Image
           src={logo}
-          alt={name}
+          alt=""
           fill
-          sizes="(min-width: 1024px) 240px, 45vw"
+          sizes={sizes}
           className="object-contain transition-transform duration-300 group-hover:scale-105"
         />
       </div>
@@ -185,8 +205,8 @@ export default async function AboutPage() {
 
   const statItems = [
     { value: "2024", label: "Founded" },
-    { value: stats.members.toLocaleString("en-US"), label: "Members" },
-    { value: stats.eventsHosted.toLocaleString("en-US"), label: "Events hosted" },
+    { value: stats ? stats.members.toLocaleString("en-US") : "—", label: "Members" },
+    { value: stats ? stats.eventsHosted.toLocaleString("en-US") : "—", label: "Events hosted" },
     { value: "S3", label: "Lone Star Cup" },
   ]
 
@@ -366,7 +386,7 @@ export default async function AboutPage() {
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
               {CAMPUS_PARTNERS.map((partner) => (
-                <LogoTile key={partner.name} {...partner} />
+                <LogoTile key={partner.name} {...partner} sizes="(min-width: 1024px) 240px, 45vw" />
               ))}
             </div>
           </div>
@@ -391,6 +411,7 @@ export default async function AboutPage() {
                   name={sponsor.name}
                   logo={sponsor.logo}
                   title={sponsor.title}
+                  sizes="(min-width: 640px) 30vw, 85vw"
                   href={sponsor.url ? sponsorHref(sponsor.url, "sponsor-about") : "/sponsors"}
                 />
               ))}

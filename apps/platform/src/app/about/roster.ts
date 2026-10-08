@@ -1,8 +1,9 @@
 // The officer roster shown on /about. Source of truth: the president's roster post to the
 // exec team (2026-09-28). Update this file when roles change.
 //
-// Photos: drop a cropped headshot (4:5, 960x1200, metadata stripped) in
-// public/images/officers/ and set `photo` to its path. Anyone without one gets an initials tile.
+// Photos: run scripts/crop-headshot.py on the original (it frames the face to match the
+// others and writes public/images/officers/<slug>.jpg), then set `photo` to that path.
+// Anyone without one gets an initials tile.
 
 export type TeamId = "executive" | "business" | "community" | "competition" | "media" | "technology";
 
