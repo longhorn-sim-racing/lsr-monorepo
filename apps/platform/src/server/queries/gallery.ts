@@ -35,3 +35,12 @@ export async function getFeaturedGalleryImages(limit = 12) {
     take: limit,
   });
 }
+
+/** The newest album with its first photo, for teaser cards. */
+export async function getLatestGalleryAlbum() {
+  return prisma.galleryAlbum.findFirst({
+    where: { images: { some: {} } },
+    orderBy: [{ date: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
+    include: { images: { orderBy: { order: "asc" }, take: 1 } },
+  });
+}

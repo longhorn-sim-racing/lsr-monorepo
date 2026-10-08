@@ -1,6 +1,9 @@
 import { getAllPosts, getPostContent } from "@/lib/news"
 import Link from "next/link"
+import Image from "next/image"
 import { notFound } from "next/navigation"
+import { ArrowLeft, Rss } from "lucide-react"
+import { formatPostDate, PostCard } from "../post-card"
 
 import { Metadata } from "next"
 import { DatabaseUnavailable } from "@/components/database-unavailable"
@@ -48,6 +51,7 @@ export async function generateMetadata({
       publishedTime: frontmatter.date,
       authors: frontmatter.author ? [frontmatter.author] : undefined,
       tags: frontmatter.tags,
+      ...(frontmatter.coverImageUrl ? { images: [{ url: frontmatter.coverImageUrl }] } : {}),
     },
     twitter: {
       title: frontmatter.title,
@@ -95,6 +99,7 @@ export default async function NewsPostPage({
     "@type": "NewsArticle",
     headline: frontmatter.title,
     description: frontmatter.excerpt || undefined,
+    ...(frontmatter.coverImageUrl ? { image: frontmatter.coverImageUrl } : {}),
     datePublished: frontmatter.date,
     dateModified: frontmatter.date,
     author: {
@@ -136,11 +141,11 @@ export default async function NewsPostPage({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
-      <div className="mx-auto max-w-4xl px-6 md:px-8 py-14 md:py-20">
+      <div className="mx-auto max-w-5xl px-6 md:px-8 py-14 md:py-20">
         <div className="mb-8">
-          <Link href="/news" className="group inline-flex items-center gap-3 text-[10px] font-sans font-bold uppercase tracking-[0.25em] text-white/50 hover:text-lsr-orange transition-colors">
-            <div className="h-px w-8 bg-lsr-orange/30 group-hover:bg-lsr-orange group-hover:w-12 transition-all" />
-            Back to News
+          <Link href="/news" className="group inline-flex items-center gap-2 text-[10px] font-sans font-bold uppercase tracking-[0.25em] text-white/50 hover:text-lsr-orange transition-colors">
+            <ArrowLeft className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-1" />
+            All news
           </Link>
         </div>
 
@@ -151,29 +156,46 @@ export default async function NewsPostPage({
           </div>
         )}
 
-        <header className="mb-12 border-b border-white/10 pb-12">
-          <div className="flex items-center gap-4 text-[10px] font-sans font-bold uppercase tracking-[0.2em] text-lsr-orange mb-6">
-            <time>{new Date(frontmatter.date).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</time>
-            <span className="text-white/20">|</span>
-            <span>{frontmatter.author || "Official Team Report"}</span>
+        <header className="mb-10 md:mb-12">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] font-sans font-bold uppercase tracking-[0.2em] text-lsr-orange mb-6">
+            <time dateTime={frontmatter.date}>{formatPostDate(frontmatter.date)}</time>
+            <span className="h-3 w-px bg-white/20" />
+            <span className="text-white/60">By {frontmatter.author || "LSR Team"}</span>
           </div>
-          
-          <h1 className="font-display font-black italic text-4xl md:text-6xl lg:text-7xl text-white uppercase tracking-normal leading-[0.9] mb-8">
+
+          <h1 className="font-display font-black italic text-4xl md:text-6xl lg:text-7xl text-white uppercase tracking-normal leading-[0.9]">
             {frontmatter.title}
           </h1>
-          
+
+          {frontmatter.excerpt && (
+            <p className="mt-6 max-w-3xl font-sans text-lg md:text-xl text-white/70 leading-relaxed">{frontmatter.excerpt}</p>
+          )}
+
           {frontmatter.tags && frontmatter.tags.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+            <div className="mt-6 flex flex-wrap gap-2">
               {frontmatter.tags.map(tag => (
-                <span key={tag} className="border border-white/10 bg-white/5 px-3 py-1 text-[9px] font-sans font-bold uppercase tracking-widest text-white/60">
+                <Link
+                  key={tag}
+                  href={`/news?tag=${encodeURIComponent(tag)}`}
+                  className="bg-lsr-orange/10 px-2 py-0.5 text-[9px] font-sans font-black uppercase tracking-widest text-lsr-orange hover:bg-lsr-orange hover:text-white transition-colors"
+                >
                   {tag}
-                </span>
+                </Link>
               ))}
             </div>
           )}
         </header>
 
-        <article className="prose prose-invert prose-lg max-w-none 
+        {frontmatter.coverImageUrl ? (
+          <div className="relative mb-12 md:mb-16 aspect-video overflow-hidden border border-white/10">
+            <Image src={frontmatter.coverImageUrl} alt="" fill sizes="(min-width: 1024px) 1024px, 100vw" preload className="object-cover" />
+            <div className="absolute bottom-0 left-0 h-1 w-24 bg-lsr-orange" />
+          </div>
+        ) : (
+          <div className="mb-12 md:mb-16 h-px bg-gradient-to-r from-lsr-orange via-white/10 to-transparent" />
+        )}
+
+        <article className="mx-auto max-w-3xl prose prose-invert prose-lg
                             prose-headings:font-display prose-headings:font-black prose-headings:italic prose-headings:uppercase prose-headings:tracking-normal
                             prose-p:font-sans prose-p:text-white/80 prose-p:leading-relaxed
                             prose-a:text-lsr-orange prose-a:no-underline hover:prose-a:underline
@@ -183,39 +205,29 @@ export default async function NewsPostPage({
                             prose-code:text-lsr-orange prose-code:bg-white/5 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-none prose-code:font-mono prose-code:before:content-none prose-code:after:content-none">
           {content}
         </article>
-        
+
         {relatedPosts.length > 0 && (
           <section className="mt-20 pt-10 border-t border-white/10">
             <h2 className="font-display font-black italic text-2xl md:text-3xl text-white uppercase tracking-normal mb-8">
               More <span className="text-lsr-orange">from LSR</span>
             </h2>
-            <div className="grid gap-6 md:grid-cols-3">
+            <div className="grid gap-4 md:gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {relatedPosts.map(p => (
-                <Link
-                  key={p.slug}
-                  href={`/news/${p.slug}`}
-                  className="group border border-white/10 bg-white/[0.02] p-6 hover:border-lsr-orange/60 transition-colors"
-                >
-                  <time className="font-mono text-[10px] text-lsr-orange uppercase tracking-widest">
-                    {new Date(p.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
-                  </time>
-                  <h3 className="font-display font-black italic text-xl text-white uppercase tracking-normal mt-3 group-hover:text-lsr-orange transition-colors">
-                    {p.title}
-                  </h3>
-                  {p.excerpt && (
-                    <p className="font-sans text-sm text-white/60 mt-3 line-clamp-3">{p.excerpt}</p>
-                  )}
-                </Link>
+                <PostCard key={p.slug} post={p} />
               ))}
             </div>
           </section>
         )}
 
-        <div className="mt-20 pt-10 border-t border-white/10">
-          <div className="flex justify-between items-center">
-            <span className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/30">End of Transmission</span>
-            <div className="h-1 w-12 bg-lsr-orange" />
-          </div>
+        <div className="mt-20 pt-10 border-t border-white/10 flex flex-wrap items-center justify-between gap-4">
+          <Link href="/news" className="group inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/60 hover:text-lsr-orange transition-colors">
+            <ArrowLeft className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-1" />
+            All news
+          </Link>
+          <Link href="/news/subscribe" className="inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange hover:text-white transition-colors">
+            <Rss className="h-3.5 w-3.5" />
+            Subscribe
+          </Link>
         </div>
       </div>
     </main>

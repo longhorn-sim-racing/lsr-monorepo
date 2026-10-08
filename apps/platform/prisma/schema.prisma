@@ -523,6 +523,8 @@ model Post {
   slug        String     @unique
   excerpt     String?
   bodyMd      String
+  /// Cloudinary URL of the cover photo shown on /news and the article page
+  coverImageUrl String?
   authorId    String? // <-- optional because onDelete: SetNull
   publishedAt DateTime?
   visibility  Visibility @default(public)
