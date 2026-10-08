@@ -9,7 +9,10 @@ import { NewsSearch } from "@/components/news-search"
 import { DatabaseUnavailable } from "@/components/database-unavailable"
 import { getNextEventForHomepage } from "@/server/queries/events"
 import { getLatestGalleryAlbum } from "@/server/queries/gallery"
+import { getInstagramFeed } from "@/server/queries/instagram"
+import { INSTAGRAM_PROFILE_URL } from "@/lib/instagram"
 import { FeaturedPost, PostCard } from "./post-card"
+import { InstagramFeed } from "./instagram-feed"
 
 export const metadata: Metadata = {
   title: "Team News",
@@ -21,20 +24,22 @@ export const metadata: Metadata = {
 
 export const revalidate = 60 // revalidate list once per min
 
-const INSTAGRAM_URL = "https://instagram.com/longhorn_sim_racing"
 const DISCORD_URL = "https://discord.gg/5Uv9YwpnFz"
 const TWITCH_URL = "https://www.twitch.tv/longhorn_sim_racing"
 
 const CHANNELS = [
-  { label: "Instagram", detail: "Photos and reels from every event", href: INSTAGRAM_URL, icon: Instagram },
+  { label: "Instagram", detail: "Photos and reels from every event", href: INSTAGRAM_PROFILE_URL, icon: Instagram },
   { label: "Discord", detail: "Where the club talks day to day", href: DISCORD_URL, icon: MessageSquare },
   { label: "Twitch", detail: "Watch our races live", href: TWITCH_URL, icon: Twitch },
   { label: "RSS", detail: "New posts in your feed reader", href: "/news/subscribe", icon: Rss },
 ]
 
-/** The next event and newest album for the "Around the club" cards; either is null if it can't load. */
+/**
+ * The next event and newest album for the "Around the club" cards, and the latest Instagram
+ * posts. Each falls back to nothing if it can't load, so the posts can still show.
+ */
 async function getClubTeasers() {
-  const [event, album] = await Promise.all([
+  const [event, album, instagram] = await Promise.all([
     getNextEventForHomepage()
       .then((events) => events[0] ?? null)
       .catch((error) => {
@@ -45,8 +50,12 @@ async function getClubTeasers() {
       console.error("[News] Failed to load latest album:", error)
       return null
     }),
+    getInstagramFeed(8).catch((error) => {
+      console.error("[News] Failed to load Instagram posts:", error)
+      return []
+    }),
   ])
-  return { event, album }
+  return { event, album, instagram }
 }
 
 function SectionHeading({ kicker, children }: { kicker: string; children: React.ReactNode }) {
@@ -165,7 +174,7 @@ export default async function NewsIndexPage({
     return query ? `/news?${query}` : "/news"
   }
 
-  const { event, album } = teasers
+  const { event, album, instagram } = teasers
   const eventLive = event ? new Date(event.startsAtUtc) <= new Date() : false
   const albumPhoto = album?.images[0]
 
@@ -209,7 +218,7 @@ export default async function NewsIndexPage({
               Subscribe
             </Link>
             <a
-              href={INSTAGRAM_URL}
+              href={INSTAGRAM_PROFILE_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 border border-white/15 bg-lsr-charcoal/40 px-4 h-10 font-sans font-bold text-[10px] uppercase tracking-widest hover:bg-white hover:text-lsr-charcoal transition-colors"
@@ -279,7 +288,7 @@ export default async function NewsIndexPage({
               </div>
             )}
           </section>
-        ) : (
+        ) : instagram.length === 0 ? (
           <section className="relative overflow-hidden border border-white/10 bg-white/[0.02] p-8 md:p-14">
             <div className="absolute top-0 left-0 h-1 w-full bg-gradient-to-r from-lsr-orange via-lsr-orange/40 to-transparent" />
             <div className="absolute -bottom-24 -right-24 h-64 w-64 rounded-full bg-lsr-orange/10 blur-[100px] pointer-events-none" />
@@ -293,7 +302,10 @@ export default async function NewsIndexPage({
               </p>
             </div>
           </section>
-        )}
+        ) : null}
+
+        {/* Instagram: below the posts, or leading the page while there are none */}
+        {instagram.length > 0 && <InstagramFeed posts={instagram} />}
 
         {/* Around the club */}
         <section>

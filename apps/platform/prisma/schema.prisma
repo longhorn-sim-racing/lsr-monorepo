@@ -861,6 +861,26 @@ model NotificationPreference {
   user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+/// Posts copied from the club Instagram account by the sync job (src/server/services/instagram.service.ts).
+/// The account's access token and sync status live in SystemSetting under "instagram".
+model InstagramPost {
+  id        String   @id // Instagram's media id
+  permalink String
+  caption   String?
+  mediaType String // IMAGE, VIDEO or CAROUSEL_ALBUM
+  /// Cloudinary copy of the photo (a video's cover frame), since Instagram's own image links expire
+  publicId  String?
+  width     Int?
+  height    Int?
+  postedAt  DateTime
+  /// Officers can hide a post from the site without touching Instagram
+  hidden    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([hidden, postedAt])
+}
+
 model SystemSetting {
   key       String   @id
   value     String   // JSON-encoded value
