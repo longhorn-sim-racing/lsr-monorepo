@@ -284,7 +284,6 @@ export async function recomputeStandings(seasonId: string) {
                     data: {
                         seasonId,
                         userId: stat.userId,
-                        classId: null,
                         isEligiblePoints: true,
                         totalPoints: stat.totalPoints,
                         starts: stat.starts,

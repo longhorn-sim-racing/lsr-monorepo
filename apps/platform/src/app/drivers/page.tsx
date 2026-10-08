@@ -93,7 +93,6 @@ async function renderDriversPage() {
     orderBy: { startsAtUtc: 'desc' },
     include: {
       series: true,
-      round: { include: { season: true } },
       ingestedSessions: {
         where: { sessionType: "RACE" },
         orderBy: { startedAt: 'desc' },
@@ -125,7 +124,6 @@ async function renderDriversPage() {
     orderBy: { startsAtUtc: 'asc' },
     include: {
       series: true,
-      round: { include: { season: true } },
       ingestedSessions: {
         // Included to satisfy type, returns empty usually
         include: { results: { include: { participant: { include: { user: { select: publicUserSelect } } } } } }

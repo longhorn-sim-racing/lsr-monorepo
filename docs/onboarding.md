@@ -7,10 +7,10 @@ Welcome to the Longhorn Sim Racing Digital Platforms team. This guide will help 
 This is the **LSR Platform** monorepo. It powers the Longhorn Sim Racing website and internal tools for UT Austin's sim racing club. The platform handles:
 
 - Club events (creation, registration, attendance/check-in)
-- Racing competitions (leagues, seasons, standings, result ingestion)
+- Racing competitions (leagues, seasons, standings, result ingestion, Lone Star Cup entry)
 - Member profiles and driver pages
 - News and content publishing
-- Merchandise shop (Shopify integration)
+- Payments (Stripe) and merchandise shop (Shopify integration)
 - Notifications (in-app and email)
 - Administration tools for officers
 
@@ -21,11 +21,9 @@ lsr-monorepo/
 ├── apps/
 │   └── platform/          # Main Next.js web application
 ├── docs/                  # Engineering and admin documentation
-├── scripts/               # Shared utility scripts
 ├── .github/               # CI workflows and repo config (CODEOWNERS)
 ├── package.json           # Root workspace config
 ├── pnpm-workspace.yaml    # pnpm workspace definition
-├── turbo.json             # Turborepo task config
 └── CLAUDE.md              # AI development guidance
 ```
 
@@ -80,7 +78,7 @@ We use [GitHub Projects](https://github.com/orgs/longhorn-sim-racing/projects/1)
 
 - Browse the board to see what's available
 - Issues labeled `good first issue` are great starting points for new contributors
-- Filter by labels (`payments`, `notifications`, `racing`, `ui/ux`, `admin`, `infrastructure`) to find work by area
+- Filter by `area:` labels (`area: payments`, `area: racing`, `area: events`, `area: admin`, `area: infra`, etc.) to find work by area
 
 ## Branch workflow
 
@@ -117,13 +115,13 @@ We track tasks and bugs as [GitHub Issues](https://github.com/longhorn-sim-racin
 
 ## How CI works
 
-The CI pipeline (`.github/workflows/ci.yml`) runs on every push to `main` and on all pull requests. It runs three checks:
+The CI pipeline (`.github/workflows/ci.yml`) runs on every push to `main` and on all pull requests. After installing dependencies and generating the Prisma client, it runs three checks:
 
 1. **Lint** -- ESLint across the platform app
 2. **Type check** -- `tsc --noEmit` for TypeScript correctness
-3. **Build** -- Full production build to catch runtime issues
+3. **Build** -- Full production build to catch build errors
 
-All three must pass before a PR can be merged. See [deployment.md](./deployment.md) for more on the deployment process.
+All three should pass before you merge. See [deployment.md](./deployment.md) for more on the deployment process, including how database migrations are deployed.
 
 ## Key documentation
 
@@ -134,6 +132,8 @@ All three must pass before a PR can be merged. See [deployment.md](./deployment.
 | [deployment.md](./deployment.md) | CI/CD and deployment process |
 | [admin-guide.md](./admin-guide.md) | Admin feature usage guide |
 | [admin-quick-reference.md](./admin-quick-reference.md) | Quick admin task lookup |
+| [payments.md](./payments.md) | How payments work (Stripe, products, entitlements) |
+| [payments-test-checklist.md](./payments-test-checklist.md) | Payments test run before merging payment changes |
 | [CLAUDE.md](../CLAUDE.md) | AI development context and conventions |
 
 ## Getting help

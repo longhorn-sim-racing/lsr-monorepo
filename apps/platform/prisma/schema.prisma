@@ -58,25 +58,6 @@ enum AttendanceReportingMode {
   CHECKIN_REQUIRED
 }
 
-enum SessionKind {
-  practice
-  qual
-  race
-}
-
-enum FinishStatus {
-  finished
-  dnf
-  dns
-  dsq
-}
-
-enum ResultSource {
-  manual
-  stracker
-  import
-}
-
 enum PaymentProvider {
   stripe
   manual
@@ -178,8 +159,6 @@ model User {
   
   auditLogs              AuditLog[]       @relation("AuditActor")
   auditLogsTargeted      AuditLog[]       @relation("AuditTarget")
-  provenanceCreated      Provenance[]     @relation("ProvenanceCreatedBy")
-  importArtifactsCreated ImportArtifact[] @relation("ImportArtifactCreatedBy")
   mediaOwned             Media[]          @relation("MediaOwner")
   rawResultUploads       RawResultUpload[]
   driverIdentities       DriverIdentity[]
@@ -193,7 +172,6 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
-
 
 model Role {
   id          String @id @default(uuid())
@@ -348,7 +326,6 @@ model League {
   visibility    Visibility @default(public)
 
   seasons              Season[]
-  classes              Class[]
   products             Product[]          @relation("EntitlementLeague")
   entitlements         Entitlement[]      @relation("EntitlementLeague") // <-- back-relation
   eventEligibilityRefs EventEligibility[] @relation("EligibilityLeague") // <-- back-relation for event gate
@@ -368,7 +345,6 @@ model Season {
 
   league       League?             @relation(fields: [leagueId], references: [id], onDelete: Cascade)
   series       EventSeries?        @relation(fields: [seriesId], references: [id], onDelete: SetNull)
-  rounds       Round[]
   entries      Entry[]
   applications LeagueApplication[]
 
@@ -400,71 +376,10 @@ model LeagueApplication {
   @@index([seasonId])
 }
 
-model Round {
-  id       String   @id @default(uuid())
-  seasonId String
-  name     String
-  slug     String   @unique
-  date     DateTime
-  eventId  String?  @unique // <-- enforce 1:1 when present
-
-  season   Season    @relation(fields: [seasonId], references: [id], onDelete: Cascade)
-  event    Event?    @relation("EventRound", fields: [eventId], references: [id], onDelete: SetNull) // <-- named relation
-  sessions Session[]
-
-  @@index([seasonId, date])
-}
-
-model Session {
-  id          String      @id @default(uuid())
-  roundId     String
-  kind        SessionKind
-  trackId     String?
-  carId       String?
-  classId     String?
-  laps        Int?
-  durationMin Int?
-  startedAt   DateTime?
-
-  round Round  @relation(fields: [roundId], references: [id], onDelete: Cascade)
-  track Track? @relation(fields: [trackId], references: [id], onDelete: SetNull)
-  car   Car?   @relation(fields: [carId], references: [id], onDelete: SetNull)
-  class Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
-
-  results Result[]
-
-  @@index([roundId, kind])
-}
-
-model Class {
-  id       String @id @default(uuid())
-  leagueId String
-  name     String
-  slug     String @unique
-
-  league   League    @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  entries  Entry[]
-  sessions Session[]
-
-  @@index([leagueId])
-}
-
-model Team {
-  id        String   @id @default(uuid())
-  name      String
-  slug      String   @unique
-  createdAt DateTime @default(now())
-
-  entries Entry[]
-}
-
 model Entry {
   id               String  @id @default(uuid())
   seasonId         String
   userId           String?
-  teamId           String?
-  classId          String?
-  carId            String?
   number           Int?
   nickname         String?
   isEligiblePoints Boolean @default(true)
@@ -489,92 +404,11 @@ model Entry {
 
   season Season @relation(fields: [seasonId], references: [id], onDelete: Cascade)
   user   User?  @relation("EntryUser", fields: [userId], references: [id], onDelete: SetNull)
-  team   Team?  @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  class  Class?  @relation(fields: [classId], references: [id], onDelete: Restrict)
-  car    Car?   @relation(fields: [carId], references: [id], onDelete: SetNull)
 
-  results Result[]
-
-  @@unique([seasonId, classId, userId], map: "unique_entry_user")
-  @@index([seasonId, classId])
+  @@unique([seasonId, userId], map: "unique_entry_user")
+  @@index([seasonId])
 }
 
-model Result {
-  id            String       @id @default(uuid())
-  sessionId     String
-  entryId       String
-  position      Int?
-  points        Int?
-  bestLapMs     Int?
-  totalTimeMs   Int?
-  lapsCompleted Int?
-  status        FinishStatus @default(finished)
-  penaltiesJson Json?
-  source        ResultSource @default(manual)
-  provenanceId  String?
-
-  session    Session     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  entry      Entry       @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  provenance Provenance? @relation(fields: [provenanceId], references: [id], onDelete: SetNull) // <-- make relation optional
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([sessionId, entryId])
-  @@index([sessionId, position])
-}
-
-model Provenance {
-  id            String       @id @default(uuid())
-  source        ResultSource
-  payloadSha256 String
-  notes         String?
-  createdById   String?
-  createdAt     DateTime     @default(now())
-
-  createdBy User?            @relation("ProvenanceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  artifacts ImportArtifact[]
-  results   Result[]
-
-  @@index([source, createdAt])
-}
-
-model ImportArtifact {
-  id           String   @id @default(uuid())
-  storageUrl   String
-  contentType  String
-  bytes        Int
-  createdById  String?
-  provenanceId String? // <-- proper FK to Provenance
-  createdAt    DateTime @default(now())
-
-  createdBy  User?       @relation("ImportArtifactCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  provenance Provenance? @relation(fields: [provenanceId], references: [id], onDelete: SetNull)
-
-  @@index([createdAt])
-}
-
-// ---------- Tracks & Cars ----------
-model Track {
-  id      String  @id @default(uuid())
-  name    String
-  layout  String?
-  country String?
-  lengthM Int?
-  simKey  String? @unique
-
-  sessions Session[]
-}
-
-model Car {
-  id        String  @id @default(uuid())
-  name      String
-  simKey    String? @unique
-  classHint String?
-
-  sessions Session[]
-  entries  Entry[]
-}
 
 // ---------- Events & Eligibility ----------
 model EventSeries {
@@ -632,6 +466,7 @@ model Event {
   registrationClosesAt        DateTime?
   registrationMax             Int?
   registrationWaitlistEnabled Boolean   @default(false)
+  waitlistAutoPromote         Boolean   @default(true) // free events only; a paid waitlist is always promoted by an officer
   registrationFeeCents        Int?      // null = free event; set to require Stripe payment
 
   // Attendance Config
@@ -656,8 +491,6 @@ model Event {
 
   rawResultUploads RawResultUpload[]
   ingestedSessions RaceSession[]
-
-  round Round? @relation("EventRound") // <-- match Round.event
 
   publishedAt DateTime?
   updatedAt   DateTime  @updatedAt
@@ -813,7 +646,6 @@ enum RawResultUploadStatus {
   FAILED
 }
 
-
 model RawResultUpload {
   id               String                  @id @default(uuid())
   filename         String
@@ -837,7 +669,6 @@ model RawResultUpload {
   @@index([uploadedByUserId])
   @@index([eventId])
 }
-
 
 model DriverIdentity {
   id           String   @id @default(uuid())
@@ -997,7 +828,6 @@ model RaceEvent {
 
   @@index([sessionId])
 }
-
 
 model ParseReport {
   id              String          @id @default(uuid())
