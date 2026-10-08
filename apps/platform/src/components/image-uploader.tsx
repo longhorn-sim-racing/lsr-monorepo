@@ -8,12 +8,17 @@ export function ImageUploader({
   name,
   defaultValue,
   onChange,
+  ...buttonProps
 }: {
   /** Form field name for a hidden input, for plain <form> posts */
   name?: string
   defaultValue?: string | null
   /** Called with the uploaded image's URL, or null when it's removed */
   onChange?: (url: string | null) => void
+  /** Set by a form field wrapper so its label and messages point at the upload button */
+  id?: string
+  "aria-describedby"?: string
+  "aria-invalid"?: boolean
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<string | null>(defaultValue ?? null)
@@ -62,7 +67,7 @@ export function ImageUploader({
       <div className="flex gap-2">
         <input ref={inputRef} type="file" accept="image/*" hidden onChange={onFile} />
         {name && <input type="hidden" name={name} value={preview ?? ""} />}
-        <Button type="button" onClick={chooseFile}>
+        <Button type="button" onClick={chooseFile} {...buttonProps}>
           {preview ? "Change" : "Upload"} image
         </Button>
         {preview && (

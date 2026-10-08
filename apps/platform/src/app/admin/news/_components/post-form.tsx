@@ -308,7 +308,9 @@ export function PostForm({ post, users, availableTags }: PostFormProps) {
           render={({ field }) => (
             <FormItem>
               <FormLabel>Cover image</FormLabel>
-              <ImageUploader defaultValue={field.value} onChange={(url) => field.onChange(url)} />
+              <FormControl>
+                <ImageUploader defaultValue={field.value} onChange={(url) => field.onChange(url)} />
+              </FormControl>
               <FormDescription>Optional. Shown on the news page and at the top of the post; landscape photos work best.</FormDescription>
               <FormMessage />
             </FormItem>

@@ -62,6 +62,11 @@ export async function generateMetadata({
 
 type RouteParams = { slug: string }
 
+/** JSON for a <script> tag: escape "<" so post text can't close the tag early. */
+function jsonLd(data: unknown) {
+  return JSON.stringify(data).replace(/</g, "\\u003c")
+}
+
 export default async function NewsPostPage({
                                              params,
                                            }: {
@@ -135,11 +140,11 @@ export default async function NewsPostPage({
     <main className="bg-lsr-charcoal text-white min-h-screen">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(articleJsonLd) }}
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd) }}
       />
       <div className="mx-auto max-w-5xl px-6 md:px-8 py-14 md:py-20">
         <div className="mb-8">

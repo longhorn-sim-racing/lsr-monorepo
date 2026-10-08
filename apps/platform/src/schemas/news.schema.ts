@@ -7,7 +7,7 @@ export const newsPostSchema = z.object({
   excerpt: z.string().optional(),
   coverImageUrl: z
     .string()
-    .regex(/^https:\/\/res\.cloudinary\.com\//, "Cover images must be uploaded to Cloudinary")
+    .regex(/^https:\/\/res\.cloudinary\.com\/[\w-]+\/image\/upload\/[^\s"<>]+$/, "Cover images must be uploaded to Cloudinary")
     .nullable()
     .optional(),
   bodyMd: z.string().min(1, "Content is required"),
