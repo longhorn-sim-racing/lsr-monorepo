@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -10,6 +11,9 @@ import { dateToZonedValue, DEFAULT_TIMEZONE } from "@/lib/dates";
 
 export function RegistrationConfigForm({ event }: { event: Event }) {
   const timezone = event.timezone || DEFAULT_TIMEZONE;
+  const [fee, setFee] = useState(event.registrationFeeCents ? (event.registrationFeeCents / 100).toFixed(2) : "");
+  const [autoPromote, setAutoPromote] = useState(event.waitlistAutoPromote);
+  const isPaid = parseFloat(fee) > 0;
 
   return (
     <form action={updateEventRegistrationConfig.bind(null, event.id)} className="space-y-6 border border-white/10 bg-white/[0.02] p-6 rounded-lg">
@@ -59,6 +63,25 @@ export function RegistrationConfigForm({ event }: { event: Event }) {
           <Switch id="registrationWaitlistEnabled" name="registrationWaitlistEnabled" defaultChecked={event.registrationWaitlistEnabled} />
           <Label htmlFor="registrationWaitlistEnabled" className="font-sans font-bold uppercase tracking-widest text-xs cursor-pointer">Enable Waitlist</Label>
         </div>
+        <div className="p-4 border border-white/5 bg-white/5 rounded-md space-y-2">
+          <div className="flex items-center space-x-3">
+            <Switch
+              id="waitlistAutoPromote"
+              name="waitlistAutoPromote"
+              checked={!isPaid && autoPromote}
+              onCheckedChange={setAutoPromote}
+              disabled={isPaid}
+            />
+            <Label htmlFor="waitlistAutoPromote" className="font-sans font-bold uppercase tracking-widest text-xs cursor-pointer">
+              Automatically move people up from the waitlist when a spot opens
+            </Label>
+          </div>
+          {/* A disabled switch isn't submitted; keep the saved setting for if the event goes free again */}
+          {isPaid && autoPromote && <input type="hidden" name="waitlistAutoPromote" value="on" />}
+          {isPaid && (
+            <p className="text-[10px] text-white/30">Paid events: promote waitlisted people by hand, since they haven&apos;t paid yet.</p>
+          )}
+        </div>
       </div>
 
       <div className="space-y-4 pt-4 border-t border-white/5">
@@ -72,7 +95,8 @@ export function RegistrationConfigForm({ event }: { event: Event }) {
               type="number"
               min="0"
               step="0.01"
-              defaultValue={event.registrationFeeCents ? (event.registrationFeeCents / 100).toFixed(2) : ""}
+              value={fee}
+              onChange={(e) => setFee(e.target.value)}
               placeholder="0.00 (Free)"
               className="bg-black/20 border-white/10 text-xs font-mono"
             />

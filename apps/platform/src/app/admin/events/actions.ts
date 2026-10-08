@@ -215,13 +215,20 @@ export async function deleteEvent(eventId: string) {
   if (deleted.seriesId) revalidateSeriesPages();
 }
 
-import { adminOverrideRegistration } from "@/server/services/registration.service";
+import {
+  adminOverrideRegistration,
+  adminRemoveRegistration,
+  reconcileEventWaitlist,
+} from "@/server/services/registration.service";
 import { RegistrationStatus } from "@prisma/client";
 
 export async function updateEventRegistrationConfig(eventId: string, formData: FormData) {
   const user = await requireOfficer();
 
-  const event = await prisma.event.findUnique({ where: { id: eventId }, select: { timezone: true } });
+  const event = await prisma.event.findUnique({
+    where: { id: eventId },
+    select: { timezone: true, registrationMax: true, waitlistAutoPromote: true, registrationFeeCents: true },
+  });
   const timezone = event?.timezone || "America/Chicago";
 
   const enabled = formData.get("registrationEnabled") === "on";
@@ -229,6 +236,7 @@ export async function updateEventRegistrationConfig(eventId: string, formData: F
   const closesAtRaw = formData.get("registrationClosesAt") as string;
   const maxRaw = formData.get("registrationMax") as string;
   const waitlistEnabled = formData.get("registrationWaitlistEnabled") === "on";
+  const waitlistAutoPromote = formData.get("waitlistAutoPromote") === "on";
   const feeRaw = formData.get("registrationFeeCents") as string;
   const registrationFeeCents = feeRaw && parseFloat(feeRaw) > 0 ? Math.round(parseFloat(feeRaw) * 100) : null;
 
@@ -238,6 +246,7 @@ export async function updateEventRegistrationConfig(eventId: string, formData: F
     registrationClosesAt: closesAtRaw ? fromZonedTime(closesAtRaw, timezone) : null,
     registrationMax: maxRaw && maxRaw !== "-1" ? parseInt(maxRaw) : null,
     registrationWaitlistEnabled: waitlistEnabled,
+    waitlistAutoPromote,
     registrationFeeCents,
   };
 
@@ -247,6 +256,16 @@ export async function updateEventRegistrationConfig(eventId: string, formData: F
     select: { slug: true },
   });
 
+  // Capacity raised (or made unlimited), auto-promote switched on, or the fee removed:
+  // fill open spots from the waitlist
+  const capacityRaised =
+    event?.registrationMax != null &&
+    (configData.registrationMax === null || configData.registrationMax > event.registrationMax);
+  const autoPromoteSwitchedOn = event != null && !event.waitlistAutoPromote && waitlistAutoPromote;
+  const madeFree = (event?.registrationFeeCents ?? 0) > 0 && registrationFeeCents === null;
+  const promotedUserIds =
+    capacityRaised || autoPromoteSwitchedOn || madeFree ? await reconcileEventWaitlist(eventId) : [];
+
   await createAuditLog({
     actorUserId: user.id,
     actionType: "UPDATE",
@@ -255,11 +274,12 @@ export async function updateEventRegistrationConfig(eventId: string, formData: F
     summary: `Updated registration configuration for event ${eventId}`,
     metadata: {
       updateType: "registration_config",
+      promotedUserIds,
     },
     after: configData,
   });
 
-  revalidatePath(`/admin/events/${eventId}`);
+  revalidatePath(`/admin/events/${eventId}/manage`);
   revalidateEventList();
   revalidateEventDetail(updated.slug);
 }
@@ -306,15 +326,13 @@ export async function reorderWaitlist(eventId: string, orderedRegistrationIds: s
 }
 
 export async function removeRegistration(eventId: string, userId: string) {
-  await requireOfficer();
+  const user = await requireOfficer();
 
-  await prisma.eventRegistration.delete({
-    where: { eventId_userId: { eventId, userId } },
-  });
+  const { slug } = await adminRemoveRegistration({ eventId, userId, actorUserId: user.id });
 
-    revalidatePath(`/admin/events/${eventId}`);
-
-  }
+  revalidatePath(`/admin/events/${eventId}/manage`);
+  revalidateEventDetail(slug);
+}
 
   
 

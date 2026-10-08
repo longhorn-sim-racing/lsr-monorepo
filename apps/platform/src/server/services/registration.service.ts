@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db";
-import { RegistrationStatus, Prisma } from "@prisma/client";
+import { RegistrationStatus, Prisma, Event } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
 import { sendNotification } from "@/server/services/notification.service";
 import { formatInTimeZone } from "date-fns-tz";
@@ -9,20 +9,54 @@ import { formatInTimeZone } from "date-fns-tz";
  * Handles transactional logic for Event Registration, Waitlists, and Reconciliation.
  */
 
+type PromotionNotificationEvent = Pick<
+  Event,
+  "id" | "title" | "slug" | "startsAtUtc" | "timezone" | "heroImageUrl"
+>;
+
+/**
+ * Notifies users who were auto-promoted off the waitlist (fire and forget).
+ * Call after the transaction that promoted them has committed.
+ */
+export function notifyPromotedUsers(event: PromotionNotificationEvent, promotedUserIds: string[]) {
+  for (const promotedUserId of promotedUserIds) {
+    sendNotification({
+      userId: promotedUserId,
+      type: "WAITLIST_PROMOTED",
+      title: `You're in! Promoted from waitlist`,
+      body: `A spot opened up for ${event.title}.`,
+      actionUrl: `/events/${event.slug}`,
+      channels: ["IN_APP", "EMAIL"],
+      metadata: {
+        eventId: event.id,
+        title: event.title,
+        startsAt: event.startsAtUtc,
+        timezone: event.timezone || "America/Chicago",
+        slug: event.slug,
+        heroImageUrl: event.heroImageUrl,
+      },
+    }).catch((err) => console.error("[Notification] Failed to send waitlist promotion notification:", err));
+  }
+}
+
 /**
  * Reconciles the event state:
  * 1. Calculates available slots.
  * 2. Promotes waitlisted users if slots are available (FIFO).
  * 3. Ensures consistency.
- * 
+ *
  * Must be called within a transaction where the Event is locked.
  */
 async function reconcileEvent(tx: Prisma.TransactionClient, eventId: string): Promise<string[]> {
   const event = await tx.event.findUnique({ where: { id: eventId } });
   if (!event) throw new Error("Event not found during reconciliation");
 
-  // Skip auto-promotion for paid events — officers handle waitlist manually
+  // Never auto-promote on paid events (a waitlisted person hasn't paid yet), or when
+  // an officer turned auto-promotion off for this event. Officers promote by hand.
   if (event.registrationFeeCents != null && event.registrationFeeCents > 0) {
+    return [];
+  }
+  if (!event.waitlistAutoPromote) {
     return [];
   }
 
@@ -187,7 +221,14 @@ export async function registerForEvent(
       // Check if user is ALREADY registered, they take up a slot, so count remains same for them
       const isAlreadyRegistered = currentReg?.status === "REGISTERED";
 
-      if (!isAlreadyRegistered && registeredCount >= event.registrationMax) {
+      // If others are already waiting (auto-promote is off), newcomers queue behind them
+      // instead of taking a freed spot first.
+      const othersWaiting =
+        event.registrationWaitlistEnabled && !isAlreadyRegistered && currentReg?.status !== "WAITLISTED"
+          ? await tx.eventRegistration.count({ where: { eventId, status: "WAITLISTED" } })
+          : 0;
+
+      if (!isAlreadyRegistered && (registeredCount >= event.registrationMax || othersWaiting > 0)) {
         // Full -> Waitlist
         if (!event.registrationWaitlistEnabled) {
           throw new Error("Event is full and waitlist is disabled.");
@@ -273,24 +314,7 @@ export async function registerForEvent(
     }
 
     // Notify users who got promoted from waitlist
-    for (const promotedUserId of result.promotedUserIds) {
-      sendNotification({
-        userId: promotedUserId,
-        type: "WAITLIST_PROMOTED",
-        title: `You're in! Promoted from waitlist`,
-        body: `A spot opened up for ${result.event.title}.`,
-        actionUrl: `/events/${result.event.slug}`,
-        channels: ["IN_APP", "EMAIL"],
-        metadata: {
-          eventId,
-          title: result.event.title,
-          startsAt: result.event.startsAtUtc,
-          timezone: result.event.timezone || "America/Chicago",
-          slug: result.event.slug,
-          heroImageUrl: result.event.heroImageUrl,
-        },
-      }).catch((err) => console.error("[Notification] Failed to send waitlist promotion notification:", err));
-    }
+    notifyPromotedUsers(result.event, result.promotedUserIds);
   } catch (err) {
     // Don't fail the registration if notifications fail
     console.error("[Notification] Error sending notifications:", err);
@@ -379,7 +403,7 @@ export async function adminOverrideRegistration(
           newStatus,
           reason,
         },
-        before: currentReg ? { status: currentReg.status } : null,
+        before: currentReg ? { status: currentReg.status } : undefined,
         after: { status: newStatus },
       },
       tx
@@ -416,27 +440,88 @@ export async function adminOverrideRegistration(
     }
 
     // Notify users who got auto-promoted from waitlist
-    for (const promotedUserId of result.promotedUserIds) {
-      sendNotification({
-        userId: promotedUserId,
-        type: "WAITLIST_PROMOTED",
-        title: `You're in! Promoted from waitlist`,
-        body: `A spot opened up for ${result.event.title}.`,
-        actionUrl: `/events/${result.event.slug}`,
-        channels: ["IN_APP", "EMAIL"],
-        metadata: {
-          eventId,
-          title: result.event.title,
-          startsAt: result.event.startsAtUtc,
-          timezone: result.event.timezone || "America/Chicago",
-          slug: result.event.slug,
-          heroImageUrl: result.event.heroImageUrl,
-        },
-      }).catch((err) =>
-        console.error("[Notification] Failed to send waitlist promotion notification:", err)
-      );
-    }
+    notifyPromotedUsers(result.event, result.promotedUserIds);
   } catch (err) {
     console.error("[Notification] Error sending notifications:", err);
   }
+}
+
+/**
+ * Admin: Remove a registration entirely.
+ * Frees the spot, auto-promotes from the waitlist where allowed, and audits the removal.
+ */
+export async function adminRemoveRegistration({
+  eventId,
+  userId,
+  actorUserId,
+}: {
+  eventId: string;
+  userId: string;
+  actorUserId: string;
+}) {
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT 1 FROM "Event" WHERE id = ${eventId} FOR UPDATE`;
+
+    const event = await tx.event.findUnique({ where: { id: eventId } });
+    if (!event) throw new Error("Event not found");
+
+    const registration = await tx.eventRegistration.findUnique({
+      where: { eventId_userId: { eventId, userId } },
+    });
+    if (!registration) throw new Error("Registration not found");
+
+    await tx.eventRegistration.delete({ where: { id: registration.id } });
+
+    const promotedUserIds = await reconcileEvent(tx, eventId);
+
+    await createAuditLog(
+      {
+        actorUserId,
+        actionType: "REGISTRATION_CHANGE",
+        entityType: "EVENT_REGISTRATION",
+        entityId: registration.id,
+        targetUserId: userId,
+        summary: `Removed registration for ${userId}`,
+        metadata: {
+          eventId,
+          targetUserId: userId,
+          oldStatus: registration.status,
+          newStatus: "REMOVED",
+          promotedUserIds,
+        },
+        before: {
+          status: registration.status,
+          waitlistOrder: registration.waitlistOrder,
+          sourcePaymentId: registration.sourcePaymentId,
+        },
+      },
+      tx
+    );
+
+    return { event, promotedUserIds };
+  });
+
+  notifyPromotedUsers(result.event, result.promotedUserIds);
+
+  return { slug: result.event.slug };
+}
+
+/**
+ * Re-runs waitlist promotion under the event lock, e.g. after capacity is raised
+ * or auto-promotion is switched on. Returns the promoted user ids.
+ */
+export async function reconcileEventWaitlist(eventId: string): Promise<string[]> {
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT 1 FROM "Event" WHERE id = ${eventId} FOR UPDATE`;
+
+    const event = await tx.event.findUnique({ where: { id: eventId } });
+    if (!event) throw new Error("Event not found");
+
+    const promotedUserIds = await reconcileEvent(tx, eventId);
+    return { event, promotedUserIds };
+  });
+
+  notifyPromotedUsers(result.event, result.promotedUserIds);
+
+  return result.promotedUserIds;
 }
