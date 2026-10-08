@@ -11,7 +11,10 @@ async function decide() {
   try {
     const res = await fetch(
       `https://api.github.com/repos/${VERCEL_GIT_REPO_OWNER}/${VERCEL_GIT_REPO_SLUG}/pulls/${VERCEL_GIT_PULL_REQUEST_ID}`,
-      { headers: { Accept: "application/vnd.github+json", "User-Agent": "lsr-vercel-ignore-build" } }
+      {
+        headers: { Accept: "application/vnd.github+json", "User-Agent": "lsr-vercel-ignore-build" },
+        signal: AbortSignal.timeout(5000),
+      }
     );
     if (!res.ok) return { build: true, reason: `GitHub lookup returned ${res.status}` };
     const pr = await res.json();

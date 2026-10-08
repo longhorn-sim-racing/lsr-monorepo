@@ -158,7 +158,7 @@ export function SeasonForm({
                 <option value="HALF">Half Points</option>
                 <option value="NONE">None</option>
             </select>
-            <p className="text-xs text-muted-foreground">This will be the default for new results uploaded to this season.</p>
+            <p className="text-xs text-muted-foreground">Saved with the season for reference. Points are awarded by the ruleset picked on each results upload.</p>
         </div>
 
         <div className="flex gap-4 pt-4">

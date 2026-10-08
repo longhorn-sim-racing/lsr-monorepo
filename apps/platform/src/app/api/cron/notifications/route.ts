@@ -3,6 +3,7 @@ import { prisma } from "@/server/db";
 import {
   processScheduledNotifications,
   processStuckNotifications,
+  failInterruptedEmails,
   sendNotification,
 } from "@/server/services/notification.service";
 import { addHours, subHours } from "date-fns";
@@ -27,6 +28,7 @@ export async function GET(request: Request) {
 
   const results = {
     processedNotifications: 0,
+    interruptedEmails: 0,
     retriedNotifications: 0,
     scheduledReminders: 0,
     errors: [] as string[],
@@ -41,7 +43,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    // 2. Retry recent unscheduled notifications still PENDING (their send was dropped)
+    // 2. Mark emails interrupted mid-send as failed, then retry recent unscheduled
+    // notifications still PENDING (their send was dropped)
+    results.interruptedEmails = await failInterruptedEmails();
     results.retriedNotifications = await processStuckNotifications();
   } catch (error) {
     console.error("[Cron] Failed to retry stuck notifications:", error);

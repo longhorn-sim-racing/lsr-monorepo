@@ -109,7 +109,7 @@ Series (e.g., "Pro Championship")
 4. Assign the results to an event
 5. Select the points ruleset for this upload. This is what awards points:
    - **F1**: Standard F1 points (25, 18, 15, 12, 10, 8, 6, 4, 2, 1)
-   - **Half Points**: 50% of F1 values
+   - **Half Points**: about half the F1 values
    - **None**: No points (practice and qualifying sessions never award points)
 6. Click **Ingest** to process the results
 

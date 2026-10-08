@@ -320,7 +320,7 @@ export default async function EventPage({ params }: EventPageArgs) {
         {isDraft && (
           <div className="mb-8 border border-amber-500/30 bg-amber-500/10 px-4 py-3 font-sans text-xs text-amber-200">
             Draft: only officers can see this event. Edit it in{" "}
-            <Link href={`/admin/events/${event.id}`} className="underline hover:text-white">Admin → Events</Link>.
+            <Link href={`/admin/events/${event.id}/edit`} className="underline hover:text-white">Admin → Events</Link>.
           </div>
         )}
 

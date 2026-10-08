@@ -167,6 +167,8 @@ function shouldSendEmail(
 // ones are stale (e.g. a confirmation for an event that's over) and we'd rather not send them.
 const UNSCHEDULED_RETRY_AFTER_MINUTES = 5;
 const UNSCHEDULED_MAX_AGE_HOURS = 48;
+// Claimed emails still without a send confirmation after this long were interrupted.
+const INTERRUPTED_EMAIL_AFTER_MINUTES = 10;
 
 /**
  * Process all pending notifications for a user.
@@ -216,6 +218,25 @@ export async function processScheduledNotifications(): Promise<number> {
  * Retry unscheduled notifications whose immediate send never happened (for cron job).
  * Only rows created between UNSCHEDULED_RETRY_AFTER_MINUTES and UNSCHEDULED_MAX_AGE_HOURS ago.
  */
+/**
+ * An email row is claimed (PENDING → SENT, sentAt null) before Resend is called. If the
+ * function died before Resend answered, mark it FAILED so it shows up for a retry
+ * instead of looking sent forever.
+ */
+export async function failInterruptedEmails(): Promise<number> {
+  const { count } = await prisma.notification.updateMany({
+    where: {
+      channel: "EMAIL",
+      status: "SENT",
+      sentAt: null,
+      emailMessageId: null,
+      updatedAt: { lt: subMinutes(new Date(), INTERRUPTED_EMAIL_AFTER_MINUTES) },
+    },
+    data: { status: "FAILED", emailError: "Interrupted before the send was confirmed; retry to resend." },
+  });
+  return count;
+}
+
 export async function processStuckNotifications(): Promise<number> {
   const now = new Date();
   const notifications = await prisma.notification.findMany({

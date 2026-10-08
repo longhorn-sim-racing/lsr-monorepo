@@ -139,7 +139,7 @@ The database schema is defined in `prisma/schema.prisma`. Key model groups:
 - **Events**: `Event`, `EventSeries`, `Venue`, `EventRegistration`, `EventAttendance`
 - **Competition**: `League`, `Season`, `Entry` (a driver's per-season standings aggregates), `LeagueApplication` (Lone Star Cup entry form)
 - **Race data**: `RawResultUpload` → `RaceSession`, `RaceParticipant`, `RaceResult`, `RaceLap`, `RaceEvent`, `ParseReport`; `DriverIdentity` and `CarMapping` map sim driver GUIDs and car names
-- **Content**: `Post`, `Page` (editable pages such as the Lone Star Cup rules), `GalleryImage`, `Media`, `Tag`
+- **Content**: `Post`, `Page` (editable pages such as the Lone Star Cup rules), `GalleryImage`, `Tag`
 - **Notifications & settings**: `Notification`, `NotificationPreference`, `SystemSetting`, `FeatureFlag`
 
 Migrations live in `prisma/migrations/`. Apply with `pnpm --filter @lsr/platform db:migrate`.
