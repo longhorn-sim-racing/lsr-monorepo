@@ -1,8 +1,8 @@
 // The officer roster shown on /about. Source of truth: the president's roster post to the
 // exec team (2026-09-28). Update this file when roles change.
 //
-// Photos: drop a cropped headshot (3:4, ~900px tall) in public/images/officers/ and set
-// `photo` to its path. Anyone without one gets an initials tile instead.
+// Photos: drop a cropped headshot (4:5, 960x1200, metadata stripped) in
+// public/images/officers/ and set `photo` to its path. Anyone without one gets an initials tile.
 
 export type TeamId = "executive" | "business" | "community" | "competition" | "media" | "technology";
 
@@ -64,28 +64,28 @@ export const TEAMS: Team[] = [
 
 export const OFFICERS: Officer[] = [
   { name: "Dylan Foley", title: "President", team: "executive", board: true },
-  { name: "Bryan Reyes", title: "Vice President", team: "executive", board: true },
+  { name: "Bryan Reyes", title: "Vice President", team: "executive", board: true, photo: "/images/officers/bryan-reyes.jpg" },
   { name: "Romer Pena", title: "Operations Lead", team: "executive" },
 
-  { name: "Armando Martinez", title: "Competition Lead", team: "competition", board: true },
+  { name: "Armando Martinez", title: "Competition Lead", team: "competition", board: true, photo: "/images/officers/armando-martinez.jpg" },
   { name: "Mark Yuan", title: "Officer", team: "competition" },
   { name: "Prakul Sherikar", title: "Officer", team: "competition" },
   { name: "Jacob Pineda", title: "Officer", team: "competition" },
   { name: "Constanza Jongkind", title: "Officer", team: "competition" },
 
-  { name: "George Lawrence", title: "Community Lead", team: "community", board: true },
+  { name: "George Lawrence", title: "Community Lead", team: "community", board: true, photo: "/images/officers/george-lawrence.jpg" },
   { name: "Ethan Chan", title: "Officer", team: "community" },
   { name: "Alejandro Palacios", title: "Officer", team: "community" },
-  { name: "Grant Ruhland", title: "Officer", team: "community" },
+  { name: "Grant Ruhland", title: "Officer", team: "community", photo: "/images/officers/grant-ruhland.jpg" },
 
-  { name: "Diane Chagoya", title: "Media Lead", team: "media", board: true },
+  { name: "Diane Chagoya", title: "Media Lead", team: "media", board: true, photo: "/images/officers/diane-chagoya.jpg" },
   { name: "Anuja Manjrekar", title: "Officer", team: "media" },
-  { name: "Harshika Mandula", title: "Officer", team: "media" },
+  { name: "Harshika Mandula", title: "Officer", team: "media", photo: "/images/officers/harshika-mandula.jpg" },
   { name: "Leisha Jhamnani", title: "Officer", team: "media" },
   { name: "Lauren Heyde", title: "Officer", team: "media" },
 
-  { name: "Jaylon Collins", title: "Business Lead", team: "business", board: true },
-  { name: "Boen Kelly", title: "Nonprofit Compliance Lead", team: "business" },
+  { name: "Jaylon Collins", title: "Business Lead", team: "business", board: true, photo: "/images/officers/jaylon-collins.jpg" },
+  { name: "Boen Kelly", title: "Nonprofit Compliance Lead", team: "business", photo: "/images/officers/boen-kelly.jpg" },
   { name: "Jose Varela", title: "Officer", team: "business" },
   { name: "Cooper Tomlin", title: "Officer", team: "business" },
 

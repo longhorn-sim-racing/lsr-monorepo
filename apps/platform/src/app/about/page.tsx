@@ -144,7 +144,7 @@ function Avatar({ officer }: { officer: Officer }) {
   return (
     <div className="relative h-10 w-10 shrink-0 overflow-hidden border border-white/10 bg-white/[0.05]">
       {officer.photo ? (
-        <Image src={officer.photo} alt="" fill sizes="40px" className="object-cover" />
+        <Image src={officer.photo} alt="" fill sizes="40px" className="object-cover object-[center_20%]" />
       ) : (
         <span aria-hidden className="absolute inset-0 flex items-center justify-center font-display font-black italic text-sm text-white/40">
           {initials(officer.name)}
