@@ -596,7 +596,7 @@ export default async function LoneStarCupPage() {
             </div>
           </div>
 
-          <div className="group relative overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-8 flex flex-col">
+          <div className="group/photo relative overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-8 flex flex-col">
             <EventPhotoBand src={last?.event.heroImageUrl ?? null} sizes="(min-width: 1152px) 440px, (min-width: 768px) 40vw, 100vw" />
             <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">Last round</p>
             {last ? (
@@ -665,7 +665,7 @@ export default async function LoneStarCupPage() {
                             done ? "opacity-15 grayscale group-hover:opacity-30" : isNext ? "opacity-45" : "opacity-30 group-hover:opacity-50"
                           }`}
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-lsr-charcoal via-lsr-charcoal/60 to-lsr-charcoal/10" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-lsr-charcoal via-lsr-charcoal/60 to-lsr-charcoal/40" />
                       </>
                     )}
                     <div className="relative flex flex-1 flex-col">
@@ -680,23 +680,23 @@ export default async function LoneStarCupPage() {
                         ) : round.final ? (
                           <Flag className="h-4 w-4 text-lsr-orange" role="img" aria-label="Finale" />
                         ) : null}
-                    </div>
-                    <p className={`mt-3 font-sans font-bold text-sm uppercase tracking-tight leading-tight ${done ? "text-white/55" : "text-white"} group-hover:text-lsr-orange transition-colors`}>
-                      {round.track}
-                    </p>
-                    <p className="mt-1 font-sans text-[11px] text-white/40">{d.day}</p>
-                    <div className="mt-auto pt-3">
-                      {done && winner ? (
-                        <p className="truncate font-sans text-[11px] text-white/60">
-                          <Trophy className="mr-1 inline h-3 w-3 text-lsr-orange" />
-                          {driverName(winner)}
-                        </p>
-                      ) : isNext ? (
-                        <p className="font-sans font-bold text-[9px] uppercase tracking-[0.2em] text-lsr-orange">{nextLive ? "Racing now" : "Next"}</p>
-                      ) : round.note ? (
-                        <p className="font-sans font-bold text-[9px] uppercase tracking-[0.15em] text-white/50">{round.note}</p>
-                      ) : null}
-                    </div>
+                      </div>
+                      <p className={`mt-3 font-sans font-bold text-sm uppercase tracking-tight leading-tight ${done ? "text-white/55" : "text-white"} group-hover:text-lsr-orange transition-colors`}>
+                        {round.track}
+                      </p>
+                      <p className="mt-1 font-sans text-[11px] text-white/40">{d.day}</p>
+                      <div className="mt-auto pt-3">
+                        {done && winner ? (
+                          <p className="truncate font-sans text-[11px] text-white/60">
+                            <Trophy className="mr-1 inline h-3 w-3 text-lsr-orange" />
+                            {driverName(winner)}
+                          </p>
+                        ) : isNext ? (
+                          <p className="font-sans font-bold text-[9px] uppercase tracking-[0.2em] text-lsr-orange">{nextLive ? "Racing now" : "Next"}</p>
+                        ) : round.note ? (
+                          <p className="font-sans font-bold text-[9px] uppercase tracking-[0.15em] text-white/50">{round.note}</p>
+                        ) : null}
+                      </div>
                     </div>
                   </Link>
                 </li>

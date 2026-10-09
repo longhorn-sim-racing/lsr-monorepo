@@ -112,7 +112,8 @@ async function getRosterDrivers(now: Date): Promise<RosterDriver[]> {
       ...(keys.includes("officer") || keys.includes("admin") ? ["officer"] : []),
       ...keys.filter((key) => key === "lsc_driver" || key === "collegiate_driver"),
     ]
-    const tierKey = getActiveTierKey(user.memberships)
+    // Only tiers with a public badge: dues stay private, and a paid membership can't hide an Alumni badge
+    const tierKey = getActiveTierKey(user.memberships.filter((m) => PUBLIC_TIERS.includes(m.tier.key)))
     return {
       id: user.id,
       handle: user.handle,
@@ -122,7 +123,7 @@ async function getRosterDrivers(now: Date): Promise<RosterDriver[]> {
       pending: user.status === "pending_verification",
       officerTitle: user.officerTitle,
       roles,
-      tierKey: tierKey && PUBLIC_TIERS.includes(tierKey) ? tierKey : null,
+      tierKey,
       lsc: !!total?.lsc || roles.includes("lsc_driver"),
       points: total?.points ?? 0,
       rank: null as number | null,

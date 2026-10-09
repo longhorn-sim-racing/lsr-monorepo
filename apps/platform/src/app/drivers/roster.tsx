@@ -223,7 +223,7 @@ function DriverCard({ driver }: { driver: RosterDriver }) {
       <div className="min-w-0 flex-1">
         <Link
           href={`/drivers/${driver.handle}`}
-          className="block truncate font-sans font-bold text-sm uppercase tracking-tight text-white outline-none transition-colors after:absolute after:inset-0 group-hover:text-lsr-orange"
+          className="block truncate font-sans font-bold text-sm uppercase tracking-tight text-white outline-hidden transition-colors after:absolute after:inset-0 group-hover:text-lsr-orange"
         >
           {driver.displayName}
         </Link>

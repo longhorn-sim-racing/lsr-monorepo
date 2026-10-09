@@ -257,7 +257,7 @@ function LatestResultCard({ event }: { event: RosterData["latestResult"] }) {
     timeZone: event.timezone || DEFAULT_TIMEZONE,
   });
   return (
-    <div className="group relative flex flex-col overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-8">
+    <div className="group/photo relative flex flex-col overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-8">
       <div className="absolute top-0 left-0 z-10 h-1 w-24 bg-lsr-orange" />
       <EventPhotoBand src={event.heroImageUrl} sizes={RACE_PHOTO_SIZES} />
       <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">
@@ -302,7 +302,7 @@ function LatestResultCard({ event }: { event: RosterData["latestResult"] }) {
 function NextRaceCard({ event }: { event: RosterData["nextRace"] }) {
   const heading = event ? raceHeading(event) : null;
   return (
-    <div className="group relative flex flex-col overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-8">
+    <div className="group/photo relative flex flex-col overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-8">
       <div className="absolute top-0 left-0 z-10 h-1 w-24 bg-lsr-orange" />
       <Flag aria-hidden className="pointer-events-none absolute -bottom-6 -right-6 h-40 w-40 -rotate-12 text-white/[0.03]" />
       <EventPhotoBand src={event?.heroImageUrl ?? null} sizes={RACE_PHOTO_SIZES} />
