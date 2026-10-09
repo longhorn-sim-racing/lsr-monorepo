@@ -4,8 +4,10 @@ import { publicUserSelect } from "@/lib/public-user"
 import { publicEventWhere } from "@/lib/events"
 import { getActiveTierKey } from "@/lib/status-indicators"
 import { pickRacingNumberStyle, type RacingNumberStyle } from "@/lib/racing-number"
+import { byName } from "@/app/drivers/names"
 
 const LSC_LEAGUE_SLUG = "lone-star-cup"
+const PUBLIC_TIERS = ["ALUMNI", "PARTNER"]
 
 /** One row of the public roster. Everything here ends up in the page's HTML, so public fields only. */
 export type RosterDriver = RacingNumberStyle & {
@@ -15,7 +17,9 @@ export type RosterDriver = RacingNumberStyle & {
   avatarUrl: string | null
   pending: boolean
   officerTitle: string | null
+  /** Display roles only: admins show as "officer", so who has full access stays private */
   roles: string[]
+  /** "ALUMNI" or "PARTNER", the only tiers with a public badge; null otherwise, so dues stay private */
   tierKey: string | null
   /** Raced (or entered) the Lone Star Cup */
   lsc: boolean
@@ -63,13 +67,14 @@ async function getRosterDrivers(now: Date): Promise<RosterDriver[]> {
       },
     }),
     prisma.season.findMany({
-      where: { visibility: "public", league: { slug: LSC_LEAGUE_SLUG } },
+      // Same seasons as /lone-star-cup, so both pages agree on which one is current
+      where: { visibility: "public", league: { slug: LSC_LEAGUE_SLUG }, seriesId: { not: null } },
       orderBy: [{ startAt: { sort: "desc", nulls: "last" } }, { year: "desc" }],
       select: {
         name: true,
         endAt: true,
         entries: {
-          where: { userId: { not: null }, totalPoints: { gt: 0 } },
+          where: { totalPoints: { gt: 0 } },
           orderBy: [{ rank: { sort: "asc", nulls: "last" } }, { totalPoints: "desc" }],
           take: 1,
           select: { userId: true },
@@ -79,7 +84,7 @@ async function getRosterDrivers(now: Date): Promise<RosterDriver[]> {
   ])
 
   // A season's champion is its leader once the season is over: any season but the newest, or the
-  // newest after its end date
+  // newest after its end date. A champion whose account is gone keeps the title (nobody inherits it)
   const titles = new Map<string, string[]>()
   lscSeasons.forEach((season, i) => {
     const over = i > 0 || (!!season.endAt && season.endAt < now)
@@ -102,7 +107,12 @@ async function getRosterDrivers(now: Date): Promise<RosterDriver[]> {
 
   const drivers = users.map((user) => {
     const total = totals.get(user.id)
-    const roles = user.roles.map((r) => r.role.key)
+    const keys = user.roles.map((r) => r.role.key)
+    const roles = [
+      ...(keys.includes("officer") || keys.includes("admin") ? ["officer"] : []),
+      ...keys.filter((key) => key === "lsc_driver" || key === "collegiate_driver"),
+    ]
+    const tierKey = getActiveTierKey(user.memberships)
     return {
       id: user.id,
       handle: user.handle,
@@ -112,7 +122,7 @@ async function getRosterDrivers(now: Date): Promise<RosterDriver[]> {
       pending: user.status === "pending_verification",
       officerTitle: user.officerTitle,
       roles,
-      tierKey: getActiveTierKey(user.memberships),
+      tierKey: tierKey && PUBLIC_TIERS.includes(tierKey) ? tierKey : null,
       lsc: !!total?.lsc || roles.includes("lsc_driver"),
       points: total?.points ?? 0,
       rank: null as number | null,
@@ -128,7 +138,7 @@ async function getRosterDrivers(now: Date): Promise<RosterDriver[]> {
   // Points first; wins, then podiums, then name break ties
   drivers.sort(
     (a, b) =>
-      b.points - a.points || b.wins - a.wins || b.podiums - a.podiums || a.displayName.localeCompare(b.displayName),
+      b.points - a.points || b.wins - a.wins || b.podiums - a.podiums || byName(a.displayName, b.displayName),
   )
   let rank = 0
   for (const driver of drivers) {

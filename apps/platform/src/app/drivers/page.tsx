@@ -15,7 +15,7 @@ import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { getRoster, type Roster as RosterData, type RosterDriver } from "@/server/queries/roster";
 import { Roster } from "./roster";
-import { initials } from "./initials";
+import { initials } from "./names";
 
 export const dynamic = "force-dynamic";
 
@@ -39,16 +39,13 @@ const RACE_PHOTO_SIZES = "(min-width: 1152px) 560px, (min-width: 768px) 50vw, 10
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
-function SectionHeading({ kicker, children, id, aside }: { kicker: string; children: React.ReactNode; id?: string; aside?: React.ReactNode }) {
+function SectionHeading({ kicker, children, id }: { kicker: string; children: React.ReactNode; id?: string }) {
   return (
-    <div id={id} className="scroll-mt-24 mb-10 md:mb-12 flex flex-col md:flex-row md:items-end justify-between gap-4">
-      <div>
-        <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-3">{kicker}</p>
-        <h2 className="font-display font-black italic text-4xl md:text-5xl text-white uppercase tracking-normal leading-[0.95]">
-          {children}
-        </h2>
-      </div>
-      {aside}
+    <div id={id} className="scroll-mt-24 mb-10 md:mb-12">
+      <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-3">{kicker}</p>
+      <h2 className="font-display font-black italic text-4xl md:text-5xl text-white uppercase tracking-normal leading-[0.95]">
+        {children}
+      </h2>
     </div>
   );
 }
@@ -67,19 +64,31 @@ function Avatar({ driver, size, className }: { driver: Pick<RosterDriver, "avata
   );
 }
 
-function TitleChips({ titles }: { titles: string[] }) {
-  if (titles.length === 0) return null;
+/** Championship tags, the Unverified tag and the status icons */
+function Badges({ driver }: { driver: RosterDriver }) {
+  const indicators = getStatusIndicators({
+    roles: driver.roles,
+    activeTierKey: driver.tierKey,
+    officerTitle: driver.officerTitle,
+  });
+  if (driver.titles.length === 0 && !driver.pending && indicators.length === 0) return null;
   return (
-    <span className="inline-flex flex-wrap gap-1.5">
-      {titles.map((title) => (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      {driver.titles.map((title, i) => (
         <span
-          key={title}
+          key={`${title}-${i}`}
           className="inline-flex items-center gap-1 bg-lsr-orange/15 px-1.5 py-0.5 font-sans font-bold text-[9px] uppercase tracking-[0.15em] text-lsr-orange"
         >
           <Trophy className="h-2.5 w-2.5" aria-hidden />
           {title} champ
         </span>
       ))}
+      {driver.pending && (
+        <span className="border border-red-900 bg-red-900/50 px-1.5 py-0.5 font-sans font-bold text-[8px] uppercase tracking-widest text-red-200">
+          Unverified
+        </span>
+      )}
+      <StatusIcons indicators={indicators} />
     </span>
   );
 }
@@ -100,14 +109,16 @@ function raceTime(date: Date, timeZone: string) {
 function countdown(start: Date, now: Date) {
   const hours = (start.getTime() - now.getTime()) / 3_600_000;
   if (hours < 1) return "Lights out within the hour";
-  if (hours < 24) return `Lights out in ${plural(Math.round(hours), "hour")}`;
-  return `Lights out in ${plural(Math.round(hours / 24), "day")}`;
+  if (Math.round(hours) < 24) return `Lights out in ${plural(Math.round(hours), "hour")}`;
+  return `Lights out in ${plural(Math.max(1, Math.round(hours / 24)), "day")}`;
 }
 
 /** A round's name and track for Lone Star Cup events, otherwise the event's own title */
 function raceHeading(event: { title: string; series: { slug: string } | null }) {
   if (!event.series?.slug.includes("lone-star-cup")) return { name: event.title, track: null };
   const round = parseRoundTitle(event.title, 0);
+  // A one-off in the series without a round number keeps its own title instead of becoming "Round 1"
+  if (!round.final && !/\bRound\s+\d/i.test(event.title)) return { name: event.title, track: null };
   return { name: round.name, track: round.track };
 }
 
@@ -141,7 +152,7 @@ function PodiumCard({ driver, place }: { driver: RosterDriver; place: number }) 
         </div>
       </div>
       <div className="relative mt-3 min-h-5">
-        <TitleChips titles={driver.titles} />
+        <Badges driver={driver} />
       </div>
       <div className="relative mt-4 flex items-end justify-between gap-4">
         <p className="font-display font-black italic leading-none text-white">
@@ -187,11 +198,6 @@ function StandingsRows({ drivers }: { drivers: RosterDriver[] }) {
         </thead>
         <tbody className="divide-y divide-white/5">
           {drivers.map((driver) => {
-            const indicators = getStatusIndicators({
-              roles: driver.roles,
-              activeTierKey: driver.tierKey,
-              officerTitle: driver.officerTitle,
-            });
             return (
               <tr key={driver.id} className="group transition-colors hover:bg-white/[0.03]">
                 <td className="px-2 md:px-3 py-3 text-center font-display font-black italic text-xl text-white/30">{driver.rank}</td>
@@ -206,8 +212,8 @@ function StandingsRows({ drivers }: { drivers: RosterDriver[] }) {
                         >
                           {driver.displayName}
                         </Link>
-                        <TitleChips titles={driver.titles} />
-                        <StatusIcons indicators={indicators} />
+                        <RacingNumber user={driver} size="xs" />
+                        <Badges driver={driver} />
                       </div>
                       <p className="mt-0.5 font-sans text-[11px] text-white/40">@{driver.handle}</p>
                       <p className="mt-0.5 font-sans text-[11px] text-white/55 md:hidden">
@@ -311,7 +317,7 @@ function NextRaceCard({ event }: { event: RosterData["nextRace"] }) {
             {raceTime(event.startsAtUtc, event.timezone || DEFAULT_TIMEZONE)}
           </p>
           <p className="mt-2 inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange">
-            <span className="h-1.5 w-1.5 rounded-full bg-lsr-orange animate-pulse" />
+            <span className="h-1.5 w-1.5 rounded-full bg-lsr-orange motion-safe:animate-pulse" />
             {countdown(event.startsAtUtc, new Date())}
           </p>
           <div className="mt-auto flex flex-wrap gap-x-6 gap-y-3 pt-8">

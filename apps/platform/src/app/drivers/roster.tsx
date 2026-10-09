@@ -2,7 +2,7 @@
 
 import Image from "next/image"
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Search, Trophy, X } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -10,7 +10,7 @@ import { StatusIcons } from "@/components/status-indicators"
 import { getStatusIndicators } from "@/lib/status-indicators"
 import { RacingNumber } from "@/components/racing-number"
 import type { RosterDriver } from "@/server/queries/roster"
-import { initials } from "./initials"
+import { byName, initials } from "./names"
 
 /** How many cards show before "Show all", when nothing is searched or filtered */
 const PREVIEW = 24
@@ -45,6 +45,7 @@ export function Roster({ drivers }: { drivers: RosterDriver[] }) {
   })
   const [sort, setSort] = useState<SortKey>(() => SORTS.find((s) => s.key === params.get("sort"))?.key ?? "name")
   const [expanded, setExpanded] = useState(false)
+  const list = useRef<HTMLUListElement>(null)
 
   // Keep the URL shareable without a server round trip per keystroke
   useEffect(() => {
@@ -58,7 +59,8 @@ export function Roster({ drivers }: { drivers: RosterDriver[] }) {
     const search = sp.toString()
     const url = `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`
     if (url !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
-      window.history.replaceState(window.history.state, "", url)
+      // null state (as in the gallery) so Next's router takes the new URL as its own
+      window.history.replaceState(null, "", url)
     }
   }, [query, filter, sort])
 
@@ -68,16 +70,16 @@ export function Roster({ drivers }: { drivers: RosterDriver[] }) {
   )
 
   const shown = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const q = query.trim().replace(/^@/, "").toLowerCase()
     const match = FILTERS.find((f) => f.key === filter)!.match
-    const list = drivers.filter(
+    const matches = drivers.filter(
       (d) => match(d) && (!q || d.displayName.toLowerCase().includes(q) || d.handle.toLowerCase().includes(q)),
     )
-    const byName = (a: RosterDriver, b: RosterDriver) => a.displayName.localeCompare(b.displayName)
-    if (sort === "name") list.sort(byName)
-    if (sort === "points") list.sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || byName(a, b))
-    if (sort === "number") list.sort((a, b) => (a.racingNumber ?? Infinity) - (b.racingNumber ?? Infinity) || byName(a, b))
-    return list
+    const nameOrder = (a: RosterDriver, b: RosterDriver) => byName(a.displayName, b.displayName)
+    if (sort === "name") matches.sort(nameOrder)
+    if (sort === "points") matches.sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || nameOrder(a, b))
+    if (sort === "number") matches.sort((a, b) => (a.racingNumber ?? Infinity) - (b.racingNumber ?? Infinity) || nameOrder(a, b))
+    return matches
   }, [drivers, query, filter, sort])
 
   const narrowed = !!query.trim() || filter !== "all"
@@ -128,7 +130,7 @@ export function Roster({ drivers }: { drivers: RosterDriver[] }) {
 
       {/* One swipeable row on phones */}
       <div
-        className="-mx-6 mt-5 flex gap-2 overflow-x-auto px-6 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
+        className="-mx-6 mt-5 flex gap-2 overflow-x-auto px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
         role="group"
         aria-label="Filter drivers"
       >
@@ -152,7 +154,7 @@ export function Roster({ drivers }: { drivers: RosterDriver[] }) {
       </div>
 
       <p className="mt-6 font-sans text-[11px] text-white/40" aria-live="polite">
-        {narrowed ? `${shown.length} of ${drivers.length} drivers` : `${drivers.length} drivers`}
+        {narrowed ? `${shown.length} of ${drivers.length} drivers` : `${drivers.length} ${drivers.length === 1 ? "driver" : "drivers"}`}
       </p>
 
       {shown.length === 0 ? (
@@ -172,7 +174,7 @@ export function Roster({ drivers }: { drivers: RosterDriver[] }) {
           </button>
         </div>
       ) : (
-        <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <ul ref={list} className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {visible.map((driver) => (
             <li key={driver.id}>
               <DriverCard driver={driver} />
@@ -185,7 +187,11 @@ export function Roster({ drivers }: { drivers: RosterDriver[] }) {
         <div className="mt-6 flex justify-center">
           <button
             type="button"
-            onClick={() => setExpanded(true)}
+            onClick={() => {
+              setExpanded(true)
+              // The button goes away, so move focus to the first newly shown driver
+              requestAnimationFrame(() => list.current?.querySelectorAll("a")[PREVIEW]?.focus())
+            }}
             className="h-12 border border-white/20 px-8 font-sans font-bold text-[10px] uppercase tracking-widest text-white transition-colors hover:bg-white hover:text-lsr-charcoal"
           >
             Show all {shown.length} drivers
@@ -204,7 +210,7 @@ function DriverCard({ driver }: { driver: RosterDriver }) {
   })
 
   return (
-    <div className="group relative flex h-full items-center gap-4 border border-white/10 bg-white/[0.02] p-3 pr-4 transition-colors hover:border-lsr-orange/60 hover:bg-white/[0.04]">
+    <div className="group relative flex h-full items-center gap-4 border border-white/10 bg-white/[0.02] p-3 pr-4 transition-colors hover:border-lsr-orange/60 hover:bg-white/[0.04] has-[a:focus-visible]:border-lsr-orange has-[a:focus-visible]:ring-1 has-[a:focus-visible]:ring-lsr-orange">
       <div className="relative h-14 w-14 shrink-0 overflow-hidden border border-white/10 bg-black">
         {driver.avatarUrl ? (
           <Image src={driver.avatarUrl} alt="" fill sizes="56px" className="object-cover" />
@@ -217,17 +223,18 @@ function DriverCard({ driver }: { driver: RosterDriver }) {
       <div className="min-w-0 flex-1">
         <Link
           href={`/drivers/${driver.handle}`}
-          className="block truncate font-sans font-bold text-sm uppercase tracking-tight text-white transition-colors after:absolute after:inset-0 group-hover:text-lsr-orange"
+          className="block truncate font-sans font-bold text-sm uppercase tracking-tight text-white outline-none transition-colors after:absolute after:inset-0 group-hover:text-lsr-orange"
         >
           {driver.displayName}
         </Link>
         <p className="truncate font-sans text-[11px] text-white/40">@{driver.handle}</p>
         {(indicators.length > 0 || driver.titles.length > 0 || driver.pending) && (
-          // Above the card-wide link so the icons' tooltips still work
-          <div className="relative z-10 mt-1.5 flex flex-wrap items-center gap-1.5">
-            {driver.titles.map((title) => (
+          // Above the card-wide link so the icons' tooltips still work; only as wide as its badges, so
+          // the rest of the row still opens the profile
+          <div className="relative z-10 mt-1.5 flex w-fit flex-wrap items-center gap-1.5">
+            {driver.titles.map((title, i) => (
               <span
-                key={title}
+                key={`${title}-${i}`}
                 className="inline-flex items-center gap-1 bg-lsr-orange/15 px-1.5 py-0.5 font-sans font-bold text-[9px] uppercase tracking-[0.15em] text-lsr-orange"
               >
                 <Trophy className="h-2.5 w-2.5" aria-hidden />

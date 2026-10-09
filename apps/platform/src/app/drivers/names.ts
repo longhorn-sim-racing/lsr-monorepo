@@ -9,3 +9,6 @@ export function initials(name: string) {
       .toUpperCase() || "?"
   )
 }
+
+/** Sorts names the same way on the server and in every visitor's browser */
+export const byName = new Intl.Collator("en").compare
