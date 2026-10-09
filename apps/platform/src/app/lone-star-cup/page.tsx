@@ -23,6 +23,7 @@ import { publicUserSelect } from "@/lib/public-user";
 import { publicEventWhere } from "@/lib/events";
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import { parseRoundTitle } from "@/lib/rounds";
+import { seasonLabel, seasonTerm } from "@/lib/seasons";
 import { OFFICERS } from "@/app/about/roster";
 import { EntryCta, type EntryState } from "./entry-cta";
 import { LiveStream } from "./live-stream";
@@ -119,14 +120,6 @@ function twitchChannel(streamUrl: string | null) {
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
-/** "Lone Star Cup | Season 3" → "Season 3" */
-const seasonLabel = (name: string) => name.split("|").pop()!.trim();
-
-/** "Spring 2026" / "Fall 2025" from a season's start date */
-function seasonTerm(startAt: Date | null) {
-  if (!startAt) return null;
-  return `${startAt.getUTCMonth() < 6 ? "Spring" : "Fall"} ${startAt.getUTCFullYear()}`;
-}
 
 
 const podiumOf = (event: RoundEvent) => event.ingestedSessions[0]?.results ?? [];

@@ -28,11 +28,33 @@ export async function getUnsortedGalleryImages() {
   });
 }
 
-/** A handful of recent photos for the homepage ribbon: newest albums first. */
-export async function getFeaturedGalleryImages(limit = 12) {
-  return prisma.galleryImage.findMany({
-    orderBy: [{ album: { date: { sort: "desc", nulls: "last" } } }, { order: "asc" }],
-    take: limit,
+/**
+ * One photo from each of the newest albums, for the homepage strip, so it shows a mix of club
+ * moments rather than a single album: each album's first landscape photo, else its first photo,
+ * skipping the photo /gallery uses as its hero.
+ */
+export async function getGalleryHighlights(albums = 5) {
+  const newest = await prisma.galleryAlbum.findMany({
+    where: { images: { some: {} } },
+    orderBy: [{ date: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
+    take: albums,
+    select: {
+      slug: true,
+      title: true,
+      images: {
+        orderBy: { order: "asc" },
+        take: 12,
+        select: { id: true, publicId: true, alt: true, width: true, height: true, creditName: true },
+      },
+    },
+  });
+  const isLandscape = (image: { width: number | null; height: number | null }) => !!image.width && !!image.height && image.width > image.height;
+  // The /gallery hero: the first landscape photo across the newest albums (see gallery/page.tsx)
+  const heroId = newest.flatMap((album) => album.images).find(isLandscape)?.id;
+  return newest.map((album) => {
+    const others = album.images.filter((image) => image.id !== heroId);
+    const photo = others.find(isLandscape) ?? others[0] ?? album.images[0];
+    return { ...photo, album: album.slug, albumTitle: album.title };
   });
 }
 

@@ -1,4 +1,4 @@
-// Corporate sponsors, shared by the homepage strip, /sponsors and /about.
+// Corporate sponsors, shared by the homepage partners section, /sponsors and /about.
 //
 // Placement follows the sponsorship tiers: Gold and up appear on the homepage, /about and
 // /sponsors; Silver only on /sponsors. Tier benefits are contractual, so check a sponsor's
