@@ -1,0 +1,35 @@
+name: Sync Instagram
+
+on:
+  schedule:
+    # Hourly, off the top of the hour
+    - cron: '7 * * * *'
+  workflow_dispatch:
+    # Allow manual triggering from GitHub Actions UI
+
+jobs:
+  sync-instagram:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Instagram sync
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          response=$(curl -s -L -w "\n%{http_code}" -X GET "${SITE_URL}/api/cron/instagram" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Content-Type: application/json")
+
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "Response: $body"
+          echo "HTTP Status: $http_code"
+
+          if [ "$http_code" -ne 200 ]; then
+            echo "::error::Instagram sync request failed with status $http_code"
+            exit 1
+          fi
+          if echo "$body" | grep -q '"problem":true'; then
+            echo "::warning::Instagram sync reported a problem; see Admin → Instagram on the site"
+          fi

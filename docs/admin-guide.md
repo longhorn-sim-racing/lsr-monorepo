@@ -193,6 +193,13 @@ Venues are locations where events take place.
 3. Add alt text and photographer credit
 4. Drag images to reorder them
 
+### Instagram on the News page
+
+New posts from the club Instagram show up on the News page within the hour, with nothing to do. In **Admin > Instagram** you can:
+- **Hide** a post you don't want on the site (it stays on Instagram)
+- **Check now** to pull new posts immediately
+- See whether the connection is healthy. If it says access expired, paste a new access token there (see [instagram.md](./instagram.md))
+
 ---
 
 ## Audit Log

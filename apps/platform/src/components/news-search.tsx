@@ -29,7 +29,8 @@ export function NewsSearch({ q }: { q: string }) {
         value={term}
         onChange={(e) => setTerm(e.target.value)}
         placeholder="SEARCH ARTICLES..."
-        className="h-9 w-[260px] rounded-none border-white/10 bg-white/5 font-sans font-bold text-[10px] uppercase tracking-widest focus:border-lsr-orange focus:ring-lsr-orange placeholder:text-white/30 transition-all"
+        aria-label="Search posts"
+        className="h-9 w-full md:w-[260px] rounded-none border-white/10 bg-white/5 font-sans font-bold text-[10px] uppercase tracking-widest focus:border-lsr-orange focus:ring-lsr-orange placeholder:text-white/30 transition-all"
       />
   )
 }

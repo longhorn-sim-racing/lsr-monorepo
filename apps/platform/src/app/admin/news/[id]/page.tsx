@@ -44,6 +44,7 @@ export default async function EditPostPage({ params }: PageProps) {
     title: post.title,
     slug: post.slug,
     excerpt: post.excerpt ?? "",
+    coverImageUrl: post.coverImageUrl,
     bodyMd: post.bodyMd,
     authorId: post.authorId ?? "",
     publishedAt: post.publishedAt,

@@ -8,6 +8,7 @@ import { newsPostSchema, NewsPostSchema } from "@/schemas/news.schema"
 import { createPost, updatePost } from "@/server/actions/news"
 import { slugify } from "@/lib/slug"
 import { cn } from "@/lib/utils"
+import { ImageUploader } from "@/components/image-uploader"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -60,6 +61,7 @@ export function PostForm({ post, users, availableTags }: PostFormProps) {
       title: post?.title ?? "",
       slug: post?.slug ?? "",
       excerpt: post?.excerpt ?? "",
+      coverImageUrl: post?.coverImageUrl ?? null,
       bodyMd: post?.bodyMd ?? "",
       authorId: post?.authorId ?? "", 
       publishedAt: post?.publishedAt ?? null,
@@ -299,6 +301,21 @@ export function PostForm({ post, users, availableTags }: PostFormProps) {
             </Popover>
         </FormItem>
 
+
+        <FormField
+          control={form.control}
+          name="coverImageUrl"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Cover image</FormLabel>
+              <FormControl>
+                <ImageUploader defaultValue={field.value} onChange={(url) => field.onChange(url)} />
+              </FormControl>
+              <FormDescription>Optional. Shown on the news page and at the top of the post; landscape photos work best.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
         <FormField
           control={form.control}
