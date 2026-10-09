@@ -116,7 +116,7 @@ export default async function ProductPage({
                         <div className="absolute top-0 left-0 h-1 w-16 bg-lsr-orange" />
                         <PackageOpen className="mt-0.5 h-5 w-5 shrink-0 text-lsr-orange" aria-hidden />
                         <div className="space-y-2">
-                            <h2 className="font-sans font-bold text-[11px] uppercase tracking-[0.2em] text-white">Made to order</h2>
+                            <p className="font-sans font-bold text-[11px] uppercase tracking-[0.2em] text-white">Made to order</p>
                             <p className="font-sans text-sm leading-relaxed text-white/60">
                                 {ON_DEMAND_TEXT}
                             </p>

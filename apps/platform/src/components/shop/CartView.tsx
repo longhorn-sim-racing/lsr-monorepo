@@ -51,11 +51,11 @@ export function CartView() {
               </Link>
 
               <div className="flex min-w-0 flex-1 flex-col">
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                   <div className="min-w-0">
                     <Link
                       href={href}
-                      className="block font-display font-black italic text-xl md:text-2xl uppercase leading-tight text-white transition-colors hover:text-lsr-orange"
+                      className="block break-words font-display font-black italic text-xl md:text-2xl uppercase leading-tight text-white transition-colors hover:text-lsr-orange"
                     >
                       {product.title}
                     </Link>
@@ -81,7 +81,7 @@ export function CartView() {
                     >
                       <Minus className="h-3.5 w-3.5" aria-hidden />
                     </button>
-                    <span className="w-10 text-center font-display font-black italic text-lg text-white" aria-label={`Quantity ${line.quantity}`}>
+                    <span className="w-10 text-center font-display font-black italic text-lg text-white">
                       {line.quantity}
                     </span>
                     <button

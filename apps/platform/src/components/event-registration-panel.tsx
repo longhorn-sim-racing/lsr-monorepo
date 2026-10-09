@@ -124,6 +124,7 @@ export function EventRegistrationPanel({
   };
 
   if (loading && !snapshot) {
+    if (attendeesOnly) return null;
     return <div className="pt-6 border-t border-white/10 text-center text-white/40 text-xs animate-pulse">Loading registration...</div>;
   }
 

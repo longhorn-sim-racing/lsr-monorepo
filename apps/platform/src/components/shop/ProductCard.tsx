@@ -80,11 +80,14 @@ export function ProductCard({ product }: { product: Product }) {
           </Link>
         </h3>
         <div className="mt-auto flex items-center justify-between gap-3 pt-5">
-          <Price
-            price={priceRange.minVariantPrice}
-            className="font-display font-black italic text-2xl text-lsr-orange"
-            currencyCodeClassName="hidden"
-          />
+          <div className="flex items-baseline gap-2">
+            <Price
+              price={priceRange.minVariantPrice}
+              className="font-display font-black italic text-2xl text-lsr-orange"
+              currencyCodeClassName="hidden"
+            />
+            {!availableForSale && <span className="sr-only">Sold out</span>}
+          </div>
           {isShopEnabled &&
             (canQuickAdd ? (
               <button

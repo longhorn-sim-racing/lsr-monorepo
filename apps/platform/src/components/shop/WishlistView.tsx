@@ -48,27 +48,30 @@ export function WishlistView() {
   }
 
   return (
-    <ul className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
-      {items.map((item) => (
-        <li key={item.handle}>
-          <ShopTile
-            handle={item.handle}
-            title={item.title}
-            imageUrl={item.imageUrl}
-            price={item.price}
-            action={
-              <button
-                type="button"
-                onClick={() => handleRemove(item.handle, item.title)}
-                className="flex h-9 w-9 items-center justify-center bg-lsr-charcoal/70 text-white/70 backdrop-blur-sm transition-colors hover:bg-lsr-charcoal hover:text-red-300"
-                aria-label={`Remove ${item.title} from your wishlist`}
-              >
-                <Trash2 className="h-4 w-4" aria-hidden />
-              </button>
-            }
-          />
-        </li>
-      ))}
-    </ul>
+    <section aria-labelledby="wishlist-items">
+      <h2 id="wishlist-items" className="sr-only">Saved items</h2>
+      <ul className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
+        {items.map((item) => (
+          <li key={item.handle}>
+            <ShopTile
+              handle={item.handle}
+              title={item.title}
+              imageUrl={item.imageUrl}
+              price={item.price}
+              action={
+                <button
+                  type="button"
+                  onClick={() => handleRemove(item.handle, item.title)}
+                  className="flex h-9 w-9 items-center justify-center bg-lsr-charcoal/70 text-white/70 backdrop-blur-sm transition-colors hover:bg-lsr-charcoal hover:text-red-300"
+                  aria-label={`Remove ${item.title} from your wishlist`}
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden />
+                </button>
+              }
+            />
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

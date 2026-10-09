@@ -79,11 +79,13 @@ export function ProductDetails({
               }
               productTitle={product.title}
             />
-            <p className="flex items-center gap-2 font-sans text-xs text-white/50">
-              <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              Secure checkout through Shopify. Questions? Email{" "}
-              <a href="mailto:info@longhornsimracing.org" className="font-bold text-white/70 hover:text-lsr-orange">info@longhornsimracing.org</a>
-            </p>
+            {process.env.NEXT_PUBLIC_SHOP_ENABLED === "true" && (
+              <p className="font-sans text-xs leading-relaxed text-white/50">
+                <Lock className="mr-1.5 inline h-3.5 w-3.5 -translate-y-px" aria-hidden />
+                Secure checkout through Shopify. Questions? Email{" "}
+                <a href="mailto:info@longhornsimracing.org" className="font-bold text-white/70 hover:text-lsr-orange">info@longhornsimracing.org</a>
+              </p>
+            )}
           </div>
 
           <div className="prose prose-invert prose-sm max-w-none font-sans leading-relaxed prose-p:text-white/70 prose-li:text-white/70 prose-li:marker:text-lsr-orange prose-strong:text-white prose-headings:font-display prose-headings:italic prose-headings:uppercase">
@@ -101,7 +103,7 @@ export function ProductDetails({
                <div className="absolute top-0 left-0 h-1 w-16 bg-lsr-orange" />
                <PackageOpen className="mt-0.5 h-5 w-5 shrink-0 text-lsr-orange" aria-hidden />
                <div className="space-y-2">
-                   <h2 className="font-sans font-bold text-[11px] uppercase tracking-[0.2em] text-white">Made to order</h2>
+                   <p className="font-sans font-bold text-[11px] uppercase tracking-[0.2em] text-white">Made to order</p>
                    <p className="font-sans text-sm leading-relaxed text-white/60">
                        {ON_DEMAND_TEXT}
                    </p>
