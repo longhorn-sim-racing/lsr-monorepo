@@ -214,11 +214,7 @@ export default async function Home() {
             <p className="mt-5 font-sans font-bold text-[11px] md:text-sm uppercase tracking-[0.35em] text-white/55 lg:mt-7 lg:mr-[-0.6em] lg:text-xl lg:tracking-[0.6em] lg:text-white/50">
               University of Texas at Austin
             </p>
-            <p className="mt-7 max-w-xl font-sans text-base md:text-xl font-bold leading-relaxed text-white/85 lg:mx-auto lg:mt-9">
-              UT Austin&apos;s sim racing club. Race in our own championship, get faster with people who&apos;ve been there, and meet
-              everyone who loves cars as much as you do.
-            </p>
-            <div className="mt-9 flex flex-wrap gap-3 lg:justify-center">
+            <div className="mt-10 flex flex-wrap gap-3 lg:mt-12 lg:justify-center">
               <Button asChild className={primaryButton}>
                 <a href="#join-the-grid">
                   <Flag className="mr-2 h-4 w-4" />
