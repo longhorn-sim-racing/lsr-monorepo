@@ -229,6 +229,23 @@ function StandingsRows({ drivers }: { drivers: RosterDriver[] }) {
   );
 }
 
+/** The event's own photo across the top of a race card, when it has one */
+function RaceImage({ src }: { src: string | null }) {
+  if (!src) return null;
+  return (
+    <div className="relative -mx-6 -mt-6 mb-6 h-36 overflow-hidden border-b border-white/10 md:-mx-8 md:-mt-8 md:h-44">
+      <Image
+        src={src}
+        alt=""
+        fill
+        sizes="(min-width: 1152px) 560px, (min-width: 768px) 50vw, 100vw"
+        className="object-cover opacity-75 transition-transform duration-700 group-hover:scale-105"
+      />
+      <div className="absolute inset-0 bg-gradient-to-t from-lsr-charcoal/80 to-transparent" />
+    </div>
+  );
+}
+
 function LatestResultCard({ event }: { event: RosterData["latestResult"] }) {
   if (!event) {
     return (
@@ -248,8 +265,9 @@ function LatestResultCard({ event }: { event: RosterData["latestResult"] }) {
     timeZone: event.timezone || DEFAULT_TIMEZONE,
   });
   return (
-    <div className="relative flex flex-col border border-white/10 bg-white/[0.02] p-6 md:p-8">
-      <div className="absolute top-0 left-0 h-1 w-24 bg-lsr-orange" />
+    <div className="group relative flex flex-col overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-8">
+      <div className="absolute top-0 left-0 z-10 h-1 w-24 bg-lsr-orange" />
+      <RaceImage src={event.heroImageUrl} />
       <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">
         Latest result · {date}
       </p>
@@ -292,9 +310,10 @@ function LatestResultCard({ event }: { event: RosterData["latestResult"] }) {
 function NextRaceCard({ event }: { event: RosterData["nextRace"] }) {
   const heading = event ? raceHeading(event) : null;
   return (
-    <div className="relative flex flex-col overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-8">
-      <div className="absolute top-0 left-0 h-1 w-24 bg-lsr-orange" />
+    <div className="group relative flex flex-col overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-8">
+      <div className="absolute top-0 left-0 z-10 h-1 w-24 bg-lsr-orange" />
       <Flag aria-hidden className="pointer-events-none absolute -bottom-6 -right-6 h-40 w-40 -rotate-12 text-white/[0.03]" />
+      <RaceImage src={event?.heroImageUrl ?? null} />
       <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">Next race</p>
       {event && heading ? (
         <>

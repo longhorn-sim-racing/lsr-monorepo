@@ -150,6 +150,7 @@ async function getLatestResult() {
       title: true,
       startsAtUtc: true,
       timezone: true,
+      heroImageUrl: true,
       series: { select: { title: true, slug: true } },
       ingestedSessions: {
         where: { sessionType: "RACE", results: { some: {} } },
@@ -185,6 +186,7 @@ async function getNextRace(now: Date) {
       title: true,
       startsAtUtc: true,
       timezone: true,
+      heroImageUrl: true,
       series: { select: { title: true, slug: true } },
     },
   })
