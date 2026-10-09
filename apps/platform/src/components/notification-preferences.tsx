@@ -62,9 +62,9 @@ export function NotificationPreferences({
 
   return (
     <div className="space-y-6">
-      <div className="space-y-4">
+      <div className="grid gap-2 sm:grid-cols-2">
         {PREFERENCE_CONFIG.map((pref) => (
-          <div key={pref.key} className="flex items-start gap-4">
+          <div key={pref.key} className="flex items-start gap-4 border border-white/10 bg-white/[0.02] p-4 transition-colors has-[[data-state=checked]]:border-lsr-orange/50">
             <input
               type="hidden"
               name={pref.key}
@@ -85,7 +85,7 @@ export function NotificationPreferences({
               >
                 {pref.label}
               </Label>
-              <p className="text-xs text-white/40 mt-0.5">{pref.description}</p>
+              <p className="mt-0.5 font-sans text-xs text-white/55">{pref.description}</p>
             </div>
           </div>
         ))}
