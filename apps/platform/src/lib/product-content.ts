@@ -7,16 +7,38 @@ export function hasOnDemandBoilerplate(html?: string): boolean {
   return normalizedHtml.includes(ON_DEMAND_TEXT);
 }
 
+const SIZE_GUIDE_HEADING =
+  /<(p|h[1-6]|div)\b[^>]*>\s*(?:<(?:strong|b)\b[^>]*>\s*)?Size\s+guide\s*(?:<\/(?:strong|b)>\s*)?<\/\1>/i;
+
+const VOID_TAGS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+
+/** Appends closing tags for any elements still open at the end of an HTML fragment */
+function closeOpenTags(html: string): string {
+  const open: string[] = [];
+  for (const [tag, name] of html.matchAll(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g)) {
+    const lower = name.toLowerCase();
+    if (tag.startsWith("</")) {
+      const at = open.lastIndexOf(lower);
+      if (at !== -1) open.splice(at);
+    } else if (!VOID_TAGS.has(lower) && !tag.endsWith("/>")) {
+      open.push(lower);
+    }
+  }
+  return html + open.reverse().map((name) => `</${name}>`).join("");
+}
+
 export function cleanProductDescription(html?: string): string {
   if (!html) return "";
   let cleaned = html;
 
-  // 1. Remove Size Guide (truncating everything after header). The cut starts at the heading's own
-  // opening tags (e.g. <p><strong class="size-guide-title">), so nothing is left unclosed to swallow the page after it
-  const sizeGuideRegex = /(?:<(?:p|h[1-6]|div)\b[^>]*>\s*)?(?:<(?:strong|b)\b[^>]*>\s*)?Size\s+guide(?:<\/strong>|<\/b>)?/i;
-  const match = cleaned.match(sizeGuideRegex);
+  // 1. Remove Size Guide (truncating everything after header). Prefer a block that is only the heading
+  // (Shopify's <p><strong class="size-guide-title">Size guide</strong></p>) over the words in a sentence,
+  // and start the cut at the heading's own opening tags
+  const match =
+    cleaned.match(SIZE_GUIDE_HEADING) ?? cleaned.match(/(?:<(?:p|h[1-6]|div)\b[^>]*>\s*)?(?:<(?:strong|b)\b[^>]*>\s*)?Size\s+guide(?:<\/strong>|<\/b>)?/i);
   if (match && match.index !== undefined) {
-    cleaned = cleaned.substring(0, match.index);
+    // Close anything the cut left open, or the browser wraps the rest of the page in it
+    cleaned = closeOpenTags(cleaned.substring(0, match.index));
   }
 
   // 2. Remove On Demand Boilerplate
