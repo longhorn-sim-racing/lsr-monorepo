@@ -2,12 +2,13 @@ import Image from "next/image"
 
 export default function Loading() {
   return (
-    <div className="flex w-full min-h-[60vh] flex-col items-center justify-center">
+    <div role="status" className="flex w-full min-h-[60vh] flex-col items-center justify-center">
+      <span className="sr-only">Loading</span>
       <div className="relative h-64 w-64 md:h-96 md:w-96">
         {/* Base dimmed logo */}
         <Image
           src="/brand/logos/white_logo2.png"
-          alt="LSR"
+          alt=""
           fill
           className="object-contain opacity-20"
           priority
