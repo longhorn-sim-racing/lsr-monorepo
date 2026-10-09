@@ -19,7 +19,6 @@ export async function LiveBanner() {
   const event = liveEvents[0];
 
   return <LiveBannerClient event={{
-    id: event.id,
     title: event.title,
     slug: event.slug,
     streamUrl: event.streamUrl,

@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button"
 
 type Props = {
   event: {
-    id: string
     title: string
     slug: string
     streamUrl: string | null
@@ -22,11 +21,11 @@ export function LiveBannerClient({ event }: Props) {
 
   useEffect(() => {
     setIsMounted(true)
-    const dismissed = sessionStorage.getItem(`live-banner-dismissed-${event.id}`)
+    const dismissed = sessionStorage.getItem(`live-banner-dismissed-${event.slug}`)
     if (dismissed) {
       setIsVisible(false)
     }
-  }, [event.id])
+  }, [event.slug])
 
   const formatTime = (date: Date) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -39,7 +38,7 @@ export function LiveBannerClient({ event }: Props) {
 
   const handleDismiss = () => {
     setIsVisible(false)
-    sessionStorage.setItem(`live-banner-dismissed-${event.id}`, "true")
+    sessionStorage.setItem(`live-banner-dismissed-${event.slug}`, "true")
   }
 
   if (!isMounted || !isVisible) return null
@@ -53,11 +52,12 @@ export function LiveBannerClient({ event }: Props) {
         <div className="absolute bottom-0 left-0 h-[2px] bg-lsr-orange z-20 animate-[lsr-border-bottom_4s_linear_infinite] pointer-events-none" />
         <div className="absolute bottom-0 right-0 h-[2px] bg-lsr-orange z-20 animate-[lsr-border-bottom_4s_linear_infinite] pointer-events-none" />
 
-        <Link 
-          href={`/events/${event.slug}`}
-          className="block w-full relative z-10 hover:bg-white/[0.02] transition-colors"
-        >
-            <div className="mx-auto max-w-6xl px-4 py-2 sm:px-6 min-h-[48px] flex items-center">
+        {/* The whole banner opens the event, through a link layered under the content rather than
+            wrapped around it, so the Watch and Details links aren't nested inside another link */}
+        <div className="block w-full relative z-10 hover:bg-white/[0.02] transition-colors">
+            {/* A mouse shortcut only: keyboard and screen-reader users have the Details link */}
+            <Link href={`/events/${event.slug}`} tabIndex={-1} aria-hidden="true" className="absolute inset-0" />
+            <div className="pointer-events-none relative mx-auto max-w-6xl px-4 py-2 sm:px-6 min-h-[48px] flex items-center">
                 
                 {/* 
                   DESKTOP LAYOUT 
@@ -87,7 +87,7 @@ export function LiveBannerClient({ event }: Props) {
                     </div>
 
                     {/* Right side: Actions and Dismiss */}
-                    <div className="flex items-center gap-4 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <div className="pointer-events-auto flex items-center gap-4 shrink-0">
                         <div className="flex items-center gap-2">
                             {event.streamUrl && (
                                 <Button asChild size="sm" variant="outline" className="h-7 text-[10px] px-3 border-white/20 text-white hover:bg-white hover:text-lsr-charcoal font-bold uppercase tracking-wider rounded-none transition-all">
@@ -137,7 +137,7 @@ export function LiveBannerClient({ event }: Props) {
                             <span className="font-display font-black text-red-500 uppercase tracking-widest text-[10px] italic">Live</span>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <div className="pointer-events-auto flex items-center gap-2 shrink-0">
                             {event.streamUrl && (
                                 <Button asChild size="sm" variant="outline" className="h-6 text-[9px] px-2 border-white/20 text-white hover:bg-white hover:text-lsr-charcoal font-bold uppercase tracking-wider rounded-none transition-all">
                                     <Link href={event.streamUrl} target="_blank" rel="noopener noreferrer">
@@ -148,7 +148,7 @@ export function LiveBannerClient({ event }: Props) {
                             )}
                             
                             <Button asChild size="sm" variant="ghost" className="h-6 text-[9px] px-2 text-white/60 hover:text-white hover:bg-white/5 font-bold uppercase tracking-wider rounded-none transition-all">
-                                <Link href={`/events/${event.slug}`}>
+                                <Link href={`/events/${event.slug}`} aria-label="Event details">
                                     <ArrowRight className="h-2.5 w-2.5" />
                                 </Link>
                             </Button>
@@ -181,7 +181,7 @@ export function LiveBannerClient({ event }: Props) {
                     </div>
                 </div>
             </div>
-        </Link>
+        </div>
     </div>
   )
 }

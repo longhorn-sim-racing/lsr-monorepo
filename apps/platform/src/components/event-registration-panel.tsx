@@ -17,7 +17,6 @@ type Attendee = RacingNumberStyle & {
 };
 
 type RegistrationSnapshot = {
-  eventId: string;
   registrationEnabled: boolean;
   windowStatus: "OPEN" | "CLOSED" | "NOT_OPEN" | "DISABLED" | "PASSED";
   registrationOpensAt: string | null;

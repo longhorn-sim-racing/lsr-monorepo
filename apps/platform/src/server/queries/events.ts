@@ -9,10 +9,6 @@ import {
   listLiveEvents,
 } from '@/server/repos/event.repo';
 
-export const getAllEvents = cache(async () => {
-  return await listAllEvents();
-});
-
 export const getAllEventsForAdmin = cache(async () => {
   return await listAllEventsForAdmin();
 });
