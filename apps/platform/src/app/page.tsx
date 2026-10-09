@@ -193,25 +193,25 @@ export default async function Home() {
       {/* Hero */}
       <section className="relative flex min-h-[100svh] flex-col overflow-hidden border-b border-white/10">
         <div className="absolute inset-0 z-0">
-          <Image src="/images/lsr-hero3.webp" alt="" fill preload sizes="100vw" className="object-cover object-[60%_center] opacity-60" />
-          <div className="absolute inset-0 bg-gradient-to-b from-lsr-charcoal/80 via-lsr-charcoal/30 to-lsr-charcoal" />
+          <Image src="/images/lsr-hero3.webp" alt="" fill preload sizes="100vw" className="object-cover object-[60%_center] opacity-80" />
+          <div className="absolute inset-0 bg-gradient-to-b from-lsr-charcoal/60 via-transparent to-lsr-charcoal" />
           {/* Phones read left to right; on desktop the title is centered, so the vignette is too */}
-          <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal/95 via-lsr-charcoal/60 to-transparent lg:hidden" />
-          <div className="absolute inset-0 hidden bg-lsr-charcoal/30 bg-[radial-gradient(circle_at_50%_50%,transparent_0%,rgba(0,0,0,0.75)_100%)] lg:block" />
+          <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal/80 via-lsr-charcoal/40 to-transparent lg:hidden" />
+          <div className="absolute inset-0 hidden bg-[radial-gradient(circle_at_50%_50%,transparent_0%,rgba(0,0,0,0.55)_100%)] lg:block" />
         </div>
         <div className="absolute inset-0 opacity-[0.03] mix-blend-overlay [background-image:repeating-linear-gradient(45deg,white_0px,white_1px,transparent_1px,transparent_10px)] pointer-events-none" />
 
         <div className="relative z-10 flex flex-1 items-center">
           <div className="mx-auto w-full max-w-6xl px-6 md:px-8 pt-24 pb-16 md:pt-32 md:pb-24 lg:text-center">
-            <p className="inline-flex items-center gap-2 border border-lsr-orange/30 bg-lsr-orange/10 px-3 py-1.5 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange">
+            <p className="inline-flex items-center gap-2 border border-lsr-orange/40 bg-lsr-charcoal/70 px-3 py-1.5 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange backdrop-blur-sm">
               <span className="h-1.5 w-1.5 rounded-full bg-lsr-orange motion-safe:animate-pulse" />
               Established 2025 · UT Austin
             </p>
             {/* Two lines on phones; one full-width line on desktop */}
-            <h1 className="mt-7 font-display font-black italic uppercase tracking-normal leading-[0.85] text-white text-6xl sm:text-7xl md:text-8xl lg:whitespace-nowrap lg:text-[5.25rem] xl:text-8xl drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]">
+            <h1 className="mt-7 font-display font-black italic uppercase tracking-normal leading-[0.85] text-white text-6xl sm:text-7xl md:text-8xl lg:whitespace-nowrap lg:text-[5.25rem] xl:text-8xl drop-shadow-[0_4px_24px_rgba(0,0,0,0.6)]">
               <span className="block lg:inline">Longhorn</span> <span className="block lg:inline">Sim Racing</span>
             </h1>
-            <p className="mt-5 font-sans font-bold text-[11px] md:text-sm uppercase tracking-[0.35em] text-white/55 lg:mt-7 lg:mr-[-0.6em] lg:text-xl lg:tracking-[0.6em] lg:text-white/50">
+            <p className="mt-5 font-sans font-bold text-[11px] md:text-sm uppercase tracking-[0.35em] text-white/70 drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)] lg:mt-7 lg:mr-[-0.6em] lg:text-xl lg:tracking-[0.6em] lg:text-white/85">
               University of Texas at Austin
             </p>
             <div className="mt-10 flex flex-wrap gap-3 lg:mt-12 lg:justify-center">
