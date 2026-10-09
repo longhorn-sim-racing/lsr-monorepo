@@ -87,12 +87,12 @@ function calendarDays(date: Date, now: Date, timeZone: string) {
 }
 
 function startsIn(start: Date, now: Date, timeZone: string) {
+  const hours = (start.getTime() - now.getTime()) / 3_600_000
+  if (hours < 1) return "Starting soon"
   const days = calendarDays(start, now, timeZone)
   if (days > 1) return `In ${days} days`
   if (days === 1) return "Tomorrow"
-  const hours = Math.round((start.getTime() - now.getTime()) / 3_600_000)
-  if (hours < 1) return "Starting soon"
-  return `In ${hours} ${hours === 1 ? "hour" : "hours"}`
+  return `In ${Math.round(hours)} ${Math.round(hours) === 1 ? "hour" : "hours"}`
 }
 
 function termOf(date: Date, timeZone: string) {
@@ -127,6 +127,7 @@ function registrationOf(
     registrationClosesAt: Date | null
     registrationMax: number | null
     registrationWaitlistEnabled: boolean
+    registrationFeeCents: number | null
     endsAtUtc: Date
   },
   counts: { registered: number; waitlisted: number },
@@ -136,12 +137,15 @@ function registrationOf(
   if (!event.registrationEnabled || now > event.endsAtUtc) return null
   if (event.registrationOpensAt && now < event.registrationOpensAt) return "soon"
   if (event.registrationClosesAt && now > event.registrationClosesAt) return "closed"
-  // And its capacity rule (registration.service): once full, or with people already waiting, new
-  // sign-ups go to the waitlist, or are turned away when there isn't one
-  if (event.registrationMax !== null && (counts.registered >= event.registrationMax || counts.waitlisted > 0)) {
-    return event.registrationWaitlistEnabled ? "waitlist" : "full"
-  }
-  return "open"
+  // And its capacity rules (registration.service, payment.service): an event is full at its max.
+  // A free event with people already waiting also sends new sign-ups to the back of the line; a
+  // paid one lets new payers take a freed spot (its waitlist is promoted by hand)
+  if (event.registrationMax === null) return "open"
+  const paid = (event.registrationFeeCents ?? 0) > 0
+  const full =
+    counts.registered >= event.registrationMax || (!paid && event.registrationWaitlistEnabled && counts.waitlisted > 0)
+  if (!full) return "open"
+  return event.registrationWaitlistEnabled ? "waitlist" : "full"
 }
 
 export async function getSchedule(viewerId: string | null) {

@@ -60,7 +60,6 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   const snapshot = {
-    eventId: event.id,
     registrationEnabled: event.registrationEnabled,
     windowStatus,
     registrationOpensAt: event.registrationOpensAt,

@@ -139,8 +139,7 @@ function AgendaRow({ event }: { event: ScheduleEvent }) {
               </a>
             ) : register ? (
               <span className="inline-flex h-9 items-center bg-lsr-orange px-4 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white">
-                {event.registration === "waitlist" ? "Join waitlist" : "Register"}
-                {event.feeCents ? ` · ${dollars(event.feeCents)}` : ""}
+                {event.registration === "waitlist" ? "Join waitlist" : `Register${event.feeCents ? ` · ${dollars(event.feeCents)}` : ""}`}
               </span>
             ) : note ? (
               <span className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/50">{note}</span>
