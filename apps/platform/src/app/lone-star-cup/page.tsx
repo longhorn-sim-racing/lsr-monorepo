@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { Metadata } from "next";
-import { ArrowRight, BookOpen, CalendarDays, Check, Flag, MessageSquare, Moon, ScrollText, Trophy } from "lucide-react";
+import { ArrowRight, ArrowUpRight, BookOpen, CalendarDays, Check, Flag, MessageSquare, Moon, ScrollText, Trophy, Twitch } from "lucide-react";
 import { getStandings, getPointsProgression } from "@/server/queries/standings";
 import { StandingsTable } from "@/components/standings-table";
 import { prisma } from "@/server/db";
@@ -36,6 +36,8 @@ export const metadata: Metadata = {
 
 const LEAGUE_SLUG = "lone-star-cup";
 const DISCORD_URL = "https://discord.gg/5Uv9YwpnFz";
+// LSC races are usually streamed here; a round's own stream URL wins when it has one
+const TWITCH_URL = "https://www.twitch.tv/longhorn_sim_racing";
 const STANDINGS_NOTE =
   "Only users with accounts can be shown on the standings page. Accounts must be manually linked to Assetto Corsa display names. If you are not listed, please create an account and email info@longhornsimracing.org to be added.";
 
@@ -322,6 +324,7 @@ export default async function LoneStarCupPage() {
   const completed = nextIndex === -1 ? rounds.length : nextIndex;
   const last = completed > 0 ? rounds[completed - 1] : null;
   const nextLive = next ? new Date(next.event.startsAtUtc) <= now : false;
+  const watchUrl = next?.event.streamUrl || TWITCH_URL;
 
   const label = seasonLabel(currentSeason.name);
   const term = seasonTerm(currentSeason.startAt);
@@ -398,6 +401,12 @@ export default async function LoneStarCupPage() {
                   Schedule
                 </a>
               </Button>
+              <Button asChild className="h-12 rounded-none border border-white/20 bg-lsr-charcoal/40 px-5 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
+                <a href={watchUrl} target="_blank" rel="noopener noreferrer">
+                  <Twitch className="mr-2 h-3.5 w-3.5" />
+                  Watch on Twitch
+                </a>
+              </Button>
             </div>
           </div>
         </div>
@@ -439,7 +448,18 @@ export default async function LoneStarCupPage() {
               {completed} of {plural(rounds.length, "round")} run
             </p>
           </div>
-          {next && (
+          {next && nextLive && (
+            <a
+              href={watchUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex shrink-0 items-center gap-2 bg-lsr-orange px-4 h-10 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white hover:bg-white hover:text-lsr-charcoal transition-colors"
+            >
+              <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
+              Watch live
+            </a>
+          )}
+          {next && !nextLive && (
             <Link
               href={`/events/${next.event.slug}`}
               className="group inline-flex shrink-0 items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white hover:text-lsr-orange transition-colors"
@@ -490,13 +510,25 @@ export default async function LoneStarCupPage() {
                     </p>
                   );
                 })()}
-                <Link
-                  href={`/events/${next.event.slug}`}
-                  className="group mt-8 inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white hover:text-lsr-orange transition-colors"
-                >
-                  Event details
-                  <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
-                </Link>
+                <div className="mt-8 flex flex-wrap items-center gap-x-8 gap-y-3">
+                  <Link
+                    href={`/events/${next.event.slug}`}
+                    className="group inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white hover:text-lsr-orange transition-colors"
+                  >
+                    Event details
+                    <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+                  </Link>
+                  <a
+                    href={watchUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange hover:text-white transition-colors"
+                  >
+                    <Twitch className="h-3.5 w-3.5" />
+                    {nextLive ? "Watch live on Twitch" : "Live on Twitch"}
+                    <ArrowUpRight className="h-3 w-3" />
+                  </a>
+                </div>
               </>
             ) : rounds.length === 0 ? (
               <>
