@@ -30,18 +30,8 @@ const ghostButton =
 const primaryButton =
   "h-12 rounded-none bg-lsr-orange px-7 font-sans text-xs font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal";
 
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
-
-/** "Starts in 2 days" */
-function countdown(startsAt: string, now: Date) {
-  const hours = (new Date(startsAt).getTime() - now.getTime()) / 3_600_000;
-  if (hours < 1) return "Starting soon";
-  if (Math.round(hours) < 24) return `Starts in ${plural(Math.round(hours), "hour")}`;
-  return `Starts in ${plural(Math.max(1, Math.round(hours / 24)), "day")}`;
-}
-
 /** The next (or live) event, in the hero's right half */
-function NextUp({ event, now }: { event: ScheduleEvent; now: Date }) {
+function NextUp({ event }: { event: ScheduleEvent }) {
   const live = event.state === "live";
   const Where = event.online ? Monitor : MapPin;
   return (
@@ -60,7 +50,7 @@ function NextUp({ event, now }: { event: ScheduleEvent; now: Date }) {
               <span className="h-1.5 w-1.5 rounded-full bg-red-500 motion-safe:animate-pulse" /> Happening now
             </>
           ) : (
-            <>Next up · {countdown(event.startsAt, now)}</>
+            <>Next up{event.startsIn ? ` · ${event.startsIn}` : ""}</>
           )}
         </p>
         <p className="mt-3 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/45">{event.series ?? event.family}</p>
@@ -73,6 +63,7 @@ function NextUp({ event, now }: { event: ScheduleEvent; now: Date }) {
             event.title
           )}
         </h2>
+        {event.summary && !event.round && <p className="mt-3 font-sans text-sm text-white/60 line-clamp-2">{event.summary}</p>}
         <ul className="mt-5 space-y-2 font-sans text-sm text-white/75">
           <li className="flex items-center gap-2.5">
             <CalendarDays className="h-4 w-4 shrink-0 text-lsr-orange" aria-hidden />
@@ -103,14 +94,14 @@ function NextUp({ event, now }: { event: ScheduleEvent; now: Date }) {
                 Watch live
               </a>
             </Button>
-          ) : event.registration === "open" && !event.viewer ? (
+          ) : (event.registration === "open" || event.registration === "waitlist") && !event.viewer ? (
             <Button asChild className="h-11 rounded-none bg-lsr-orange px-6 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
-              <Link href={`/events/${event.slug}`}>Register</Link>
+              <Link href={`/events/${event.slug}`}>{event.registration === "waitlist" ? "Join the waitlist" : "Register"}</Link>
             </Button>
           ) : null}
           <Button asChild className="h-11 rounded-none border border-white/20 bg-transparent px-5 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
             <Link href={`/events/${event.slug}`}>
-              {event.viewer === "registered" ? "You're in · Details" : "Event details"}
+              {event.viewer === "registered" ? "You're in · Details" : event.viewer === "waitlisted" ? "Waitlisted · Details" : "Event details"}
               <ArrowRight className="ml-2 h-3.5 w-3.5" />
             </Link>
           </Button>
@@ -142,7 +133,6 @@ export default async function EventsIndexPage() {
     );
   }
 
-  const now = new Date();
   const ahead = events.filter((e) => !e.ended && e.state !== "cancelled" && e.state !== "postponed");
   const next = ahead.find((e) => e.state === "live") ?? ahead[0] ?? null;
   const hosted = events.filter((e) => e.ended && e.state === "past").length;
@@ -206,15 +196,17 @@ export default async function EventsIndexPage() {
                   What&apos;s coming up
                 </a>
               </Button>
-              <Button asChild className={ghostButton}>
-                <a href="#past">
-                  <Images className="mr-2 h-3.5 w-3.5" />
-                  Past events
-                </a>
-              </Button>
+              {hosted > 0 && (
+                <Button asChild className={ghostButton}>
+                  <a href="#past">
+                    <Images className="mr-2 h-3.5 w-3.5" />
+                    Past events
+                  </a>
+                </Button>
+              )}
             </div>
           </div>
-          {next && <NextUp event={next} now={now} />}
+          {next && <NextUp event={next} />}
         </div>
       </div>
 

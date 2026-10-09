@@ -4,14 +4,15 @@ import { publicEventWhere, isEventLive } from "@/lib/events"
 import { publicUserSelect } from "@/lib/public-user"
 import { DEFAULT_TIMEZONE } from "@/lib/dates"
 import { parseRoundTitle } from "@/lib/rounds"
+import { slugify } from "@/lib/slug"
 
 /**
  * One event on the public schedule. Everything here ends up in the page's HTML, so public fields
- * only: no internal description (see #46), meeting links or registration internals. Dates are
- * formatted on the server in the event's own time zone, so the server and every browser agree.
+ * only: no internal description (see #46), meeting links, registration internals or the event's
+ * id (QR check-in is keyed on it). Dates are formatted on the server in the event's own time
+ * zone, so the server and every browser agree.
  */
 export type ScheduleEvent = {
-  id: string
   slug: string
   title: string
   summary: string | null
@@ -20,9 +21,9 @@ export type ScheduleEvent = {
   series: string | null
   /** The series without its season, e.g. "Lone Star Cup"; what the filter chips use */
   family: string
+  familyKey: string
   /** League rounds: "Round 5" at "Long Beach" */
   round: { name: string; track: string; note: string | null; night: boolean; final: boolean } | null
-  startsAt: string
   /** "October 2026" */
   month: string
   /** "Sat" and "10", for the date plate */
@@ -32,6 +33,8 @@ export type ScheduleEvent = {
   date: string
   /** "10:00 AM – 12:00 PM CT" */
   time: string
+  /** "Tomorrow", "In 3 days"; upcoming events only */
+  startsIn: string | null
   /** "Fall 2026" */
   term: string
   venue: string | null
@@ -41,7 +44,7 @@ export type ScheduleEvent = {
   state: "live" | "upcoming" | "past" | "cancelled" | "postponed"
   /** Over (cancelled and postponed events too), so it belongs in the archive rather than the agenda */
   ended: boolean
-  registration: "open" | "soon" | "closed" | null
+  registration: "open" | "waitlist" | "full" | "soon" | "closed" | null
   feeCents: number | null
   /** The signed-in viewer's own registration */
   viewer: "registered" | "waitlisted" | null
@@ -77,32 +80,67 @@ function timeRange(start: Date, end: Date, timeZone: string) {
   return `${time(start)} – ${endLabel} ${zoneLabel(start, timeZone)}`.trim()
 }
 
+/** Whole calendar days from `now` to `date`, counted in the event's time zone */
+function calendarDays(date: Date, now: Date, timeZone: string) {
+  const day = (d: Date) => Date.parse(d.toLocaleDateString("en-CA", { timeZone }))
+  return Math.round((day(date) - day(now)) / 86_400_000)
+}
+
+function startsIn(start: Date, now: Date, timeZone: string) {
+  const days = calendarDays(start, now, timeZone)
+  if (days > 1) return `In ${days} days`
+  if (days === 1) return "Tomorrow"
+  const hours = Math.round((start.getTime() - now.getTime()) / 3_600_000)
+  if (hours < 1) return "Starting soon"
+  return `In ${hours} ${hours === 1 ? "hour" : "hours"}`
+}
+
 function termOf(date: Date, timeZone: string) {
   const month = Number(format(date, timeZone, { month: "numeric" }))
   const year = format(date, timeZone, { year: "numeric" })
   return `${month <= 5 ? "Spring" : month <= 7 ? "Summer" : "Fall"} ${year}`
 }
 
-/** League rounds get a round name and track; one-offs keep their own title */
+/**
+ * League rounds ("… Round 5 @ Long Beach", "… FINAL Round @ Fuji", "… Finale @ Monaco") get a
+ * round name and track; everything else keeps its own title.
+ */
 function roundOf(title: string, series: { slug: string } | null) {
   if (!series || !title.includes("@")) return null
-  // "Formula Sunday League Finale @ Monaco"
-  if (/\bfinale\b/i.test(title) && !/\bRound\s+\d/i.test(title)) {
-    return { name: "Finale", track: title.split("@").pop()!.trim(), note: null, night: false, final: true }
-  }
-  if (!/\bRound\s+\d|\bfinal\b/i.test(title)) return null
+  const finale = /\bfinale\b/i.test(title)
+  if (!/\bRound\s+\d|\bfinal\s+round\b/i.test(title) && !finale) return null
   const round = parseRoundTitle(title, 0)
-  return { name: round.name, track: round.track, note: round.note, night: round.night, final: round.final }
+  const isFinale = finale && !/\bRound\s+\d/i.test(title)
+  return {
+    name: isFinale ? "Finale" : round.name,
+    track: round.track,
+    note: round.note,
+    night: round.night,
+    final: round.final || isFinale,
+  }
 }
 
 function registrationOf(
-  event: { registrationEnabled: boolean; registrationOpensAt: Date | null; registrationClosesAt: Date | null; endsAtUtc: Date },
+  event: {
+    registrationEnabled: boolean
+    registrationOpensAt: Date | null
+    registrationClosesAt: Date | null
+    registrationMax: number | null
+    registrationWaitlistEnabled: boolean
+    endsAtUtc: Date
+  },
+  counts: { registered: number; waitlisted: number },
   now: Date,
 ): ScheduleEvent["registration"] {
   // Mirrors the event page's registration window (api/events/[slug]/registration)
   if (!event.registrationEnabled || now > event.endsAtUtc) return null
   if (event.registrationOpensAt && now < event.registrationOpensAt) return "soon"
   if (event.registrationClosesAt && now > event.registrationClosesAt) return "closed"
+  // And its capacity rule (registration.service): once full, or with people already waiting, new
+  // sign-ups go to the waitlist, or are turned away when there isn't one
+  if (event.registrationMax !== null && (counts.registered >= event.registrationMax || counts.waitlisted > 0)) {
+    return event.registrationWaitlistEnabled ? "waitlist" : "full"
+  }
   return "open"
 }
 
@@ -126,6 +164,8 @@ export async function getSchedule(viewerId: string | null) {
       registrationEnabled: true,
       registrationOpensAt: true,
       registrationClosesAt: true,
+      registrationMax: true,
+      registrationWaitlistEnabled: true,
       registrationFeeCents: true,
       series: { select: { title: true, slug: true } },
       venue: { select: { name: true, city: true, state: true, googleMapsUrl: true } },
@@ -145,12 +185,25 @@ export async function getSchedule(viewerId: string | null) {
     },
   })
 
-  const registrations = viewerId
-    ? await prisma.eventRegistration.findMany({
-        where: { userId: viewerId, status: { in: ["REGISTERED", "WAITLISTED"] }, event: { endsAtUtc: { gte: now } } },
-        select: { eventId: true, status: true },
-      })
-    : []
+  // Sign-up counts for events that still take registrations (the event page shows these publicly)
+  const open = events.filter((e) => e.registrationEnabled && e.registrationMax !== null && e.endsAtUtc >= now).map((e) => e.id)
+  const [counts, registrations] = await Promise.all([
+    open.length
+      ? prisma.eventRegistration.groupBy({
+          by: ["eventId", "status"],
+          where: { eventId: { in: open }, status: { in: ["REGISTERED", "WAITLISTED"] } },
+          _count: true,
+        })
+      : [],
+    viewerId
+      ? prisma.eventRegistration.findMany({
+          where: { userId: viewerId, status: { in: ["REGISTERED", "WAITLISTED"] }, event: { endsAtUtc: { gte: now } } },
+          select: { eventId: true, status: true },
+        })
+      : [],
+  ])
+  const countOf = (eventId: string, status: "REGISTERED" | "WAITLISTED") =>
+    counts.find((c) => c.eventId === eventId && c.status === status)?._count ?? 0
   const viewerStatus = new Map(registrations.map((r) => [r.eventId, r.status]))
 
   return events.map((event): ScheduleEvent => {
@@ -168,21 +221,22 @@ export async function getSchedule(viewerId: string | null) {
               ? "past"
               : "upcoming"
     const status = viewerStatus.get(event.id)
+    const family = familyOf(event.series)
     return {
-      id: event.id,
       slug: event.slug,
       title: event.title,
       summary: event.summary?.trim() || null,
       photo: event.heroImageUrl || null,
       series: event.series?.title ?? null,
-      family: familyOf(event.series),
+      family,
+      familyKey: slugify(family),
       round: roundOf(event.title, event.series),
-      startsAt: start.toISOString(),
       month: format(start, tz, { month: "long", year: "numeric" }),
       weekday: format(start, tz, { weekday: "short" }),
       day: format(start, tz, { day: "numeric" }),
       date: format(start, tz, { weekday: "short", month: "short", day: "numeric", year: "numeric" }),
       time: timeRange(start, event.endsAtUtc, tz),
+      startsIn: state === "upcoming" ? startsIn(start, now, tz) : null,
       term: termOf(start, tz),
       venue: event.venue?.name ?? null,
       place: [event.venue?.city, event.venue?.state].filter(Boolean).join(", ") || null,
@@ -190,7 +244,10 @@ export async function getSchedule(viewerId: string | null) {
       online: /virtual|online/i.test(event.venue?.name ?? ""),
       state,
       ended: event.endsAtUtc < now,
-      registration: state === "cancelled" || state === "postponed" ? null : registrationOf(event, now),
+      registration:
+        state === "cancelled" || state === "postponed"
+          ? null
+          : registrationOf(event, { registered: countOf(event.id, "REGISTERED"), waitlisted: countOf(event.id, "WAITLISTED") }, now),
       feeCents: event.registrationFeeCents,
       viewer: status === "REGISTERED" ? "registered" : status === "WAITLISTED" ? "waitlisted" : null,
       winner: winner ? { name: winner.user?.displayName || winner.displayName, handle: winner.user?.handle ?? null } : null,

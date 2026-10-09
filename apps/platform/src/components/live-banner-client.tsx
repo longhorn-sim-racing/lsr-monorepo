@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button"
 
 type Props = {
   event: {
-    id: string
     title: string
     slug: string
     streamUrl: string | null
@@ -22,11 +21,11 @@ export function LiveBannerClient({ event }: Props) {
 
   useEffect(() => {
     setIsMounted(true)
-    const dismissed = sessionStorage.getItem(`live-banner-dismissed-${event.id}`)
+    const dismissed = sessionStorage.getItem(`live-banner-dismissed-${event.slug}`)
     if (dismissed) {
       setIsVisible(false)
     }
-  }, [event.id])
+  }, [event.slug])
 
   const formatTime = (date: Date) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -39,7 +38,7 @@ export function LiveBannerClient({ event }: Props) {
 
   const handleDismiss = () => {
     setIsVisible(false)
-    sessionStorage.setItem(`live-banner-dismissed-${event.id}`, "true")
+    sessionStorage.setItem(`live-banner-dismissed-${event.slug}`, "true")
   }
 
   if (!isMounted || !isVisible) return null
@@ -56,7 +55,8 @@ export function LiveBannerClient({ event }: Props) {
         {/* The whole banner opens the event, through a link layered under the content rather than
             wrapped around it, so the Watch and Details links aren't nested inside another link */}
         <div className="block w-full relative z-10 hover:bg-white/[0.02] transition-colors">
-            <Link href={`/events/${event.slug}`} aria-label={`${event.title}: event details`} className="absolute inset-0" />
+            {/* A mouse shortcut only: keyboard and screen-reader users have the Details link */}
+            <Link href={`/events/${event.slug}`} tabIndex={-1} aria-hidden="true" className="absolute inset-0" />
             <div className="pointer-events-none relative mx-auto max-w-6xl px-4 py-2 sm:px-6 min-h-[48px] flex items-center">
                 
                 {/* 

@@ -11,8 +11,6 @@ import type { ScheduleEvent } from "@/server/queries/schedule"
 /** Past events shown before "Show all", when nothing is searched or filtered */
 const ARCHIVE_PREVIEW = 9
 
-const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
-
 const dollars = (cents: number) => `$${(cents / 100).toFixed(cents % 100 ? 2 : 0)}`
 
 /** Groups in order of first appearance */
@@ -22,14 +20,11 @@ function groupBy<T>(items: T[], key: (item: T) => string) {
   return [...groups]
 }
 
-function Heading({ kicker, children, id, aside }: { kicker: string; children: React.ReactNode; id: string; aside?: React.ReactNode }) {
+function Heading({ kicker, children, id }: { kicker: string; children: React.ReactNode; id: string }) {
   return (
-    <div id={id} className="scroll-mt-24 mb-8 md:mb-10 flex flex-col md:flex-row md:items-end justify-between gap-3">
-      <div>
-        <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-3">{kicker}</p>
-        <h2 className="font-display font-black italic text-4xl md:text-5xl text-white uppercase tracking-normal leading-[0.95]">{children}</h2>
-      </div>
-      {aside}
+    <div id={id} className="scroll-mt-24 mb-8 md:mb-10">
+      <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-3">{kicker}</p>
+      <h2 className="font-display font-black italic text-4xl md:text-5xl text-white uppercase tracking-normal leading-[0.95]">{children}</h2>
     </div>
   )
 }
@@ -72,11 +67,11 @@ function Tags({ event }: { event: ScheduleEvent }) {
   )
 }
 
-function Where({ event, className }: { event: ScheduleEvent; className?: string }) {
+function Where({ event }: { event: ScheduleEvent }) {
   if (!event.venue) return null
   const Icon = event.online ? Monitor : MapPin
   return (
-    <span className={cn("inline-flex min-w-0 items-center gap-1.5", className)}>
+    <span className="inline-flex min-w-0 items-center gap-1.5">
       <Icon className="h-3.5 w-3.5 shrink-0 text-lsr-orange" aria-hidden />
       <span className="truncate">
         {event.venue}
@@ -89,8 +84,8 @@ function Where({ event, className }: { event: ScheduleEvent; className?: string 
 function AgendaRow({ event }: { event: ScheduleEvent }) {
   const off = event.state === "cancelled" || event.state === "postponed"
   const watch = event.state === "live" && !!event.streamUrl
-  const register = event.registration === "open" && !event.viewer
-  const soon = event.registration === "soon"
+  const register = (event.registration === "open" || event.registration === "waitlist") && !event.viewer
+  const note = event.registration === "soon" ? "Registration soon" : event.registration === "full" && !event.viewer ? "Full" : null
   return (
     <li>
       <div
@@ -105,18 +100,18 @@ function AgendaRow({ event }: { event: ScheduleEvent }) {
             <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal via-lsr-charcoal/60 to-transparent" />
           </div>
         )}
-        <div className="relative grid grid-cols-[56px_minmax(0,1fr)] items-center gap-4 p-4 md:grid-cols-[72px_minmax(0,1fr)_auto] md:gap-6 md:p-5">
+        <div className="relative grid grid-cols-[60px_minmax(0,1fr)] items-center gap-4 p-4 md:grid-cols-[76px_minmax(0,1fr)_auto] md:gap-6 md:p-5">
           <div className={cn("flex flex-col items-center justify-center border-r border-white/10 pr-4 md:pr-6", off && "opacity-50")}>
             <span className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange">{event.weekday}</span>
             <span className="font-display font-black italic text-4xl md:text-5xl leading-none text-white">{event.day}</span>
           </div>
           <div className="min-w-0">
             <Tags event={event} />
-            <h3 className={cn("mt-1.5 font-display font-black italic text-xl md:text-2xl uppercase leading-tight text-white", off && "line-through decoration-white/40")}>
+            <h4 className={cn("mt-1.5 font-display font-black italic text-xl md:text-2xl uppercase leading-tight text-white", off && "line-through decoration-white/40")}>
               <Link href={`/events/${event.slug}`} className="outline-hidden after:absolute after:inset-0 group-hover:text-white">
                 <EventTitle event={event} />
               </Link>
-            </h3>
+            </h4>
             <div className="mt-2 flex flex-col gap-1 font-sans text-xs text-white/60 sm:flex-row sm:flex-wrap sm:gap-x-5">
               <span className="inline-flex items-center gap-1.5">
                 <Clock className="h-3.5 w-3.5 shrink-0 text-lsr-orange" aria-hidden />
@@ -130,7 +125,7 @@ function AgendaRow({ event }: { event: ScheduleEvent }) {
           <div
             className={cn(
               "col-span-2 items-center justify-between gap-3 border-t border-white/5 pt-3 md:col-span-1 md:flex md:flex-col md:items-end md:border-0 md:pt-0",
-              watch || register || soon ? "flex" : "hidden",
+              watch || register || note ? "flex" : "hidden",
             )}
           >
             {watch ? (
@@ -144,10 +139,11 @@ function AgendaRow({ event }: { event: ScheduleEvent }) {
               </a>
             ) : register ? (
               <span className="inline-flex h-9 items-center bg-lsr-orange px-4 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white">
-                Register{event.feeCents ? ` · ${dollars(event.feeCents)}` : ""}
+                {event.registration === "waitlist" ? "Join waitlist" : "Register"}
+                {event.feeCents ? ` · ${dollars(event.feeCents)}` : ""}
               </span>
-            ) : soon ? (
-              <span className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/50">Registration soon</span>
+            ) : note ? (
+              <span className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/50">{note}</span>
             ) : (
               <span />
             )}
@@ -185,12 +181,13 @@ function ArchiveCard({ event }: { event: ScheduleEvent }) {
           <p className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/45">
             {event.series ?? event.family}
             {event.state === "cancelled" && <span className="ml-2 text-red-300">· Cancelled</span>}
+            {event.state === "postponed" && <span className="ml-2 text-amber-300">· Postponed</span>}
           </p>
-          <h3 className="mt-2 font-display font-black italic text-xl uppercase leading-tight text-white">
+          <h4 className="mt-2 font-display font-black italic text-xl uppercase leading-tight text-white">
             <Link href={`/events/${event.slug}`} className="outline-hidden transition-colors after:absolute after:inset-0 group-hover:text-lsr-orange">
               <EventTitle event={event} />
             </Link>
-          </h3>
+          </h4>
           {event.winner && (
             <p className="relative z-10 mt-3 inline-flex w-fit items-center gap-1.5 font-sans text-xs text-white/70">
               <Trophy className="h-3.5 w-3.5 text-lsr-orange" aria-hidden />
@@ -226,17 +223,22 @@ function ArchiveCard({ event }: { event: ScheduleEvent }) {
 export function Schedule({ events }: { events: ScheduleEvent[] }) {
   const params = useSearchParams()
   const [query, setQuery] = useState(params.get("q") ?? "")
-  const [family, setFamily] = useState(params.get("series") ?? "all")
+  const [family, setFamily] = useState<string | null>(params.get("series"))
   const [expanded, setExpanded] = useState(false)
   const archive = useRef<HTMLDivElement>(null)
 
   const families = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const event of events) counts.set(event.family, (counts.get(event.family) ?? 0) + 1)
+    const byKey = new Map<string, { key: string; name: string; count: number }>()
+    for (const event of events) {
+      const entry = byKey.get(event.familyKey) ?? { key: event.familyKey, name: event.family, count: 0 }
+      entry.count += 1
+      byKey.set(event.familyKey, entry)
+    }
     // Busiest first, so the racing series lead
-    return [...counts].sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ key: slugify(name), name, count }))
+    return [...byKey.values()].sort((a, b) => b.count - a.count)
   }, [events])
-  const activeFamily = families.some((f) => f.key === family) ? family : "all"
+  // null is everything; an unknown key from an old or hand-edited URL falls back to everything
+  const activeFamily = families.some((f) => f.key === family) ? family : null
 
   // Keep the URL shareable without a server round trip per keystroke
   useEffect(() => {
@@ -244,7 +246,7 @@ export function Schedule({ events }: { events: ScheduleEvent[] }) {
     sp.delete("q")
     sp.delete("series")
     if (query.trim()) sp.set("q", query.trim())
-    if (activeFamily !== "all") sp.set("series", activeFamily)
+    if (activeFamily) sp.set("series", activeFamily)
     const search = sp.toString()
     const url = `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`
     if (url !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
@@ -257,7 +259,7 @@ export function Schedule({ events }: { events: ScheduleEvent[] }) {
     const q = query.trim().toLowerCase()
     const matches = events.filter(
       (e) =>
-        (activeFamily === "all" || slugify(e.family) === activeFamily) &&
+        (!activeFamily || e.familyKey === activeFamily) &&
         (!q || [e.title, e.summary, e.venue, e.series].some((field) => field?.toLowerCase().includes(q))),
     )
     return {
@@ -266,7 +268,7 @@ export function Schedule({ events }: { events: ScheduleEvent[] }) {
     }
   }, [events, query, activeFamily])
 
-  const narrowed = !!query.trim() || activeFamily !== "all"
+  const narrowed = !!query.trim() || !!activeFamily
   const shownPast = expanded || narrowed ? past : past.slice(0, ARCHIVE_PREVIEW)
   const familyName = families.find((f) => f.key === activeFamily)?.name
 
@@ -279,9 +281,9 @@ export function Schedule({ events }: { events: ScheduleEvent[] }) {
           role="group"
           aria-label="Filter by series"
         >
-          {[{ key: "all", name: "Everything", count: events.length }, ...families].map((f) => (
+          {[{ key: null, name: "Everything", count: events.length }, ...families].map((f) => (
             <button
-              key={f.key}
+              key={f.key ?? "everything"}
               type="button"
               aria-pressed={activeFamily === f.key}
               onClick={() => setFamily(f.key)}
@@ -319,7 +321,12 @@ export function Schedule({ events }: { events: ScheduleEvent[] }) {
       </div>
 
       {/* Upcoming */}
-      <section className="mt-14 md:mt-16" aria-live="polite">
+      {/* Announced to screen readers instead of the whole list re-reading on every keystroke */}
+      <p className="mt-6 font-sans text-[11px] text-white/40" aria-live="polite">
+        {narrowed ? `${upcoming.length} coming up, ${past.length} past` : `${events.length} events`}
+      </p>
+
+      <section className="mt-10 md:mt-12">
         <Heading kicker={narrowed ? `${upcoming.length} coming up` : "What's next"} id="upcoming">
           Coming <span className="text-lsr-orange">up</span>
         </Heading>
@@ -341,7 +348,7 @@ export function Schedule({ events }: { events: ScheduleEvent[] }) {
                 </h3>
                 <ul className="space-y-2">
                   {list.map((event) => (
-                    <AgendaRow key={event.id} event={event} />
+                    <AgendaRow key={event.slug} event={event} />
                   ))}
                 </ul>
               </div>
@@ -365,7 +372,7 @@ export function Schedule({ events }: { events: ScheduleEvent[] }) {
                 </h3>
                 <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {list.map((event) => (
-                    <ArchiveCard key={event.id} event={event} />
+                    <ArchiveCard key={event.slug} event={event} />
                   ))}
                 </ul>
               </div>
@@ -378,7 +385,7 @@ export function Schedule({ events }: { events: ScheduleEvent[] }) {
                 onClick={() => {
                   setExpanded(true)
                   // The button goes away, so move focus to the first newly shown event
-                  requestAnimationFrame(() => archive.current?.querySelectorAll<HTMLElement>("article h3 a")[ARCHIVE_PREVIEW]?.focus())
+                  requestAnimationFrame(() => archive.current?.querySelectorAll<HTMLElement>("article h4 a")[ARCHIVE_PREVIEW]?.focus())
                 }}
                 className="h-12 border border-white/20 px-8 font-sans font-bold text-[10px] uppercase tracking-widest text-white transition-colors hover:bg-white hover:text-lsr-charcoal"
               >
