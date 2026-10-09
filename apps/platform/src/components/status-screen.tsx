@@ -12,7 +12,8 @@ export function StatusScreen({
   actions,
   photo,
 }: {
-  code: string
+  /** The big outlined status code, when there is one */
+  code?: string
   kicker: string
   title: React.ReactNode
   children: React.ReactNode
@@ -32,13 +33,15 @@ export function StatusScreen({
       <div className="absolute inset-0 z-0 opacity-[0.04] [background-image:repeating-linear-gradient(45deg,white_0px,white_1px,transparent_1px,transparent_10px)] pointer-events-none" />
 
       <div className="relative z-10 mx-auto w-full max-w-6xl px-6 py-16 md:px-8 md:py-24">
-        <p
-          aria-hidden
-          className="select-none font-display font-black italic text-[7rem] leading-[0.8] text-transparent [-webkit-text-stroke:2px_rgba(255,255,255,0.22)] md:text-[13rem]"
-        >
-          {code}
-        </p>
-        <p className="mt-6 font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">{kicker}</p>
+        {code && (
+          <p
+            aria-hidden
+            className="mb-6 select-none font-display font-black italic text-[7rem] leading-[0.8] text-transparent [-webkit-text-stroke:2px_rgba(255,255,255,0.22)] md:text-[13rem]"
+          >
+            {code}
+          </p>
+        )}
+        <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">{kicker}</p>
         <h1 className="mt-3 max-w-2xl font-display font-black italic text-5xl uppercase leading-[0.9] md:text-7xl">{title}</h1>
         <div className="mt-6 max-w-xl font-sans text-base leading-relaxed text-white/75 md:text-lg">{children}</div>
         <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap">{actions}</div>
