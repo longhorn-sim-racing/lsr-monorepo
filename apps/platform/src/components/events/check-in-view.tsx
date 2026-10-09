@@ -1,216 +1,181 @@
 "use client";
 
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { CheckCircle2, Loader2, AlertCircle, Clock, CalendarCheck } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
+import { AlertCircle, CalendarCheck, CheckCircle2, Clock, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-
-type CheckInState = 
-    | { status: "IDLE" }
-    | { status: "LOADING" }
-    | { status: "SUCCESS"; timestamp: string }
-    | { status: "ERROR"; message: string };
+type CheckInState =
+  | { status: "IDLE" }
+  | { status: "LOADING" }
+  | { status: "SUCCESS"; timestamp: string }
+  | { status: "ERROR"; message: string };
 
 type CheckInStatus = "OPEN" | "NOT_ENABLED" | "NOT_OPEN_YET" | "CLOSED" | "ALREADY_CHECKED_IN";
 
 type CheckInViewProps = {
-    eventId: string;
-    eventSlug: string;
-    eventTitle: string;
-    status: CheckInStatus;
-    opensAt?: string;
-    checkedInAt?: string;
-    currentUser: {
-        displayName: string;
-        handle: string;
-        avatarUrl: string | null;
-    };
+  eventId: string;
+  eventSlug: string;
+  eventTitle: string;
+  /** The event's time zone, for the time shown after checking in */
+  timeZone: string;
+  status: CheckInStatus;
+  /** Pre-formatted on the server in the event's time zone, so both renders match */
+  opensAt?: { time: string; date: string };
+  checkedInAt?: string;
+  currentUser: {
+    displayName: string;
+    handle: string;
+    avatarUrl: string | null;
+  };
 };
 
-export function CheckInView({ eventId, eventSlug, eventTitle, status, opensAt, checkedInAt, currentUser }: CheckInViewProps) {
-    const [viewState, setViewState] = useState<CheckInState>(() => {
-        if (status === "ALREADY_CHECKED_IN" && checkedInAt) {
-            return { status: "SUCCESS", timestamp: new Date(checkedInAt).toLocaleTimeString() };
-        }
-        return { status: "IDLE" };
-    });
+const secondary =
+  "h-12 w-full rounded-none border border-white/15 bg-transparent font-sans text-[11px] font-bold uppercase tracking-[0.2em] text-white hover:bg-white hover:text-lsr-charcoal";
 
-    async function handleCheckIn() {
-        setViewState({ status: "LOADING" });
-        try {
-            const res = await fetch(`/api/check-in/${eventId}`, { method: "POST" });
-            const data = await res.json();
-            
-            if (!res.ok) {
-                throw new Error(data.message || "Failed to check in");
-            }
-            
-            setViewState({ status: "SUCCESS", timestamp: new Date().toLocaleTimeString() });
-        } catch (err: any) {
-            setViewState({ status: "ERROR", message: err.message });
-        }
+/** The card every check-in state sits in */
+function Panel({ tone = "default", icon, kicker, title, children }: { tone?: "default" | "success" | "warn" | "error"; icon: React.ReactNode; kicker: string; title: string; children: React.ReactNode }) {
+  const ring = {
+    default: "bg-white/5 text-white/60 border-white/10",
+    success: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
+    warn: "bg-lsr-orange/10 text-lsr-orange border-lsr-orange/30",
+    error: "bg-red-500/10 text-red-300 border-red-500/30",
+  }[tone];
+  return (
+    <div className="relative w-full max-w-md border border-white/10 bg-lsr-charcoal/85 p-7 shadow-2xl backdrop-blur-md md:p-9">
+      <div className={`absolute top-0 left-0 h-1 ${tone === "success" ? "w-full bg-emerald-400" : "w-24 bg-lsr-orange"}`} />
+      <span className={`flex h-14 w-14 items-center justify-center border ${ring}`}>{icon}</span>
+      <p className="mt-6 font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">{kicker}</p>
+      <h1 className="mt-2 font-display font-black italic text-4xl uppercase leading-[0.95] text-white">{title}</h1>
+      <div className="mt-6 space-y-6">{children}</div>
+    </div>
+  );
+}
+
+export function CheckInView({ eventId, eventSlug, eventTitle, timeZone, status, opensAt, checkedInAt, currentUser }: CheckInViewProps) {
+  const [viewState, setViewState] = useState<CheckInState>(() =>
+    status === "ALREADY_CHECKED_IN" && checkedInAt ? { status: "SUCCESS", timestamp: checkedInAt } : { status: "IDLE" },
+  );
+
+  async function handleCheckIn() {
+    setViewState({ status: "LOADING" });
+    try {
+      const res = await fetch(`/api/check-in/${eventId}`, { method: "POST" });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "Failed to check in");
+      }
+
+      setViewState({
+        status: "SUCCESS",
+        timestamp: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone }),
+      });
+    } catch (err: unknown) {
+      setViewState({ status: "ERROR", message: err instanceof Error ? err.message : "Failed to check in" });
     }
+  }
 
-    if (viewState.status === "SUCCESS") {
-        return (
-            <div className="w-full max-w-md mx-auto border border-white/10 bg-white/[0.02] p-8 md:p-12 flex flex-col items-center justify-center space-y-8 animate-in fade-in zoom-in duration-300 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-24 h-24 bg-lsr-orange/10 -rotate-45 translate-x-12 -translate-y-12" />
-                
-                <div className="rounded-none bg-green-500/10 p-6 border border-green-500/20">
-                    <CheckCircle2 className="w-16 h-16 text-green-500" />
-                </div>
-                <div className="text-center space-y-4">
-                    <h2 className="text-4xl font-display font-black italic text-white uppercase tracking-normal leading-[0.9]">Checked In!</h2>
-                    <p className="text-white/60 font-sans font-bold uppercase tracking-widest text-[10px]">{eventTitle}</p>
-                    <div className="inline-block border border-white/10 bg-black/40 px-4 py-2">
-                        <p className="text-[10px] font-mono text-white/40 uppercase tracking-widest">
-                            Recorded at {viewState.timestamp}
-                        </p>
-                    </div>
-                </div>
-                <Button variant="outline" className="w-full h-12 border-white/10 hover:bg-white/5 hover:text-lsr-orange hover:border-lsr-orange/50 uppercase tracking-widest text-xs font-bold rounded-none transition-all" asChild>
-                    <Link href={`/events/${eventSlug}`}>Return to Event</Link>
-                </Button>
-            </div>
-        );
-    }
+  const backToEvent = (
+    <Button asChild className={secondary}>
+      <Link href={`/events/${eventSlug}`}>Event page</Link>
+    </Button>
+  );
 
-    // Handle "Not Enabled" - Neutral Info
-    if (status === "NOT_ENABLED") {
-        return (
-            <Card className="w-full max-w-md mx-auto border-white/10 bg-white/[0.02] rounded-none shadow-2xl">
-                <CardHeader className="text-center pb-2 pt-8">
-                    <div className="mx-auto bg-white/5 w-16 h-16 flex items-center justify-center mb-6 border border-white/10">
-                        <CalendarCheck className="w-8 h-8 text-white/40" />
-                    </div>
-                    <CardTitle className="text-2xl font-display font-black italic uppercase text-white tracking-tight">Check-in Not Required</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col items-center space-y-8 text-center p-8">
-                    <div className="space-y-4">
-                        <p className="text-white/60 text-sm leading-relaxed font-sans">
-                            Attendance check-in is not required for <br/>
-                            <span className="text-white font-bold uppercase tracking-wide">{eventTitle}</span>. 
-                        </p>
-                        <p className="text-white/40 text-xs uppercase tracking-widest">Your registration is sufficient.</p>
-                    </div>
-                    <Button variant="outline" className="w-full h-12 border-white/10 hover:bg-white/5 hover:text-white uppercase tracking-widest text-xs font-bold rounded-none" asChild>
-                        <Link href={`/events/${eventSlug}`}>Return to Event</Link>
-                    </Button>
-                </CardContent>
-            </Card>
-        );
-    }
-
-    // Handle "Not Open Yet" - Specific Time
-    if (status === "NOT_OPEN_YET") {
-        const openDate = opensAt ? new Date(opensAt) : null;
-        return (
-            <Card className="w-full max-w-md mx-auto border-white/10 bg-white/[0.02] rounded-none shadow-2xl">
-                <CardHeader className="text-center pb-2 pt-8">
-                    <div className="mx-auto bg-lsr-orange/10 w-16 h-16 flex items-center justify-center mb-6 border border-lsr-orange/20">
-                        <Clock className="w-8 h-8 text-lsr-orange" />
-                    </div>
-                    <CardTitle className="text-2xl font-display font-black italic uppercase text-white tracking-tight">Check-in Not Open</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col items-center space-y-8 text-center p-8">
-                    <div className="space-y-4 w-full">
-                        <p className="text-white/60 text-xs font-bold uppercase tracking-widest">Check-in opens at</p>
-                        {openDate && (
-                            <div className="bg-black/40 border border-white/10 p-4 w-full">
-                                <div className="text-3xl font-display font-black italic text-white">
-                                    {openDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                                </div>
-                                <div className="text-xs font-sans font-bold text-white/40 uppercase tracking-widest mt-1">
-                                    {openDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                    <Button variant="outline" className="w-full h-12 border-white/10 hover:bg-white/5 hover:text-white uppercase tracking-widest text-xs font-bold rounded-none" asChild>
-                        <Link href={`/events/${eventSlug}`}>Return to Event</Link>
-                    </Button>
-                </CardContent>
-            </Card>
-        );
-    }
-
-    // Handle "Closed"
-    if (status === "CLOSED") {
-        return (
-            <Card className="w-full max-w-md mx-auto border-white/10 bg-white/[0.02] rounded-none shadow-2xl">
-                <CardHeader className="text-center pb-2 pt-8">
-                    <div className="mx-auto bg-red-500/10 w-16 h-16 flex items-center justify-center mb-6 border border-red-500/20">
-                        <AlertCircle className="w-8 h-8 text-red-500" />
-                    </div>
-                    <CardTitle className="text-2xl font-display font-black italic uppercase text-white tracking-tight">Check-in Closed</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col items-center space-y-8 text-center p-8">
-                    <p className="text-white/60 text-sm leading-relaxed font-sans">
-                        Check-in for <span className="text-white font-bold">{eventTitle}</span> has ended. <br/>
-                        <span className="text-white/40 text-xs uppercase tracking-widest mt-2 block">Please see an officer for assistance.</span>
-                    </p>
-                    <Button variant="outline" className="w-full h-12 border-white/10 hover:bg-white/5 hover:text-white uppercase tracking-widest text-xs font-bold rounded-none" asChild>
-                        <Link href={`/events/${eventSlug}`}>Return to Event</Link>
-                    </Button>
-                </CardContent>
-            </Card>
-        );
-    }
-
-    // Default: OPEN
+  if (viewState.status === "SUCCESS") {
     return (
-        <Card className="w-full max-w-md mx-auto border-white/10 bg-white/[0.02] rounded-none shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-lsr-orange" />
-            <CardHeader className="text-center pt-8 pb-2">
-                <CardTitle className="text-3xl font-display font-black italic uppercase text-white tracking-tight leading-[0.9] mb-2">{eventTitle}</CardTitle>
-                <CardDescription className="uppercase tracking-[0.2em] text-[10px] font-bold text-lsr-orange mb-4">Event Check-In</CardDescription>
-                
-                <Link href={`/drivers/${currentUser.handle}`} className="flex items-center gap-3 bg-white/5 border border-white/5 p-3 hover:bg-white/10 hover:border-white/10 transition-all group mx-auto w-fit">
-                    <Avatar className="h-10 w-10 border border-white/10 group-hover:border-lsr-orange transition-colors rounded-none">
-                        <AvatarImage src={currentUser.avatarUrl || undefined} />
-                        <AvatarFallback className="bg-lsr-charcoal text-white/40 text-xs rounded-none">{currentUser.displayName[0]}</AvatarFallback>
-                    </Avatar>
-                    <div className="text-left">
-                        <div className="font-sans font-bold text-sm text-white group-hover:text-lsr-orange transition-colors leading-none mb-1">{currentUser.displayName}</div>
-                        <div className="text-[9px] text-white/40 uppercase tracking-widest leading-none">@{currentUser.handle}</div>
-                    </div>
-                </Link>
-            </CardHeader>
-            <CardContent className="flex flex-col items-center space-y-8 p-8">
-                <div className="text-center text-white/60 text-sm font-sans px-4 leading-relaxed">
-                    Confirm your attendance by tapping the button below.
-                </div>
-                
-                {viewState.status === "ERROR" && (
-                    <div className="w-full p-4 bg-red-500/10 border border-red-500/20 text-red-200 text-xs font-bold uppercase tracking-wide text-center flex items-center justify-center gap-2">
-                        <AlertCircle className="w-4 h-4" />
-                        {viewState.message}
-                    </div>
-                )}
-
-                <Button 
-                    size="lg" 
-                    className="w-full h-16 bg-lsr-orange hover:bg-lsr-orange/90 text-white uppercase tracking-widest font-bold text-sm rounded-none shadow-[0_0_20px_rgba(255,88,0,0.3)] transition-all hover:scale-[1.02]"
-                    onClick={handleCheckIn}
-                    disabled={viewState.status === "LOADING"}
-                >
-                    {viewState.status === "LOADING" ? (
-                        <>
-                            <Loader2 className="mr-3 h-5 w-5 animate-spin" />
-                            Checking In...
-                        </>
-                    ) : (
-                        "Check In Now"
-                    )}
-                </Button>
-                
-                <Button variant="ghost" className="text-white/30 hover:text-white uppercase tracking-widest text-[10px] font-bold" asChild>
-                    <Link href={`/events/${eventSlug}`}>Cancel</Link>
-                </Button>
-            </CardContent>
-        </Card>
+      <Panel tone="success" icon={<CheckCircle2 className="h-7 w-7" aria-hidden />} kicker={eventTitle} title="You're checked in">
+        <p className="font-sans text-sm leading-relaxed text-white/70" role="status">
+          Recorded at <span className="font-bold text-white">{viewState.timestamp}</span>. It counts toward your attendance on your driver page.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {backToEvent}
+          <Button asChild className="h-12 w-full rounded-none bg-lsr-orange font-sans text-[11px] font-bold uppercase tracking-[0.2em] text-white hover:bg-white hover:text-lsr-charcoal">
+            <Link href={`/drivers/${currentUser.handle}`}>Your driver page</Link>
+          </Button>
+        </div>
+      </Panel>
     );
+  }
+
+  if (status === "NOT_ENABLED") {
+    return (
+      <Panel icon={<CalendarCheck className="h-7 w-7" aria-hidden />} kicker={eventTitle} title="No check-in needed">
+        <p className="font-sans text-sm leading-relaxed text-white/70">This event doesn&apos;t use check-in. Your registration is all you need.</p>
+        {backToEvent}
+      </Panel>
+    );
+  }
+
+  if (status === "NOT_OPEN_YET") {
+    return (
+      <Panel tone="warn" icon={<Clock className="h-7 w-7" aria-hidden />} kicker={eventTitle} title="Not open yet">
+        {opensAt && (
+          <div className="border border-white/10 bg-black/30 p-5">
+            <p className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/50">Check-in opens</p>
+            <p className="mt-2 font-display font-black italic text-4xl leading-none text-white">{opensAt.time}</p>
+            <p className="mt-1 font-sans text-sm text-white/60">{opensAt.date}</p>
+          </div>
+        )}
+        <p className="font-sans text-sm text-white/60">Scan the code again once it&apos;s open.</p>
+        {backToEvent}
+      </Panel>
+    );
+  }
+
+  if (status === "CLOSED") {
+    return (
+      <Panel tone="error" icon={<AlertCircle className="h-7 w-7" aria-hidden />} kicker={eventTitle} title="Check-in closed">
+        <p className="font-sans text-sm leading-relaxed text-white/70">Check-in for this event has ended. If you were there, find an officer and they can add you.</p>
+        {backToEvent}
+      </Panel>
+    );
+  }
+
+  // OPEN
+  return (
+    <Panel icon={<CalendarCheck className="h-7 w-7 text-lsr-orange" aria-hidden />} kicker="Event check-in" title={eventTitle}>
+      <Link href={`/drivers/${currentUser.handle}`} className="group flex items-center gap-3 border border-white/10 bg-white/[0.03] p-3 transition-colors hover:border-white/25">
+        <span className="relative h-11 w-11 shrink-0 overflow-hidden border border-white/10 bg-black">
+          {currentUser.avatarUrl ? (
+            <Image src={currentUser.avatarUrl} alt="" fill sizes="44px" className="object-cover" />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center font-display font-black italic text-white/40">{currentUser.displayName[0]}</span>
+          )}
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate font-sans font-bold text-sm text-white group-hover:text-lsr-orange">{currentUser.displayName}</span>
+          <span className="block truncate font-sans text-xs text-white/50">Checking in as @{currentUser.handle}</span>
+        </span>
+      </Link>
+
+      {viewState.status === "ERROR" && (
+        <div role="alert" className="flex items-start gap-3 border border-red-500/30 bg-red-500/10 px-4 py-3 font-sans text-sm text-red-200">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          {viewState.message}
+        </div>
+      )}
+
+      <Button
+        size="lg"
+        className="h-16 w-full rounded-none bg-lsr-orange font-sans text-sm font-bold uppercase tracking-[0.2em] text-white shadow-[0_0_30px_rgba(255,128,0,0.25)] hover:bg-white hover:text-lsr-charcoal"
+        onClick={handleCheckIn}
+        disabled={viewState.status === "LOADING"}
+      >
+        {viewState.status === "LOADING" ? (
+          <>
+            <Loader2 className="mr-3 h-5 w-5 animate-spin" />
+            Checking in…
+          </>
+        ) : (
+          "Check in"
+        )}
+      </Button>
+
+      <Link href={`/events/${eventSlug}`} className="block text-center font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/45 hover:text-white">
+        Not now
+      </Link>
+    </Panel>
+  );
 }
