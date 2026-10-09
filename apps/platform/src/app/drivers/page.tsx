@@ -6,6 +6,7 @@ import { ArrowDown, ArrowRight, Flag, Pencil, Trophy, UserPlus, UserRound } from
 import { Button } from "@/components/ui/button";
 import { CloudinaryImage } from "@/components/cloudinary-image";
 import { DatabaseUnavailable } from "@/components/database-unavailable";
+import { EventPhotoBand } from "@/components/event-photo-band";
 import { RacingNumber } from "@/components/racing-number";
 import { StatusIcons } from "@/components/status-indicators";
 import { getStatusIndicators } from "@/lib/status-indicators";
@@ -33,6 +34,8 @@ const ghostButton =
   "h-12 rounded-none border border-white/20 bg-lsr-charcoal/40 px-5 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal";
 const primaryButton =
   "h-12 rounded-none bg-lsr-orange px-7 font-sans text-xs font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal";
+
+const RACE_PHOTO_SIZES = "(min-width: 1152px) 560px, (min-width: 768px) 50vw, 100vw";
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
@@ -229,23 +232,6 @@ function StandingsRows({ drivers }: { drivers: RosterDriver[] }) {
   );
 }
 
-/** The event's own photo across the top of a race card, when it has one */
-function RaceImage({ src }: { src: string | null }) {
-  if (!src) return null;
-  return (
-    <div className="relative -mx-6 -mt-6 mb-6 h-36 overflow-hidden border-b border-white/10 md:-mx-8 md:-mt-8 md:h-44">
-      <Image
-        src={src}
-        alt=""
-        fill
-        sizes="(min-width: 1152px) 560px, (min-width: 768px) 50vw, 100vw"
-        className="object-cover opacity-75 transition-transform duration-700 group-hover:scale-105"
-      />
-      <div className="absolute inset-0 bg-gradient-to-t from-lsr-charcoal/80 to-transparent" />
-    </div>
-  );
-}
-
 function LatestResultCard({ event }: { event: RosterData["latestResult"] }) {
   if (!event) {
     return (
@@ -267,7 +253,7 @@ function LatestResultCard({ event }: { event: RosterData["latestResult"] }) {
   return (
     <div className="group relative flex flex-col overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-8">
       <div className="absolute top-0 left-0 z-10 h-1 w-24 bg-lsr-orange" />
-      <RaceImage src={event.heroImageUrl} />
+      <EventPhotoBand src={event.heroImageUrl} sizes={RACE_PHOTO_SIZES} />
       <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">
         Latest result · {date}
       </p>
@@ -313,7 +299,7 @@ function NextRaceCard({ event }: { event: RosterData["nextRace"] }) {
     <div className="group relative flex flex-col overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-8">
       <div className="absolute top-0 left-0 z-10 h-1 w-24 bg-lsr-orange" />
       <Flag aria-hidden className="pointer-events-none absolute -bottom-6 -right-6 h-40 w-40 -rotate-12 text-white/[0.03]" />
-      <RaceImage src={event?.heroImageUrl ?? null} />
+      <EventPhotoBand src={event?.heroImageUrl ?? null} sizes={RACE_PHOTO_SIZES} />
       <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">Next race</p>
       {event && heading ? (
         <>

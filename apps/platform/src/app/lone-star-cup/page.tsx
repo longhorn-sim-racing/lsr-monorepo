@@ -11,6 +11,7 @@ import { prisma } from "@/server/db";
 import { DatabaseUnavailable } from "@/components/database-unavailable";
 import { ChampionshipChart } from "@/components/championship-chart";
 import { CloudinaryImage } from "@/components/cloudinary-image";
+import { EventPhotoBand } from "@/components/event-photo-band";
 import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { getActiveEntitlements } from "@/server/repos/membership.repo";
 import { priceForUser, productRequiresMembership } from "@/server/services/product-pricing";
@@ -509,78 +510,94 @@ export default async function LoneStarCupPage() {
         {/* Next and last round */}
         <section className="grid gap-4 md:gap-6 md:grid-cols-[3fr_2fr]">
           <div className="relative overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-10">
-            <div className="absolute top-0 left-0 h-1 w-24 bg-lsr-orange" />
-            {next ? (
-              <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">
-                    {nextLive ? "Racing now" : "Next round"}
-                  </p>
-                  {next.night && (
-                    <span className="inline-flex items-center gap-1 bg-white/10 px-2 py-0.5 font-sans font-bold text-[9px] uppercase tracking-[0.2em] text-white/80">
-                      <Moon className="h-3 w-3" /> {next.note}
-                    </span>
-                  )}
-                  {next.final && (
-                    <span className="inline-flex items-center gap-1 bg-lsr-orange px-2 py-0.5 font-sans font-bold text-[9px] uppercase tracking-[0.2em] text-white">
-                      <Flag className="h-3 w-3" /> Finale
-                    </span>
-                  )}
-                </div>
-                <div className="mt-5 flex items-end gap-5">
-                  <span className="font-display font-black italic text-7xl md:text-9xl leading-[0.8] text-white/10">
-                    {next.final ? "FIN" : next.number!.padStart(2, "0")}
-                  </span>
-                  <h2 className="font-display font-black italic text-4xl md:text-6xl uppercase leading-[0.9]">{next.track}</h2>
-                </div>
-                {(() => {
-                  const d = roundDate(next.event.startsAtUtc, next.event.timezone || DEFAULT_TIMEZONE);
-                  return (
-                    <p className="mt-6 font-sans text-base md:text-lg text-white/75">
-                      {d.day} at <span className="font-bold text-white">{d.time}</span>
-                    </p>
-                  );
-                })()}
-                <div className="mt-8 flex flex-wrap items-center gap-x-8 gap-y-3">
-                  <Link
-                    href={`/events/${next.event.slug}`}
-                    className="group inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white hover:text-lsr-orange transition-colors"
-                  >
-                    Event details
-                    <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
-                  </Link>
-                  <a
-                    href={watchUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange hover:text-white transition-colors"
-                  >
-                    <BrandIcon icon={siTwitch} label="" className="h-3.5 w-3.5" />
-                    {nextLive ? "Watch live on Twitch" : "Streams on Twitch"}
-                    <ArrowUpRight className="h-3 w-3" />
-                  </a>
-                </div>
-              </>
-            ) : rounds.length === 0 ? (
-              <>
-                <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Coming up</p>
-                <h2 className="mt-5 font-display font-black italic text-4xl md:text-6xl uppercase leading-[0.9]">
-                  {label} <span className="text-lsr-orange">is coming</span>
-                </h2>
-                <p className="mt-6 font-sans text-base text-white/65">The schedule goes up here once the rounds are set. Watch Discord for dates.</p>
-              </>
-            ) : (
-              <>
-                <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Season complete</p>
-                <h2 className="mt-5 font-display font-black italic text-4xl md:text-6xl uppercase leading-[0.9]">
-                  See you <span className="text-lsr-orange">next season</span>
-                </h2>
-                <p className="mt-6 font-sans text-base text-white/65">Final standings are below. Watch Discord for the next season&apos;s dates.</p>
-              </>
+            {next?.event.heroImageUrl && (
+              <div className="absolute inset-0">
+                <Image
+                  src={next.event.heroImageUrl}
+                  alt=""
+                  fill
+                  sizes="(min-width: 1152px) 660px, (min-width: 768px) 60vw, 100vw"
+                  className="object-cover opacity-50"
+                />
+                <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal via-lsr-charcoal/75 to-lsr-charcoal/10" />
+                <div className="absolute inset-0 bg-gradient-to-t from-lsr-charcoal/70 to-transparent" />
+              </div>
             )}
+            <div className="absolute top-0 left-0 z-10 h-1 w-24 bg-lsr-orange" />
+            <div className="relative">
+              {next ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">
+                      {nextLive ? "Racing now" : "Next round"}
+                    </p>
+                    {next.night && (
+                      <span className="inline-flex items-center gap-1 bg-white/10 px-2 py-0.5 font-sans font-bold text-[9px] uppercase tracking-[0.2em] text-white/80">
+                        <Moon className="h-3 w-3" /> {next.note}
+                      </span>
+                    )}
+                    {next.final && (
+                      <span className="inline-flex items-center gap-1 bg-lsr-orange px-2 py-0.5 font-sans font-bold text-[9px] uppercase tracking-[0.2em] text-white">
+                        <Flag className="h-3 w-3" /> Finale
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-5 flex items-end gap-5">
+                    <span className="font-display font-black italic text-7xl md:text-9xl leading-[0.8] text-white/10">
+                      {next.final ? "FIN" : next.number!.padStart(2, "0")}
+                    </span>
+                    <h2 className="font-display font-black italic text-4xl md:text-6xl uppercase leading-[0.9]">{next.track}</h2>
+                  </div>
+                  {(() => {
+                    const d = roundDate(next.event.startsAtUtc, next.event.timezone || DEFAULT_TIMEZONE);
+                    return (
+                      <p className="mt-6 font-sans text-base md:text-lg text-white/75">
+                        {d.day} at <span className="font-bold text-white">{d.time}</span>
+                      </p>
+                    );
+                  })()}
+                  <div className="mt-8 flex flex-wrap items-center gap-x-8 gap-y-3">
+                    <Link
+                      href={`/events/${next.event.slug}`}
+                      className="group inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white hover:text-lsr-orange transition-colors"
+                    >
+                      Event details
+                      <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+                    </Link>
+                    <a
+                      href={watchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange hover:text-white transition-colors"
+                    >
+                      <BrandIcon icon={siTwitch} label="" className="h-3.5 w-3.5" />
+                      {nextLive ? "Watch live on Twitch" : "Streams on Twitch"}
+                      <ArrowUpRight className="h-3 w-3" />
+                    </a>
+                  </div>
+                </>
+              ) : rounds.length === 0 ? (
+                <>
+                  <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Coming up</p>
+                  <h2 className="mt-5 font-display font-black italic text-4xl md:text-6xl uppercase leading-[0.9]">
+                    {label} <span className="text-lsr-orange">is coming</span>
+                  </h2>
+                  <p className="mt-6 font-sans text-base text-white/65">The schedule goes up here once the rounds are set. Watch Discord for dates.</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Season complete</p>
+                  <h2 className="mt-5 font-display font-black italic text-4xl md:text-6xl uppercase leading-[0.9]">
+                    See you <span className="text-lsr-orange">next season</span>
+                  </h2>
+                  <p className="mt-6 font-sans text-base text-white/65">Final standings are below. Watch Discord for the next season&apos;s dates.</p>
+                </>
+              )}
+            </div>
           </div>
 
-          <div className="border border-white/10 bg-white/[0.02] p-6 md:p-8 flex flex-col">
+          <div className="group relative overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-8 flex flex-col">
+            <EventPhotoBand src={last?.event.heroImageUrl ?? null} sizes="(min-width: 1152px) 440px, (min-width: 768px) 40vw, 100vw" />
             <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">Last round</p>
             {last ? (
               <>
@@ -629,7 +646,7 @@ export default async function LoneStarCupPage() {
                 <li key={round.event.id}>
                   <Link
                     href={`/events/${round.event.slug}`}
-                    className={`group relative flex h-full min-h-[150px] flex-col border p-4 transition-colors ${
+                    className={`group relative flex h-full min-h-[150px] flex-col overflow-hidden border p-4 transition-colors ${
                       isNext
                         ? "border-lsr-orange/70 bg-lsr-orange/[0.08]"
                         : done
@@ -637,17 +654,32 @@ export default async function LoneStarCupPage() {
                           : "border-white/10 bg-white/[0.03] hover:border-lsr-orange/50"
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className={`font-display font-black italic text-3xl leading-none ${isNext ? "text-lsr-orange" : done ? "text-white/20" : "text-white/40"}`}>
-                        {round.short}
-                      </span>
-                      {done ? (
-                        <Check className="h-4 w-4 text-white/30" role="img" aria-label="Done" />
-                      ) : round.night ? (
-                        <Moon className="h-4 w-4 text-white/60" role="img" aria-label="Night race" />
-                      ) : round.final ? (
-                        <Flag className="h-4 w-4 text-lsr-orange" role="img" aria-label="Finale" />
-                      ) : null}
+                    {round.event.heroImageUrl && (
+                      <>
+                        <Image
+                          src={round.event.heroImageUrl}
+                          alt=""
+                          fill
+                          sizes="(min-width: 1024px) 220px, (min-width: 640px) 33vw, 50vw"
+                          className={`object-cover transition-opacity duration-500 ${
+                            done ? "opacity-15 grayscale group-hover:opacity-30" : isNext ? "opacity-45" : "opacity-30 group-hover:opacity-50"
+                          }`}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-lsr-charcoal via-lsr-charcoal/60 to-lsr-charcoal/10" />
+                      </>
+                    )}
+                    <div className="relative flex flex-1 flex-col">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className={`font-display font-black italic text-3xl leading-none ${isNext ? "text-lsr-orange" : done ? "text-white/20" : "text-white/40"}`}>
+                          {round.short}
+                        </span>
+                        {done ? (
+                          <Check className="h-4 w-4 text-white/30" role="img" aria-label="Done" />
+                        ) : round.night ? (
+                          <Moon className="h-4 w-4 text-white/60" role="img" aria-label="Night race" />
+                        ) : round.final ? (
+                          <Flag className="h-4 w-4 text-lsr-orange" role="img" aria-label="Finale" />
+                        ) : null}
                     </div>
                     <p className={`mt-3 font-sans font-bold text-sm uppercase tracking-tight leading-tight ${done ? "text-white/55" : "text-white"} group-hover:text-lsr-orange transition-colors`}>
                       {round.track}
@@ -664,6 +696,7 @@ export default async function LoneStarCupPage() {
                       ) : round.note ? (
                         <p className="font-sans font-bold text-[9px] uppercase tracking-[0.15em] text-white/50">{round.note}</p>
                       ) : null}
+                    </div>
                     </div>
                   </Link>
                 </li>
