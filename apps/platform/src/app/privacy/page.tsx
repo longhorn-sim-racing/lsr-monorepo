@@ -1,5 +1,5 @@
-import Link from "next/link"
 import { Metadata } from "next"
+import { LegalPage } from "@/components/legal-page"
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
@@ -74,41 +74,17 @@ const toc: { id: string; label: string }[] = [
 
 export default function PrivacyPage() {
   return (
-    <div className="bg-lsr-charcoal text-white min-h-screen">
-      <div className="mx-auto max-w-4xl px-6 md:px-8 py-20 md:py-28">
-        <h1 className="font-display font-black italic text-5xl md:text-7xl text-white uppercase tracking-normal leading-[0.9] mb-6">
+    <LegalPage
+      title={
+        <>
           Privacy <span className="text-lsr-orange">Policy</span>
-        </h1>
-
-        <div className="flex flex-wrap gap-x-8 gap-y-1 text-[11px] font-bold uppercase tracking-[0.2em] text-white/40 mb-12">
-          <span>
-            Effective: <span className="text-white/70">{EFFECTIVE_DATE}</span>
-          </span>
-          <span>
-            Last Updated: <span className="text-white/70">{LAST_UPDATED}</span>
-          </span>
-        </div>
-
-        <div className="border border-white/10 bg-white/[0.02] p-6 md:p-8 mb-16">
-          <h2 className="font-sans font-black text-[11px] uppercase tracking-[0.25em] text-lsr-orange mb-4">
-            Contents
-          </h2>
-          <nav>
-            <ol className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2 text-sm text-white/70">
-              {toc.map((entry) => (
-                <li key={entry.id}>
-                  <a
-                    href={`#${entry.id}`}
-                    className="hover:text-lsr-orange transition-colors"
-                  >
-                    {entry.label}
-                  </a>
-                </li>
-              ))}
-            </ol>
-          </nav>
-        </div>
-
+        </>
+      }
+      effective={EFFECTIVE_DATE}
+      updated={LAST_UPDATED}
+      toc={toc}
+      related={{ href: "/terms", label: "Terms of Service" }}
+    >
         <div className="space-y-14">
           <Section id="intro" title="1. Introduction">
             <P>
@@ -744,16 +720,6 @@ export default function PrivacyPage() {
             </P>
           </Section>
         </div>
-
-        <div className="mt-20 pt-8 border-t border-white/10 flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.2em] text-white/40">
-          <span>
-            Last Updated: <span className="text-white/70">{LAST_UPDATED}</span>
-          </span>
-          <Link href="/terms" className="text-lsr-orange hover:text-white transition-colors">
-            Terms of Service &rarr;
-          </Link>
-        </div>
-      </div>
-    </div>
+    </LegalPage>
   )
 }
