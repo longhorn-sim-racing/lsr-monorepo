@@ -213,10 +213,10 @@ export default async function Home() {
               Established 2025 · UT Austin
             </p>
             {/* Two lines on phones; one full-width line on desktop */}
-            <h1 className="mt-7 font-display font-black italic uppercase tracking-normal leading-[0.85] text-white text-[clamp(2.75rem,15vw,4.5rem)] sm:text-7xl md:text-8xl lg:whitespace-nowrap lg:text-[5.25rem] xl:text-8xl drop-shadow-[0_4px_24px_rgba(0,0,0,0.6)]">
+            <h1 className="mt-7 font-display font-black italic uppercase tracking-normal leading-[0.85] text-white text-[clamp(2.75rem,15vw,4.5rem)] sm:text-7xl md:text-8xl lg:whitespace-nowrap lg:text-[5rem] xl:text-8xl drop-shadow-[0_4px_24px_rgba(0,0,0,0.6)]">
               <span className="block lg:inline">Longhorn</span> <span className="block lg:inline">Sim Racing</span>
             </h1>
-            <p className="mt-5 font-sans font-bold text-[11px] md:text-sm uppercase tracking-[0.35em] text-white/70 drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)] lg:mt-7 lg:mr-[-0.6em] lg:text-xl lg:tracking-[0.6em] lg:text-white/85">
+            <p className="mt-5 font-sans font-bold text-[11px] md:text-sm uppercase tracking-[0.35em] text-white/70 [text-shadow:0_1px_3px_rgba(0,0,0,0.9),0_0_14px_rgba(0,0,0,0.7)] lg:mt-7 lg:mr-[-0.6em] lg:text-xl lg:tracking-[0.6em] lg:text-white/85">
               University of Texas at Austin
             </p>
             <div className="mt-10 flex flex-wrap gap-3 lg:mt-12 lg:justify-center">
@@ -504,7 +504,7 @@ export default async function Home() {
               className="group mt-7 inline-flex w-fit items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/70 hover:text-lsr-orange transition-colors"
             >
               <Play className="h-3.5 w-3.5" />
-              Watch with sound on YouTube
+              Watch on YouTube
               <ArrowUpRight className="h-3 w-3" />
             </a>
           </div>
@@ -549,7 +549,7 @@ export default async function Home() {
                   <span className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2.5 pt-8">
                     <span className="truncate font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/85">{photo.albumTitle}</span>
                     {photo.creditName && (
-                      <span className="inline-flex shrink-0 items-center gap-1 font-sans text-[10px] text-white/60">
+                      <span className="hidden min-w-0 max-w-[50%] items-center gap-1 truncate font-sans text-[10px] text-white/60 sm:inline-flex">
                         <Camera className="h-3 w-3" aria-hidden />
                         {photo.creditName}
                       </span>

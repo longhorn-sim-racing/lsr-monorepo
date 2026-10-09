@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import { Play } from "lucide-react"
 
@@ -12,10 +12,17 @@ export function HotlapVideo({ videoId, title }: { videoId: string; title: string
   const [playing, setPlaying] = useState(false)
   // The 16:9 thumbnail, falling back to the 4:3 one (letterboxed) for videos without an HD frame
   const [thumb, setThumb] = useState("hq720")
+  const player = useRef<HTMLIFrameElement>(null)
+
+  // The button goes away when the video starts, so keyboard focus moves to the player
+  useEffect(() => {
+    if (playing) player.current?.focus()
+  }, [playing])
 
   if (playing) {
     return (
       <iframe
+        ref={player}
         src={`https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&playsinline=1&rel=0`}
         title={title}
         allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
@@ -32,6 +39,8 @@ export function HotlapVideo({ videoId, title }: { videoId: string; title: string
         alt=""
         fill
         unoptimized
+        // A missing HD frame comes back as a 120×90 placeholder rather than an error
+        onLoad={(e) => e.currentTarget.naturalWidth <= 120 && setThumb("hqdefault")}
         onError={() => setThumb("hqdefault")}
         className="object-cover opacity-75 transition-opacity duration-500 group-hover:opacity-100"
       />
