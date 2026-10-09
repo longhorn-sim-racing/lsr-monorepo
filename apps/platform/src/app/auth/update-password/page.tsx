@@ -1,143 +1,145 @@
 "use client"
 
 import { useEffect, useState, useTransition } from "react"
-import { createSupabaseBrowser } from "@/lib/supabase-browser"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { AuthChangeEvent, Session } from "@supabase/supabase-js"
+import { Loader2 } from "lucide-react"
+import { createSupabaseBrowser } from "@/lib/supabase-browser"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { AuthChangeEvent, Session } from "@supabase/supabase-js"
+import { AuthNotice } from "@/components/auth/auth-forms"
+import { authInput, authLabel, authSubmit } from "@/components/auth/auth-styles"
+import { AuthShell } from "../auth-shell"
 
 // Helper to decode JWT payload safely on client
 function decodeJwtPayload(token: string) {
   try {
-    const base64Url = token.split('.')[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
-        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-    }).join(''));
-    return JSON.parse(jsonPayload);
-  } catch (e) {
-    return null;
+    const base64Url = token.split(".")[1]
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/")
+    const jsonPayload = decodeURIComponent(
+      window
+        .atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join(""),
+    )
+    return JSON.parse(jsonPayload)
+  } catch {
+    return null
   }
 }
+
+/** How long to wait for the reset link's session before calling the link expired */
+const LINK_TIMEOUT_MS = 6000
 
 export default function UpdatePasswordPage() {
   const [password, setPassword] = useState("")
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState("")
-  const [isAllowed, setIsAllowed] = useState(false)
-  
+  const [state, setState] = useState<"checking" | "allowed" | "expired" | "done">("checking")
   const router = useRouter()
-  const supabase = createSupabaseBrowser()
 
   useEffect(() => {
-    // Shared verification logic
+    const supabase = createSupabaseBrowser()
+    // Only a session that came from a reset link may set a new password here
     const checkSession = (session: Session | null) => {
-      if (!session) return;
-
-      // 1. Try checking the 'amr' claim directly from the token if possible
-      const payload = session.access_token ? decodeJwtPayload(session.access_token) : null;
-      const amr = payload?.amr || [];
-      const isRecovery = amr.some((m: any) => m.method === 'recovery');
-
-      if (isRecovery) {
-        setIsAllowed(true)
-      } else {
-        // If logged in but NOT via recovery, redirect.
-        router.replace("/")
-      }
+      if (!session) return
+      const payload = session.access_token ? decodeJwtPayload(session.access_token) : null
+      const amr = payload?.amr || []
+      const isRecovery = amr.some((m: { method?: string }) => m.method === "recovery")
+      if (isRecovery) setState("allowed")
+      else router.replace("/")
     }
 
-    // Check initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-         checkSession(session);
-      } else {
-         // No session at all? likely wait for auth state change or redirect?
-         // We'll let the onAuthStateChange handle the 'no session' case or eventual sign in.
-      }
-    });
-
-    // Listen for auth state changes.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        setIsAllowed(true)
-      } 
-      else if (event === 'SIGNED_IN' && session) {
-        checkSession(session);
-      } 
-      else if (event === 'SIGNED_OUT') {
-         router.replace("/")
-      }
+      if (session) checkSession(session)
     })
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
+      if (event === "PASSWORD_RECOVERY") setState("allowed")
+      else if (event === "SIGNED_IN" && session) checkSession(session)
+      else if (event === "SIGNED_OUT") router.replace("/")
+    })
+
+    // Supabase says so in the URL when the link was already used or has expired
+    const params = new URLSearchParams(window.location.search + "&" + window.location.hash.slice(1))
+    if (params.get("error_code") || params.get("error")) setState((s) => (s === "checking" ? "expired" : s))
+
+    // No recovery session arriving means the link was used, expired, or opened without one
+    const timeout = window.setTimeout(() => setState((s) => (s === "checking" ? "expired" : s)), LINK_TIMEOUT_MS)
 
     return () => {
       subscription.unsubscribe()
+      window.clearTimeout(timeout)
     }
-  }, [router, supabase])
+  }, [router])
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError("")
     startTransition(async () => {
+      const supabase = createSupabaseBrowser()
       const { error } = await supabase.auth.updateUser({ password })
-
-      if (error) {
-        setError(error.message)
-      } else {
-        alert("Password updated successfully!")
-        router.push("/")
-      }
+      if (error) return setError(error.message)
+      setState("done")
+      window.setTimeout(() => router.push("/"), 1800)
     })
   }
 
-  if (!isAllowed) {
-    return (
-      <div className="flex h-screen w-full items-center justify-center">
-        <p className="text-muted-foreground animate-pulse">Verifying access...</p>
-      </div>
-    )
-  }
-
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center bg-lsr-charcoal text-white">
-      <div className="mx-auto flex w-full flex-col justify-center space-y-8 sm:w-[450px] border border-white/5 bg-white/[0.03] p-10 rounded-none shadow-2xl relative overflow-hidden">
-        {/* Top accent line */}
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-lsr-orange to-transparent opacity-50" />
+    <AuthShell
+      kicker="Account help"
+      title={
+        <>
+          Set a new <span className="text-lsr-orange">password</span>
+        </>
+      }
+      intro={state === "allowed" ? "Choose something you don't use anywhere else." : undefined}
+    >
+      {state === "checking" && (
+        <p className="flex items-center gap-3 font-sans text-sm text-white/60" role="status">
+          <Loader2 className="h-4 w-4 animate-spin text-lsr-orange" aria-hidden />
+          Checking your reset link…
+        </p>
+      )}
 
-        <div className="flex flex-col space-y-4 text-center">
-          <h1 className="font-display font-black italic text-3xl text-white uppercase tracking-normal">
-            Reset <span className="text-lsr-orange">Password</span>
-          </h1>
-          <p className="font-sans text-sm text-white/50 leading-relaxed px-4">
-            Enter your new password below. Make it secure.
-          </p>
+      {state === "expired" && (
+        <div className="space-y-5">
+          <AuthNotice tone="error">This reset link has expired or was already used. Request a new one and open it on this device.</AuthNotice>
+          <Button asChild className={authSubmit}>
+            <Link href="/auth/forgot-password">Send a new link</Link>
+          </Button>
         </div>
+      )}
 
-        <form onSubmit={onSubmit} className="grid gap-6">
-          <div className="grid gap-2">
-            <Label htmlFor="password" className="font-sans font-bold text-[10px] text-white/40 uppercase tracking-[0.2em] pl-1">New Password</Label>
+      {state === "done" && <AuthNotice tone="success">Password updated. Taking you home…</AuthNotice>}
+
+      {state === "allowed" && (
+        <form onSubmit={onSubmit} className="space-y-5">
+          <div className="space-y-2">
+            <Label htmlFor="password" className={authLabel}>New password</Label>
             <Input
               id="password"
               type="password"
+              autoComplete="new-password"
+              minLength={6}
               disabled={pending}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="rounded-none bg-white/5 border-white/10 text-white placeholder:text-white/20 focus-visible:ring-1 focus-visible:ring-lsr-orange focus-visible:border-lsr-orange h-12"
+              className={authInput}
             />
           </div>
-          {error && (
-            <div className="text-sm text-red-500 font-bold uppercase tracking-wide">
-              {error}
-            </div>
-          )}
-          <Button disabled={pending} className="rounded-none bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal font-bold uppercase tracking-widest h-12 transition-all">
-            {pending ? "Updating..." : "Update Password"}
+          {error && <AuthNotice tone="error">{error}</AuthNotice>}
+          <Button disabled={pending} className={authSubmit}>
+            {pending ? "Saving…" : "Save new password"}
           </Button>
         </form>
-      </div>
-    </div>
+      )}
+    </AuthShell>
   )
 }

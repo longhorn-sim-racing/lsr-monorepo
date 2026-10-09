@@ -124,12 +124,12 @@ export function MobileStickyAddToCart({
               className={cn(
                 "flex-1 max-w-xs h-12 font-black uppercase tracking-[0.15em] text-sm transition-all flex items-center justify-center gap-2",
                 availableForSale
-                  ? "bg-white text-lsr-charcoal hover:bg-lsr-orange hover:text-white"
+                  ? "bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal"
                   : "bg-white/10 text-white/40 cursor-not-allowed"
               )}
             >
               {isUpdating && <Loader2 className="h-4 w-4 animate-spin" />}
-              {!availableForSale ? "Sold Out" : isUpdating ? "Adding..." : "Add to Cart"}
+              {!availableForSale ? "Sold out" : isUpdating ? "Adding…" : "Add to cart"}
             </button>
         )}
       </div>

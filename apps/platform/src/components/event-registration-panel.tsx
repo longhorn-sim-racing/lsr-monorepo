@@ -30,7 +30,16 @@ type RegistrationSnapshot = {
   registrationFeeCents: number | null;
 };
 
-export function EventRegistrationPanel({ eventSlug, userLoggedIn }: { eventSlug: string; userLoggedIn: boolean }) {
+export function EventRegistrationPanel({
+  eventSlug,
+  userLoggedIn,
+  attendeesOnly = false,
+}: {
+  eventSlug: string;
+  userLoggedIn: boolean;
+  /** Just the drivers list, for events that are over */
+  attendeesOnly?: boolean;
+}) {
   const [snapshot, setSnapshot] = useState<RegistrationSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -115,10 +124,41 @@ export function EventRegistrationPanel({ eventSlug, userLoggedIn }: { eventSlug:
   };
 
   if (loading && !snapshot) {
+    if (attendeesOnly) return null;
     return <div className="pt-6 border-t border-white/10 text-center text-white/40 text-xs animate-pulse">Loading registration...</div>;
   }
 
   if (!snapshot) return null;
+
+  const attendeeList = snapshot.attendees.length > 0 && (
+    <div className="pt-6 border-t border-white/10">
+        <h3 className="font-sans font-black text-xs uppercase tracking-[0.2em] text-white/30 mb-4">
+            Drivers List ({snapshot.attendees.length})
+        </h3>
+        <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+            {snapshot.attendees.map((attendee, idx) => (
+                <Link
+                    key={idx}
+                    href={attendee.profileLink}
+                    className="flex items-center gap-3 p-2 hover:bg-white/5 transition-colors group border border-transparent hover:border-white/5"
+                >
+                    <Avatar className="h-6 w-6 border border-white/10 group-hover:border-lsr-orange/50 transition-colors rounded-none">
+                        <AvatarImage src={attendee.avatarUrl || undefined} className="rounded-none" />
+                        <AvatarFallback className="text-[9px] bg-white/10 text-white rounded-none">
+                            {attendee.displayName[0]}
+                        </AvatarFallback>
+                    </Avatar>
+                    <span className="text-xs font-bold text-white/70 group-hover:text-white transition-colors truncate">
+                        {attendee.displayName}
+                    </span>
+                    <RacingNumber user={attendee} size="xs" className="text-xs shrink-0" />
+                </Link>
+            ))}
+        </div>
+    </div>
+  );
+
+  if (attendeesOnly) return attendeeList || null;
 
   if (snapshot.windowStatus === "DISABLED") {
     return (
@@ -237,33 +277,7 @@ export function EventRegistrationPanel({ eventSlug, userLoggedIn }: { eventSlug:
       </div>
 
       {/* ATTENDEE LIST */}
-      {snapshot.attendees.length > 0 && (
-        <div className="pt-6 border-t border-white/10">
-            <h3 className="font-sans font-black text-xs uppercase tracking-[0.2em] text-white/30 mb-4">
-                Drivers List ({snapshot.attendees.length})
-            </h3>
-            <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-                {snapshot.attendees.map((attendee, idx) => (
-                    <Link 
-                        key={idx} 
-                        href={attendee.profileLink}
-                        className="flex items-center gap-3 p-2 hover:bg-white/5 transition-colors group border border-transparent hover:border-white/5"
-                    >
-                        <Avatar className="h-6 w-6 border border-white/10 group-hover:border-lsr-orange/50 transition-colors rounded-none">
-                            <AvatarImage src={attendee.avatarUrl || undefined} className="rounded-none" />
-                            <AvatarFallback className="text-[9px] bg-white/10 text-white rounded-none">
-                                {attendee.displayName[0]}
-                            </AvatarFallback>
-                        </Avatar>
-                        <span className="text-xs font-bold text-white/70 group-hover:text-white transition-colors truncate">
-                            {attendee.displayName}
-                        </span>
-                        <RacingNumber user={attendee} size="xs" className="text-xs shrink-0" />
-                    </Link>
-                ))}
-            </div>
-        </div>
-      )}
+      {attendeeList}
     </div>
   );
 }

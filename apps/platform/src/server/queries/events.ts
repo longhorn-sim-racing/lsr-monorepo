@@ -1,5 +1,4 @@
 import { cache } from 'react';
-import { prisma } from "@/server/db";
 import {
   listAllEvents,
   listAllEventsForAdmin,
@@ -38,30 +37,4 @@ export const getNextEventForHomepage = cache(async () => {
   // The first event in the sorted list is the featured one.
   // It's either live or the next upcoming.
   return upcoming.slice(0, 5);
-});
-
-export const getUpcomingRegistrations = cache(async (userId: string) => {
-  const now = new Date();
-  return await prisma.eventRegistration.findMany({
-    where: {
-      userId,
-      status: { not: "NOT_ATTENDING" },
-      event: {
-        startsAtUtc: { gte: now },
-      },
-    },
-    include: {
-      event: {
-        include: {
-          series: true,
-          venue: true,
-        },
-      },
-    },
-    orderBy: {
-      event: {
-        startsAtUtc: 'asc',
-      },
-    },
-  });
 });

@@ -33,7 +33,12 @@ export function GoogleButton({ next }: { next?: string }) {
   };
 
   return (
-    <Button onClick={handle} className="w-full" variant="outline">
+    <Button
+      type="button"
+      onClick={handle}
+      variant="outline"
+      className="h-11 w-full rounded-none border-white/15 bg-white/[0.04] font-sans text-sm font-bold text-white hover:border-white/40 hover:bg-white/10 hover:text-white"
+    >
       <GoogleIcon className="mr-2 h-4 w-4" />
       Continue with Google
     </Button>

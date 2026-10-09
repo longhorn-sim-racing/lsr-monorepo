@@ -2,8 +2,9 @@ import { redirect } from "next/navigation";
 import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { prisma } from "@/server/db";
 import { NotificationList } from "./notification-list";
-import { Bell, ArrowLeft } from "lucide-react";
+import { Bell } from "lucide-react";
 import Link from "next/link";
+import { AccountHeader } from "../account-header";
 
 export const dynamic = "force-dynamic";
 
@@ -54,33 +55,27 @@ export default async function NotificationsPage({
   const totalPages = Math.ceil(totalCount / pageSize);
 
   return (
-    <div className="bg-lsr-charcoal text-white min-h-screen pt-20 pb-20">
-      <div className="mx-auto max-w-4xl px-6 md:px-8 space-y-8">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
+      <AccountHeader user={user} active="notifications" kicker="Your account" />
+      <div className="mx-auto max-w-5xl px-6 md:px-8 py-12 md:py-16 space-y-8">
         <div>
-          <Link
-            href="/account"
-            className="inline-flex items-center gap-2 text-white/50 hover:text-lsr-orange transition-colors text-sm mb-6"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Account
-          </Link>
-          <h1 className="font-display font-black italic text-4xl md:text-6xl text-white uppercase tracking-normal">
-            Your <span className="text-lsr-orange">Notifications</span>
-          </h1>
-          <p className="font-sans font-medium text-white/60 mt-4 max-w-2xl leading-relaxed">
-            View and manage all your in-app notifications.
+          <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Inbox</p>
+          <h2 className="mt-2 font-display font-black italic text-3xl uppercase leading-none text-white">Notifications</h2>
+          <p className="mt-3 max-w-2xl font-sans text-sm leading-relaxed text-white/60">
+            Registration updates, waitlist moves and club news. Choose which ones you also get by email in{" "}
+            <Link href="/account#email" className="font-bold text-lsr-orange hover:text-white">
+              your settings
+            </Link>
+            .
           </p>
         </div>
 
-        <div className="w-full h-px bg-white/5" />
-
         {notifications.length === 0 ? (
-          <div className="rounded-none border border-white/5 bg-white/[0.03] p-12 text-center">
-            <Bell className="h-12 w-12 mx-auto mb-4 text-white/20" />
-            <p className="text-lg text-white/40">No notifications yet</p>
-            <p className="text-sm text-white/30 mt-2">
-              When you receive notifications, they&apos;ll appear here.
-            </p>
+          <div className="relative border border-white/10 bg-white/[0.02] p-10 text-center md:p-14">
+            <div className="absolute top-0 left-0 h-1 w-16 bg-lsr-orange" />
+            <Bell className="mx-auto mb-4 h-10 w-10 text-white/25" aria-hidden />
+            <p className="font-display font-black italic text-2xl uppercase text-white/80">Nothing here yet</p>
+            <p className="mt-2 font-sans text-sm text-white/50">When something needs your attention, it shows up here.</p>
           </div>
         ) : (
           <>

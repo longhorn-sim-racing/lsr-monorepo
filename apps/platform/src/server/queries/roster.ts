@@ -42,7 +42,7 @@ function shortSeason(name: string) {
 }
 
 /** Every driver with all-time totals from their season entries, ranked by points. */
-async function getRosterDrivers(now: Date): Promise<RosterDriver[]> {
+export async function getRosterDrivers(now: Date): Promise<RosterDriver[]> {
   const [users, entries, lscSeasons] = await Promise.all([
     prisma.user.findMany({
       where: { status: { not: "deleted" } },

@@ -1,8 +1,29 @@
+import Link from "next/link"
+import { StatusScreen, statusPrimary, statusSecondary } from "@/components/status-screen"
+
 export default function NotFound() {
   return (
-    <div className="mx-auto max-w-6xl p-8 text-center">
-      <h1 className="text-3xl font-bold">404</h1>
-      <p className="text-muted-foreground mt-2">This page could not be found.</p>
-    </div>
+    <StatusScreen
+      code="404"
+      kicker="Page not found"
+      title={
+        <>
+          Off <span className="text-lsr-orange">track</span>
+        </>
+      }
+      photo="gallery/harris-hill-raceway/dsc00543"
+      actions={
+        <>
+          <Link href="/" className={statusPrimary}>
+            Back to the homepage
+          </Link>
+          <Link href="/events" className={statusSecondary}>
+            See what&apos;s coming up
+          </Link>
+        </>
+      }
+    >
+      That page doesn&apos;t exist, or it&apos;s moved. Rejoin from the homepage, or find your next event on the schedule.
+    </StatusScreen>
   )
 }

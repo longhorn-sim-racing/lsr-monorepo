@@ -1,10 +1,42 @@
 "use client"
-export default function Error({ error, reset }: { error: Error; reset: () => void }) {
+
+import { useEffect } from "react"
+import Link from "next/link"
+import { StatusScreen, statusPrimary, statusSecondary } from "@/components/status-screen"
+
+export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  useEffect(() => {
+    console.error(error)
+  }, [error])
+
   return (
-    <div className="mx-auto max-w-6xl p-8">
-      <h1 className="text-2xl font-bold">Something went wrong</h1>
-      <p className="text-muted-foreground mt-2">{error.message}</p>
-      <button className="mt-4 rounded-md border px-3 py-2" onClick={() => reset()}>Try again</button>
-    </div>
+    <StatusScreen
+      code="500"
+      kicker="Something went wrong"
+      title={
+        <>
+          Red <span className="text-lsr-orange">flag</span>
+        </>
+      }
+      actions={
+        <>
+          <button type="button" onClick={() => reset()} className={statusPrimary}>
+            Try again
+          </button>
+          <Link href="/" className={statusSecondary}>
+            Back to the homepage
+          </Link>
+        </>
+      }
+    >
+      <p>
+        Something broke on our side while loading this page. Try again, and if it keeps happening, email{" "}
+        <a href="mailto:info@longhornsimracing.org" className="font-bold text-lsr-orange hover:text-white">
+          info@longhornsimracing.org
+        </a>{" "}
+        and tell us what you were doing.
+      </p>
+      {error.digest && <p className="mt-4 font-mono text-xs text-white/40">Reference: {error.digest}</p>}
+    </StatusScreen>
   )
 }
