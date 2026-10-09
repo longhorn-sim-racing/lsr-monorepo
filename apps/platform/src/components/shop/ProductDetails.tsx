@@ -38,7 +38,7 @@ export function ProductDetails({
           <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">{product.productType}</p>
         )}
         <div className="mt-2 mb-5 flex items-start justify-between gap-4">
-          <h1 className="break-words font-display font-black italic text-5xl md:text-6xl uppercase leading-[0.9]">
+          <h1 className="min-w-0 break-words font-display font-black italic text-5xl md:text-6xl uppercase leading-[0.9]">
             {product.title}
           </h1>
           <WishlistButton

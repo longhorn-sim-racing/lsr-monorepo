@@ -11,8 +11,9 @@ export function cleanProductDescription(html?: string): string {
   if (!html) return "";
   let cleaned = html;
 
-  // 1. Remove Size Guide (truncating everything after header)
-  const sizeGuideRegex = /(?:<strong>|<b>)?Size\s+guide(?:<\/strong>|<\/b>)?/i;
+  // 1. Remove Size Guide (truncating everything after header). The cut starts at the heading's own
+  // opening tags (e.g. <p><strong class="size-guide-title">), so nothing is left unclosed to swallow the page after it
+  const sizeGuideRegex = /(?:<(?:p|h[1-6]|div)\b[^>]*>\s*)?(?:<(?:strong|b)\b[^>]*>\s*)?Size\s+guide(?:<\/strong>|<\/b>)?/i;
   const match = cleaned.match(sizeGuideRegex);
   if (match && match.index !== undefined) {
     cleaned = cleaned.substring(0, match.index);
