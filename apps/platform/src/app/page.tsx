@@ -195,39 +195,74 @@ export default async function Home() {
         <div className="absolute inset-0 z-0">
           <Image src="/images/lsr-hero3.webp" alt="" fill preload sizes="100vw" className="object-cover object-[60%_center] opacity-60" />
           <div className="absolute inset-0 bg-gradient-to-b from-lsr-charcoal/80 via-lsr-charcoal/30 to-lsr-charcoal" />
-          <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal/95 via-lsr-charcoal/60 to-transparent" />
+          {/* Phones read left to right; on desktop the title is centered, so the vignette is too */}
+          <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal/95 via-lsr-charcoal/60 to-transparent lg:hidden" />
+          <div className="absolute inset-0 hidden bg-lsr-charcoal/30 bg-[radial-gradient(circle_at_50%_50%,transparent_0%,rgba(0,0,0,0.75)_100%)] lg:block" />
         </div>
         <div className="absolute inset-0 opacity-[0.03] mix-blend-overlay [background-image:repeating-linear-gradient(45deg,white_0px,white_1px,transparent_1px,transparent_10px)] pointer-events-none" />
 
         <div className="relative z-10 flex flex-1 items-center">
-          <div className={`mx-auto w-full max-w-6xl px-6 md:px-8 pt-24 pb-16 md:pt-32 md:pb-24 ${next ? "xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,420px)] xl:items-center xl:gap-14" : ""}`}>
-            <div>
-              <p className="inline-flex items-center gap-2 border border-lsr-orange/30 bg-lsr-orange/10 px-3 py-1.5 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange">
-                <span className="h-1.5 w-1.5 rounded-full bg-lsr-orange motion-safe:animate-pulse" />
-                Established 2025 · UT Austin
-              </p>
-              <h1 className="mt-7 font-display font-black italic uppercase tracking-normal leading-[0.85] text-6xl sm:text-7xl md:text-8xl drop-shadow-[0_0_30px_rgba(255,255,255,0.15)]">
-                Longhorn
-                <span className="block text-lsr-orange">Sim Racing</span>
-              </h1>
-              <p className="mt-5 font-sans font-bold text-[11px] md:text-sm uppercase tracking-[0.35em] text-white/55">University of Texas at Austin</p>
-              <p className="mt-7 max-w-xl font-sans text-base md:text-xl font-bold leading-relaxed text-white/85">
-                UT Austin&apos;s sim racing club. Race in our own championship, get faster with people who&apos;ve been there, and meet
-                everyone who loves cars as much as you do.
-              </p>
-              <div className="mt-9 flex flex-wrap gap-3">
-                <Button asChild className={primaryButton}>
-                  <a href="#join-the-grid">
-                    <Flag className="mr-2 h-4 w-4" />
-                    Join the grid
-                  </a>
-                </Button>
-                <Button asChild className={ghostButton}>
-                  <Link href="/sponsors">Sponsor LSR</Link>
-                </Button>
-              </div>
+          <div className="mx-auto w-full max-w-6xl px-6 md:px-8 pt-24 pb-16 md:pt-32 md:pb-24 lg:text-center">
+            <p className="inline-flex items-center gap-2 border border-lsr-orange/30 bg-lsr-orange/10 px-3 py-1.5 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange">
+              <span className="h-1.5 w-1.5 rounded-full bg-lsr-orange motion-safe:animate-pulse" />
+              Established 2025 · UT Austin
+            </p>
+            {/* Two lines on phones; one full-width line on desktop */}
+            <h1 className="mt-7 font-display font-black italic uppercase tracking-normal leading-[0.85] text-white text-6xl sm:text-7xl md:text-8xl lg:whitespace-nowrap lg:text-[5.25rem] xl:text-8xl drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]">
+              <span className="block lg:inline">Longhorn</span> <span className="block lg:inline">Sim Racing</span>
+            </h1>
+            <p className="mt-5 font-sans font-bold text-[11px] md:text-sm uppercase tracking-[0.35em] text-white/55 lg:mt-7 lg:mr-[-0.6em] lg:text-xl lg:tracking-[0.6em] lg:text-white/50">
+              University of Texas at Austin
+            </p>
+            <p className="mt-7 max-w-xl font-sans text-base md:text-xl font-bold leading-relaxed text-white/85 lg:mx-auto lg:mt-9">
+              UT Austin&apos;s sim racing club. Race in our own championship, get faster with people who&apos;ve been there, and meet
+              everyone who loves cars as much as you do.
+            </p>
+            <div className="mt-9 flex flex-wrap gap-3 lg:justify-center">
+              <Button asChild className={primaryButton}>
+                <a href="#join-the-grid">
+                  <Flag className="mr-2 h-4 w-4" />
+                  Join the grid
+                </a>
+              </Button>
+              <Button asChild className={ghostButton}>
+                <Link href="/sponsors">Sponsor LSR</Link>
+              </Button>
             </div>
-            {next && <NextUp event={next} />}
+            {next && (
+              <>
+                {/* Phones: the full panel under the buttons */}
+                <div className="lg:hidden">
+                  <NextUp event={next} />
+                </div>
+                {/* Desktop: a slim strip, so the title keeps the full width */}
+                <Link
+                  href={`/events/${next.slug}`}
+                  className="group mt-12 hidden max-w-full items-center gap-5 border border-white/15 bg-lsr-charcoal/70 py-3 pl-5 pr-4 text-left backdrop-blur-sm transition-colors hover:border-lsr-orange/60 lg:inline-flex"
+                >
+                  <span
+                    className={`inline-flex shrink-0 items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.25em] ${next.state === "live" ? "text-red-400" : "text-lsr-orange"}`}
+                  >
+                    {next.state === "live" && <span className="h-1.5 w-1.5 rounded-full bg-red-500 motion-safe:animate-pulse" />}
+                    {next.state === "live" ? "Happening now" : `Next up${next.startsIn ? ` · ${next.startsIn}` : ""}`}
+                  </span>
+                  <span className="h-6 w-px shrink-0 bg-white/15" aria-hidden />
+                  <span className="truncate font-display font-black italic text-xl uppercase leading-none text-white">
+                    {next.round ? (
+                      <>
+                        {next.round.name} <span className="text-lsr-orange">{next.round.track}</span>
+                      </>
+                    ) : (
+                      next.title
+                    )}
+                  </span>
+                  <span className="shrink-0 font-sans text-sm text-white/60">
+                    {next.date.replace(/,\s*\d{4}$/, "")} · {next.time}
+                  </span>
+                  <ArrowRight className="h-4 w-4 shrink-0 text-white/50 transition-all group-hover:translate-x-1 group-hover:text-lsr-orange" />
+                </Link>
+              </>
+            )}
           </div>
         </div>
 
