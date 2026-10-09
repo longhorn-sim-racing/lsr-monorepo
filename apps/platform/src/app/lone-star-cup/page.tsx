@@ -20,6 +20,7 @@ import { publicUserSelect } from "@/lib/public-user";
 import { publicEventWhere } from "@/lib/events";
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import { parseRoundTitle } from "@/lib/rounds";
+import { OFFICERS } from "@/app/about/roster";
 import { EntryCta, type EntryState } from "./entry-cta";
 
 export const dynamic = "force-dynamic";
@@ -46,17 +47,20 @@ const SEASON_DETAILS: Record<string, { car: string; blurb: string }> = {
   },
 };
 
+// Titles come from the About page roster so the two pages never disagree
+const officerTitle = (name: string) => OFFICERS.find((officer) => officer.name === name)?.title ?? "Series Director";
+
 const DIRECTORS = [
   {
     name: "Bryan Reyes",
-    title: "Competitive Lead",
+    title: officerTitle("Bryan Reyes"),
     photo: "/images/bryan.jpg",
     blurb:
       "Ever since I was little, I’ve been fascinated with racing. I still remember watching Cars for the first time and instantly wanting to be Lightning McQueen. After gaining 5 years of sim racing experience, I have found that I enjoy coaching and teaching others about racing as much as being on the track.",
   },
   {
     name: "Armando Martinez",
-    title: "Competitive Officer",
+    title: officerTitle("Armando Martinez"),
     photo: "/images/armando.jpg",
     blurb:
       "I've spent most of my life racing on a controller and in all honesty am probably better on the controller than on a wheel. Recently getting a wheel has been amazing since the immersion of sim-racing is important. My goal is to teach people about racing and its tricky parts.",
