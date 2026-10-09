@@ -225,3 +225,9 @@ export async function getRoster() {
 }
 
 export type Roster = Awaited<ReturnType<typeof getRoster>>
+
+/** The top of the all-time table (the homepage shows five) */
+export async function getAllTimeLeaders(limit: number) {
+  const drivers = await getRosterDrivers(new Date())
+  return drivers.filter((driver) => driver.rank !== null).slice(0, limit)
+}

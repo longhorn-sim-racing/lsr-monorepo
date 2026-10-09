@@ -28,11 +28,24 @@ export async function getUnsortedGalleryImages() {
   });
 }
 
-/** A handful of recent photos for the homepage ribbon: newest albums first. */
-export async function getFeaturedGalleryImages(limit = 12) {
-  return prisma.galleryImage.findMany({
-    orderBy: [{ album: { date: { sort: "desc", nulls: "last" } } }, { order: "asc" }],
-    take: limit,
+/**
+ * One photo from each of the newest albums, for the homepage strip, so it shows a mix of club
+ * moments rather than a single album. Each album's first landscape photo, else its first photo.
+ */
+export async function getGalleryHighlights(albums = 5) {
+  const newest = await prisma.galleryAlbum.findMany({
+    where: { images: { some: {} } },
+    orderBy: [{ date: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
+    take: albums,
+    select: {
+      slug: true,
+      title: true,
+      images: { orderBy: { order: "asc" }, take: 12, select: { id: true, publicId: true, alt: true, width: true, height: true } },
+    },
+  });
+  return newest.map((album) => {
+    const photo = album.images.find((image) => image.width && image.height && image.width > image.height) ?? album.images[0];
+    return { ...photo, album: album.slug, albumTitle: album.title };
   });
 }
 
