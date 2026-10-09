@@ -47,7 +47,7 @@ export function EntryCta({ state, align = "start" }: { state: EntryState; align?
         <Button asChild className={primary}>
           <Link href="/auth/signin?next=/lone-star-cup/enter">Sign in to enter — {dollars(state.priceCents)}</Link>
         </Button>
-        <p className="font-sans text-[11px] text-white/45">Your LSR account is your entry. Making one takes a minute.</p>
+        <p className="font-sans text-[11px] text-white/45">Sign in or make an account, then fill out the entry form.</p>
       </div>
     )
   }

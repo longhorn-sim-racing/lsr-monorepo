@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { Metadata } from "next";
-import { ArrowRight, BookOpen, CalendarDays, Check, Flag, MessageSquare, Moon, Trophy } from "lucide-react";
+import { ArrowRight, BookOpen, CalendarDays, Check, Flag, MessageSquare, Moon, ScrollText, Trophy } from "lucide-react";
 import { getStandings, getPointsProgression } from "@/server/queries/standings";
 import { StandingsTable } from "@/components/standings-table";
 import { prisma } from "@/server/db";
@@ -10,6 +10,7 @@ import { DatabaseUnavailable } from "@/components/database-unavailable";
 import { ChampionshipChart } from "@/components/championship-chart";
 import { CloudinaryImage } from "@/components/cloudinary-image";
 import { getCachedSessionUser } from "@/server/auth/cached-session";
+import { isViewerOfficer } from "@/server/auth/guards";
 import { getActiveEntitlements } from "@/server/repos/membership.repo";
 import { priceForUser, productRequiresMembership } from "@/server/services/product-pricing";
 import { getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
@@ -98,6 +99,8 @@ type SeriesWithPodiums = NonNullable<Awaited<ReturnType<typeof getSeriesWithPodi
 type RoundEvent = SeriesWithPodiums["events"][number];
 type Standing = Awaited<ReturnType<typeof getStandings>>[number];
 
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
 /** "Lone Star Cup | Season 3" → "Season 3" */
 const seasonLabel = (name: string) => name.split("|").pop()!.trim();
 
@@ -161,10 +164,11 @@ async function loadLoneStarCup() {
     ]);
 
   // Returning drivers (in a past season's standings) see their lower rate.
-  const [entryPrice, application, rulesPage] = await Promise.all([
+  const [entryPrice, application, rulesPage, viewerIsOfficer] = await Promise.all([
     entryProduct ? priceForUser(entryProduct, session.user?.id ?? null) : null,
     session.user && openSeason ? getLeagueApplication(session.user.id, openSeason.id) : null,
-    prisma.page.findUnique({ where: { slug: LSC_RULES_SLUG }, select: { visibility: true } }),
+    prisma.page.findUnique({ where: { slug: LSC_RULES_SLUG }, select: { id: true, visibility: true } }),
+    session.user ? isViewerOfficer() : false,
   ]);
 
   return {
@@ -181,6 +185,8 @@ async function loadLoneStarCup() {
     entitlements,
     application,
     rulesPublished: rulesPage?.visibility === "public",
+    // An officer sees a nudge to publish the rules while they're still a draft
+    rulesDraftId: rulesPage && rulesPage.visibility !== "public" && viewerIsOfficer ? rulesPage.id : null,
   };
 }
 
@@ -277,6 +283,7 @@ export default async function LoneStarCupPage() {
     entitlements,
     application,
     rulesPublished,
+    rulesDraftId,
   } = data;
 
   if (!currentSeason || !currentSeries) {
@@ -323,7 +330,7 @@ export default async function LoneStarCupPage() {
   const weekday = events[0]?.startsAtUtc.toLocaleDateString("en-US", { weekday: "long", timeZone: events[0].timezone || DEFAULT_TIMEZONE });
 
   const facts = [
-    `${rounds.length} rounds`,
+    rounds.length > 0 ? plural(rounds.length, "round") : null,
     weekday && firstDate ? `${weekday}s · ${firstDate.time}` : null,
     details?.car ?? null,
     "Assetto Corsa",
@@ -401,10 +408,14 @@ export default async function LoneStarCupPage() {
         <div className="mx-auto max-w-6xl px-6 md:px-8 py-6 md:py-7 flex flex-col md:flex-row md:items-center gap-4 md:gap-10">
           <div className="shrink-0">
             <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">
-              {next ? (nextLive ? "Racing now" : "Next up") : "Season complete"}
+              {rounds.length === 0 ? "Coming up" : next ? (nextLive ? "Racing now" : "Next up") : "Season complete"}
             </p>
             <p className="mt-1 font-display font-black italic text-2xl md:text-3xl uppercase leading-none">
-              {next ? (
+              {rounds.length === 0 ? (
+                <>
+                  {label} <span className="text-lsr-orange">schedule soon</span>
+                </>
+              ) : next ? (
                 <>
                   {next.name} <span className="text-lsr-orange">{next.track}</span>
                 </>
@@ -425,7 +436,7 @@ export default async function LoneStarCupPage() {
               ))}
             </div>
             <p className="mt-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/45">
-              {completed} of {rounds.length} rounds run
+              {completed} of {plural(rounds.length, "round")} run
             </p>
           </div>
           {next && (
@@ -486,6 +497,14 @@ export default async function LoneStarCupPage() {
                   Event details
                   <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
                 </Link>
+              </>
+            ) : rounds.length === 0 ? (
+              <>
+                <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Coming up</p>
+                <h2 className="mt-5 font-display font-black italic text-4xl md:text-6xl uppercase leading-[0.9]">
+                  {label} <span className="text-lsr-orange">is coming</span>
+                </h2>
+                <p className="mt-6 font-sans text-base text-white/65">The schedule goes up here once the rounds are set. Watch Discord for dates.</p>
               </>
             ) : (
               <>
@@ -555,11 +574,11 @@ export default async function LoneStarCupPage() {
                         {round.short}
                       </span>
                       {done ? (
-                        <Check className="h-4 w-4 text-white/30" aria-label="Done" />
+                        <Check className="h-4 w-4 text-white/30" role="img" aria-label="Done" />
                       ) : round.night ? (
-                        <Moon className="h-4 w-4 text-white/60" aria-label="Night race" />
+                        <Moon className="h-4 w-4 text-white/60" role="img" aria-label="Night race" />
                       ) : round.final ? (
-                        <Flag className="h-4 w-4 text-lsr-orange" aria-label="Finale" />
+                        <Flag className="h-4 w-4 text-lsr-orange" role="img" aria-label="Finale" />
                       ) : null}
                     </div>
                     <p className={`mt-3 font-sans font-bold text-sm uppercase tracking-tight leading-tight ${done ? "text-white/55" : "text-white"} group-hover:text-lsr-orange transition-colors`}>
@@ -626,7 +645,7 @@ export default async function LoneStarCupPage() {
             </div>
             <ol className="grid gap-px bg-white/10 border border-white/10 sm:grid-cols-2">
               {[
-                { title: "Make an account", body: "Your LSR account is how you enter and how your results show up in the standings." },
+                { title: "Make an account", body: "You enter with your LSR account. Once it's linked to your Assetto Corsa name, your results show up in the standings." },
                 { title: "Fill out the entry form", body: "Your Discord name, your experience and what you race on. Pick a car number while you're there." },
                 {
                   title: "Pay the entry fee",
@@ -649,6 +668,38 @@ export default async function LoneStarCupPage() {
             </ol>
           </div>
         </section>
+
+        {/* Rules */}
+        {rulesPublished ? (
+          <section className="relative overflow-hidden border border-white/10 bg-white/[0.02] p-6 md:p-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="absolute top-0 left-0 h-1 w-24 bg-lsr-orange" />
+            <div className="flex gap-5">
+              <ScrollText className="h-10 w-10 shrink-0 text-lsr-orange" />
+              <div>
+                <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Before race day</p>
+                <h2 className="mt-2 font-display font-black italic text-3xl md:text-4xl uppercase leading-none">
+                  The <span className="text-lsr-orange">rules</span>
+                </h2>
+                <p className="mt-3 max-w-xl font-sans text-sm md:text-base text-white/60 leading-relaxed">
+                  Race format, car setup, practice, qualifying and race rules. Entering means you agree to them, so give them a read.
+                </p>
+              </div>
+            </div>
+            <Button asChild className="h-12 shrink-0 rounded-none bg-lsr-orange px-7 font-sans text-xs font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
+              <Link href="/lone-star-cup/rules">Read the rules</Link>
+            </Button>
+          </section>
+        ) : rulesDraftId ? (
+          <section className="border border-dashed border-amber-500/40 bg-amber-500/5 p-6 md:p-8 font-sans text-sm text-amber-100/80">
+            <p className="font-bold uppercase tracking-[0.2em] text-[10px] text-amber-300">Officers only</p>
+            <p className="mt-2">
+              The rules are still a draft, so visitors don&apos;t see them yet. Once Competition signs off,{" "}
+              <Link href={`/admin/pages/${rulesDraftId}`} className="underline hover:text-white">publish them in Admin → Pages</Link>{" "}
+              and they show up here and in the header.{" "}
+              <Link href="/lone-star-cup/rules" className="underline hover:text-white">Preview the draft</Link>.
+            </p>
+          </section>
+        ) : null}
 
         {/* Directors */}
         <section>
@@ -690,28 +741,28 @@ export default async function LoneStarCupPage() {
                 return (
                   <details key={season.id} className="group/season border border-white/10 bg-white/[0.02] open:bg-white/[0.03]">
                     <summary className="flex cursor-pointer list-none flex-col gap-4 p-6 md:flex-row md:items-center md:justify-between md:p-8 [&::-webkit-details-marker]:hidden">
-                      <div>
-                        <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">
+                      <span className="block">
+                        <span className="block font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">
                           {season.term ? `${season.term} · ` : ""}
-                          {pastRounds.length} rounds
-                        </p>
+                          {plural(pastRounds.length, "round")}
+                        </span>
                         <h3 className="mt-2 font-display font-black italic text-3xl md:text-4xl uppercase leading-none">{season.label}</h3>
-                      </div>
-                      <div className="flex items-center gap-6">
+                      </span>
+                      <span className="flex items-center gap-6">
                         {champion && (
-                          <div className="text-left md:text-right">
-                            <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">
+                          <span className="block text-left md:text-right">
+                            <span className="block font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">
                               <Trophy className="mr-1 inline h-3 w-3" /> Champion
-                            </p>
-                            <p className="mt-1 font-display font-black italic text-xl md:text-2xl uppercase">{champion.driver.name}</p>
-                            <p className="font-sans text-xs text-white/50">
+                            </span>
+                            <span className="block mt-1 font-display font-black italic text-xl md:text-2xl uppercase">{champion.driver.name}</span>
+                            <span className="block font-sans text-xs text-white/50">
                               {champion.points} pts · {champion.wins} {champion.wins === 1 ? "win" : "wins"}
-                            </p>
-                          </div>
+                            </span>
+                          </span>
                         )}
-                        <span className="hidden md:inline font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/40 group-open/season:hidden">Show</span>
-                        <span className="hidden md:group-open/season:inline font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/40">Hide</span>
-                      </div>
+                        <span className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/40 group-open/season:hidden">Show</span>
+                        <span className="hidden group-open/season:inline font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/40">Hide</span>
+                      </span>
                     </summary>
                     <div className="space-y-6 border-t border-white/10 p-6 md:p-8">
                       <ol className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
@@ -772,9 +823,13 @@ export default async function LoneStarCupPage() {
               Grab a <span className="text-lsr-orange">grid slot</span>
             </h2>
             <p className="mt-5 font-sans text-base md:text-lg text-white/70 leading-relaxed">
-              {next
-                ? `${next.final ? "The finale" : next.name} is at ${next.track}. Enter and race the rest of the season.`
-                : "Entry for the next season opens here. Say hi on Discord in the meantime."}
+              {entry.kind === "entered"
+                ? next
+                  ? `You're on the grid. ${next.final ? "The finale" : next.name} is at ${next.track}.`
+                  : "You're on the grid. Watch Discord for what's next."
+                : entry.kind === "unavailable" || !next
+                  ? "Entry is closed right now. Say hi on Discord in the meantime."
+                  : `${next.final ? "The finale" : next.name} is at ${next.track}. Enter and race the rest of the season.`}
             </p>
             <div className="mt-8 flex flex-col sm:flex-row sm:items-start gap-4">
               <EntryCta state={entry} />
