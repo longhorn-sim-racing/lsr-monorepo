@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db"
 import { publicEventWhere } from "@/lib/events"
 import { getStandings } from "@/server/queries/standings"
+import { seasonLabel, seasonTerm } from "@/lib/seasons"
 
 /**
  * The current Lone Star Cup season at a glance, for the homepage: how far through it is and
@@ -11,7 +12,11 @@ export async function getLoneStarCupSnapshot() {
   const seasons = await prisma.season.findMany({
     where: { visibility: "public", league: { slug: "lone-star-cup" }, seriesId: { not: null } },
     orderBy: [{ startAt: { sort: "desc", nulls: "last" } }, { year: "desc" }],
-    select: { name: true, startAt: true, series: { select: { id: true, slug: true } } },
+    select: {
+      name: true,
+      startAt: true,
+      series: { select: { id: true, slug: true, _count: { select: { events: { where: publicEventWhere(now) } } } } },
+    },
   })
   const season = seasons[0]
   if (!season?.series) return null
@@ -27,10 +32,10 @@ export async function getLoneStarCupSnapshot() {
   const nextIndex = rounds.findIndex((round) => round.endsAtUtc > now)
 
   return {
-    /** "Lone Star Cup | Season 3" → "Season 3" */
-    label: season.name.split("|").pop()!.trim(),
-    term: season.startAt ? `${season.startAt.getUTCMonth() < 6 ? "Spring" : "Fall"} ${season.startAt.getUTCFullYear()}` : null,
-    seasons: seasons.length,
+    label: seasonLabel(season.name),
+    term: seasonTerm(season.startAt),
+    /** Seasons that have run or are on the calendar, as the LSC page's archive counts them */
+    seasons: seasons.filter((s) => (s.series?._count.events ?? 0) > 0).length,
     rounds: rounds.length,
     completed: nextIndex === -1 ? rounds.length : nextIndex,
     leaders: standings.filter((entry) => entry.points > 0).slice(0, 3),

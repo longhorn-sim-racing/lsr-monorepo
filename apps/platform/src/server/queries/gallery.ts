@@ -30,7 +30,8 @@ export async function getUnsortedGalleryImages() {
 
 /**
  * One photo from each of the newest albums, for the homepage strip, so it shows a mix of club
- * moments rather than a single album. Each album's first landscape photo, else its first photo.
+ * moments rather than a single album: each album's first landscape photo, else its first photo.
+ * The newest album's first landscape photo is the /gallery hero, so that album uses its second.
  */
 export async function getGalleryHighlights(albums = 5) {
   const newest = await prisma.galleryAlbum.findMany({
@@ -40,11 +41,16 @@ export async function getGalleryHighlights(albums = 5) {
     select: {
       slug: true,
       title: true,
-      images: { orderBy: { order: "asc" }, take: 12, select: { id: true, publicId: true, alt: true, width: true, height: true } },
+      images: {
+        orderBy: { order: "asc" },
+        take: 12,
+        select: { id: true, publicId: true, alt: true, width: true, height: true, creditName: true },
+      },
     },
   });
-  return newest.map((album) => {
-    const photo = album.images.find((image) => image.width && image.height && image.width > image.height) ?? album.images[0];
+  return newest.map((album, i) => {
+    const landscape = album.images.filter((image) => image.width && image.height && image.width > image.height);
+    const photo = (i === 0 ? landscape[1] : undefined) ?? landscape[0] ?? album.images[0];
     return { ...photo, album: album.slug, albumTitle: album.title };
   });
 }

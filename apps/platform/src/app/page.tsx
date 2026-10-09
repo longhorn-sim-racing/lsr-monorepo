@@ -2,10 +2,11 @@ import Image from "next/image"
 import Link from "next/link"
 import { Metadata } from "next"
 import { unstable_rethrow } from "next/navigation"
-import { ArrowRight, ArrowUpRight, CalendarDays, Check, Flag, MessageSquare, Play } from "lucide-react"
+import { ArrowRight, ArrowUpRight, CalendarDays, Camera, Check, Flag, MessageSquare, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { CloudinaryImage } from "@/components/cloudinary-image"
 import { LogoTile } from "@/components/logo-tile"
+import { HotlapVideo } from "@/components/hotlap-video"
 import { RacingNumber } from "@/components/racing-number"
 import { AgendaRow } from "@/components/events/agenda-row"
 import { NextUp } from "@/components/events/next-up"
@@ -88,15 +89,16 @@ const ghostButton =
 const primaryButton =
   "h-12 rounded-none bg-lsr-orange px-7 font-sans text-xs font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal"
 
-/** A YouTube video id from watch, youtu.be and embed links */
+/** A YouTube video id from watch, youtu.be, embed, shorts and live links */
 function youTubeId(url: string) {
+  let id: string | null = null
   try {
     const u = new URL(url)
-    if (u.hostname.includes("youtube.com") && u.searchParams.has("v")) return u.searchParams.get("v")
-    if (u.hostname === "youtu.be") return u.pathname.slice(1).split("/")[0] || null
-    if (u.pathname.startsWith("/embed/")) return u.pathname.split("/")[2] || null
+    if (u.hostname.includes("youtube.com") && u.searchParams.has("v")) id = u.searchParams.get("v")
+    else if (u.hostname === "youtu.be") id = u.pathname.split("/")[1] ?? null
+    else if (/^\/(embed|shorts|live)\//.test(u.pathname)) id = u.pathname.split("/")[2] ?? null
   } catch {}
-  return null
+  return id && /^[\w-]{11}$/.test(id) ? id : null
 }
 
 /** Each loader fails on its own, so one bad query doesn't take the whole homepage down */
@@ -149,11 +151,11 @@ function Avatar({ name, src, size }: { name: string; src: string | null | undefi
 }
 
 export default async function Home() {
-  const session = await safe("session", () => getCachedSessionUser(), { user: null, roles: [] as string[] })
-  const viewer = session.user
-
-  const [schedule, stats, lsc, leaders, hotlap, posts, instagram, photos] = await Promise.all([
-    safe("events", () => getSchedule(viewer?.id ?? null), []),
+  // Everything but the schedule starts right away; the schedule waits on the session for "You're in"
+  const sessionLoad = safe("session", () => getCachedSessionUser(), { user: null, roles: [] as string[] })
+  const [schedule, viewer, stats, lsc, leaders, hotlap, posts, instagram, photos] = await Promise.all([
+    sessionLoad.then((session) => safe("events", () => getSchedule(session.user?.id ?? null), [])),
+    sessionLoad.then((session) => session.user),
     safe("stats", () => getClubStats(), null),
     safe("Lone Star Cup", () => getLoneStarCupSnapshot(), null),
     safe("leaders", () => getAllTimeLeaders(5), []),
@@ -166,7 +168,10 @@ export default async function Home() {
   const ahead = schedule.filter((e) => !e.ended && e.state !== "cancelled" && e.state !== "postponed")
   const next = ahead.find((e) => e.state === "live") ?? ahead[0] ?? null
   const comingUp = ahead.filter((e) => e !== next).slice(0, 3)
-  const nextRound = ahead.find((e) => e.familyKey === "lone-star-cup") ?? null
+  const nextRound = ahead.find((e) => e.familyKey === "lone-star-cup" && e.round) ?? null
+
+  // The big-tile layout needs a full set of five photos
+  const mosaic = photos.length === 5
 
   const hot = hotlap ?? HOTLAP_DEFAULTS
   const videoId = youTubeId(hot.videoUrl) ?? "fbS2ExGupLU"
@@ -174,7 +179,7 @@ export default async function Home() {
   const statItems = [
     stats && { value: stats.members, label: "Members" },
     stats && { value: stats.eventsHosted, label: "Events hosted" },
-    { value: ahead.length, label: "On the calendar" },
+    ahead.length > 0 && { value: ahead.length, label: "On the calendar" },
     lsc && { value: lsc.seasons, label: lsc.seasons === 1 ? "Lone Star Cup season" : "Lone Star Cup seasons" },
   ].filter((item): item is { value: number; label: string } => !!item)
 
@@ -208,7 +213,7 @@ export default async function Home() {
               Established 2025 · UT Austin
             </p>
             {/* Two lines on phones; one full-width line on desktop */}
-            <h1 className="mt-7 font-display font-black italic uppercase tracking-normal leading-[0.85] text-white text-6xl sm:text-7xl md:text-8xl lg:whitespace-nowrap lg:text-[5.25rem] xl:text-8xl drop-shadow-[0_4px_24px_rgba(0,0,0,0.6)]">
+            <h1 className="mt-7 font-display font-black italic uppercase tracking-normal leading-[0.85] text-white text-[clamp(2.75rem,15vw,4.5rem)] sm:text-7xl md:text-8xl lg:whitespace-nowrap lg:text-[5.25rem] xl:text-8xl drop-shadow-[0_4px_24px_rgba(0,0,0,0.6)]">
               <span className="block lg:inline">Longhorn</span> <span className="block lg:inline">Sim Racing</span>
             </h1>
             <p className="mt-5 font-sans font-bold text-[11px] md:text-sm uppercase tracking-[0.35em] text-white/70 drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)] lg:mt-7 lg:mr-[-0.6em] lg:text-xl lg:tracking-[0.6em] lg:text-white/85">
@@ -263,7 +268,7 @@ export default async function Home() {
         </div>
 
         {/* Ticker: two copies of the list for a seamless loop */}
-        <div className="group relative z-10 overflow-hidden border-t border-white/10 bg-black/30 backdrop-blur-sm" aria-label="What we do">
+        <div className="group relative z-10 overflow-hidden border-t border-white/10 bg-black/30 backdrop-blur-sm">
           <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-gradient-to-r from-lsr-charcoal to-transparent md:w-24" />
           <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-lsr-charcoal to-transparent md:w-24" />
           <div className="flex w-max animate-[lsr-ticker_40s_linear_infinite] group-hover:[animation-play-state:paused] motion-reduce:animate-none">
@@ -284,11 +289,11 @@ export default async function Home() {
       {/* Stats */}
       {statItems.length > 0 && (
         <section aria-label="LSR in numbers" className="border-b border-white/10 bg-black/25">
-          <dl className={`mx-auto grid max-w-6xl grid-cols-2 ${statItems.length === 4 ? "md:grid-cols-4" : "md:grid-cols-3"}`}>
+          <dl className={`mx-auto grid max-w-6xl grid-cols-2 ${["", "md:grid-cols-1", "md:grid-cols-2", "md:grid-cols-3", "md:grid-cols-4"][statItems.length]}`}>
             {statItems.map((stat, i) => (
               <div
                 key={stat.label}
-                className={`flex flex-col-reverse px-6 py-6 md:px-8 md:py-8 ${i % 2 === 1 ? "border-l border-white/10" : ""} ${i >= 2 ? "border-t border-white/10 md:border-t-0" : ""} ${i === 2 ? "md:border-l" : ""}`}
+                className={`flex flex-col-reverse px-6 py-6 md:px-8 md:py-8 ${i % 2 === 1 ? "border-l border-white/10" : ""} ${i >= 2 ? "border-t border-white/10 md:border-t-0" : ""} ${i === 2 ? "md:border-l" : ""} ${i === statItems.length - 1 && i % 2 === 0 ? "col-span-2 md:col-span-1" : ""}`}
               >
                 <dt className="mt-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/45">{stat.label}</dt>
                 <dd className="font-display font-black italic text-4xl md:text-5xl leading-none text-white">{stat.value}</dd>
@@ -315,7 +320,7 @@ export default async function Home() {
                   publicId={pillar.photo}
                   alt=""
                   fill
-                  sizes="(min-width: 768px) 33vw, 100vw"
+                  sizes="(min-width: 1152px) 370px, (min-width: 768px) 33vw, 100vw"
                   className="object-cover opacity-50 transition-all duration-700 group-hover:scale-105 group-hover:opacity-70"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-lsr-charcoal via-lsr-charcoal/50 to-lsr-charcoal/20" />
@@ -360,14 +365,16 @@ export default async function Home() {
             <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal via-lsr-charcoal/80 to-lsr-charcoal/40" />
             <div className="absolute top-0 left-0 h-1 w-24 bg-lsr-orange" />
             <div className="relative">
-              <Image src="/images/lone-star-cup-logo.png" alt="Lone Star Cup" width={509} height={218} className="h-auto w-44 md:w-56" />
+              <h2>
+                <Image src="/images/lone-star-cup-logo.png" alt="Lone Star Cup" width={509} height={218} className="h-auto w-44 md:w-56" />
+              </h2>
               {lsc ? (
                 <>
                   <p className="mt-6 font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">
                     {lsc.label}
                     {lsc.term ? ` · ${lsc.term}` : ""}
                   </p>
-                  <h2 className="mt-2 font-display font-black italic text-3xl md:text-4xl uppercase leading-[0.95]">
+                  <h3 className="mt-2 font-display font-black italic text-3xl md:text-4xl uppercase leading-[0.95]">
                     {nextRound?.round ? (
                       <>
                         {nextRound.round.name} <span className="text-lsr-orange">{nextRound.round.track}</span>
@@ -381,7 +388,7 @@ export default async function Home() {
                         The club <span className="text-lsr-orange">championship</span>
                       </>
                     )}
-                  </h2>
+                  </h3>
                   {nextRound && <p className="mt-2 font-sans text-sm text-white/65">{nextRound.date} · {nextRound.time}</p>}
                   {lsc.rounds > 0 && (
                     <div className="mt-6 max-w-md">
@@ -473,19 +480,13 @@ export default async function Home() {
         {/* Hotlap of the week (set in Admin → Hotlap) */}
         <section id="hotlap" className="scroll-mt-24 grid overflow-hidden border border-white/10 bg-white/[0.02] lg:grid-cols-[3fr_2fr]">
           <div className="relative aspect-video bg-black">
-            <iframe
-              src={`https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=0&modestbranding=1&playsinline=1`}
-              title={`Hotlap of the week: ${hot.driverName} at ${hot.track}`}
-              loading="lazy"
-              allow="autoplay; encrypted-media; picture-in-picture"
-              className="absolute inset-0 h-full w-full"
-            />
+            <HotlapVideo videoId={videoId} title={`Hotlap of the week: ${hot.driverName} at ${hot.track}`} />
           </div>
           <div className="relative flex flex-col justify-center p-6 md:p-10">
             <div className="absolute top-0 left-0 h-1 w-24 bg-lsr-orange" />
-            <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Hotlap of the week</p>
+            <h2 className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Hotlap of the week</h2>
             <p className="mt-3 font-display font-black italic text-6xl md:text-7xl leading-none text-white">{hot.lapTime}</p>
-            <h2 className="mt-4 font-display font-black italic text-2xl md:text-3xl uppercase leading-tight">{hot.driverName}</h2>
+            <p className="mt-4 font-display font-black italic text-2xl md:text-3xl uppercase leading-tight">{hot.driverName}</p>
             <dl className="mt-4 space-y-1 font-sans text-sm text-white/65">
               <div className="flex gap-2">
                 <dt className="sr-only">Car</dt>
@@ -531,22 +532,28 @@ export default async function Home() {
             <SectionHeading kicker="Moments from the track" aside={<MoreLink href="/gallery">Photos and videos</MoreLink>}>
               The <span className="text-lsr-orange">gallery</span>
             </SectionHeading>
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-4 md:grid-rows-2 md:gap-3">
+            <div className={`grid grid-cols-2 gap-2 md:gap-3 ${mosaic ? "md:grid-cols-4 md:grid-rows-2" : "md:grid-cols-4"}`}>
               {photos.map((photo, i) => (
                 <Link
                   key={photo.id}
                   href={`/gallery?album=${encodeURIComponent(photo.album)}#albums`}
-                  className={`group relative overflow-hidden border border-white/10 bg-black ${i === 0 ? "col-span-2 aspect-video md:row-span-2 md:aspect-auto" : "aspect-[4/3]"}`}
+                  className={`group relative overflow-hidden border border-white/10 bg-black ${mosaic && i === 0 ? "col-span-2 aspect-video md:row-span-2 md:aspect-auto" : "aspect-[4/3]"}`}
                 >
                   <CloudinaryImage
                     publicId={photo.publicId}
                     alt={photo.alt ?? ""}
                     fill
-                    sizes={i === 0 ? "(min-width: 768px) 50vw, 100vw" : "(min-width: 768px) 25vw, 50vw"}
+                    sizes={mosaic && i === 0 ? "(min-width: 1152px) 560px, (min-width: 768px) 50vw, 100vw" : "(min-width: 1152px) 280px, (min-width: 768px) 25vw, 50vw"}
                     className="object-cover opacity-85 transition-all duration-700 group-hover:scale-105 group-hover:opacity-100"
                   />
-                  <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2.5 pt-8 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/85">
-                    {photo.albumTitle}
+                  <span className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/80 to-transparent px-3 pb-2.5 pt-8">
+                    <span className="truncate font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/85">{photo.albumTitle}</span>
+                    {photo.creditName && (
+                      <span className="inline-flex shrink-0 items-center gap-1 font-sans text-[10px] text-white/60">
+                        <Camera className="h-3 w-3" aria-hidden />
+                        {photo.creditName}
+                      </span>
+                    )}
                   </span>
                 </Link>
               ))}
@@ -577,7 +584,7 @@ export default async function Home() {
       </div>
 
       {/* Join the grid */}
-      <section id="join-the-grid" className="relative scroll-mt-20 overflow-hidden border-t border-white/10">
+      <section id="join-the-grid" className="relative scroll-mt-24 overflow-hidden border-t border-white/10">
         <div className="absolute inset-0 z-0">
           <CloudinaryImage publicId="gallery/cota-track-day/img-1058" alt="" fill sizes="100vw" className="object-cover object-[center_30%] opacity-40" />
           <div className="absolute inset-0 bg-gradient-to-b from-lsr-charcoal/90 via-lsr-charcoal/75 to-lsr-charcoal" />
