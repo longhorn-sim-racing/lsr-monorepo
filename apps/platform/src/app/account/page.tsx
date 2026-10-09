@@ -37,7 +37,7 @@ export default async function AccountPage() {
   };
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen pt-20 pb-20">
+    <div className="bg-lsr-charcoal text-white min-h-screen pt-20 pb-20">
       <ProductPaymentToast />
       <div className="mx-auto max-w-4xl px-6 md:px-8 space-y-12">
         <div>
@@ -201,6 +201,6 @@ export default async function AccountPage() {
           </div>
         </section>
       </div>
-    </main>
+    </div>
   );
 }

@@ -269,14 +269,14 @@ export default async function LoneStarCupPage() {
   } catch (error) {
     console.error('[LoneStarCup] Failed to load series data:', error);
     return (
-      <main className="bg-lsr-charcoal text-white min-h-screen">
+      <div className="bg-lsr-charcoal text-white min-h-screen">
         <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
           <h1 className="mb-10 font-display font-black italic text-5xl md:text-7xl text-white uppercase tracking-normal leading-[0.9]">
             Lone Star <span className="text-lsr-orange">Cup</span>
           </h1>
           <DatabaseUnavailable title="Championship Data Unavailable" />
         </div>
-      </main>
+      </div>
     );
   }
 
@@ -359,7 +359,7 @@ export default async function LoneStarCupPage() {
   ].filter(Boolean) as string[];
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       <ProductPaymentToast />
 
       {/* Hero */}
@@ -940,6 +940,6 @@ export default async function LoneStarCupPage() {
           </div>
         </div>
       </section>
-    </main>
+    </div>
   );
 }

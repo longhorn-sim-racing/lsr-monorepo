@@ -39,7 +39,7 @@ export default function SubscribePage() {
   }
 
   return (
-    <main className="min-h-screen bg-lsr-charcoal text-white pt-24 pb-20 px-6 md:px-8">
+    <div className="min-h-screen bg-lsr-charcoal text-white pt-24 pb-20 px-6 md:px-8">
       <div className="mx-auto max-w-3xl">
       <header className="text-center mb-16">
         <div className="inline-flex items-center gap-2 rounded-full border border-lsr-orange/30 bg-lsr-orange/10 px-4 py-1.5 text-[10px] md:text-xs uppercase tracking-[0.2em] text-lsr-orange font-bold mb-6">
@@ -121,6 +121,6 @@ export default function SubscribePage() {
         </p>
       </div>
       </div>
-    </main>
+    </div>
   )
 }

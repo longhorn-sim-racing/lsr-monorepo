@@ -53,7 +53,7 @@ export default async function ManageEventPage({ params }: { params: Promise<{ id
   });
 
   return (
-    <main className="mx-auto max-w-7xl p-6 md:p-12 pb-32">
+    <div className="mx-auto max-w-7xl p-6 md:p-12 pb-32">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-6">
         <div>
             <div className="flex items-center gap-3 mb-2">
@@ -121,6 +121,6 @@ export default async function ManageEventPage({ params }: { params: Promise<{ id
                </div>
           </TabsContent>
       </Tabs>
-    </main>
+    </div>
   );
 }

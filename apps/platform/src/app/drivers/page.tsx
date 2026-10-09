@@ -352,14 +352,14 @@ export default async function DriversIndexPage() {
     unstable_rethrow(error);
     console.error("[Drivers] Failed to load drivers:", error);
     return (
-      <main className="bg-lsr-charcoal text-white min-h-screen">
+      <div className="bg-lsr-charcoal text-white min-h-screen">
         <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
           <h1 className="mb-10 font-display font-black italic text-5xl md:text-7xl text-white uppercase tracking-normal leading-[0.9]">
             Driver <span className="text-lsr-orange">Roster</span>
           </h1>
           <DatabaseUnavailable title="Roster Unavailable" />
         </div>
-      </main>
+      </div>
     );
   }
 
@@ -406,7 +406,7 @@ export default async function DriversIndexPage() {
   );
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(itemListJsonLd).replace(/</g, "\\u003c") }}
@@ -563,6 +563,6 @@ export default async function DriversIndexPage() {
           </div>
         </div>
       </section>
-    </main>
+    </div>
   );
 }

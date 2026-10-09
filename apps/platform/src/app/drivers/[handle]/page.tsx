@@ -77,11 +77,11 @@ export default async function DriverProfilePage({
   } catch (error) {
     console.error('[DriverProfile] Failed to load driver:', error);
     return (
-      <main className="bg-lsr-charcoal text-white min-h-screen">
+      <div className="bg-lsr-charcoal text-white min-h-screen">
         <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
           <DatabaseUnavailable title="Driver Profile Unavailable" />
         </div>
-      </main>
+      </div>
     );
   }
 
@@ -130,7 +130,7 @@ export default async function DriverProfilePage({
   };
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(personJsonLd) }}
@@ -203,6 +203,6 @@ export default async function DriverProfilePage({
         <DriverMetadata socials={socials} iRating={user.iRating} />
 
       </div>
-    </main>
+    </div>
   );
 }

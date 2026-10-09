@@ -43,7 +43,7 @@ export default async function EditDriverPage({
   const socials = (pageUser.socials as Record<string, string> | null) ?? {};
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen pt-20 pb-20">
+    <div className="bg-lsr-charcoal text-white min-h-screen pt-20 pb-20">
       <div className="mx-auto max-w-4xl px-6 md:px-8 space-y-12">
         <div>
            <h1 className="font-display font-black italic text-4xl md:text-6xl text-white uppercase tracking-normal">
@@ -135,7 +135,7 @@ export default async function EditDriverPage({
           </form>
         </div>
       </div>
-    </main>
+    </div>
   );
 }
 

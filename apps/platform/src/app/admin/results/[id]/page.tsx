@@ -29,8 +29,8 @@ export default async function ResultDetailPage({
   });
 
   return (
-    <main className="mx-auto max-w-6xl p-8">
+    <div className="mx-auto max-w-6xl p-8">
       <ResultDetailClient result={result} events={events} />
-    </main>
+    </div>
   );
 }

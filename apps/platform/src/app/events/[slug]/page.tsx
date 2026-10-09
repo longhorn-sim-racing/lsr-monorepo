@@ -77,11 +77,11 @@ export default async function EventPage({ params }: EventPageArgs) {
   } catch (error) {
     console.error('[EventPage] Failed to load event:', error);
     return (
-      <main className="bg-lsr-charcoal text-white min-h-screen">
+      <div className="bg-lsr-charcoal text-white min-h-screen">
         <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
           <DatabaseUnavailable title="Event Unavailable" />
         </div>
-      </main>
+      </div>
     );
   }
 
@@ -300,7 +300,7 @@ export default async function EventPage({ params }: EventPageArgs) {
   };
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(eventJsonLd) }}
@@ -489,6 +489,6 @@ export default async function EventPage({ params }: EventPageArgs) {
           )}
         </div>
       </div>
-    </main>
+    </div>
   );
 }
