@@ -47,7 +47,7 @@ function Panel({ tone = "default", icon, kicker, title, children }: { tone?: "de
       <div className={`absolute top-0 left-0 h-1 ${tone === "success" ? "w-full bg-emerald-400" : "w-24 bg-lsr-orange"}`} />
       <span className={`flex h-14 w-14 items-center justify-center border ${ring}`}>{icon}</span>
       <p className="mt-6 font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">{kicker}</p>
-      <h1 className="mt-2 font-display font-black italic text-4xl uppercase leading-[0.95] text-white">{title}</h1>
+      <h1 className="mt-2 break-words font-display font-black italic text-4xl uppercase leading-[0.95] text-white">{title}</h1>
       <div className="mt-6 space-y-6">{children}</div>
     </div>
   );

@@ -43,7 +43,7 @@ export default function SubscribePage() {
     },
     {
       title: "Email",
-      text: "Make an account and turn on club updates to get news and new events in your inbox.",
+      text: "Make an account and turn on club updates to get club announcements by email.",
       href: "/account#email",
       action: "Email settings",
       icon: <Mail className="h-5 w-5" aria-hidden />,
@@ -80,7 +80,7 @@ export default function SubscribePage() {
                 className="group relative flex h-full flex-col border border-white/10 bg-white/[0.02] p-6 transition-colors hover:border-lsr-orange/60"
               >
                 <div className="absolute top-0 left-0 h-1 w-16 bg-lsr-orange" />
-                <span className="flex h-11 w-11 items-center justify-center bg-lsr-orange/15 text-lsr-orange">{c.icon}</span>
+                <span aria-hidden className="flex h-11 w-11 items-center justify-center bg-lsr-orange/15 text-lsr-orange">{c.icon}</span>
                 <h2 className="mt-5 font-display font-black italic text-2xl uppercase">{c.title}</h2>
                 <p className="mt-2 flex-1 font-sans text-sm leading-relaxed text-white/65">{c.text}</p>
                 <span className="mt-6 inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white group-hover:text-lsr-orange">

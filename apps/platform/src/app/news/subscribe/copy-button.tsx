@@ -9,6 +9,7 @@ export function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false)
 
   async function copy() {
+    let ok = true
     try {
       await navigator.clipboard.writeText(value)
     } catch {
@@ -16,9 +17,11 @@ export function CopyButton({ value }: { value: string }) {
       el.value = value
       document.body.appendChild(el)
       el.select()
-      document.execCommand("copy")
+      ok = document.execCommand("copy")
       document.body.removeChild(el)
     }
+    // Where copying is blocked entirely, the URL stays selectable in the box next to the button
+    if (!ok) return
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
@@ -27,7 +30,6 @@ export function CopyButton({ value }: { value: string }) {
     <Button
       type="button"
       onClick={copy}
-      aria-label="Copy the RSS feed URL"
       className="h-11 w-full shrink-0 rounded-none bg-lsr-orange px-6 font-sans text-[10px] font-bold uppercase tracking-widest text-white transition-all hover:bg-white hover:text-lsr-charcoal md:w-auto"
     >
       {copied ? <Check className="mr-2 h-3.5 w-3.5" /> : <Copy className="mr-2 h-3.5 w-3.5" />}

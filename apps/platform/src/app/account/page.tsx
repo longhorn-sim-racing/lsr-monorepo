@@ -225,7 +225,7 @@ export default async function AccountPage() {
             <div className="flex h-full flex-col border border-white/10 bg-white/[0.02] p-6 md:p-8">
               <h3 className="font-sans font-bold text-base text-white">Retire your account</h3>
               <p className="mt-2 mb-8 flex-grow font-sans text-sm leading-relaxed text-white/60">
-                Step back from the club. You&apos;ll be marked as <span className="font-bold text-white">retired</span> and stop getting club emails. Your driver page and stats stay up.
+                Step back from the club. You&apos;ll be marked as <span className="font-bold text-white">retired</span> and drop off club-wide emails. Your driver page and stats stay up.
               </p>
               <form action={retireAccount}>
                 <Button type="submit" variant="outline" className="h-12 w-full rounded-none border-white/15 bg-transparent font-bold uppercase tracking-widest text-[10px] text-white hover:bg-white hover:text-lsr-charcoal">

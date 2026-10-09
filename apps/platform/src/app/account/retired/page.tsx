@@ -11,7 +11,7 @@ export default function RetiredPage() {
           Thanks for <span className="text-lsr-orange">racing</span>
         </h1>
         <p className="mt-5 font-sans text-base leading-relaxed text-white/70">
-          Your account is <span className="font-bold text-white">retired</span>. Your driver page and results stay up, and club emails stop.
+          Your account is <span className="font-bold text-white">retired</span>. Your driver page and results stay up, and club-wide emails stop.
         </p>
         <p className="mt-3 font-sans text-sm leading-relaxed text-white/55">
           Want back on the grid? Email{" "}

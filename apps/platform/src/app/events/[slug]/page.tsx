@@ -263,9 +263,10 @@ export default async function EventPage({ params }: EventPageArgs) {
         select: { slug: true, title: true, images: { orderBy: { order: "asc" }, take: 4, select: { id: true, publicId: true, alt: true } } },
       })
       .catch(() => null),
-    getSchedule(user?.id ?? null)
-      .then((list) => list.filter((e) => !e.ended && e.state !== "cancelled" && e.state !== "postponed" && e.slug !== event.slug).slice(0, 3))
-      .catch(() => []),
+    getSchedule(user?.id ?? null, { upcoming: { take: 3, exceptSlug: event.slug } }).catch((error) => {
+      console.error("[EventPage] Failed to load upcoming events:", error);
+      return [];
+    }),
   ]);
 
   const statusMap: Record<string, string> = {
@@ -304,7 +305,7 @@ export default async function EventPage({ params }: EventPageArgs) {
           },
         }
       : event.meetingUrl
-        ? { "@type": "VirtualLocation", url: event.meetingUrl }
+        ? { "@type": "VirtualLocation", url: `https://www.longhornsimracing.org/events/${event.slug}` }
         : undefined,
     organizer: {
       "@type": "SportsOrganization",
@@ -385,7 +386,7 @@ export default async function EventPage({ params }: EventPageArgs) {
               )}
               {round?.final && <span className={`${tag} bg-lsr-orange text-white`}>Finale</span>}
             </div>
-            <h1 className={`mt-4 font-display font-black italic text-5xl md:text-7xl uppercase leading-[0.9] ${cancelled ? "line-through decoration-white/40" : ""}`}>
+            <h1 className={`mt-4 break-words font-display font-black italic text-5xl md:text-7xl uppercase leading-[0.9] ${cancelled ? "line-through decoration-white/40" : ""}`}>
               {round ? (
                 <>
                   {round.name} <span className="text-lsr-orange">{round.track}</span>
@@ -416,7 +417,21 @@ export default async function EventPage({ params }: EventPageArgs) {
           {/* Registration, or what's left to see once it's over */}
           <aside id="register" className="relative mt-10 scroll-mt-24 border border-white/15 bg-lsr-charcoal/85 p-6 backdrop-blur-sm md:p-7 lg:mt-0">
             <div className="absolute top-0 left-0 h-1 w-24 bg-lsr-orange" />
-            {ended && !isLive ? (
+            {cancelled || postponed ? (
+              <>
+                <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">{cancelled ? "Cancelled" : "Postponed"}</p>
+                <p className="mt-2 font-display font-black italic text-2xl uppercase leading-tight">{cancelled ? "This one’s off" : "New date to come"}</p>
+                <p className="mt-3 font-sans text-sm leading-relaxed text-white/70">
+                  {cancelled ? "This event won’t run. Catch the next one on the schedule." : "We’ll post the new date here and on Discord."}
+                </p>
+                <Link href="/events" className="group mt-5 inline-flex w-full items-center justify-between border border-white/15 px-4 py-3 font-sans text-xs font-bold uppercase tracking-[0.15em] text-white hover:border-lsr-orange">
+                  <span className="inline-flex items-center gap-2">
+                    <CalendarDays className="h-4 w-4 text-lsr-orange" aria-hidden /> What&apos;s next
+                  </span>
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                </Link>
+              </>
+            ) : ended && !isLive ? (
               <>
                 <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">Finished</p>
                 <p className="mt-2 font-display font-black italic text-2xl uppercase leading-tight">This one&apos;s in the books</p>
@@ -444,6 +459,12 @@ export default async function EventPage({ params }: EventPageArgs) {
                     <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                   </Link>
                 </div>
+                {/* Who came (members only, like before the event) */}
+                {user && (
+                  <div className="mt-6">
+                    <EventRegistrationPanel eventSlug={slug} userLoggedIn attendeesOnly />
+                  </div>
+                )}
               </>
             ) : (
               <>
@@ -494,9 +515,11 @@ export default async function EventPage({ params }: EventPageArgs) {
                 {address && <p className="mt-1 font-sans text-sm text-white/60">{address}</p>}
                 {venue.room && <p className="mt-1 font-sans text-sm text-white/60">{venue.room}</p>}
                 {online && <p className="mt-3 font-sans text-sm text-white/65">Online event: race from your own setup. Details are shared on Discord.</p>}
-                <div className="mt-4">
-                  <VenueActions venue={venue} />
-                </div>
+                {!online && (
+                  <div className="mt-4">
+                    <VenueActions venue={venue} />
+                  </div>
+                )}
               </>
             ) : (
               <p className="mt-2 font-sans text-sm text-white/65">Location details go out on Discord.</p>

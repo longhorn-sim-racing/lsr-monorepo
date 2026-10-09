@@ -149,11 +149,28 @@ function registrationOf(
   return event.registrationWaitlistEnabled ? "waitlist" : "full"
 }
 
-export async function getSchedule(viewerId: string | null) {
+export async function getSchedule(
+  viewerId: string | null,
+  /** Just the next few events still to run (not cancelled or postponed), instead of the whole archive */
+  options?: { upcoming?: { take: number; exceptSlug?: string } },
+) {
   const now = new Date()
+  const upcoming = options?.upcoming
   const events = await prisma.event.findMany({
-    where: publicEventWhere(now),
+    where: upcoming
+      ? {
+          AND: [
+            publicEventWhere(now),
+            {
+              endsAtUtc: { gte: now },
+              status: { notIn: [EventStatus.CANCELLED, EventStatus.POSTPONED] },
+              ...(upcoming.exceptSlug ? { slug: { not: upcoming.exceptSlug } } : {}),
+            },
+          ],
+        }
+      : publicEventWhere(now),
     orderBy: { startsAtUtc: "asc" },
+    ...(upcoming ? { take: upcoming.take } : {}),
     select: {
       id: true,
       slug: true,
