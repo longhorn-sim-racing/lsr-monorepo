@@ -23,6 +23,7 @@ import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import { parseRoundTitle } from "@/lib/rounds";
 import { OFFICERS } from "@/app/about/roster";
 import { EntryCta, type EntryState } from "./entry-cta";
+import { LiveStream } from "./live-stream";
 
 export const dynamic = "force-dynamic";
 
@@ -100,6 +101,15 @@ async function getSeriesWithPodiums(slug: string) {
 type SeriesWithPodiums = NonNullable<Awaited<ReturnType<typeof getSeriesWithPodiums>>>;
 type RoundEvent = SeriesWithPodiums["events"][number];
 type Standing = Awaited<ReturnType<typeof getStandings>>[number];
+
+/** The Twitch channel to embed: the round's own stream if it's on Twitch, otherwise LSR's. */
+function twitchChannel(streamUrl: string | null) {
+  try {
+    const url = new URL(streamUrl ?? TWITCH_URL);
+    if (url.hostname.endsWith("twitch.tv")) return url.pathname.split("/")[1] || "longhorn_sim_racing";
+  } catch {}
+  return "longhorn_sim_racing";
+}
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
@@ -326,6 +336,15 @@ export default async function LoneStarCupPage() {
   const nextLive = next ? new Date(next.event.startsAtUtc) <= now : false;
   const watchUrl = next?.event.streamUrl || TWITCH_URL;
 
+  // The Twitch player only loads around a round (30 min before to an hour after), so the
+  // page doesn't pull in Twitch the rest of the week. It still only appears once the channel is live.
+  const streamRound = rounds.find(
+    (round) =>
+      now.getTime() >= round.event.startsAtUtc.getTime() - 30 * 60_000 &&
+      now.getTime() <= round.event.endsAtUtc.getTime() + 60 * 60_000,
+  );
+  const streamChannel = streamRound ? twitchChannel(streamRound.event.streamUrl) : null;
+
   const label = seasonLabel(currentSeason.name);
   const term = seasonTerm(currentSeason.startAt);
   const details = SEASON_DETAILS[currentSeason.slug];
@@ -358,57 +377,61 @@ export default async function LoneStarCupPage() {
           <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal/95 via-lsr-charcoal/60 to-transparent" />
         </div>
 
-        <div className="relative z-10 mx-auto max-w-6xl px-6 md:px-8 pt-20 pb-14 md:pt-28 md:pb-20">
-          <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-5">
-            {label}
-            {term ? ` · ${term}` : ""}
-          </p>
-          <h1>
-            <span className="sr-only">Lone Star Cup</span>
-            <Image
-              src="/images/lone-star-cup-logo.png"
-              alt=""
-              width={509}
-              height={218}
-              preload
-              className="h-auto w-56 sm:w-72 md:w-80 drop-shadow-2xl"
-            />
-          </h1>
-          <p className="mt-7 max-w-xl font-sans text-base md:text-xl font-bold text-white/85 leading-relaxed">
-            LSR&apos;s own championship: a full season of races, one grid, and points toward the title.
-          </p>
-          <ul className="mt-6 flex flex-wrap gap-2">
-            {facts.map((fact) => (
-              <li key={fact} className="border border-white/15 bg-lsr-charcoal/50 px-3 py-1.5 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/80">
-                {fact}
-              </li>
-            ))}
-          </ul>
-          <div className="mt-9 flex flex-col sm:flex-row sm:items-start gap-4 sm:gap-6">
-            <EntryCta state={entry} />
-            <div className="flex flex-wrap gap-2">
-              {rulesPublished && (
+        <div className={`relative z-10 mx-auto max-w-6xl px-6 md:px-8 pt-20 pb-14 md:pt-28 md:pb-20 ${streamChannel ? "lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,520px)] lg:items-center lg:gap-12" : ""}`}>
+          <div>
+            <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-5">
+              {label}
+              {term ? ` · ${term}` : ""}
+            </p>
+            <h1>
+              <span className="sr-only">Lone Star Cup</span>
+              <Image
+                src="/images/lone-star-cup-logo.png"
+                alt=""
+                width={509}
+                height={218}
+                preload
+                className="h-auto w-56 sm:w-72 md:w-80 drop-shadow-2xl"
+              />
+            </h1>
+            <p className="mt-7 max-w-xl font-sans text-base md:text-xl font-bold text-white/85 leading-relaxed">
+              LSR&apos;s own championship: a full season of races, one grid, and points toward the title.
+            </p>
+            <ul className="mt-6 flex flex-wrap gap-2">
+              {facts.map((fact) => (
+                <li key={fact} className="border border-white/15 bg-lsr-charcoal/50 px-3 py-1.5 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/80">
+                  {fact}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-9 flex flex-col sm:flex-row sm:items-start gap-4 sm:gap-6">
+              <EntryCta state={entry} />
+              <div className="flex flex-wrap gap-2">
+                {rulesPublished && (
+                  <Button asChild className="h-12 rounded-none border border-white/20 bg-lsr-charcoal/40 px-5 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
+                    <Link href="/lone-star-cup/rules">
+                      <BookOpen className="mr-2 h-3.5 w-3.5" />
+                      Rules
+                    </Link>
+                  </Button>
+                )}
                 <Button asChild className="h-12 rounded-none border border-white/20 bg-lsr-charcoal/40 px-5 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
-                  <Link href="/lone-star-cup/rules">
-                    <BookOpen className="mr-2 h-3.5 w-3.5" />
-                    Rules
-                  </Link>
+                  <a href="#schedule">
+                    <CalendarDays className="mr-2 h-3.5 w-3.5" />
+                    Schedule
+                  </a>
                 </Button>
-              )}
-              <Button asChild className="h-12 rounded-none border border-white/20 bg-lsr-charcoal/40 px-5 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
-                <a href="#schedule">
-                  <CalendarDays className="mr-2 h-3.5 w-3.5" />
-                  Schedule
-                </a>
-              </Button>
-              <Button asChild className="h-12 rounded-none border border-white/20 bg-lsr-charcoal/40 px-5 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
-                <a href={watchUrl} target="_blank" rel="noopener noreferrer">
-                  <Twitch className="mr-2 h-3.5 w-3.5" />
-                  Watch on Twitch
-                </a>
-              </Button>
+                <Button asChild className="h-12 rounded-none border border-white/20 bg-lsr-charcoal/40 px-5 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
+                  <a href={watchUrl} target="_blank" rel="noopener noreferrer">
+                    <Twitch className="mr-2 h-3.5 w-3.5" />
+                    Watch on Twitch
+                  </a>
+                </Button>
+              </div>
             </div>
           </div>
+          {/* During a round's broadcast window, the stream shows here once the channel is live */}
+          {streamChannel && <LiveStream channel={streamChannel} />}
         </div>
       </div>
 
