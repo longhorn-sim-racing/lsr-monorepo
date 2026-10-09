@@ -32,7 +32,7 @@ export default function SignInPage() {
           : "Sign in to register for events, enter the Lone Star Cup and manage your driver page."
       }
     >
-      <AuthForms initialMode={mode} next={next} onModeChange={setMode} />
+      <AuthForms initialMode={mode} next={next} googleNext={searchParams.get("next") ? next : undefined} onModeChange={setMode} />
     </AuthShell>
   );
 }

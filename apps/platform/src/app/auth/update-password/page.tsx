@@ -9,7 +9,8 @@ import { createSupabaseBrowser } from "@/lib/supabase-browser"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { AuthNotice, authInput, authLabel, authSubmit } from "@/components/auth/auth-forms"
+import { AuthNotice } from "@/components/auth/auth-forms"
+import { authInput, authLabel, authSubmit } from "@/components/auth/auth-styles"
 import { AuthShell } from "../auth-shell"
 
 // Helper to decode JWT payload safely on client
@@ -63,6 +64,10 @@ export default function UpdatePasswordPage() {
       else if (event === "SIGNED_IN" && session) checkSession(session)
       else if (event === "SIGNED_OUT") router.replace("/")
     })
+
+    // Supabase says so in the URL when the link was already used or has expired
+    const params = new URLSearchParams(window.location.search + "&" + window.location.hash.slice(1))
+    if (params.get("error_code") || params.get("error")) setState((s) => (s === "checking" ? "expired" : s))
 
     // No recovery session arriving means the link was used, expired, or opened without one
     const timeout = window.setTimeout(() => setState((s) => (s === "checking" ? "expired" : s)), LINK_TIMEOUT_MS)

@@ -6,7 +6,8 @@ import { createSupabaseBrowser } from "@/lib/supabase-browser"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { AuthNotice, authInput, authLabel, authSubmit } from "@/components/auth/auth-forms"
+import { AuthNotice } from "@/components/auth/auth-forms"
+import { authInput, authLabel, authSubmit } from "@/components/auth/auth-styles"
 import { AuthShell } from "../auth-shell"
 
 export default function ForgotPasswordPage() {

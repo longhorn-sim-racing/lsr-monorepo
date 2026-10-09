@@ -16,6 +16,7 @@ import { publicEventWhere } from "@/lib/events";
 import { parseRoundTitle } from "@/lib/rounds";
 import { seasonLabel, seasonTerm } from "@/lib/seasons";
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
+import { zoneLabel } from "@/server/queries/schedule";
 import { UpdateRacingNumberButton } from "@/components/racing-number-prompt";
 import { Button } from "@/components/ui/button";
 
@@ -144,7 +145,7 @@ export default async function EnterLoneStarCupPage() {
         hour: "numeric",
         minute: "2-digit",
         timeZone: nextRound.timezone || DEFAULT_TIMEZONE,
-      })
+      }) + ` ${zoneLabel(nextRound.startsAtUtc, nextRound.timezone || DEFAULT_TIMEZONE)}`
     : null;
   const rulesPublic = rulesPage?.visibility === "public";
 
@@ -169,7 +170,7 @@ export default async function EnterLoneStarCupPage() {
               <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-lsr-orange" aria-hidden />
               <p className="font-sans text-sm text-white/75">
                 Next up: <span className="font-bold text-white">{nextParsed.name}, {nextParsed.track}</span>
-                <span className="block text-white/55">{nextWhen} CT</span>
+                <span className="block text-white/55">{nextWhen}</span>
               </p>
             </div>
           )}

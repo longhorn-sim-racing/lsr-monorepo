@@ -11,14 +11,14 @@ export default function RetiredPage() {
           Thanks for <span className="text-lsr-orange">racing</span>
         </h1>
         <p className="mt-5 font-sans text-base leading-relaxed text-white/70">
-          Your account is <span className="font-bold text-white">retired</span>. Your driver page and results stay up, but you&apos;re signed out and can&apos;t use member features.
+          Your account is <span className="font-bold text-white">retired</span>. Your driver page and results stay up, and club emails stop.
         </p>
         <p className="mt-3 font-sans text-sm leading-relaxed text-white/55">
           Want back on the grid? Email{" "}
           <a href="mailto:info@longhornsimracing.org" className="font-bold text-lsr-orange hover:text-white">
             info@longhornsimracing.org
           </a>{" "}
-          and an officer can reactivate you.
+          and we&apos;ll get you set up again.
         </p>
         <Button asChild className="mt-8 h-12 rounded-none border border-white/20 bg-transparent px-6 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
           <Link href="/">Back to the homepage</Link>

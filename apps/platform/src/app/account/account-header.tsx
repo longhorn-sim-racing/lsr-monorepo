@@ -36,7 +36,7 @@ export function AccountHeader({
             )}
           </span>
           <div className="min-w-0">
-            <h1 className="truncate font-display font-black italic text-4xl md:text-5xl uppercase leading-none text-white">{user.displayName}</h1>
+            <h1 className="break-words font-display font-black italic text-3xl sm:text-4xl md:text-5xl uppercase leading-[0.95] text-white">{user.displayName}</h1>
             <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-sm text-white/55">
               <span>@{user.handle}</span>
               <span aria-hidden>·</span>

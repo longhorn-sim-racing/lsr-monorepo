@@ -22,7 +22,10 @@ export function AuthDialog() {
   }, [])
 
   useEffect(() => {
-    const handleOpen = () => openAs("signup")
+    const handleOpen = () => {
+      setNotice(null)
+      openAs("signup")
+    }
     window.addEventListener("open-auth-dialog", handleOpen)
     return () => window.removeEventListener("open-auth-dialog", handleOpen)
   }, [openAs])
@@ -40,7 +43,10 @@ export function AuthDialog() {
       <DialogTrigger asChild>
         <Button
           size="sm"
-          onClick={() => openAs("signup")}
+          onClick={() => {
+            setNotice(null)
+            openAs("signup")
+          }}
           className="rounded-none bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal font-bold uppercase tracking-widest text-[10px] h-9 px-3 md:px-6 transition-all"
         >
           <span className="sm:hidden">Sign In</span>

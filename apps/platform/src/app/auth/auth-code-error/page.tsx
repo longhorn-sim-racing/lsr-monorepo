@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { authSubmit } from "@/components/auth/auth-forms";
+import { authSubmit } from "@/components/auth/auth-styles";
 import { AuthShell } from "../auth-shell";
 
 export default function AuthCodeErrorPage() {
@@ -12,14 +12,14 @@ export default function AuthCodeErrorPage() {
           That link <span className="text-lsr-orange">didn&apos;t work</span>
         </>
       }
-      intro="Sign-in and confirmation links only work once, and they expire after a while. Sign in again, or ask for a fresh link."
+      intro="Sign-in and confirmation links only work once, and they expire after a while. Try signing in; if you've lost your password, reset it."
     >
       <div className="space-y-3">
         <Button asChild className={authSubmit}>
           <Link href="/auth/signin">Sign in</Link>
         </Button>
         <Button asChild className="h-12 w-full rounded-none border border-white/20 bg-transparent font-sans text-xs font-bold uppercase tracking-[0.2em] text-white hover:bg-white hover:text-lsr-charcoal">
-          <Link href="/auth/forgot-password">Send me a new link</Link>
+          <Link href="/auth/forgot-password">Reset my password</Link>
         </Button>
       </div>
       <p className="mt-8 font-sans text-sm text-white/55">

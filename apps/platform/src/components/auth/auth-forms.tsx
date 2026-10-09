@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useState, useTransition } from "react"
+import { useId, useState, useTransition } from "react"
 import { AlertCircle, CheckCircle2, MailCheck } from "lucide-react"
 import { createSupabaseBrowser } from "@/lib/supabase-browser"
 import { cn } from "@/lib/utils"
@@ -11,15 +11,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { GoogleButton } from "@/components/google-button"
+import { authInput, authLabel, authSubmit } from "./auth-styles"
 
 export type AuthMode = "signin" | "signup"
-
-export const authLabel = "font-sans font-bold text-[11px] uppercase tracking-[0.2em] text-white/55"
-// 16px text on phones so iOS doesn't zoom into the field
-export const authInput =
-  "h-11 rounded-none border-white/15 bg-white/[0.04] text-base text-white placeholder:text-white/30 focus-visible:border-lsr-orange focus-visible:ring-1 focus-visible:ring-lsr-orange md:text-sm"
-export const authSubmit =
-  "h-12 w-full rounded-none bg-lsr-orange font-sans text-xs font-bold uppercase tracking-[0.2em] text-white transition-colors hover:bg-white hover:text-lsr-charcoal"
 
 export function AuthNotice({ tone, children }: { tone: "error" | "success"; children: React.ReactNode }) {
   const Icon = tone === "error" ? AlertCircle : CheckCircle2
@@ -57,6 +51,7 @@ function OrDivider() {
 export function AuthForms({
   initialMode = "signin",
   next,
+  googleNext,
   onSignedIn,
   onNavigate,
   onModeChange,
@@ -64,6 +59,8 @@ export function AuthForms({
   initialMode?: AuthMode
   /** Where to go after signing in; without it the current page refreshes */
   next?: string
+  /** Where Google sign-in returns to; without it the callback sends people to their driver page */
+  googleNext?: string
   /** Called after a successful sign-in (the dialog closes itself) */
   onSignedIn?: () => void
   /** Called when a link inside leaves the form (the dialog closes itself) */
@@ -72,6 +69,8 @@ export function AuthForms({
   onModeChange?: (mode: AuthMode) => void
 }) {
   const router = useRouter()
+  // Unique per copy: /auth/signin and the header's dialog can both be on screen
+  const id = useId()
   const [mode, setMode] = useState<AuthMode>(initialMode)
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -167,23 +166,23 @@ export function AuthForms({
         </button>
       </div>
 
-      <GoogleButton next={next} />
+      <GoogleButton next={googleNext} />
       <OrDivider />
 
       {mode === "signin" ? (
         <form onSubmit={onSignin} className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="auth-email" className={authLabel}>Email</Label>
-            <Input id="auth-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className={authInput} placeholder="you@utexas.edu" required />
+            <Label htmlFor={`${id}-email`} className={authLabel}>Email</Label>
+            <Input id={`${id}-email`} type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className={authInput} placeholder="you@utexas.edu" required />
           </div>
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="auth-password" className={authLabel}>Password</Label>
-              <Link href="/auth/forgot-password" onClick={onNavigate} className="font-sans font-bold text-[11px] uppercase tracking-[0.15em] text-lsr-orange hover:text-white">
+              <Label htmlFor={`${id}-password`} className={authLabel}>Password</Label>
+              <Link href="/auth/forgot-password" onClick={onNavigate} className="-my-2 py-2 font-sans font-bold text-[11px] uppercase tracking-[0.15em] text-lsr-orange hover:text-white">
                 Forgot it?
               </Link>
             </div>
-            <Input id="auth-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className={authInput} required />
+            <Input id={`${id}-password`} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className={authInput} required />
           </div>
           {error && <AuthNotice tone="error">{error}</AuthNotice>}
           <Button type="submit" disabled={pending} className={authSubmit}>
@@ -199,29 +198,29 @@ export function AuthForms({
       ) : (
         <form onSubmit={onSignup} className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="auth-name" className={authLabel}>Full name</Label>
-            <Input id="auth-name" autoComplete="name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={authInput} placeholder="Your name on the roster" required />
+            <Label htmlFor={`${id}-name`} className={authLabel}>Full name</Label>
+            <Input id={`${id}-name`} autoComplete="name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={authInput} placeholder="Your name on the roster" required />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="auth-email" className={authLabel}>Email</Label>
-            <Input id="auth-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className={authInput} placeholder="you@utexas.edu" required />
+            <Label htmlFor={`${id}-email`} className={authLabel}>Email</Label>
+            <Input id={`${id}-email`} type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className={authInput} placeholder="you@utexas.edu" required />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="auth-password" className={authLabel}>Password</Label>
-            <Input id="auth-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className={authInput} minLength={6} required />
+            <Label htmlFor={`${id}-password`} className={authLabel}>Password</Label>
+            <Input id={`${id}-password`} type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} className={authInput} minLength={6} required />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="auth-eid" className={authLabel}>
+            <Label htmlFor={`${id}-eid`} className={authLabel}>
               UT EID <span className="normal-case tracking-normal text-white/35">(optional)</span>
             </Label>
-            <Input id="auth-eid" autoComplete="off" value={eid} onChange={(e) => setEid(e.target.value)} className={authInput} placeholder="e.g. abc123" />
+            <Input id={`${id}-eid`} autoComplete="off" value={eid} onChange={(e) => setEid(e.target.value)} className={authInput} placeholder="e.g. abc123" />
           </div>
-          <label htmlFor="auth-marketing" className="flex cursor-pointer items-center justify-between gap-4 border border-white/10 bg-white/[0.03] p-4">
+          <label htmlFor={`${id}-marketing`} className="flex cursor-pointer items-center justify-between gap-4 border border-white/10 bg-white/[0.03] p-4">
             <span>
               <span className="block font-sans font-bold text-sm text-white">Club news and event emails</span>
               <span className="mt-0.5 block font-sans text-xs text-white/50">You can turn these off any time.</span>
             </span>
-            <Switch id="auth-marketing" checked={marketing} onCheckedChange={(checked: boolean) => setMarketing(checked)} className="data-[state=checked]:bg-lsr-orange" />
+            <Switch id={`${id}-marketing`} checked={marketing} onCheckedChange={(checked: boolean) => setMarketing(checked)} className="data-[state=checked]:bg-lsr-orange" />
           </label>
           {error && <AuthNotice tone="error">{error}</AuthNotice>}
           <Button type="submit" disabled={pending} className={authSubmit}>

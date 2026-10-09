@@ -44,10 +44,15 @@ export default async function AccountPage() {
     prisma.notificationPreference.findUnique({ where: { userId: user.id } }),
     getActiveEntitlements(user.id),
     prisma.product.findFirst({ where: { type: 'ANNUAL_DUES', active: true } }),
-    getSchedule(user.id).catch(() => []),
+    getSchedule(user.id).catch((error) => {
+      console.error('[Account] Failed to load schedule:', error);
+      return null;
+    }),
   ]);
   const membership = entitlements.find((entitlement) => entitlement.kind === 'lsr_member');
-  const myEvents = schedule.filter((event) => event.viewer && !event.ended);
+  // Hidden in semesters without dues, and then the profile takes the full width
+  const showMembership = !!(membership || dues);
+  const myEvents = (schedule ?? []).filter((event) => event.viewer && !event.ended);
 
   // Default preferences if none exist
   const preferences = notificationPrefs ?? {
@@ -96,7 +101,7 @@ export default async function AccountPage() {
               {cardTick}
               <p className="flex items-center gap-3 font-sans text-sm text-white/65">
                 <CalendarDays className="h-5 w-5 shrink-0 text-lsr-orange" aria-hidden />
-                You&apos;re not registered for anything coming up.
+                {schedule ? "You're not registered for anything coming up." : "We couldn't load your events just now. The schedule has everything."}
               </p>
               <Button asChild className="h-11 rounded-none bg-lsr-orange px-6 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
                 <Link href="/events">Find an event</Link>
@@ -105,7 +110,7 @@ export default async function AccountPage() {
           )}
         </Section>
 
-        <div className="grid gap-16 md:gap-20 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-8">
+        <div className={`grid gap-16 md:gap-20 lg:gap-8 ${showMembership ? 'lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]' : ''}`}>
           {/* Profile */}
           <Section
             id="profile"
@@ -122,7 +127,7 @@ export default async function AccountPage() {
           >
             <div className={card}>
               {cardTick}
-              <dl className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
+              <dl className={`grid gap-x-8 gap-y-5 sm:grid-cols-2 ${showMembership ? '' : 'lg:grid-cols-4'}`}>
                 {details.map((item) => (
                   <div key={item.label} className="min-w-0">
                     <dt className="font-sans font-bold text-[11px] uppercase tracking-[0.2em] text-white/45">{item.label}</dt>
@@ -143,7 +148,7 @@ export default async function AccountPage() {
           </Section>
 
           {/* Membership: only when someone holds one or dues are on sale (no dues some semesters) */}
-          {(membership || dues) && (
+          {showMembership && (
             <Section id="membership" kicker="Longhorn Sim Racing" title="Membership">
               <div className={card}>
                 {cardTick}
@@ -220,7 +225,7 @@ export default async function AccountPage() {
             <div className="flex h-full flex-col border border-white/10 bg-white/[0.02] p-6 md:p-8">
               <h3 className="font-sans font-bold text-base text-white">Retire your account</h3>
               <p className="mt-2 mb-8 flex-grow font-sans text-sm leading-relaxed text-white/60">
-                You&apos;ll be signed out and marked as <span className="font-bold text-white">retired</span>. Your driver page and stats stay visible, but you won&apos;t be able to use the site.
+                Step back from the club. You&apos;ll be marked as <span className="font-bold text-white">retired</span> and stop getting club emails. Your driver page and stats stay up.
               </p>
               <form action={retireAccount}>
                 <Button type="submit" variant="outline" className="h-12 w-full rounded-none border-white/15 bg-transparent font-bold uppercase tracking-widest text-[10px] text-white hover:bg-white hover:text-lsr-charcoal">

@@ -92,7 +92,14 @@ export default async function DriverProfilePage({ params }: { params: Promise<{ 
 
   const { user, driver, seasons, races, cars, events } = profile;
   const isMe = viewerId === user.id;
-  const myEvents = isMe ? (await getSchedule(user.id).catch(() => [])).filter((e) => e.viewer && !e.ended) : [];
+  const myEvents = isMe
+    ? (
+        await getSchedule(user.id).catch((error) => {
+          console.error("[DriverProfile] Failed to load schedule:", error);
+          return [];
+        })
+      ).filter((e) => e.viewer && !e.ended)
+    : [];
 
   const socials = (user.socials as Record<string, string> | null) ?? {};
   const links = [
@@ -275,10 +282,12 @@ export default async function DriverProfilePage({ params }: { params: Promise<{ 
                         key={link.key}
                         href={link.href}
                         target="_blank"
-                        rel="noopener noreferrer nofollow"
+                        rel="noopener noreferrer nofollow ugc"
                         className="inline-flex h-10 items-center gap-2 border border-white/15 px-3 font-sans text-xs font-bold text-white/80 transition-colors hover:border-lsr-orange hover:text-lsr-orange"
                       >
-                        <BrandIcon icon={link.icon} label="" className="h-3.5 w-3.5" />
+                        <span aria-hidden>
+                          <BrandIcon icon={link.icon} label="" className="h-3.5 w-3.5" />
+                        </span>
                         {link.label}
                       </a>
                     ))}
@@ -286,7 +295,7 @@ export default async function DriverProfilePage({ params }: { params: Promise<{ 
                       <a
                         href={website}
                         target="_blank"
-                        rel="noopener noreferrer nofollow"
+                        rel="noopener noreferrer nofollow ugc"
                         className="inline-flex h-10 items-center gap-2 border border-white/15 px-3 font-sans text-xs font-bold text-white/80 transition-colors hover:border-lsr-orange hover:text-lsr-orange"
                       >
                         <Globe className="h-3.5 w-3.5" aria-hidden />

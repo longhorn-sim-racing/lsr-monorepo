@@ -1,10 +1,10 @@
 import { cache } from "react"
 import { prisma } from "@/server/db"
 import { publicEventWhere } from "@/lib/events"
-import { parseRoundTitle } from "@/lib/rounds"
 import { seasonLabel } from "@/lib/seasons"
 import { DEFAULT_TIMEZONE } from "@/lib/dates"
 import { getRosterDrivers } from "@/server/queries/roster"
+import { roundOf } from "@/server/queries/schedule"
 
 /**
  * Everything on a driver's public page. Career numbers come from the same roster calculation as
@@ -69,7 +69,7 @@ export const getDriverProfile = cache(async (handle: string) => {
             startedAt: true,
             trackName: true,
             _count: { select: { results: true } },
-            event: { select: { slug: true, title: true, startsAtUtc: true, timezone: true, series: { select: { title: true } } } },
+            event: { select: { slug: true, title: true, startsAtUtc: true, timezone: true, series: { select: { title: true, slug: true } } } },
           },
         },
       },
@@ -84,7 +84,7 @@ export const getDriverProfile = cache(async (handle: string) => {
   const driver = roster.find((d) => d.id === user.id) ?? null
 
   const seasons = entries
-    .sort((a, b) => (b.season.startAt?.getTime() ?? b.season.year) - (a.season.startAt?.getTime() ?? a.season.year))
+    .sort((a, b) => (b.season.startAt?.getTime() ?? Date.UTC(b.season.year, 0)) - (a.season.startAt?.getTime() ?? Date.UTC(a.season.year, 0)))
     .map((entry) => ({
       league: entry.season.league?.name ?? null,
       season: seasonLabel(entry.season.name),
@@ -102,9 +102,9 @@ export const getDriverProfile = cache(async (handle: string) => {
   const races = results
     .filter((r) => r.session.event)
     .sort((a, b) => b.session.event!.startsAtUtc.getTime() - a.session.event!.startsAtUtc.getTime() || b.session.startedAt.getTime() - a.session.startedAt.getTime())
-    .map((r, i) => {
+    .map((r) => {
       const event = r.session.event!
-      const round = /\bRound\s+\d|\bfinal\b/i.test(event.title) && event.title.includes("@") ? parseRoundTitle(event.title, i) : null
+      const round = roundOf(event.title, event.series)
       return {
         id: r.id,
         eventSlug: event.slug,
