@@ -22,6 +22,10 @@ const SCRIPT_SRC = "https://player.twitch.tv/js/embed/v1.js"
 export function LiveStream({ channel }: { channel: string }) {
   const mount = useRef<HTMLDivElement>(null)
   const [live, setLive] = useState(false)
+  const liveRef = useRef(false)
+  useEffect(() => {
+    liveRef.current = live
+  }, [live])
 
   useEffect(() => {
     const element = mount.current
@@ -45,6 +49,12 @@ export function LiveStream({ channel }: { channel: string }) {
       player.addEventListener(Twitch.Player.OFFLINE, () => setLive(false))
     }
 
+    // Twitch reliably reports a live channel when the player loads, less so when a channel goes
+    // live later, so reload the player every few minutes until it's live
+    const retry = window.setInterval(() => {
+      if (!liveRef.current) start()
+    }, 3 * 60_000)
+
     let script = document.querySelector<HTMLScriptElement>(`script[src="${SCRIPT_SRC}"]`)
     if ((window as unknown as { Twitch?: TwitchApi }).Twitch?.Player) {
       start()
@@ -60,6 +70,7 @@ export function LiveStream({ channel }: { channel: string }) {
 
     return () => {
       cancelled = true
+      window.clearInterval(retry)
       script?.removeEventListener("load", start)
       element.replaceChildren()
     }
@@ -67,10 +78,10 @@ export function LiveStream({ channel }: { channel: string }) {
 
   return (
     <div
-      // Offline it stays mounted (Twitch needs the element to report the channel going live) but takes
-      // no room on narrow screens, where it would otherwise leave a gap under the hero text
-      className={`transition-opacity duration-700 ${live ? "opacity-100 max-lg:mt-10" : "pointer-events-none opacity-0 max-lg:h-0 max-lg:overflow-hidden"}`}
-      aria-hidden={!live}
+      // Offline it stays mounted (Twitch needs the element to report the channel going live) but is
+      // inert, and takes no room when it stacks under the hero text
+      className={`transition-opacity duration-700 ${live ? "opacity-100 max-xl:mt-10" : "pointer-events-none opacity-0 max-xl:h-0 max-xl:overflow-hidden"}`}
+      inert={!live}
     >
       <div className="mb-3 flex items-center justify-between gap-3">
         <span className="inline-flex items-center gap-2 bg-red-600 px-2.5 py-1 font-sans font-black text-[10px] uppercase tracking-[0.2em] text-white">
@@ -81,7 +92,6 @@ export function LiveStream({ channel }: { channel: string }) {
           href={`https://www.twitch.tv/${channel}`}
           target="_blank"
           rel="noopener noreferrer"
-          tabIndex={live ? undefined : -1}
           className="inline-flex items-center gap-1 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/70 hover:text-lsr-orange transition-colors"
         >
           Open on Twitch <ArrowUpRight className="h-3 w-3" />

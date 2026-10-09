@@ -2,7 +2,9 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { Metadata } from "next";
-import { ArrowRight, ArrowUpRight, BookOpen, CalendarDays, Check, Flag, MessageSquare, Moon, ScrollText, Trophy, Twitch } from "lucide-react";
+import { ArrowRight, ArrowUpRight, BookOpen, CalendarDays, Check, Flag, MessageSquare, Moon, ScrollText, Trophy } from "lucide-react";
+import { siTwitch } from "simple-icons/icons";
+import { BrandIcon } from "@/components/brand-icon";
 import { getStandings, getPointsProgression } from "@/server/queries/standings";
 import { StandingsTable } from "@/components/standings-table";
 import { prisma } from "@/server/db";
@@ -10,7 +12,6 @@ import { DatabaseUnavailable } from "@/components/database-unavailable";
 import { ChampionshipChart } from "@/components/championship-chart";
 import { CloudinaryImage } from "@/components/cloudinary-image";
 import { getCachedSessionUser } from "@/server/auth/cached-session";
-import { isViewerOfficer } from "@/server/auth/guards";
 import { getActiveEntitlements } from "@/server/repos/membership.repo";
 import { priceForUser, productRequiresMembership } from "@/server/services/product-pricing";
 import { getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
@@ -37,8 +38,6 @@ export const metadata: Metadata = {
 
 const LEAGUE_SLUG = "lone-star-cup";
 const DISCORD_URL = "https://discord.gg/5Uv9YwpnFz";
-// LSC races are usually streamed here; a round's own stream URL wins when it has one
-const TWITCH_URL = "https://www.twitch.tv/longhorn_sim_racing";
 const STANDINGS_NOTE =
   "Only users with accounts can be shown on the standings page. Accounts must be manually linked to Assetto Corsa display names. If you are not listed, please create an account and email info@longhornsimracing.org to be added.";
 
@@ -102,11 +101,17 @@ type SeriesWithPodiums = NonNullable<Awaited<ReturnType<typeof getSeriesWithPodi
 type RoundEvent = SeriesWithPodiums["events"][number];
 type Standing = Awaited<ReturnType<typeof getStandings>>[number];
 
-/** The Twitch channel to embed: the round's own stream if it's on Twitch, otherwise LSR's. */
+/**
+ * The Twitch channel in a round's stream URL, or LSR's (where LSC races usually stream) when it
+ * isn't a twitch.tv/<channel> link.
+ */
 function twitchChannel(streamUrl: string | null) {
   try {
-    const url = new URL(streamUrl ?? TWITCH_URL);
-    if (url.hostname.endsWith("twitch.tv")) return url.pathname.split("/")[1] || "longhorn_sim_racing";
+    const url = new URL(streamUrl ?? "");
+    const channel = url.pathname.split("/")[1] ?? "";
+    if (["twitch.tv", "www.twitch.tv", "m.twitch.tv"].includes(url.hostname) && /^[a-z0-9_]{3,25}$/i.test(channel) && channel !== "videos") {
+      return channel;
+    }
   } catch {}
   return "longhorn_sim_racing";
 }
@@ -176,11 +181,11 @@ async function loadLoneStarCup() {
     ]);
 
   // Returning drivers (in a past season's standings) see their lower rate.
-  const [entryPrice, application, rulesPage, viewerIsOfficer] = await Promise.all([
+  const viewerIsOfficer = session.roles.some((role) => role === "officer" || role === "admin");
+  const [entryPrice, application, rulesPage] = await Promise.all([
     entryProduct ? priceForUser(entryProduct, session.user?.id ?? null) : null,
     session.user && openSeason ? getLeagueApplication(session.user.id, openSeason.id) : null,
     prisma.page.findUnique({ where: { slug: LSC_RULES_SLUG }, select: { id: true, visibility: true } }),
-    session.user ? isViewerOfficer() : false,
   ]);
 
   return {
@@ -334,7 +339,6 @@ export default async function LoneStarCupPage() {
   const completed = nextIndex === -1 ? rounds.length : nextIndex;
   const last = completed > 0 ? rounds[completed - 1] : null;
   const nextLive = next ? new Date(next.event.startsAtUtc) <= now : false;
-  const watchUrl = next?.event.streamUrl || TWITCH_URL;
 
   // The Twitch player only loads around a round (30 min before to an hour after), so the
   // page doesn't pull in Twitch the rest of the week. It still only appears once the channel is live.
@@ -344,6 +348,8 @@ export default async function LoneStarCupPage() {
       now.getTime() <= round.event.endsAtUtc.getTime() + 60 * 60_000,
   );
   const streamChannel = streamRound ? twitchChannel(streamRound.event.streamUrl) : null;
+  // Links follow the round being streamed (or the next one), and always go to Twitch
+  const watchUrl = `https://www.twitch.tv/${twitchChannel((streamRound ?? next)?.event.streamUrl ?? null)}`;
 
   const label = seasonLabel(currentSeason.name);
   const term = seasonTerm(currentSeason.startAt);
@@ -377,7 +383,7 @@ export default async function LoneStarCupPage() {
           <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal/95 via-lsr-charcoal/60 to-transparent" />
         </div>
 
-        <div className={`relative z-10 mx-auto max-w-6xl px-6 md:px-8 pt-20 pb-14 md:pt-28 md:pb-20 ${streamChannel ? "lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,520px)] lg:items-center lg:gap-12" : ""}`}>
+        <div className={`relative z-10 mx-auto max-w-6xl px-6 md:px-8 pt-20 pb-14 md:pt-28 md:pb-20 ${streamChannel ? "xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,500px)] xl:items-center xl:gap-12" : ""}`}>
           <div>
             <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-5">
               {label}
@@ -404,7 +410,7 @@ export default async function LoneStarCupPage() {
                 </li>
               ))}
             </ul>
-            <div className="mt-9 flex flex-col sm:flex-row sm:items-start gap-4 sm:gap-6">
+            <div className="mt-9 flex flex-col sm:flex-row sm:flex-wrap sm:items-start gap-4 sm:gap-6">
               <EntryCta state={entry} />
               <div className="flex flex-wrap gap-2">
                 {rulesPublished && (
@@ -423,7 +429,7 @@ export default async function LoneStarCupPage() {
                 </Button>
                 <Button asChild className="h-12 rounded-none border border-white/20 bg-lsr-charcoal/40 px-5 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
                   <a href={watchUrl} target="_blank" rel="noopener noreferrer">
-                    <Twitch className="mr-2 h-3.5 w-3.5" />
+                    <BrandIcon icon={siTwitch} label="" className="mr-2 h-3.5 w-3.5" />
                     Watch on Twitch
                   </a>
                 </Button>
@@ -458,6 +464,7 @@ export default async function LoneStarCupPage() {
               )}
             </p>
           </div>
+          {rounds.length > 0 && (
           <div className="flex-1">
             <div className="flex gap-1" aria-hidden>
               {rounds.map((round, i) => (
@@ -471,6 +478,7 @@ export default async function LoneStarCupPage() {
               {completed} of {plural(rounds.length, "round")} run
             </p>
           </div>
+          )}
           {next && nextLive && (
             <a
               href={watchUrl}
@@ -547,8 +555,8 @@ export default async function LoneStarCupPage() {
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange hover:text-white transition-colors"
                   >
-                    <Twitch className="h-3.5 w-3.5" />
-                    {nextLive ? "Watch live on Twitch" : "Live on Twitch"}
+                    <BrandIcon icon={siTwitch} label="" className="h-3.5 w-3.5" />
+                    {nextLive ? "Watch live on Twitch" : "Streams on Twitch"}
                     <ArrowUpRight className="h-3 w-3" />
                   </a>
                 </div>
@@ -606,6 +614,11 @@ export default async function LoneStarCupPage() {
           <SectionHeading kicker={`${label} calendar`} id="schedule">
             The <span className="text-lsr-orange">schedule</span>
           </SectionHeading>
+          {rounds.length === 0 && (
+            <p className="border border-white/10 bg-white/[0.02] p-8 text-center font-sans text-sm text-white/55">
+              Rounds go up here once the season&apos;s schedule is set.
+            </p>
+          )}
           <ol className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 md:gap-3">
             {rounds.map((round, i) => {
               const done = i < completed;
@@ -750,7 +763,7 @@ export default async function LoneStarCupPage() {
             <p className="mt-2">
               The rules are still a draft, so visitors don&apos;t see them yet. Once Competition signs off,{" "}
               <Link href={`/admin/pages/${rulesDraftId}`} className="underline hover:text-white">publish them in Admin → Pages</Link>{" "}
-              and they show up here and in the header.{" "}
+              and they show up here and as a Rules button at the top of this page.{" "}
               <Link href="/lone-star-cup/rules" className="underline hover:text-white">Preview the draft</Link>.
             </p>
           </section>
@@ -795,15 +808,13 @@ export default async function LoneStarCupPage() {
                 const champion = season.standings[0];
                 return (
                   <details key={season.id} className="group/season border border-white/10 bg-white/[0.02] open:bg-white/[0.03]">
-                    <summary className="flex cursor-pointer list-none flex-col gap-4 p-6 md:flex-row md:items-center md:justify-between md:p-8 [&::-webkit-details-marker]:hidden">
-                      <span className="block">
-                        <span className="block font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">
-                          {season.term ? `${season.term} · ` : ""}
-                          {plural(pastRounds.length, "round")}
-                        </span>
-                        <h3 className="mt-2 font-display font-black italic text-3xl md:text-4xl uppercase leading-none">{season.label}</h3>
+                    <summary className="grid cursor-pointer list-none gap-x-6 gap-y-2 p-6 md:grid-cols-[1fr_auto] md:items-center md:p-8 [&::-webkit-details-marker]:hidden">
+                      <span className="block font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">
+                        {season.term ? `${season.term} · ` : ""}
+                        {plural(pastRounds.length, "round")}
                       </span>
-                      <span className="flex items-center gap-6">
+                      <h3 className="font-display font-black italic text-3xl md:text-4xl uppercase leading-none md:col-start-1">{season.label}</h3>
+                      <span className="mt-2 flex items-center gap-6 md:col-start-2 md:row-span-2 md:row-start-1 md:mt-0">
                         {champion && (
                           <span className="block text-left md:text-right">
                             <span className="block font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">
@@ -882,9 +893,11 @@ export default async function LoneStarCupPage() {
                 ? next
                   ? `You're on the grid. ${next.final ? "The finale" : next.name} is at ${next.track}.`
                   : "You're on the grid. Watch Discord for what's next."
-                : entry.kind === "unavailable" || !next
+                : entry.kind === "unavailable"
                   ? "Entry is closed right now. Say hi on Discord in the meantime."
-                  : `${next.final ? "The finale" : next.name} is at ${next.track}. Enter and race the rest of the season.`}
+                  : next
+                    ? `${next.final ? "The finale" : next.name} is at ${next.track}. Enter and race the rest of the season.`
+                    : "Entry is open. Watch Discord for race dates."}
             </p>
             <div className="mt-8 flex flex-col sm:flex-row sm:items-start gap-4">
               <EntryCta state={entry} />
