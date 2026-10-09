@@ -82,7 +82,7 @@ export default async function EditDriverPage({
       </div>
 
       <div className="mx-auto max-w-6xl px-6 md:px-8 py-10 md:py-14">
-        <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,320px)] lg:items-start lg:gap-12">
+        <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,320px)] lg:items-start lg:gap-12">
           {/* How you appear */}
           <aside className="relative border border-white/10 bg-white/[0.02] p-6 lg:sticky lg:top-24 lg:order-2">
             <div className="absolute top-0 left-0 h-1 w-16 bg-lsr-orange" />

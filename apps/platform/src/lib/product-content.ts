@@ -15,7 +15,7 @@ const VOID_TAGS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "i
 /** Appends closing tags for any elements still open at the end of an HTML fragment */
 function closeOpenTags(html: string): string {
   const open: string[] = [];
-  for (const [tag, name] of html.matchAll(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g)) {
+  for (const [tag, name] of html.replace(/<!--[\s\S]*?-->/g, "").matchAll(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g)) {
     const lower = name.toLowerCase();
     if (tag.startsWith("</")) {
       const at = open.lastIndexOf(lower);
@@ -37,8 +37,9 @@ export function cleanProductDescription(html?: string): string {
   const match =
     cleaned.match(SIZE_GUIDE_HEADING) ?? cleaned.match(/(?:<(?:p|h[1-6]|div)\b[^>]*>\s*)?(?:<(?:strong|b)\b[^>]*>\s*)?Size\s+guide(?:<\/strong>|<\/b>)?/i);
   if (match && match.index !== undefined) {
-    // Close anything the cut left open, or the browser wraps the rest of the page in it
-    cleaned = closeOpenTags(cleaned.substring(0, match.index));
+    // Drop a tag the cut landed inside (e.g. an alt="Size guide chart"), then close anything left open,
+    // or the browser wraps the rest of the page in it
+    cleaned = closeOpenTags(cleaned.substring(0, match.index).replace(/<[^>]*$/, ""));
   }
 
   // 2. Remove On Demand Boilerplate
