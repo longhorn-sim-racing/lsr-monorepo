@@ -163,6 +163,11 @@ model User {
   raceParticipants       RaceParticipant[]
   leagueApplications     LeagueApplication[]
 
+  // Recruiting relations
+  applications             Application[]       @relation("ApplicationApplicant")
+  decidedApplicationTracks ApplicationTrack[]  @relation("ApplicationDecider")
+  applicationReviews       ApplicationReview[] @relation("ApplicationReviewer")
+
   // Notification relations
   notifications          Notification[]
   notificationPrefs      NotificationPreference?
@@ -838,4 +843,163 @@ model SystemSetting {
   key       String   @id
   value     String   // JSON-encoded value
   updatedAt DateTime @updatedAt
+}
+
+
+// ---------- Recruiting ----------
+// Applicants are Users. An Application is one person's submission for a round; it has
+// one ApplicationTrack per team they applied to, and decisions are made per track.
+// Design: docs/recruiting-system-design.md (local doc).
+
+enum ApplicationState {
+  DRAFT      // saved on the server, editable, invisible to officers
+  SUBMITTED  // final: by the applicant, or by the deadline sweep if it was complete
+}
+
+enum TrackStatus {
+  SUBMITTED  // received, not looked at yet
+  IN_REVIEW
+  INTERVIEW  // only for teams that run interviews (enforced in the service layer)
+  ACCEPTED
+  REJECTED   // "not moving forward"
+}
+
+model RecruitingCycle {
+  id          String   @id @default(uuid())
+  slug        String   @unique // "fall-2026"
+  name        String
+  opensAt     DateTime
+  closesAt    DateTime // UTC; shown in America/Chicago
+  isActive    Boolean  @default(false) // at most one active round (partial unique index in the migration)
+  formVersion Int      @default(1)     // bump when a question is removed or changes meaning
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  applications   Application[]
+  trackConfigs   RecruitingTrackConfig[]
+  emailTemplates RecruitingEmailTemplate[]
+}
+
+model Application {
+  id      String           @id @default(uuid())
+  cycleId String
+  userId  String
+  state   ApplicationState @default(DRAFT)
+
+  // Snapshot of profile fields, pre-filled from User and copied here so later profile
+  // edits don't change a submitted application. Nullable while it is a draft.
+  fullName String?
+  email    String?
+  eid      String?
+  gradYear Int?
+  major    String?
+
+  genericAnswers Json    @default("{}") // answers to the generic question set: { questionId: value }
+  resumeUrl      String? // https link, required at submit
+  portfolioLinks Json    @default("[]") // [{ label, url }], optional, shared across teams
+  draftStep      String? // where the applicant left off in the form
+  formVersion    Int // copied from the round when the draft is created (no default on purpose)
+
+  submittedAt   DateTime?
+  autoSubmitted Boolean   @default(false) // true when the deadline sweep submitted it
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cycle  RecruitingCycle @relation(fields: [cycleId], references: [id], onDelete: Restrict)
+  user   User            @relation("ApplicationApplicant", fields: [userId], references: [id], onDelete: Cascade)
+  tracks ApplicationTrack[]
+  emails ApplicationEmail[]
+
+  @@unique([cycleId, userId]) // one application per person per round
+  @@index([state, cycleId, updatedAt]) // the deadline sweep and officer lists
+}
+
+model ApplicationTrack {
+  id            String      @id @default(uuid())
+  applicationId String
+  track         String // key from the hardcoded tracks list, e.g. "racing"
+  answers       Json        @default("{}") // this team's page of answers: { questionId: value }
+  status        TrackStatus @default(SUBMITTED) // only meaningful once the Application is SUBMITTED
+  decidedAt     DateTime?
+  decidedById   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  decidedBy   User?       @relation("ApplicationDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+  reviews     ApplicationReview[]
+  emails      ApplicationEmail[]
+
+  @@unique([applicationId, track])
+  @@index([track, status])
+}
+
+model ApplicationReview {
+  id                 String   @id @default(uuid())
+  applicationTrackId String
+  reviewerId         String? // set null if the officer's account is deleted; never blocks account deletion
+  score              Int? // 1 to 5, optional
+  notes              String?
+  createdAt          DateTime @default(now())
+
+  applicationTrack ApplicationTrack @relation(fields: [applicationTrackId], references: [id], onDelete: Cascade)
+  reviewer         User?            @relation("ApplicationReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([applicationTrackId])
+}
+
+// Delivery log for recruiting email. Separate from Notification: that pipeline skips
+// users who opted out of marketing mail, and decision emails must always go out.
+model ApplicationEmail {
+  id                 String             @id @default(uuid())
+  applicationId      String
+  applicationTrackId String? // null for application-level mail (e.g. "received")
+  template           String // RECEIVED | INTERVIEW | ACCEPTED | REJECTED | DEADLINE_REMINDER
+  toEmail            String
+  subject            String // exactly what was sent
+  body               String // exactly what was sent (plain text, before HTML wrapping)
+  status             NotificationStatus @default(PENDING)
+  resendMessageId    String?
+  error              String?
+  sentAt             DateTime?
+  createdAt          DateTime           @default(now())
+
+  application      Application       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  applicationTrack ApplicationTrack? @relation(fields: [applicationTrackId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([applicationId])
+}
+
+// Per-round, per-team settings (the Google Calendar booking link).
+model RecruitingTrackConfig {
+  id            String   @id @default(uuid())
+  cycleId       String
+  track         String
+  schedulingUrl String?
+  updatedById   String? // plain id, no relation: the audit log records who changed it
+  updatedAt     DateTime @updatedAt
+
+  cycle RecruitingCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+
+  @@unique([cycleId, track])
+}
+
+// Optional overrides of the default email drafts that live in code.
+// `track` is a team key, or '*' for "all teams" (not NULL: Postgres treats NULLs as
+// distinct in unique indexes, so a nullable column would allow duplicates).
+model RecruitingEmailTemplate {
+  id          String   @id @default(uuid())
+  cycleId     String
+  track       String
+  template    String // INTERVIEW | ACCEPTED | REJECTED | RECEIVED
+  subject     String
+  body        String // plain text with {{tokens}}
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  cycle RecruitingCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+
+  @@unique([cycleId, track, template])
 }
