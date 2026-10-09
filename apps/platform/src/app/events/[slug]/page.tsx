@@ -1,20 +1,25 @@
 import { getEventBySlug } from "@/server/queries/events";
 import { getIngestedResultsByEventId, getLapDataBySessionId } from "@/server/queries/results";
+import { getSchedule, roundOf, timeRange } from "@/server/queries/schedule";
 import { LapPositionChart, type LapPositionData } from "@/components/lap-position-chart";
 import { notFound } from "next/navigation";
 import Image from "next/image";
-import { Calendar, Clock, MapPin, QrCode, CreditCard } from "lucide-react";
 import Link from "next/link";
-import { LocalTime, LocalTimeRange } from "@/components/ui/local-time";
+import { ArrowLeft, ArrowRight, CalendarDays, Clock, CreditCard, Images, MapPin, Monitor, Moon, QrCode, Trophy } from "lucide-react";
 import { VenueActions } from "@/components/venue-actions";
 import { ResultsTable } from "@/components/results-table";
 import { EventRegistrationPanel } from "@/components/event-registration-panel";
+import { AgendaRow } from "@/components/events/agenda-row";
+import { CloudinaryImage } from "@/components/cloudinary-image";
 import { getSessionUser } from "@/server/auth/session";
 import { isViewerOfficer } from "@/server/auth/guards";
 import { Metadata } from "next";
 import { isEventLive, isEventPublic } from "@/lib/events";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
+import { prisma } from "@/server/db";
 import { StreamPlayer } from "@/components/stream-player";
 import { DatabaseUnavailable } from "@/components/database-unavailable";
+import { initials } from "@/app/drivers/names";
 
 // Per request, not ISR: an officer's draft preview must never be cached for everyone else.
 export const dynamic = "force-dynamic";
@@ -43,10 +48,10 @@ export async function generateMetadata({
     };
   }
 
+  // Only the summary is public: the form calls `description` the internal description (#46)
   const description =
-    event.summary ||
-    event.description?.slice(0, 155) ||
-    `Details, registration, and results for ${event.title} — a Longhorn Sim Racing event.`;
+    event.summary?.slice(0, 155) ||
+    `Details, registration, and results for ${event.title}, a Longhorn Sim Racing event.`;
 
   return {
     title: event.title,
@@ -155,10 +160,8 @@ export default async function EventPage({ params }: EventPageArgs) {
       for (const lap of laps) {
         const pid = lap.participantId;
         if (!participantLaps.has(pid)) {
-          const displayName =
-            lap.participant.carMapping?.displayName ??
-            lap.participant.user?.displayName ??
-            lap.participant.displayName;
+          // The driver, not the car: in a one-make series every line would share the car's name
+          const displayName = lap.participant.user?.displayName ?? lap.participant.displayName;
           participantLaps.set(pid, { name: displayName, lapTimes: [] });
         }
         const entry = participantLaps.get(pid)!;
@@ -235,14 +238,35 @@ export default async function EventPage({ params }: EventPageArgs) {
   const startsAt = new Date(event.startsAtUtc);
   const endsAt = new Date(event.endsAtUtc);
   const isLive = isEventLive(event);
+  const tz = event.timezone || DEFAULT_TIMEZONE;
+  const ended = endsAt < new Date();
+  const cancelled = event.status === "CANCELLED";
+  const postponed = event.status === "POSTPONED";
+  const round = roundOf(event.title, event.series);
+  const dateLabel = startsAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: tz });
+  const timeLabel = timeRange(startsAt, endsAt, tz);
 
-  const isCheckinRequired = event.attendanceEnabled &&
-    event.attendanceReportingMode === 'CHECKIN_REQUIRED';
+  const isCheckinRequired = event.attendanceEnabled && event.attendanceReportingMode === "CHECKIN_REQUIRED";
   const isPaidEvent = event.registrationFeeCents != null && event.registrationFeeCents > 0;
-
-  // const isEventPassed = new Date() > endsAt; // Logic handled by registration config/snapshot
-
   const venue = event.venue;
+  const online = /virtual|online/i.test(venue?.name ?? "") || (!venue && !!event.meetingUrl);
+  const address = venue ? [venue.addressLine1, venue.city, venue.state].filter(Boolean).join(", ") : "";
+
+  // The race's top three, for the podium above the full table
+  const race = raceSessions.find((s) => s.sessionType === "RACE");
+  const podium = race ? [...race.results].sort((a, b) => a.position - b.position).slice(0, 3) : [];
+
+  const [album, upcoming] = await Promise.all([
+    prisma.galleryAlbum
+      .findFirst({
+        where: { eventId: event.id, images: { some: {} } },
+        select: { slug: true, title: true, images: { orderBy: { order: "asc" }, take: 4, select: { id: true, publicId: true, alt: true } } },
+      })
+      .catch(() => null),
+    getSchedule(user?.id ?? null)
+      .then((list) => list.filter((e) => !e.ended && e.state !== "cancelled" && e.state !== "postponed" && e.slug !== event.slug).slice(0, 3))
+      .catch(() => []),
+  ]);
 
   const statusMap: Record<string, string> = {
     CANCELLED: "https://schema.org/EventCancelled",
@@ -259,7 +283,7 @@ export default async function EventPage({ params }: EventPageArgs) {
     "@context": "https://schema.org",
     "@type": "SportsEvent",
     name: event.title,
-    description: event.summary || event.description || undefined,
+    description: event.summary || undefined,
     startDate: startsAt.toISOString(),
     endDate: endsAt.toISOString(),
     eventStatus: statusMap[event.status] ?? "https://schema.org/EventScheduled",
@@ -298,196 +322,338 @@ export default async function EventPage({ params }: EventPageArgs) {
       { "@type": "ListItem", position: 3, name: event.title, item: `https://www.longhornsimracing.org/events/${event.slug}` },
     ],
   };
+  const jsonLd = (data: object) => JSON.stringify(data).replace(/</g, "\\u003c");
+
+  const tag = "inline-flex items-center gap-1.5 px-2 py-1 font-sans font-bold text-[10px] uppercase tracking-[0.15em]";
+  const WhereIcon = online ? Monitor : MapPin;
 
   return (
     <div className="bg-lsr-charcoal text-white min-h-screen">
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(eventJsonLd) }}
-      />
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
-      />
-      <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
-        <div className="mb-8">
-          <Link href="/events" className="group inline-flex items-center gap-3 text-[10px] font-sans font-bold uppercase tracking-[0.25em] text-lsr-orange hover:text-white transition-colors">
-            <div className="h-px w-8 bg-lsr-orange/30 group-hover:bg-white group-hover:w-12 transition-all" />
-            Return to Calendar
-          </Link>
-        </div>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(eventJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd) }} />
 
-        {isDraft && (
-          <div className="mb-8 border border-amber-500/30 bg-amber-500/10 px-4 py-3 font-sans text-xs text-amber-200">
-            Draft: only officers can see this event. Edit it in{" "}
-            <Link href={`/admin/events/${event.id}/edit`} className="underline hover:text-white">Admin → Events</Link>.
-          </div>
-        )}
-
-        {event.heroImageUrl && (
-          <div className="aspect-[21/9] w-full border border-white/10 bg-black relative overflow-hidden group mb-12">
-            <Image 
-              src={event.heroImageUrl} 
-              alt={event.title} 
-              width={1600} 
-              height={800} 
-              className="object-cover w-full h-full opacity-60 group-hover:opacity-80 transition-opacity duration-700" 
+      {/* Hero */}
+      <div className="relative overflow-hidden border-b border-white/10">
+        <div className="absolute inset-0 z-0">
+          {event.heroImageUrl ? (
+            <Image src={event.heroImageUrl} alt="" fill preload sizes="100vw" className="object-cover opacity-60" />
+          ) : (
+            <CloudinaryImage
+              publicId={event.series?.slug.includes("lone-star-cup") ? "gallery/lone-star-cup-season-2/lsc2nurb" : "gallery/wec-at-cota-2025/dsc09813"}
+              alt=""
+              fill
+              preload
+              sizes="100vw"
+              className="object-cover opacity-45"
             />
-            <div className="absolute inset-0 bg-[linear-gradient(transparent_50%,rgba(0,0,0,0.5)_50%)] bg-[length:100%_4px] opacity-20 pointer-events-none" />
-            <div className="absolute bottom-4 right-4 bg-black/80 px-3 py-1 border border-white/10">
-              <span className="font-sans font-black text-[9px] uppercase tracking-widest text-white/50">Event Preview</span>
+          )}
+          <div className="absolute inset-0 bg-gradient-to-b from-lsr-charcoal/60 via-lsr-charcoal/40 to-lsr-charcoal" />
+          <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal/95 via-lsr-charcoal/65 to-transparent" />
+        </div>
+        <div className="absolute inset-0 opacity-[0.03] mix-blend-overlay [background-image:repeating-linear-gradient(45deg,white_0px,white_1px,transparent_1px,transparent_10px)] pointer-events-none" />
+
+        <div className="relative z-10 mx-auto max-w-6xl px-6 md:px-8 pt-10 pb-12 md:pt-14 md:pb-16 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)] lg:items-end lg:gap-12">
+          <div>
+            <Link href="/events" className="group inline-flex items-center gap-2 font-sans text-[10px] font-bold uppercase tracking-[0.2em] text-white/60 transition-colors hover:text-lsr-orange">
+              <ArrowLeft className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-1" />
+              Schedule
+            </Link>
+
+            {isDraft && (
+              <div className="mt-6 border border-amber-500/30 bg-amber-500/10 px-4 py-3 font-sans text-xs text-amber-200">
+                Draft: only officers can see this event. Edit it in{" "}
+                <Link href={`/admin/events/${event.id}/edit`} className="underline hover:text-white">
+                  Admin → Events
+                </Link>
+                .
+              </div>
+            )}
+
+            <div className="mt-10 flex flex-wrap items-center gap-2">
+              {event.series && <span className={`${tag} bg-white/10 text-white/80`}>{event.series.title}</span>}
+              {isLive && !cancelled && (
+                <span className={`${tag} bg-red-600 text-white`}>
+                  <span className="h-1.5 w-1.5 rounded-full bg-white motion-safe:animate-pulse" /> Live now
+                </span>
+              )}
+              {cancelled && <span className={`${tag} bg-red-900/70 text-red-100`}>Cancelled</span>}
+              {postponed && <span className={`${tag} bg-amber-900/60 text-amber-100`}>Postponed</span>}
+              {round?.night && (
+                <span className={`${tag} bg-white/10 text-white/80`}>
+                  <Moon className="h-3 w-3" aria-hidden /> {round.note}
+                </span>
+              )}
+              {round?.final && <span className={`${tag} bg-lsr-orange text-white`}>Finale</span>}
             </div>
+            <h1 className={`mt-4 font-display font-black italic text-5xl md:text-7xl uppercase leading-[0.9] ${cancelled ? "line-through decoration-white/40" : ""}`}>
+              {round ? (
+                <>
+                  {round.name} <span className="text-lsr-orange">{round.track}</span>
+                </>
+              ) : (
+                event.title
+              )}
+            </h1>
+            <ul className="mt-6 flex flex-col gap-2 font-sans text-sm text-white/80 sm:flex-row sm:flex-wrap sm:gap-x-6">
+              <li className="inline-flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 shrink-0 text-lsr-orange" aria-hidden />
+                {dateLabel}
+              </li>
+              <li className="inline-flex items-center gap-2">
+                <Clock className="h-4 w-4 shrink-0 text-lsr-orange" aria-hidden />
+                {timeLabel}
+              </li>
+              {venue && (
+                <li className="inline-flex items-center gap-2">
+                  <WhereIcon className="h-4 w-4 shrink-0 text-lsr-orange" aria-hidden />
+                  {venue.name}
+                </li>
+              )}
+            </ul>
+            {event.summary && <p className="mt-6 max-w-2xl font-sans text-base md:text-lg leading-relaxed text-white/80">{event.summary}</p>}
           </div>
+
+          {/* Registration, or what's left to see once it's over */}
+          <aside id="register" className="relative mt-10 scroll-mt-24 border border-white/15 bg-lsr-charcoal/85 p-6 backdrop-blur-sm md:p-7 lg:mt-0">
+            <div className="absolute top-0 left-0 h-1 w-24 bg-lsr-orange" />
+            {ended && !isLive ? (
+              <>
+                <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">Finished</p>
+                <p className="mt-2 font-display font-black italic text-2xl uppercase leading-tight">This one&apos;s in the books</p>
+                <div className="mt-5 flex flex-col gap-2">
+                  {raceSessions.length > 0 && (
+                    <a href="#results" className="group inline-flex items-center justify-between border border-white/15 px-4 py-3 font-sans text-xs font-bold uppercase tracking-[0.15em] text-white hover:border-lsr-orange">
+                      <span className="inline-flex items-center gap-2">
+                        <Trophy className="h-4 w-4 text-lsr-orange" aria-hidden /> Results
+                      </span>
+                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                    </a>
+                  )}
+                  {album && (
+                    <Link href={`/gallery?album=${encodeURIComponent(album.slug)}#albums`} className="group inline-flex items-center justify-between border border-white/15 px-4 py-3 font-sans text-xs font-bold uppercase tracking-[0.15em] text-white hover:border-lsr-orange">
+                      <span className="inline-flex items-center gap-2">
+                        <Images className="h-4 w-4 text-lsr-orange" aria-hidden /> Photos
+                      </span>
+                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                    </Link>
+                  )}
+                  <Link href="/events" className="group inline-flex items-center justify-between border border-white/15 px-4 py-3 font-sans text-xs font-bold uppercase tracking-[0.15em] text-white hover:border-lsr-orange">
+                    <span className="inline-flex items-center gap-2">
+                      <CalendarDays className="h-4 w-4 text-lsr-orange" aria-hidden /> What&apos;s next
+                    </span>
+                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  </Link>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">Sign up</p>
+                {isPaidEvent && (
+                  <p className="mt-2 inline-flex items-center gap-2 font-sans text-sm text-white/75">
+                    <CreditCard className="h-4 w-4 text-lsr-orange" aria-hidden />
+                    ${((event.registrationFeeCents ?? 0) / 100).toFixed(2)} to register
+                  </p>
+                )}
+                {isCheckinRequired && (
+                  <p className="mt-2 inline-flex items-start gap-2 font-sans text-sm text-white/75">
+                    <QrCode className="mt-0.5 h-4 w-4 shrink-0 text-lsr-orange" aria-hidden />
+                    Check in with the QR code at the event to count your attendance.
+                  </p>
+                )}
+                <div className="mt-4">
+                  <EventRegistrationPanel eventSlug={slug} userLoggedIn={!!user} />
+                </div>
+              </>
+            )}
+          </aside>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-6xl px-6 md:px-8 py-12 md:py-16 space-y-16 md:space-y-20">
+        {/* Live stream */}
+        {isLive && event.streamUrl && (
+          <section>
+            <div className="mb-6 flex items-center gap-3">
+              <span className={`${tag} bg-red-600 text-white`}>
+                <span className="h-1.5 w-1.5 rounded-full bg-white motion-safe:animate-pulse" /> Live
+              </span>
+              <h2 className="font-display font-black italic text-3xl uppercase">Watch now</h2>
+            </div>
+            <StreamPlayer streamUrl={event.streamUrl} />
+          </section>
         )}
 
-        <div className="border-l-4 border-lsr-orange bg-white/[0.02] p-8 md:p-12 mb-12 relative">
-          <div className="relative grid grid-cols-1 lg:grid-cols-3 gap-12">
-            <div className="lg:col-span-2">
-              <div className="flex flex-wrap items-center gap-3 mb-6">
-                  {isLive && (
-                    <div className="flex items-center gap-1.5 border border-red-600/30 bg-red-600/10 px-2 py-0.5 rounded-none">
-                        <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-600"></span>
-                        </span>
-                        <span className="font-display font-black text-red-500 uppercase tracking-widest text-[9px] italic">Live Now</span>
-                    </div>
-                  )}
-                  {event.series && (
-                    <span className="bg-lsr-orange text-white px-2 py-0.5 text-[9px] font-black uppercase tracking-widest">
-                      {event.series.title}
-                    </span>
-                  )}
-                  <span className="border border-white/20 text-white/60 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest">
-                    Official Session
-                  </span>
+        {/* Details */}
+        <section className="grid gap-4 md:grid-cols-2">
+          <div className="relative border border-white/10 bg-white/[0.02] p-6 md:p-8">
+            <div className="absolute top-0 left-0 h-1 w-16 bg-lsr-orange" />
+            <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Where</p>
+            {venue ? (
+              <>
+                <h2 className="mt-2 font-display font-black italic text-2xl uppercase leading-tight">{venue.name}</h2>
+                {address && <p className="mt-1 font-sans text-sm text-white/60">{address}</p>}
+                {venue.room && <p className="mt-1 font-sans text-sm text-white/60">{venue.room}</p>}
+                {online && <p className="mt-3 font-sans text-sm text-white/65">Online event: race from your own setup. Details are shared on Discord.</p>}
+                <div className="mt-4">
+                  <VenueActions venue={venue} />
                 </div>
-              
-              <h1 className="font-display font-black italic text-4xl md:text-6xl text-white uppercase tracking-normal leading-[0.9] mb-6">
-                {event.title}
-              </h1>
-
-              {isCheckinRequired && (
-                <div className="border-l border-white/10 bg-black/10 px-4 py-2 mb-8 flex items-center gap-3 max-w-2xl">
-                  <QrCode className="h-3.5 w-3.5 text-white/20 shrink-0" />
-                  <p className="font-sans font-bold text-[10px] uppercase tracking-widest text-white/30 leading-tight">
-                    <span className="text-lsr-orange/60 font-black mr-2">Note:</span>
-                    Attendance is recorded via QR Check-in at this event
-                  </p>
-                </div>
-              )}
-
-              <div className="prose prose-invert prose-p:font-sans prose-p:text-white/70 prose-p:text-sm prose-p:leading-relaxed max-w-none">
-                <p>{event.summary || event.description}</p>
-              </div>
-
-              <div className="mt-10 pt-8 border-t border-white/5 space-y-4">
-                <p className="font-sans text-[11px] text-white/40 leading-relaxed max-w-2xl">
-                  Questions, comments, or concerns? Reach out to us at <Link href="mailto:info@longhornsimracing.org" className="text-white/60 hover:text-lsr-orange transition-colors border-b border-white/10 hover:border-lsr-orange">info@longhornsimracing.org</Link>.
-                </p>
-                <p className="font-sans text-[11px] text-white/40 leading-relaxed max-w-2xl">
-                  <strong className="text-white/60 uppercase tracking-widest text-[9px] mr-2">Note:</strong> Most physical events will have arranged carpooling available upon request within our <Link href="https://discord.gg/5Uv9YwpnFz" target="_blank" className="text-white/60 hover:text-lsr-orange transition-colors border-b border-white/10 hover:border-lsr-orange">Discord community</Link>.
-                </p>
-              </div>
-            </div>
-
-            <div className="lg:col-span-1">
-              {isLive && event.streamUrl && (
-                <div className="mb-6">
-                  <StreamPlayer streamUrl={event.streamUrl} />
-                </div>
-              )}
-              <div className="bg-black border border-white/10 p-6 space-y-6">
-                <h3 className="font-sans font-black text-xs uppercase tracking-[0.2em] text-white/30 border-b border-white/10 pb-4">
-                  Session Logistics
-                </h3>
-                
-                <div className="space-y-5">
-                  <div className="flex items-start gap-4">
-                    <Calendar className="h-5 w-5 text-lsr-orange mt-0.5 shrink-0" />
-                    <div>
-                      <div className="font-sans font-bold text-[10px] uppercase tracking-widest text-white/40 mb-1">Date</div>
-                      <div className="font-sans font-bold text-sm text-white">
-                        <LocalTime date={startsAt} format="weekday-date" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-4">
-                    <Clock className="h-5 w-5 text-lsr-orange mt-0.5 shrink-0" />
-                    <div>
-                      <div className="font-sans font-bold text-[10px] uppercase tracking-widest text-white/40 mb-1">Time</div>
-                      <div className="font-sans font-bold text-sm text-white">
-                        <LocalTimeRange start={startsAt} end={endsAt} />
-                      </div>
-                    </div>
-                  </div>
-
-                  {venue && (
-                    <div className="flex items-start gap-4">
-                      <MapPin className="h-5 w-5 text-lsr-orange mt-0.5 shrink-0" />
-                      <div className="space-y-2">
-                        <div className="font-sans font-bold text-[10px] uppercase tracking-widest text-white/40">Circuit / Venue</div>
-                        <div className="font-sans font-bold text-sm text-white">{venue.name}</div>
-                        {(venue.addressLine1 || venue.city) && (
-                          <div className="text-xs text-white/40">
-                            {[venue.addressLine1, venue.city, venue.state].filter(Boolean).join(", ")}
-                          </div>
-                        )}
-                        <VenueActions venue={venue} />
-                      </div>
-                    </div>
-                  )}
-
-                  {isPaidEvent && (
-                    <div className="flex items-start gap-4">
-                      <CreditCard className="h-5 w-5 text-lsr-orange mt-0.5 shrink-0" />
-                      <div>
-                        <div className="font-sans font-bold text-[10px] uppercase tracking-widest text-white/40 mb-1">Paid Event</div>
-                        <div className="font-sans text-xs text-white/50 leading-relaxed">
-                          For payment issues or refunds, contact{" "}
-                          <a href="mailto:info@longhornsimracing.org" className="text-white/70 hover:text-lsr-orange transition-colors border-b border-white/10 hover:border-lsr-orange">info@longhornsimracing.org</a>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <EventRegistrationPanel eventSlug={slug} userLoggedIn={!!user} />
-              </div>
-            </div>
+              </>
+            ) : (
+              <p className="mt-2 font-sans text-sm text-white/65">Location details go out on Discord.</p>
+            )}
           </div>
+          <div className="relative border border-white/10 bg-white/[0.02] p-6 md:p-8">
+            <div className="absolute top-0 left-0 h-1 w-16 bg-lsr-orange" />
+            <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Good to know</p>
+            <ul className="mt-3 space-y-3 font-sans text-sm leading-relaxed text-white/70">
+              {!online && venue && (
+                <li>
+                  Need a ride? Most in-person events have carpools; ask in the{" "}
+                  <a href="https://discord.gg/5Uv9YwpnFz" target="_blank" rel="noopener noreferrer" className="font-bold text-white hover:text-lsr-orange">
+                    Discord
+                  </a>
+                  .
+                </li>
+              )}
+              {isPaidEvent && (
+                <li>
+                  Payment issues or refunds:{" "}
+                  <a href="mailto:info@longhornsimracing.org" className="font-bold text-white hover:text-lsr-orange">
+                    info@longhornsimracing.org
+                  </a>
+                </li>
+              )}
+              <li>
+                Questions? Email{" "}
+                <a href="mailto:info@longhornsimracing.org" className="font-bold text-white hover:text-lsr-orange">
+                  info@longhornsimracing.org
+                </a>{" "}
+                or ask on Discord.
+              </li>
+            </ul>
+          </div>
+        </section>
 
-          {raceSessions.length > 0 && (
-            <div className="relative mt-12 pt-12 border-t border-white/10">
-              <div className="space-y-8">
-                {raceSessions.map(session => {
-                    const typeLabel = session.sessionType === "QUALIFYING" ? "Qualifying" : session.sessionType === "PRACTICE" ? "Practice" : "Race";
-                    const isRace = session.sessionType === "RACE";
-                    const lapPositions = isRace ? lapDataBySession.get(session.id) : undefined;
-                    return (
-                    <div key={session.id}>
-                        <ResultsTable
-                            results={session.results}
-                            title={`${typeLabel} Results${session.trackName ? ` - ${session.trackName}` : ''}`}
-                            showPoints={isRace}
-                            sessionType={session.sessionType}
-                            positionsGained={isRace ? positionsGainedBySession.get(session.id) : undefined}
-                        />
-                        {lapPositions && (
-                          <LapPositionChart
-                            data={lapPositions.data}
-                            drivers={lapPositions.drivers}
-                            driverCount={lapPositions.driverCount}
-                          />
-                        )}
-                    </div>
-                    );
-                })}
-              </div>
+        {/* Results */}
+        {raceSessions.length > 0 && (
+          <section id="results" className="scroll-mt-24">
+            <div className="mb-8 md:mb-10">
+              <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-3">Official results</p>
+              <h2 className="font-display font-black italic text-4xl md:text-5xl uppercase leading-[0.95]">
+                How it <span className="text-lsr-orange">finished</span>
+              </h2>
             </div>
-          )}
-        </div>
+
+            {podium.length > 0 && (
+              <ol className="mb-8 grid gap-3 sm:grid-cols-3">
+                {podium.map((result, i) => {
+                  const driver = result.participant.user;
+                  const name = driver?.displayName || result.participant.displayName;
+                  const body = (
+                    <>
+                      <div className={`absolute top-0 left-0 h-1 ${i === 0 ? "w-full" : "w-16"} bg-lsr-orange`} />
+                      <span className={`font-display font-black italic text-4xl leading-none ${i === 0 ? "text-lsr-orange" : "text-white/70"}`}>P{i + 1}</span>
+                      <span className="relative h-12 w-12 shrink-0 overflow-hidden border border-white/10 bg-black">
+                        {driver?.avatarUrl ? (
+                          <Image src={driver.avatarUrl} alt="" fill sizes="48px" className="object-cover" />
+                        ) : (
+                          <span className="flex h-full w-full items-center justify-center font-display font-black italic text-white/30">{initials(name)}</span>
+                        )}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate font-sans font-bold text-sm uppercase tracking-tight text-white">{name}</span>
+                        <span className="block font-sans text-xs text-white/55">{result.points ?? 0} pts</span>
+                      </span>
+                    </>
+                  );
+                  return (
+                    <li key={result.id}>
+                      {driver?.handle ? (
+                        <Link href={`/drivers/${driver.handle}`} className="relative flex items-center gap-4 border border-white/10 bg-white/[0.02] p-4 transition-colors hover:border-lsr-orange/60">
+                          {body}
+                        </Link>
+                      ) : (
+                        <div className="relative flex items-center gap-4 border border-white/10 bg-white/[0.02] p-4">{body}</div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+
+            <div className="space-y-8">
+              {raceSessions.map((session) => {
+                const typeLabel = session.sessionType === "QUALIFYING" ? "Qualifying" : session.sessionType === "PRACTICE" ? "Practice" : "Race";
+                const isRace = session.sessionType === "RACE";
+                const lapPositions = isRace ? lapDataBySession.get(session.id) : undefined;
+                return (
+                  <div key={session.id}>
+                    <ResultsTable
+                      results={session.results}
+                      title={`${typeLabel} Results${session.trackName ? ` - ${session.trackName}` : ""}`}
+                      showPoints={isRace}
+                      sessionType={session.sessionType}
+                      positionsGained={isRace ? positionsGainedBySession.get(session.id) : undefined}
+                    />
+                    {lapPositions && <LapPositionChart data={lapPositions.data} drivers={lapPositions.drivers} driverCount={lapPositions.driverCount} />}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* Photos */}
+        {album && (
+          <section>
+            <div className="mb-8 flex flex-col justify-between gap-3 md:flex-row md:items-end">
+              <div>
+                <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-3">From the gallery</p>
+                <h2 className="font-display font-black italic text-4xl md:text-5xl uppercase leading-[0.95]">
+                  The <span className="text-lsr-orange">photos</span>
+                </h2>
+              </div>
+              <Link href={`/gallery?album=${encodeURIComponent(album.slug)}#albums`} className="group inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/70 hover:text-lsr-orange">
+                See the album <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
+              {album.images.map((image) => (
+                <Link key={image.id} href={`/gallery?album=${encodeURIComponent(album.slug)}#albums`} className="group relative aspect-[4/3] overflow-hidden border border-white/10 bg-black">
+                  <CloudinaryImage
+                    publicId={image.publicId}
+                    alt={image.alt ?? ""}
+                    fill
+                    sizes="(min-width: 1152px) 280px, (min-width: 768px) 25vw, 50vw"
+                    className="object-cover opacity-85 transition-all duration-700 group-hover:scale-105 group-hover:opacity-100"
+                  />
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* What's next */}
+        {upcoming.length > 0 && (
+          <section>
+            <div className="mb-8 flex flex-col justify-between gap-3 md:flex-row md:items-end">
+              <div>
+                <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange mb-3">On the calendar</p>
+                <h2 className="font-display font-black italic text-4xl md:text-5xl uppercase leading-[0.95]">
+                  Coming <span className="text-lsr-orange">up</span>
+                </h2>
+              </div>
+              <Link href="/events" className="group inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/70 hover:text-lsr-orange">
+                Full schedule <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+              </Link>
+            </div>
+            <ul className="space-y-2">
+              {upcoming.map((e) => (
+                <AgendaRow key={e.slug} event={e} titleAs="h3" />
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
     </div>
   );

@@ -64,7 +64,7 @@ function familyOf(series: { title: string; slug: string } | null) {
 }
 
 /** "CT" rather than CDT/CST, which flips mid-season when daylight saving ends */
-function zoneLabel(date: Date, timeZone: string) {
+export function zoneLabel(date: Date, timeZone: string) {
   if (timeZone === "America/Chicago") return "CT"
   return new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(date).find((part) => part.type === "timeZoneName")?.value ?? ""
 }
@@ -73,7 +73,8 @@ function format(date: Date, timeZone: string, options: Intl.DateTimeFormatOption
   return date.toLocaleString("en-US", { ...options, timeZone })
 }
 
-function timeRange(start: Date, end: Date, timeZone: string) {
+/** "10:00 AM – 12:00 PM CT", with the end date when it runs past midnight */
+export function timeRange(start: Date, end: Date, timeZone: string) {
   const time = (date: Date) => format(date, timeZone, { hour: "numeric", minute: "2-digit" })
   const sameDay = format(start, timeZone, { dateStyle: "short" }) === format(end, timeZone, { dateStyle: "short" })
   const endLabel = sameDay ? time(end) : `${format(end, timeZone, { month: "short", day: "numeric" })}, ${time(end)}`
@@ -105,7 +106,7 @@ function termOf(date: Date, timeZone: string) {
  * League rounds ("… Round 5 @ Long Beach", "… FINAL Round @ Fuji", "… Finale @ Monaco") get a
  * round name and track; everything else keeps its own title.
  */
-function roundOf(title: string, series: { slug: string } | null) {
+export function roundOf(title: string, series: { slug: string } | null) {
   if (!series || !title.includes("@")) return null
   const finale = /\bfinale\b/i.test(title)
   if (!/\bRound\s+\d|\bfinal\s+round\b/i.test(title) && !finale) return null
