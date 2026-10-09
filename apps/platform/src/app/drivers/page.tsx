@@ -398,7 +398,7 @@ export default async function DriversIndexPage() {
     </Button>
   ) : (
     <Button asChild className={primaryButton}>
-      <Link href="/auth/signin?next=/drivers">
+      <Link href="/auth/signin?mode=signup&next=/drivers">
         <UserPlus className="mr-2 h-4 w-4" />
         Join the roster
       </Link>

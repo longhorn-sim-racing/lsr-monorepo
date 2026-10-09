@@ -1,25 +1,34 @@
-// src/app/auth/auth-code-error/page.tsx
-import Link from 'next/link';
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { authSubmit } from "@/components/auth/auth-forms";
+import { AuthShell } from "../auth-shell";
 
 export default function AuthCodeErrorPage() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-lsr-charcoal text-white">
-      <div className="container flex flex-col items-center justify-center gap-12 px-4 py-16 ">
-        <h1 className="text-4xl font-bold tracking-tight sm:text-[5rem]">
-          Authentication Error
-        </h1>
-        <p className="text-lg text-center">
-          The sign-in link may be invalid or expired.
-          <br />
-          Please try signing in again.
-        </p>
-        <Link
-          href="/"
-          className="rounded-md bg-lsr-orange px-4 py-2 text-lg text-lsr-charcoal-darker no-underline transition hover:bg-lsr-orange/80"
-        >
-          Go to Homepage
-        </Link>
+    <AuthShell
+      kicker="Sign-in problem"
+      title={
+        <>
+          That link <span className="text-lsr-orange">didn&apos;t work</span>
+        </>
+      }
+      intro="Sign-in and confirmation links only work once, and they expire after a while. Sign in again, or ask for a fresh link."
+    >
+      <div className="space-y-3">
+        <Button asChild className={authSubmit}>
+          <Link href="/auth/signin">Sign in</Link>
+        </Button>
+        <Button asChild className="h-12 w-full rounded-none border border-white/20 bg-transparent font-sans text-xs font-bold uppercase tracking-[0.2em] text-white hover:bg-white hover:text-lsr-charcoal">
+          <Link href="/auth/forgot-password">Send me a new link</Link>
+        </Button>
       </div>
-    </div>
+      <p className="mt-8 font-sans text-sm text-white/55">
+        Still stuck? Email{" "}
+        <a href="mailto:info@longhornsimracing.org" className="font-bold text-lsr-orange hover:text-white">
+          info@longhornsimracing.org
+        </a>
+        .
+      </p>
+    </AuthShell>
   );
 }
