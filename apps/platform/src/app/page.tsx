@@ -192,7 +192,7 @@ export default async function Home() {
   }
 
   return (
-    <main className="bg-lsr-charcoal text-white">
+    <div className="bg-lsr-charcoal text-white">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }} />
 
       {/* Hero */}
@@ -654,6 +654,6 @@ export default async function Home() {
           </div>
         </div>
       </section>
-    </main>
+    </div>
   )
 }

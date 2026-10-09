@@ -76,7 +76,7 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
   const videos = galleryItems.filter((item) => item.type !== "image")
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       {/* Hero */}
       <div className="relative border-b border-white/10 overflow-hidden">
         <div className="absolute inset-0 z-0">
@@ -171,6 +171,6 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
           </section>
         )}
       </div>
-    </main>
+    </div>
   )
 }

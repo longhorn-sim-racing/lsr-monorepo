@@ -20,7 +20,7 @@ export const metadata: Metadata = {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       <div className="mx-auto max-w-2xl px-6 md:px-8 py-14 md:py-20">
         <Link href="/lone-star-cup" className="font-sans text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 transition-colors hover:text-lsr-orange">
           ← Lone Star Cup
@@ -30,7 +30,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         </h1>
         <div className="mt-10">{children}</div>
       </div>
-    </main>
+    </div>
   );
 }
 

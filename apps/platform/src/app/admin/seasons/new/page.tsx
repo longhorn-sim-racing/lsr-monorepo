@@ -11,9 +11,9 @@ export default async function NewSeasonPage() {
   ]);
 
   return (
-    <main className="mx-auto max-w-4xl p-8">
+    <div className="mx-auto max-w-4xl p-8">
       <h1 className="text-3xl font-bold mb-6">Create New Season</h1>
       <SeasonForm seriesList={series} leagues={leagues} />
-    </main>
+    </div>
   );
 }

@@ -18,11 +18,11 @@ export default async function EditVenuePage({ params }: EditVenueArgs) {
   }
 
   return (
-    <main className="mx-auto max-w-2xl p-8">
+    <div className="mx-auto max-w-2xl p-8">
       <h1 className="text-3xl font-bold mb-6">Edit Venue</h1>
       <div className="overflow-x-auto">
         <VenueForm venue={venue} />
       </div>
-    </main>
+    </div>
   );
 }

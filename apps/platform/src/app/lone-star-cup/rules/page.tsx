@@ -22,7 +22,7 @@ export default async function LoneStarCupRulesPage() {
   const content = await renderPageMarkdown(page.bodyMd);
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       <div className="mx-auto max-w-3xl px-6 md:px-8 py-14 md:py-20">
         <Link href="/lone-star-cup" className="font-sans text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 transition-colors hover:text-lsr-orange">
           ← Lone Star Cup
@@ -51,6 +51,6 @@ export default async function LoneStarCupRulesPage() {
           Last updated {page.updatedAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "America/Chicago" })}
         </p>
       </div>
-    </main>
+    </div>
   );
 }

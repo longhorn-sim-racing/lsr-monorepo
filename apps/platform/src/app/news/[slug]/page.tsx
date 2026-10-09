@@ -84,11 +84,11 @@ export default async function NewsPostPage({
   } catch (error) {
     console.error('[NewsPost] Failed to load post:', error);
     return (
-      <main className="bg-lsr-charcoal text-white min-h-screen">
+      <div className="bg-lsr-charcoal text-white min-h-screen">
         <div className="mx-auto max-w-4xl px-6 md:px-8 py-14 md:py-20">
           <DatabaseUnavailable title="Article Unavailable" />
         </div>
-      </main>
+      </div>
     );
   }
 
@@ -137,7 +137,7 @@ export default async function NewsPostPage({
   };
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: jsonLd(articleJsonLd) }}
@@ -235,6 +235,6 @@ export default async function NewsPostPage({
           </Link>
         </div>
       </div>
-    </main>
+    </div>
   )
 }

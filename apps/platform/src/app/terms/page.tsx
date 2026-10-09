@@ -80,7 +80,7 @@ const toc: { id: string; label: string }[] = [
 
 export default function TermsPage() {
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       <div className="mx-auto max-w-4xl px-6 md:px-8 py-20 md:py-28">
         <h1 className="font-display font-black italic text-5xl md:text-7xl text-white uppercase tracking-normal leading-[0.9] mb-6">
           Terms of <span className="text-lsr-orange">Service</span>
@@ -872,6 +872,6 @@ export default function TermsPage() {
           </Link>
         </div>
       </div>
-    </main>
+    </div>
   )
 }

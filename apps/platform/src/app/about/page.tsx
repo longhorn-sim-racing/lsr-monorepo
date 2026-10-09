@@ -149,7 +149,7 @@ export default async function AboutPage() {
   ]
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       {/* Hero Section */}
       <div className="relative border-b border-white/10 overflow-hidden">
         <div className="absolute inset-0 z-0">
@@ -398,6 +398,6 @@ export default async function AboutPage() {
           </div>
         </section>
       </div>
-    </main>
+    </div>
   )
 }

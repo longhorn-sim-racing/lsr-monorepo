@@ -285,7 +285,7 @@ export default async function SponsorsPage() {
   ]
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(partnerListJsonLd) }}
@@ -725,6 +725,6 @@ export default async function SponsorsPage() {
           </div>
         </div>
       </section>
-    </main>
+    </div>
   )
 }

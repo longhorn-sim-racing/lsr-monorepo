@@ -124,14 +124,14 @@ export default async function NewsIndexPage({
   } catch (error) {
     console.error('[News] Failed to load posts:', error);
     return (
-      <main className="bg-lsr-charcoal text-white min-h-screen">
+      <div className="bg-lsr-charcoal text-white min-h-screen">
         <div className="mx-auto max-w-6xl px-6 md:px-8 py-14 md:py-20">
           <h1 className="mb-10 font-display font-black italic text-5xl md:text-6xl text-white uppercase tracking-normal">
             Team <span className="text-lsr-orange">News</span>
           </h1>
           <DatabaseUnavailable title="News Unavailable" />
         </div>
-      </main>
+      </div>
     );
   }
 
@@ -179,7 +179,7 @@ export default async function NewsIndexPage({
   const albumPhoto = album?.images[0]
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(itemListJsonLd) }}
@@ -427,6 +427,6 @@ export default async function NewsIndexPage({
           </div>
         </section>
       </div>
-    </main>
+    </div>
   )
 }

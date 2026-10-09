@@ -54,7 +54,7 @@ export default async function NotificationsPage({
   const totalPages = Math.ceil(totalCount / pageSize);
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen pt-20 pb-20">
+    <div className="bg-lsr-charcoal text-white min-h-screen pt-20 pb-20">
       <div className="mx-auto max-w-4xl px-6 md:px-8 space-y-8">
         <div>
           <Link
@@ -118,6 +118,6 @@ export default async function NotificationsPage({
           </>
         )}
       </div>
-    </main>
+    </div>
   );
 }
