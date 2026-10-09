@@ -2,6 +2,7 @@ import { cache } from 'react';
 import { publicEventWhere } from '@/lib/events';
 import { getStandings as getStandingsFromRepo } from '@/server/repos/standings.repo';
 import { prisma } from '@/server/db';
+import { parseRoundTitle } from '@/lib/rounds';
 
 export const getStandings = cache(async (seriesSlug: string) => {
   return await getStandingsFromRepo(seriesSlug);
@@ -45,6 +46,10 @@ export const getPointsProgression = cache(async (seriesSlug: string): Promise<Po
   });
 
   if (events.length === 0) return null;
+  // Rounds run so far: the chart stops at the last round with results instead of flatlining to the finale
+  const lastRun = events.findLastIndex((event) => event.ingestedSessions.some((session) => session.results.length > 0));
+  if (lastRun === -1) return null;
+  events.splice(lastRun + 1);
 
   // Build per-driver, per-event points
   const driverTotals = new Map<string, { name: string; perRound: number[] }>();
@@ -88,7 +93,7 @@ export const getPointsProgression = cache(async (seriesSlug: string): Promise<Po
     .slice(0, 8)
     .map(({ name, data }) => ({ name, data }));
 
-  const rounds = events.map((e, i) => e.venue?.name ?? e.title ?? `R${i + 1}`);
+  const rounds = events.map((e, i) => parseRoundTitle(e.title, i).short);
 
   return { rounds, drivers };
 });
