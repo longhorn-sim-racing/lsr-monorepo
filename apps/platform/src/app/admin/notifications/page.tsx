@@ -12,17 +12,19 @@ import { NotificationSettings } from "./_components/notification-settings";
 import { NotificationCleanup } from "./_components/notification-cleanup";
 import { Bell, Send, Clock, Settings } from "lucide-react";
 import { requireOfficerPage } from "@/server/auth/guards";
+import { getEmailUsage } from "@/server/services/notification.service";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminNotificationsPage() {
   await requireOfficerPage();
-  const [stats, recentNotifications, scheduledNotifications, emailSettings] =
+  const [stats, recentNotifications, scheduledNotifications, emailSettings, emailUsage] =
     await Promise.all([
       getNotificationStats(),
       getRecentNotifications(),
       getScheduledNotifications(),
       getEmailSettings(),
+      getEmailUsage(),
     ]);
 
   return (
@@ -99,7 +101,7 @@ export default async function AdminNotificationsPage() {
         </TabsContent>
 
         <TabsContent value="compose" className="mt-6">
-          <NotificationComposer />
+          <NotificationComposer emailUsage={emailUsage} />
         </TabsContent>
 
         <TabsContent value="settings" className="mt-6 space-y-6">

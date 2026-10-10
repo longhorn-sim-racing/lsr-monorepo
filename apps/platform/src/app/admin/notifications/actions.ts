@@ -7,6 +7,8 @@ import {
   sendBulkNotification,
   cancelNotification,
   retryNotification,
+  countEmailRecipients,
+  getEmailUsage,
 } from "@/server/services/notification.service";
 import { setSystemSetting, getSystemSetting, SETTINGS } from "@/lib/email/settings";
 import { NotificationChannel } from "@prisma/client";
@@ -149,69 +151,73 @@ export async function sendCustomNotification(formData: FormData): Promise<Action
     return { ok: false, error: "Pick a valid date and time to schedule it." };
   }
 
+  let recipientIds: string[];
   if (recipientType === "single" || recipientType === "multiple") {
-    const userIds: string[] = userIdsJson ? JSON.parse(userIdsJson) : [];
-
-    if (userIds.length === 0) {
+    recipientIds = userIdsJson ? JSON.parse(userIdsJson) : [];
+    if (recipientIds.length === 0) {
       return { ok: false, error: "Search for and add at least one recipient." };
     }
-
-    const targetUsers = await prisma.user.findMany({
-      where: { id: { in: userIds } },
-      select: { id: true, displayName: true },
-    });
-
-    await sendBulkNotification({
-      userIds,
-      type: "CUSTOM",
-      title,
-      body,
-      actionUrl,
-      channels,
-      scheduledFor: scheduledDate,
-      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-    });
-
-    const userNames = targetUsers.map((u) => u.displayName).join(", ");
-    await createAuditLog({
-      actorUserId: user.id,
-      actionType: "CREATE",
-      entityType: "NOTIFICATION",
-      entityId: userIds.length === 1 ? "custom" : "multi",
-      targetUserId: userIds.length === 1 ? userIds[0] : undefined,
-      summary: userIds.length === 1
-        ? `Sent custom notification "${title}" to ${userNames}`
-        : `Sent custom notification "${title}" to ${userIds.length} users: ${userNames}`,
-      after: { title, body, channels, scheduledFor: scheduledDate?.toISOString() },
-      metadata: { recipientType, recipientCount: userIds.length, userIds, actionUrl },
-    });
   } else if (recipientType === "all") {
-    const users = await prisma.user.findMany({
-      where: { status: "active" },
-      select: { id: true },
-    });
-    await sendBulkNotification({
-      userIds: users.map((u) => u.id),
-      type: "CUSTOM",
-      title,
-      body,
-      actionUrl,
-      channels,
-      scheduledFor: scheduledDate,
-      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-    });
+    const active = await prisma.user.findMany({ where: { status: "active" }, select: { id: true } });
+    recipientIds = active.map((u) => u.id);
+  } else {
+    return { ok: false, error: "Choose who to send it to." };
+  }
 
+  // Resend rejects everything past the daily limit, so check before an immediate email send
+  if (sendEmail && !scheduledDate && formData.get("sendAnyway") !== "on") {
+    const [{ sentLast24h, dailyLimit }, emailCount] = await Promise.all([
+      getEmailUsage(),
+      countEmailRecipients(recipientIds, "CUSTOM"),
+    ]);
+    const left = Math.max(0, dailyLimit - sentLast24h);
+    if (emailCount > left) {
+      return {
+        ok: false,
+        error: `This would send ${emailCount} emails, but only ${left} of the ${dailyLimit} daily emails are left (${sentLast24h} sent in the last 24 hours). Resend rejects the rest. Send fewer, schedule it for tomorrow, or tick "Send anyway".`,
+      };
+    }
+  }
+
+  const sent = await sendBulkNotification({
+    userIds: recipientIds,
+    type: "CUSTOM",
+    title,
+    body,
+    actionUrl,
+    channels,
+    scheduledFor: scheduledDate,
+    metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+  });
+
+  if (recipientType === "all") {
     await createAuditLog({
       actorUserId: user.id,
       actionType: "CREATE",
       entityType: "NOTIFICATION",
       entityId: "bulk",
-      summary: `Sent bulk notification "${title}" to ${users.length} active members`,
+      summary: `Sent bulk notification "${title}" to ${recipientIds.length} active members`,
       after: { title, body, channels, scheduledFor: scheduledDate?.toISOString() },
-      metadata: { recipientType: "all", recipientCount: users.length, actionUrl },
+      metadata: { recipientType: "all", recipientCount: recipientIds.length, emailCount: sent.emails, actionUrl },
     });
   } else {
-    return { ok: false, error: "Choose who to send it to." };
+    const targetUsers = await prisma.user.findMany({
+      where: { id: { in: recipientIds } },
+      select: { displayName: true },
+    });
+    const userNames = targetUsers.map((u) => u.displayName).join(", ");
+    await createAuditLog({
+      actorUserId: user.id,
+      actionType: "CREATE",
+      entityType: "NOTIFICATION",
+      entityId: recipientIds.length === 1 ? "custom" : "multi",
+      targetUserId: recipientIds.length === 1 ? recipientIds[0] : undefined,
+      summary: recipientIds.length === 1
+        ? `Sent custom notification "${title}" to ${userNames}`
+        : `Sent custom notification "${title}" to ${recipientIds.length} users: ${userNames}`,
+      after: { title, body, channels, scheduledFor: scheduledDate?.toISOString() },
+      metadata: { recipientType, recipientCount: recipientIds.length, emailCount: sent.emails, userIds: recipientIds, actionUrl },
+    });
   }
 
   revalidatePath("/admin/notifications");

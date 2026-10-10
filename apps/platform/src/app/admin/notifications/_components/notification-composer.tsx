@@ -24,7 +24,7 @@ type UserResult = {
   handle: string;
 };
 
-export function NotificationComposer() {
+export function NotificationComposer({ emailUsage }: { emailUsage: { sentLast24h: number; dailyLimit: number } }) {
   const [isPending, startTransition] = useTransition();
   const [recipientType, setRecipientType] = useState<"single" | "multiple" | "all">("single");
   const [selectedUsers, setSelectedUsers] = useState<UserResult[]>([]);
@@ -259,6 +259,24 @@ export function NotificationComposer() {
               </Label>
             </div>
           </div>
+          {sendEmail && (
+            <div className="space-y-2 text-xs text-white/50">
+              <p>
+                {emailUsage.sentLast24h} of {emailUsage.dailyLimit} daily emails used in the last 24 hours. Sends that would go
+                over are stopped first, since Resend rejects the extra emails.
+              </p>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="sendAnyway"
+                  name="sendAnyway"
+                  className="rounded-none border-white/30 data-[state=checked]:bg-lsr-orange data-[state=checked]:border-lsr-orange"
+                />
+                <Label htmlFor="sendAnyway" className="cursor-pointer text-xs text-white/70">
+                  Send anyway, even if it goes over
+                </Label>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Title */}
