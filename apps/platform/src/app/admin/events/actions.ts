@@ -1,71 +1,72 @@
 "use server"
 
-import { prisma } from "@/server/db";
+import { EventStatus, Prisma, RegistrationStatus } from "@prisma/client";
 import { fromZonedTime } from "date-fns-tz";
-import { createAuditLog } from "@/server/audit/log";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { prisma } from "@/server/db";
+import { createAuditLog } from "@/server/audit/log";
 import { requireOfficer } from "@/server/auth/guards";
 import {
   revalidateEventList,
   revalidateEventDetail,
   revalidateSeriesPages,
 } from "@/server/cache/revalidate-public";
+import {
+  adminOverrideRegistration,
+  adminRemoveRegistration,
+  reconcileEventWaitlist,
+} from "@/server/services/registration.service";
+import { updateAttendanceConfig, checkInUser, removeCheckIn } from "@/server/services/attendance.service";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
+import { parseEventForm, parseRegistrationConfigForm } from "@/schemas/event.schema";
+import type { ActionResult } from "@/lib/action-result";
 
-export async function createEvent(formData: FormData) {
+/** The status the publish buttons ask for; null leaves it as it is */
+function publication(formData: FormData, timezone: string): { status: EventStatus; publishedAt: Date | null } | { error: string } | null {
+  const submitAction = formData.get("submitAction");
+  if (submitAction === "publish") return { status: "PUBLISHED", publishedAt: new Date() };
+  if (submitAction === "draft") return { status: "DRAFT", publishedAt: null };
+  if (submitAction === "schedule") {
+    const raw = String(formData.get("scheduleDate") ?? "");
+    const publishedAt = raw ? fromZonedTime(raw, timezone) : null;
+    if (!publishedAt || Number.isNaN(publishedAt.getTime())) return { error: "Pick the date and time to publish it" };
+    return { status: "SCHEDULED", publishedAt };
+  }
+  return null;
+}
+
+function slugTaken(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+const SLUG_TAKEN = "Another event already uses that URL slug. Pick a different one.";
+
+export async function createEvent(formData: FormData): Promise<ActionResult> {
   const user = await requireOfficer();
 
-  const seriesId = formData.get("seriesId") as string;
-  const venueId = formData.get("venueId") as string;
-  const opensAtRaw = formData.get("registrationOpensAt") as string;
-  const closesAtRaw = formData.get("registrationClosesAt") as string;
-  const maxRaw = formData.get("registrationMax") as string;
-  const feeRaw = formData.get("registrationFeeCents") as string;
-  const registrationFeeCents = feeRaw && parseFloat(feeRaw) > 0 ? Math.round(parseFloat(feeRaw) * 100) : null;
+  const parsed = parseEventForm(formData);
+  if (!parsed.ok) return parsed;
+  const fields = parsed.data;
 
-  const submitAction = formData.get("submitAction") as string;
-  const scheduleDateRaw = formData.get("scheduleDate") as string;
-  const timezone = formData.get("timezone") as string;
+  const publish = publication(formData, fields.timezone) ?? { status: "DRAFT" as const, publishedAt: null };
+  if ("error" in publish) return { ok: false, error: publish.error };
 
-  let status: EventStatus = "DRAFT";
-  let publishedAt: Date | null = null;
-
-  if (submitAction === "publish") {
-    status = "PUBLISHED";
-    publishedAt = new Date();
-  } else if (submitAction === "schedule") {
-    status = "SCHEDULED";
-    publishedAt = scheduleDateRaw ? fromZonedTime(scheduleDateRaw, timezone) : null;
+  let event;
+  try {
+    event = await prisma.event.create({
+      data: {
+        ...fields,
+        status: publish.status,
+        publishedAt: publish.publishedAt,
+        visibility: "public",
+        attendanceReportingMode: fields.attendanceEnabled ? "CHECKIN_REQUIRED" : "ASSUME_REGISTERED",
+      },
+    });
+  } catch (error) {
+    if (slugTaken(error)) return { ok: false, error: SLUG_TAKEN };
+    throw error;
   }
-
-  const event = await prisma.event.create({
-    data: {
-      title: formData.get("title") as string,
-      slug: formData.get("slug") as string,
-      seriesId: seriesId === "" ? null : seriesId,
-      venueId: venueId === "" ? null : venueId,
-      startsAtUtc: fromZonedTime(formData.get("startsAtUtc") as string, timezone),
-      endsAtUtc: fromZonedTime(formData.get("endsAtUtc") as string, timezone),
-      timezone: timezone,
-      summary: formData.get("summary") as string,
-      description: formData.get("description") as string,
-      heroImageUrl: formData.get("heroImageUrl") as string,
-      streamUrl: formData.get("streamUrl") as string,
-      status: status,
-      publishedAt: publishedAt,
-      visibility: "public",
-      registrationEnabled: formData.get("registrationEnabled") === "on",
-      registrationOpensAt: opensAtRaw ? fromZonedTime(opensAtRaw, timezone) : null,
-      registrationClosesAt: closesAtRaw ? fromZonedTime(closesAtRaw, timezone) : null,
-      registrationMax: maxRaw && maxRaw !== "-1" ? parseInt(maxRaw) : null,
-      registrationWaitlistEnabled: formData.get("registrationWaitlistEnabled") === "on",
-      registrationFeeCents,
-      attendanceEnabled: formData.get("attendanceEnabled") === "on",
-      attendanceReportingMode: formData.get("attendanceEnabled") === "on" ? "CHECKIN_REQUIRED" : "ASSUME_REGISTERED",
-      attendanceOpensAt: formData.get("attendanceOpensAt") ? fromZonedTime(formData.get("attendanceOpensAt") as string, timezone) : null,
-      attendanceClosesAt: formData.get("attendanceClosesAt") ? fromZonedTime(formData.get("attendanceClosesAt") as string, timezone) : null,
-    },
-  });
 
   await createAuditLog({
     actorUserId: user.id,
@@ -83,8 +84,6 @@ export async function createEvent(formData: FormData) {
   }
   redirect("/admin/events");
 }
-
-import { EventStatus } from "@prisma/client";
 
 export async function updateEventStatus(eventId: string, status: EventStatus, publishedAt?: Date) {
   const user = await requireOfficer();
@@ -131,73 +130,41 @@ function waitlistNeedsRefill(
   return capacityRaised || madeFree;
 }
 
-export async function updateEvent(id: string, formData: FormData) {
+export async function updateEvent(id: string, formData: FormData): Promise<ActionResult> {
   const user = await requireOfficer();
   const before = await prisma.event.findUnique({
     where: { id },
     select: { registrationMax: true, registrationFeeCents: true },
   });
 
-  const seriesId = formData.get("seriesId") as string;
-  const venueId = formData.get("venueId") as string;
-  const opensAtRaw = formData.get("registrationOpensAt") as string;
-  const closesAtRaw = formData.get("registrationClosesAt") as string;
-  const maxRaw = formData.get("registrationMax") as string;
-  const feeRaw = formData.get("registrationFeeCents") as string;
-  const registrationFeeCents = feeRaw && parseFloat(feeRaw) > 0 ? Math.round(parseFloat(feeRaw) * 100) : null;
+  const parsed = parseEventForm(formData);
+  if (!parsed.ok) return parsed;
+  const fields = parsed.data;
 
-  const submitAction = formData.get("submitAction") as string;
-  const scheduleDateRaw = formData.get("scheduleDate") as string;
-  const timezone = formData.get("timezone") as string;
+  const publish = publication(formData, fields.timezone);
+  if (publish && "error" in publish) return { ok: false, error: publish.error };
 
-  const eventUpdateData: any = {
-    title: formData.get("title") as string,
-    slug: formData.get("slug") as string,
-    seriesId: seriesId === "" ? null : seriesId,
-    venueId: venueId === "" ? null : venueId,
-    startsAtUtc: fromZonedTime(formData.get("startsAtUtc") as string, formData.get("timezone") as string),
-    endsAtUtc: fromZonedTime(formData.get("endsAtUtc") as string, formData.get("timezone") as string),
-    timezone: formData.get("timezone") as string,
-    summary: formData.get("summary") as string,
-    description: formData.get("description") as string,
-    heroImageUrl: formData.get("heroImageUrl") as string,
-    streamUrl: formData.get("streamUrl") as string,
-    registrationEnabled: formData.get("registrationEnabled") === "on",
-    registrationOpensAt: opensAtRaw ? fromZonedTime(opensAtRaw, formData.get("timezone") as string) : null,
-    registrationClosesAt: closesAtRaw ? fromZonedTime(closesAtRaw, formData.get("timezone") as string) : null,
-    registrationMax: maxRaw && maxRaw !== "-1" ? parseInt(maxRaw) : null,
-    registrationWaitlistEnabled: formData.get("registrationWaitlistEnabled") === "on",
-    registrationFeeCents,
-    attendanceEnabled: formData.get("attendanceEnabled") === "on",
-    attendanceOpensAt: formData.get("attendanceOpensAt") ? fromZonedTime(formData.get("attendanceOpensAt") as string, formData.get("timezone") as string) : null,
-    attendanceClosesAt: formData.get("attendanceClosesAt") ? fromZonedTime(formData.get("attendanceClosesAt") as string, formData.get("timezone") as string) : null,
+  const eventUpdateData: Prisma.EventUpdateInput = {
+    ...fields,
+    // Turning check-in on from the event form means people have to check in
+    ...(fields.attendanceEnabled ? { attendanceReportingMode: "CHECKIN_REQUIRED" as const } : {}),
+    // A draft keeps its publish date, as before
+    ...(publish ? { status: publish.status, ...(publish.status === "DRAFT" ? {} : { publishedAt: publish.publishedAt }) } : {}),
   };
 
-  // When enabling attendance via the event form, set reporting mode to CHECKIN_REQUIRED
-  if (eventUpdateData.attendanceEnabled) {
-    eventUpdateData.attendanceReportingMode = "CHECKIN_REQUIRED";
+  let updated;
+  try {
+    updated = await prisma.event.update({
+      where: { id },
+      data: eventUpdateData,
+      select: { slug: true, seriesId: true },
+    });
+  } catch (error) {
+    if (slugTaken(error)) return { ok: false, error: SLUG_TAKEN };
+    throw error;
   }
 
-  if (submitAction === "publish") {
-    eventUpdateData.status = "PUBLISHED";
-    // Only set publishedAt if we are explicitly publishing,
-    // but for updates we might want to check if it's already published to avoid resetting time?
-    // For now, "Publish Now" means NOW.
-    eventUpdateData.publishedAt = new Date();
-  } else if (submitAction === "schedule") {
-    eventUpdateData.status = "SCHEDULED";
-    eventUpdateData.publishedAt = scheduleDateRaw ? fromZonedTime(scheduleDateRaw, timezone) : null;
-  } else if (submitAction === "draft") {
-    eventUpdateData.status = "DRAFT";
-  }
-
-  const updated = await prisma.event.update({
-    where: { id },
-    data: eventUpdateData,
-    select: { slug: true, seriesId: true },
-  });
-
-  if (waitlistNeedsRefill(before, eventUpdateData.registrationMax, registrationFeeCents)) {
+  if (waitlistNeedsRefill(before, fields.registrationMax, fields.registrationFeeCents)) {
     await reconcileEventWaitlist(id);
   }
 
@@ -206,7 +173,7 @@ export async function updateEvent(id: string, formData: FormData) {
     actionType: "UPDATE",
     entityType: "EVENT",
     entityId: id,
-    summary: `Updated event details for ${eventUpdateData.title}`,
+    summary: `Updated event details for ${fields.title}`,
     after: eventUpdateData,
   });
 
@@ -239,40 +206,19 @@ export async function deleteEvent(eventId: string) {
   if (deleted.seriesId) revalidateSeriesPages();
 }
 
-import {
-  adminOverrideRegistration,
-  adminRemoveRegistration,
-  reconcileEventWaitlist,
-} from "@/server/services/registration.service";
-import { RegistrationStatus } from "@prisma/client";
-
-export async function updateEventRegistrationConfig(eventId: string, formData: FormData) {
+export async function updateEventRegistrationConfig(eventId: string, formData: FormData): Promise<ActionResult> {
   const user = await requireOfficer();
 
   const event = await prisma.event.findUnique({
     where: { id: eventId },
     select: { timezone: true, registrationMax: true, waitlistAutoPromote: true, registrationFeeCents: true },
   });
-  const timezone = event?.timezone || "America/Chicago";
+  const timezone = event?.timezone || DEFAULT_TIMEZONE;
 
-  const enabled = formData.get("registrationEnabled") === "on";
-  const opensAtRaw = formData.get("registrationOpensAt") as string;
-  const closesAtRaw = formData.get("registrationClosesAt") as string;
-  const maxRaw = formData.get("registrationMax") as string;
-  const waitlistEnabled = formData.get("registrationWaitlistEnabled") === "on";
-  const waitlistAutoPromote = formData.get("waitlistAutoPromote") === "on";
-  const feeRaw = formData.get("registrationFeeCents") as string;
-  const registrationFeeCents = feeRaw && parseFloat(feeRaw) > 0 ? Math.round(parseFloat(feeRaw) * 100) : null;
-
-  const configData = {
-    registrationEnabled: enabled,
-    registrationOpensAt: opensAtRaw ? fromZonedTime(opensAtRaw, timezone) : null,
-    registrationClosesAt: closesAtRaw ? fromZonedTime(closesAtRaw, timezone) : null,
-    registrationMax: maxRaw && maxRaw !== "-1" ? parseInt(maxRaw) : null,
-    registrationWaitlistEnabled: waitlistEnabled,
-    waitlistAutoPromote,
-    registrationFeeCents,
-  };
+  const parsed = parseRegistrationConfigForm(formData, timezone);
+  if (!parsed.ok) return parsed;
+  const configData = parsed.data;
+  const { waitlistAutoPromote, registrationFeeCents } = configData;
 
   const updated = await prisma.event.update({
     where: { id: eventId },
@@ -302,6 +248,7 @@ export async function updateEventRegistrationConfig(eventId: string, formData: F
   revalidatePath(`/admin/events/${eventId}/manage`);
   revalidateEventList();
   revalidateEventDetail(updated.slug);
+  return { ok: true };
 }
 
 export async function overrideRegistrationStatus(eventId: string, userId: string, status: RegistrationStatus, reason?: string) {
@@ -354,17 +301,11 @@ export async function removeRegistration(eventId: string, userId: string) {
   revalidateEventDetail(slug);
 }
 
-  
-
-  import { updateAttendanceConfig, checkInUser, removeCheckIn } from "@/server/services/attendance.service";
-
-  
-
 export async function updateEventAttendanceConfig(eventId: string, formData: FormData) {
   const user = await requireOfficer();
 
   const event = await prisma.event.findUnique({ where: { id: eventId }, select: { timezone: true } });
-  const timezone = event?.timezone || "America/Chicago";
+  const timezone = event?.timezone || DEFAULT_TIMEZONE;
 
   const enabled = formData.get("attendanceEnabled") === "on";
   const opensAtRaw = formData.get("attendanceOpensAt") as string;
@@ -398,4 +339,3 @@ export async function manualRemoveCheckIn(eventId: string, userId: string) {
 
   revalidatePath(`/admin/events/${eventId}/manage`);
 }
-

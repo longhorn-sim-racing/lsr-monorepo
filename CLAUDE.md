@@ -31,13 +31,15 @@ Longhorn Sim Racing platform for UT Austin. A monorepo containing the club manag
 # Root-level (runs via pnpm filter)
 pnpm dev              # Start dev server (localhost:3000)
 pnpm build            # Production build
-pnpm lint             # ESLint
+pnpm lint             # ESLint (fails on any warning)
+pnpm test             # Unit tests (Vitest)
 
 # From apps/platform/
 pnpm dev              # Start dev server (localhost:3000)
 pnpm build            # Production build (runs prisma generate first)
-pnpm lint             # ESLint
+pnpm lint             # ESLint (fails on any warning)
 pnpm typecheck        # tsc --noEmit
+pnpm test             # Unit tests (Vitest); pnpm test:watch to rerun on save
 pnpm db:migrate       # Create/apply migrations (prisma migrate dev)
 pnpm db:reset         # Reset, re-apply migrations and re-seed
 pnpm db:generate      # Regenerate Prisma client
@@ -106,6 +108,10 @@ Use `"use client"` directive only when interactivity is required. The codebase f
 ### Registration System
 
 Event registration uses database locks (`FOR UPDATE`) to prevent race conditions. Waitlist is FIFO and auto-promotes when capacity opens, except on paid events or when the event's `waitlistAutoPromote` is off. See `src/server/services/registration.service.ts`.
+
+## Tests
+
+Unit tests use Vitest and sit next to the code they test as `*.test.ts` (e.g. `src/lib/money.test.ts`). They run without a database or network: tests that touch Prisma or Resend replace them with `vi.mock` fakes (see `src/server/services/notification.service.test.ts`). CI runs them on every PR. Code that needs a real database (registration locking, the waitlist) isn't covered yet.
 
 ## Local Development
 

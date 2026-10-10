@@ -71,8 +71,9 @@ export function VariantSelector({
 
         return (
           <div key={option.name}>
-            <div className="text-[10px] font-black text-white/40 uppercase tracking-[0.2em] mb-3">
+            <div className="mb-3 flex items-baseline gap-2 font-sans text-[11px] font-bold uppercase tracking-[0.2em] text-white/55">
               {option.name}
+              <span className="text-white">{currentValue}</span>
             </div>
 
             {/* Mobile: Dropdown selector */}
@@ -81,7 +82,7 @@ export function VariantSelector({
                 value={currentValue}
                 onValueChange={(value) => handleOptionChange(option.name, value)}
               >
-                <SelectTrigger className="w-full bg-transparent border-white/10 text-white font-bold uppercase tracking-wider rounded-none h-12">
+                <SelectTrigger aria-label={option.name} className="h-12 w-full rounded-none border-white/15 bg-white/[0.04] text-base font-bold uppercase tracking-wider text-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-lsr-charcoal border-white/10 rounded-none">
@@ -115,14 +116,16 @@ export function VariantSelector({
                 return (
                   <button
                     key={value}
+                    type="button"
                     onClick={() => handleOptionChange(option.name, value)}
                     disabled={!isAvailable}
+                    aria-pressed={isActive}
                     className={cn(
-                      "px-4 py-2 border text-sm font-bold uppercase tracking-wider transition-all",
+                      "h-11 min-w-12 px-4 border font-sans text-sm font-bold uppercase tracking-wider transition-colors",
                       isActive
                         ? "bg-lsr-orange border-lsr-orange text-white"
                         : isAvailable
-                          ? "bg-transparent border-white/10 text-white/60 hover:border-white/30 hover:text-white"
+                          ? "bg-white/[0.03] border-white/15 text-white/75 hover:border-white/40 hover:text-white"
                           : "bg-transparent border-white/5 text-white/20 line-through cursor-not-allowed"
                     )}
                   >

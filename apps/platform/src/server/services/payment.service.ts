@@ -9,6 +9,8 @@ import { priceForUser, productRequiresMembership } from "@/server/services/produ
 import { getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
 import { expireOpenCheckouts } from "@/server/services/checkout-sessions";
 import type Stripe from "stripe";
+import { getSiteUrl } from "@/lib/site-url";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
 
 // ---------------------------------------------------------------------------
 // Checkout Session Creation
@@ -73,7 +75,7 @@ export async function createEventCheckoutSession(
     },
   });
 
-  const baseUrl = getBaseUrl();
+  const baseUrl = getSiteUrl();
 
   const session = await getStripe().checkout.sessions.create({
     mode: "payment",
@@ -122,15 +124,6 @@ export type CheckoutProductType = "ANNUAL_DUES" | "LEAGUE_FEE";
 const PRODUCT_RETURN_PATHS: Record<string, string> = {
   "lone-star-cup": "/lone-star-cup",
 };
-
-function getBaseUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    (process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : "http://localhost:3000")
-  );
-}
 
 /**
  * Starts a Stripe Checkout for a Product-backed purchase (annual dues or a
@@ -223,7 +216,7 @@ export async function createProductCheckoutSession(
 
   const returnPath =
     (leagueSlug && PRODUCT_RETURN_PATHS[leagueSlug]) || "/account";
-  const baseUrl = getBaseUrl();
+  const baseUrl = getSiteUrl();
 
   let session: Stripe.Checkout.Session;
   try {
@@ -464,18 +457,22 @@ async function grantEventSeat(
   const event = await prisma.event.findUnique({
     where: { id: meta.eventId },
   });
-  if (event && registrationStatus === "REGISTERED") {
-    const tz = event.timezone || "America/Chicago";
+  if (event) {
+    const tz = event.timezone || DEFAULT_TIMEZONE;
     const eventDate = formatInTimeZone(event.startsAtUtc, tz, "EEEE, MMMM d 'at' h:mm a");
+    const registered = registrationStatus === "REGISTERED";
     await runAfterResponse(
       () =>
         sendNotification({
           userId: payment.userId,
-          type: "REGISTRATION_CONFIRMED",
-          title: `You're registered for ${event.title}!`,
-          body: `Payment confirmed. See you on ${eventDate}.`,
+          type: registered ? "REGISTRATION_CONFIRMED" : "PAYMENT_WAITLISTED",
+          title: registered ? `You're registered for ${event.title}!` : `Payment received for ${event.title}`,
+          body: registered
+            ? `Payment confirmed. See you on ${eventDate}.`
+            : `Payment confirmed, but ${event.title} filled up while you were checking out, so you're on the waitlist. An officer will follow up with you.`,
           actionUrl: `/events/${event.slug}`,
           channels: ["IN_APP", "EMAIL"],
+          receipt: true,
           metadata: {
             eventId: meta.eventId,
             title: event.title,
@@ -677,7 +674,7 @@ async function grantProduct(
 
   // Send notification once the response is out
   const isDues = product.type === "ANNUAL_DUES";
-  const through = formatInTimeZone(result.validTo, "America/Chicago", "MMMM d, yyyy");
+  const through = formatInTimeZone(result.validTo, DEFAULT_TIMEZONE, "MMMM d, yyyy");
   const leagueName = product.league?.name ?? "the league";
   const actionUrl = isDues
     ? "/account"
@@ -694,6 +691,7 @@ async function grantProduct(
           : `Payment confirmed. Your ${leagueName} entry is active through ${through}. Next, the comp team will give you the ${leagueName} role on Discord, which unlocks the track and car downloads.`,
         actionUrl,
         channels: ["IN_APP", "EMAIL"],
+        receipt: true,
         metadata: {
           paymentId: payment.id,
           productId: product.id,
@@ -724,9 +722,11 @@ type MembershipChange = {
 };
 
 async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
-  // Find payment by the payment_intent stored in providerRef
+  // Find payment by the payment_intent stored in providerRef. Without one, `providerRef: null`
+  // would match any payment that never got a Stripe reference.
+  if (typeof charge.payment_intent !== "string") return;
   const payment = await prisma.payment.findFirst({
-    where: { providerRef: charge.payment_intent as string },
+    where: { providerRef: charge.payment_intent },
   });
   if (!payment) return; // Not a payment we track
 

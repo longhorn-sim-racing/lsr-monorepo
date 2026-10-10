@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { setRacingNumberAction } from "@/server/actions/racing-number";
 import { toast } from "sonner";
 import { RACING_NUMBER_FONTS, type RacingNumberStyle } from "@/lib/racing-number";
+import { unexpectedError } from "@/lib/action-result";
 
 export type { RacingNumberStyle } from "@/lib/racing-number";
 
@@ -63,19 +64,24 @@ export function RacingNumberDialog({
         setLoading(false);
         return;
       }
-      await setRacingNumberAction({
+      const result = await setRacingNumberAction({
         racingNumber: parsed,
         racingNumberColor: color,
         racingNumberFont: font,
         racingNumberItalic: isItalic,
         racingNumberBorder: hasBorder,
       });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
       toast.success(isUpdateMode ? "Racing number updated successfully!" : "Racing number reserved successfully!");
       setOpen(false);
       if (onSuccess) onSuccess();
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error && err.message ? err.message : "Failed to save number. It might be taken.");
+      console.error(err);
+      toast.error(unexpectedError(err, "Couldn't save your number"));
     } finally {
       setLoading(false);
     }

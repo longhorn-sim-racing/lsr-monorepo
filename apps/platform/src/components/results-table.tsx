@@ -205,7 +205,7 @@ export function ResultsTable({ results, title, showPoints = true, sessionType = 
             >
                 <div className="flex items-center gap-3">
                     {isPractice ? <Cone className="h-4 w-4 text-white/40" /> : isQualifying ? <Timer className="h-4 w-4 text-blue-400" /> : <Flag className="h-4 w-4 text-lsr-orange" />}
-                    <h4 className="font-sans font-bold text-xs text-white/60 uppercase tracking-[0.2em]">{title ?? (isPractice ? "Practice Session" : isQualifying ? "Qualifying Session" : "Race Results")}</h4>
+                    <h3 className="font-sans font-bold text-xs text-white/60 uppercase tracking-[0.2em]">{title ?? (isPractice ? "Practice Session" : isQualifying ? "Qualifying Session" : "Race Results")}</h3>
                     {isNonRace && (
                         <span className="text-[10px] font-bold text-white/30 uppercase tracking-widest">{results.length} drivers</span>
                     )}

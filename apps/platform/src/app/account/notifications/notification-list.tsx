@@ -101,6 +101,7 @@ export function NotificationList({
       case "REGISTRATION_CONFIRMED":
         return { label: "Registration", color: "bg-green-500" };
       case "WAITLIST_PROMOTED":
+      case "PAYMENT_WAITLISTED":
         return { label: "Waitlist", color: "bg-lsr-orange" };
       case "EVENT_REMINDER_24H":
         return { label: "Reminder", color: "bg-blue-500" };

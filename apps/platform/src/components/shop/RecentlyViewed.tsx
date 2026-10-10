@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import Image from "next/image";
 import {
   RecentProduct,
   getRecentlyViewed,
   addRecentlyViewed,
 } from "@/lib/shopify/recentlyViewed";
-import { Price } from "./Price";
+import { ShopTile } from "./ShopTiles";
 import { Product } from "@/lib/shopify/types";
 
 interface RecentlyViewedProps {
@@ -29,39 +27,20 @@ export function RecentlyViewed({ currentHandle }: RecentlyViewedProps) {
   if (items.length === 0) return null;
 
   return (
-    <div className="mt-16 pt-16 border-t border-white/10">
-      <h2 className="font-display font-black italic text-2xl uppercase tracking-normal mb-8">
-        Recently <span className="text-lsr-orange">Viewed</span>
+    <section aria-labelledby="recently-viewed" className="mt-16 border-t border-white/10 pt-12 md:mt-20 md:pt-16">
+      <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Pick up where you left off</p>
+      <h2 id="recently-viewed" className="mt-2 mb-6 font-display font-black italic text-3xl md:text-4xl uppercase leading-none">
+        Recently <span className="text-lsr-orange">viewed</span>
       </h2>
 
-      <div className="flex gap-4 overflow-x-auto pb-4 -mx-2 px-2">
-        {items.map((item) => (
-          <Link
-            key={item.handle}
-            href={`/shop/products/${item.handle}`}
-            className="flex-shrink-0 w-40 group"
-          >
-            <div className="relative aspect-square bg-white/5 border border-white/10 overflow-hidden mb-3 group-hover:border-lsr-orange/50 transition-colors">
-              <Image
-                src={item.imageUrl}
-                alt={item.imageAlt || item.title}
-                fill
-                sizes="160px"
-                className="object-cover opacity-60 group-hover:opacity-80 group-hover:scale-105 transition-all duration-300"
-              />
-            </div>
-            <h3 className="font-sans font-bold text-sm text-white truncate mb-1">
-              {item.title}
-            </h3>
-            <Price
-              price={item.price}
-              className="font-mono text-xs text-lsr-orange"
-              currencyCodeClassName="hidden"
-            />
-          </Link>
+      <ul className="-mx-6 flex gap-3 overflow-x-auto px-6 pb-2 md:mx-0 md:grid md:grid-cols-4 md:gap-4 md:overflow-visible md:px-0">
+        {items.slice(0, 8).map((item) => (
+          <li key={item.handle} className="w-44 shrink-0 md:w-auto">
+            <ShopTile handle={item.handle} title={item.title} imageUrl={item.imageUrl} price={item.price} sizes="(min-width: 768px) 25vw, 176px" />
+          </li>
         ))}
-      </div>
-    </div>
+      </ul>
+    </section>
   );
 }
 

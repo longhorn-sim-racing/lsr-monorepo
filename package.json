@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "pnpm --filter @lsr/platform dev",
     "build": "pnpm --filter @lsr/platform build",
-    "lint": "pnpm --filter @lsr/platform lint"
+    "lint": "pnpm --filter @lsr/platform lint",
+    "test": "pnpm --filter @lsr/platform test"
   },
   "packageManager": "pnpm@10.12.1",
   "pnpm": {

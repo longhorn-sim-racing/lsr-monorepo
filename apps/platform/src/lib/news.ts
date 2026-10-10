@@ -23,6 +23,7 @@ export type NewsFrontmatter = {
   date: string      // ISO date
   author?: string
   excerpt?: string
+  coverImageUrl?: string
   tags?: string[]
   published?: boolean
 }
@@ -58,6 +59,7 @@ export async function getAllPosts() {
         title: p.title,
         date: p.publishedAt?.toISOString() ?? new Date().toISOString(),
         excerpt: p.excerpt ?? undefined,
+        coverImageUrl: p.coverImageUrl ?? undefined,
         author: p.author?.displayName ?? "LSR Team",
         published: true,
         tags: tags
@@ -102,6 +104,7 @@ export async function getPostContent(slug: string) {
     title: post.title,
     date: post.publishedAt?.toISOString() ?? new Date().toISOString(),
     excerpt: post.excerpt ?? undefined,
+    coverImageUrl: post.coverImageUrl ?? undefined,
     author: post.author?.displayName ?? "LSR Team",
     published: isPostPublished(post),
     tags: tags

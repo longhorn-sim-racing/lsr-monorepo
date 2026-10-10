@@ -12,8 +12,8 @@ export async function POST(req: NextRequest) {
 
     const cart = await getCart(cartId);
     return NextResponse.json({ ok: true, cart }); // cart can be null if not found
-  } catch (e: any) {
+  } catch (e) {
     console.error("Error getting cart:", e);
-    return NextResponse.json({ ok: false, error: e.message || "Unknown error" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "Unknown error" }, { status: 500 });
   }
 }

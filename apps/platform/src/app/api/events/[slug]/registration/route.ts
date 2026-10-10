@@ -3,9 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/server/auth/session"; // Assuming this exists or similar
 import { prisma } from "@/server/db";
 import { registerForEvent } from "@/server/services/registration.service";
-import { pickRacingNumberStyle, racingNumberSelect } from "@/lib/racing-number";
+import { pickRacingNumberStyle, racingNumberSelect, type RacingNumberStyle } from "@/lib/racing-number";
 import { isEventPublic } from "@/lib/events";
 import { isViewerOfficer } from "@/server/auth/guards";
+
+type Attendee = { displayName: string; avatarUrl: string | null; profileLink: string } & RacingNumberStyle;
 
 type Params = {
   params: Promise<{ slug: string }>;
@@ -60,7 +62,6 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   const snapshot = {
-    eventId: event.id,
     registrationEnabled: event.registrationEnabled,
     windowStatus,
     registrationOpensAt: event.registrationOpensAt,
@@ -70,7 +71,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     waitlistEnabled: event.registrationWaitlistEnabled,
     waitlistCount: 0, // Hidden for public by default usually, but requested to return count if logged in?
     myStatus: "NONE",
-    attendees: [] as any[],
+    attendees: [] as Attendee[],
     registrationFeeCents: event.registrationFeeCents ?? null,
   };
 

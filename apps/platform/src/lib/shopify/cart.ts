@@ -6,11 +6,11 @@ import {
   CART_LINES_UPDATE_MUTATION,
   CART_QUERY,
 } from './queries';
-import { mapCart } from './mappers';
+import { mapCart, type RawCart } from './mappers';
 import { Cart } from './types';
 
 export async function createCart(): Promise<Cart> {
-  const res = await shopifyFetch<any>({
+  const res = await shopifyFetch<{ cartCreate: { cart: Pick<RawCart, 'id' | 'checkoutUrl'> } }>({
     query: CART_CREATE_MUTATION,
     cache: 'no-store',
   });
@@ -37,7 +37,7 @@ export async function createCart(): Promise<Cart> {
 }
 
 export async function getCart(cartId: string): Promise<Cart | null> {
-  const res = await shopifyFetch<any>({
+  const res = await shopifyFetch<{ cart: RawCart | null }>({
     query: CART_QUERY,
     variables: { cartId },
     cache: 'no-store',
@@ -54,7 +54,7 @@ export async function addLines(
   cartId: string,
   lines: { merchandiseId: string; quantity: number }[]
 ): Promise<Cart> {
-  await shopifyFetch<any>({
+  await shopifyFetch<unknown>({
     query: CART_LINES_ADD_MUTATION,
     variables: {
       cartId,
@@ -81,7 +81,7 @@ export async function updateLines(
   cartId: string,
   lines: { id: string; quantity: number }[]
 ): Promise<Cart> {
-  await shopifyFetch<any>({
+  await shopifyFetch<unknown>({
     query: CART_LINES_UPDATE_MUTATION,
     variables: {
       cartId,
@@ -97,7 +97,7 @@ export async function updateLines(
 }
 
 export async function removeLines(cartId: string, lineIds: string[]): Promise<Cart> {
-  await shopifyFetch<any>({
+  await shopifyFetch<unknown>({
     query: CART_LINES_REMOVE_MUTATION,
     variables: {
       cartId,

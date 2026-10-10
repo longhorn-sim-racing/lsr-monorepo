@@ -13,6 +13,7 @@ import { updateUser, type UpdateUserPayload } from "@/server/actions/users";
 import { useRouter } from "next/navigation";
 import { format, addMonths } from "date-fns";
 import { Loader2 } from "lucide-react";
+import { unexpectedError } from "@/lib/action-result";
 
 type FullUser = User & {
     officerTitle: string | null;
@@ -22,12 +23,11 @@ type FullUser = User & {
 
 interface UserEditFormProps {
     user: FullUser;
-    currentUser: User;
     allRoles: Role[];
     allTiers: MembershipTier[];
 }
 
-export function UserEditForm({ user, currentUser, allRoles, allTiers }: UserEditFormProps) {
+export function UserEditForm({ user, allRoles, allTiers }: UserEditFormProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
 
@@ -84,11 +84,16 @@ export function UserEditForm({ user, currentUser, allRoles, allTiers }: UserEdit
 
         startTransition(async () => {
             try {
-                await updateUser(user.id, payload);
+                const result = await updateUser(user.id, payload);
+                if (!result.ok) {
+                    toast.error(result.error);
+                    return;
+                }
                 toast.success("User updated successfully");
                 router.refresh();
-            } catch (error: any) {
-                toast.error(error.message || "Failed to update user");
+            } catch (error) {
+                console.error(error);
+                toast.error(unexpectedError(error, "Couldn't save the user"));
             }
         });
     };

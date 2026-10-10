@@ -200,7 +200,7 @@ export function NewsConsole({ initialPosts }: NewsConsoleProps) {
                     {/* Author */}
                     <div className="w-32 shrink-0 text-xs text-white/60 truncate flex items-center gap-2">
                          {post.author?.avatarUrl && (
-                             // eslint-disable-next-line @next/next/no-img-element
+                             // eslint-disable-next-line @next/next/no-img-element -- avatar URLs can come from any host, which next/image would reject
                              <img src={post.author.avatarUrl} alt="" className="w-4 h-4 rounded-full" />
                          )}
                          <span>{post.author?.displayName || "-"}</span>

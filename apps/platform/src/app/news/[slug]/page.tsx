@@ -1,10 +1,14 @@
 import { getAllPosts, getPostContent } from "@/lib/news"
 import Link from "next/link"
+import Image from "next/image"
 import { notFound } from "next/navigation"
+import { ArrowLeft, Rss } from "lucide-react"
+import { formatPostDate, PostCard } from "../post-card"
 
 import { Metadata } from "next"
 import { DatabaseUnavailable } from "@/components/database-unavailable"
 import { isViewerOfficer } from "@/server/auth/guards"
+import { CANONICAL_SITE_URL } from "@/lib/site-url"
 
 // Per request, not ISR: an officer's draft preview must never be cached for everyone else.
 export const dynamic = "force-dynamic";
@@ -48,6 +52,7 @@ export async function generateMetadata({
       publishedTime: frontmatter.date,
       authors: frontmatter.author ? [frontmatter.author] : undefined,
       tags: frontmatter.tags,
+      ...(frontmatter.coverImageUrl ? { images: [{ url: frontmatter.coverImageUrl }] } : {}),
     },
     twitter: {
       title: frontmatter.title,
@@ -57,6 +62,11 @@ export async function generateMetadata({
 }
 
 type RouteParams = { slug: string }
+
+/** JSON for a <script> tag: escape "<" so post text can't close the tag early. */
+function jsonLd(data: unknown) {
+  return JSON.stringify(data).replace(/</g, "\\u003c")
+}
 
 export default async function NewsPostPage({
                                              params,
@@ -75,11 +85,11 @@ export default async function NewsPostPage({
   } catch (error) {
     console.error('[NewsPost] Failed to load post:', error);
     return (
-      <main className="bg-lsr-charcoal text-white min-h-screen">
+      <div className="bg-lsr-charcoal text-white min-h-screen">
         <div className="mx-auto max-w-4xl px-6 md:px-8 py-14 md:py-20">
           <DatabaseUnavailable title="Article Unavailable" />
         </div>
-      </main>
+      </div>
     );
   }
 
@@ -95,6 +105,7 @@ export default async function NewsPostPage({
     "@type": "NewsArticle",
     headline: frontmatter.title,
     description: frontmatter.excerpt || undefined,
+    ...(frontmatter.coverImageUrl ? { image: frontmatter.coverImageUrl } : {}),
     datePublished: frontmatter.date,
     dateModified: frontmatter.date,
     author: {
@@ -106,13 +117,13 @@ export default async function NewsPostPage({
       name: "Longhorn Sim Racing",
       logo: {
         "@type": "ImageObject",
-        url: "https://www.longhornsimracing.org/brand/logos/black_logo_white_square.png",
+        url: `${CANONICAL_SITE_URL}/brand/logos/black_logo_white_square.png`,
       },
     },
     keywords: frontmatter.tags,
     mainEntityOfPage: {
       "@type": "WebPage",
-      "@id": `https://www.longhornsimracing.org/news/${slug}`,
+      "@id": `${CANONICAL_SITE_URL}/news/${slug}`,
     },
   };
 
@@ -120,104 +131,115 @@ export default async function NewsPostPage({
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.longhornsimracing.org/" },
-      { "@type": "ListItem", position: 2, name: "News", item: "https://www.longhornsimracing.org/news" },
-      { "@type": "ListItem", position: 3, name: frontmatter.title, item: `https://www.longhornsimracing.org/news/${slug}` },
+      { "@type": "ListItem", position: 1, name: "Home", item: `${CANONICAL_SITE_URL}/` },
+      { "@type": "ListItem", position: 2, name: "News", item: `${CANONICAL_SITE_URL}/news` },
+      { "@type": "ListItem", position: 3, name: frontmatter.title, item: `${CANONICAL_SITE_URL}/news/${slug}` },
     ],
   };
 
   return (
-    <main className="bg-lsr-charcoal text-white min-h-screen">
+    <div className="bg-lsr-charcoal text-white min-h-screen">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(articleJsonLd) }}
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd) }}
       />
-      <div className="mx-auto max-w-4xl px-6 md:px-8 py-14 md:py-20">
-        <div className="mb-8">
-          <Link href="/news" className="group inline-flex items-center gap-3 text-[10px] font-sans font-bold uppercase tracking-[0.25em] text-white/50 hover:text-lsr-orange transition-colors">
-            <div className="h-px w-8 bg-lsr-orange/30 group-hover:bg-lsr-orange group-hover:w-12 transition-all" />
-            Back to News
-          </Link>
-        </div>
-
-        {isDraft && (
-          <div className="mb-8 border border-amber-500/30 bg-amber-500/10 px-4 py-3 font-sans text-xs text-amber-200">
-            Draft: only officers can see this post. Edit it in{" "}
-            <Link href={`/admin/news/${postData.id}`} className="underline hover:text-white">Admin → News</Link>.
+      {/* Header: over the cover photo when there is one */}
+      <header className={`relative overflow-hidden border-b border-white/10 ${frontmatter.coverImageUrl ? "min-h-[60svh] md:min-h-[70svh] flex items-end" : ""}`}>
+        {frontmatter.coverImageUrl ? (
+          <div className="absolute inset-0 z-0">
+            <Image src={frontmatter.coverImageUrl} alt="" fill sizes="100vw" preload className="object-cover opacity-75" />
+            <div className="absolute inset-0 bg-gradient-to-t from-lsr-charcoal via-lsr-charcoal/55 to-lsr-charcoal/20" />
+            <div className="absolute inset-0 bg-gradient-to-r from-lsr-charcoal/70 to-transparent" />
           </div>
+        ) : (
+          <div className="absolute inset-0 opacity-[0.04] [background-image:repeating-linear-gradient(45deg,white_0px,white_1px,transparent_1px,transparent_10px)] pointer-events-none" />
         )}
+        <div className="relative z-10 mx-auto w-full max-w-5xl px-6 md:px-8 pt-10 pb-12 md:pt-14 md:pb-16">
+          <Link href="/news" className="group inline-flex items-center gap-2 text-[10px] font-sans font-bold uppercase tracking-[0.2em] text-white/70 hover:text-lsr-orange transition-colors">
+            <ArrowLeft className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-1" />
+            All news
+          </Link>
 
-        <header className="mb-12 border-b border-white/10 pb-12">
-          <div className="flex items-center gap-4 text-[10px] font-sans font-bold uppercase tracking-[0.2em] text-lsr-orange mb-6">
-            <time>{new Date(frontmatter.date).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</time>
-            <span className="text-white/20">|</span>
-            <span>{frontmatter.author || "Official Team Report"}</span>
+          {isDraft && (
+            <div className="mt-6 border border-amber-500/30 bg-amber-500/10 px-4 py-3 font-sans text-xs text-amber-200">
+              Draft: only officers can see this post. Edit it in{" "}
+              <Link href={`/admin/news/${postData.id}`} className="underline hover:text-white">Admin → News</Link>.
+            </div>
+          )}
+
+          <div className={`${frontmatter.coverImageUrl ? "mt-16 md:mt-24" : "mt-10"} flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] font-sans font-bold uppercase tracking-[0.2em] text-lsr-orange`}>
+            <time dateTime={frontmatter.date}>{formatPostDate(frontmatter.date)}</time>
+            <span className="h-3 w-px bg-white/25" />
+            <span className="text-white/75">By {frontmatter.author || "LSR Team"}</span>
           </div>
-          
-          <h1 className="font-display font-black italic text-4xl md:text-6xl lg:text-7xl text-white uppercase tracking-normal leading-[0.9] mb-8">
+
+          <h1 className="mt-5 max-w-4xl font-display font-black italic text-4xl md:text-6xl lg:text-7xl text-white uppercase tracking-normal leading-[0.9] drop-shadow-[0_4px_24px_rgba(0,0,0,0.5)]">
             {frontmatter.title}
           </h1>
-          
+
+          {frontmatter.excerpt && (
+            <p className="mt-6 max-w-3xl font-sans text-lg md:text-xl text-white/80 leading-relaxed">{frontmatter.excerpt}</p>
+          )}
+
           {frontmatter.tags && frontmatter.tags.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+            <div className="mt-6 flex flex-wrap gap-2">
               {frontmatter.tags.map(tag => (
-                <span key={tag} className="border border-white/10 bg-white/5 px-3 py-1 text-[9px] font-sans font-bold uppercase tracking-widest text-white/60">
+                <Link
+                  key={tag}
+                  href={`/news?tag=${encodeURIComponent(tag)}`}
+                  className="bg-lsr-orange/15 px-2.5 py-1 text-[10px] font-sans font-bold uppercase tracking-[0.15em] text-lsr-orange hover:bg-lsr-orange hover:text-white transition-colors"
+                >
                   {tag}
-                </span>
+                </Link>
               ))}
             </div>
           )}
-        </header>
+        </div>
+      </header>
 
-        <article className="prose prose-invert prose-lg max-w-none 
+      <div className="mx-auto max-w-5xl px-6 md:px-8 py-12 md:py-16">
+        <article className="mx-auto max-w-3xl prose prose-invert prose-lg
                             prose-headings:font-display prose-headings:font-black prose-headings:italic prose-headings:uppercase prose-headings:tracking-normal
                             prose-p:font-sans prose-p:text-white/80 prose-p:leading-relaxed
                             prose-a:text-lsr-orange prose-a:no-underline hover:prose-a:underline
                             prose-strong:text-white prose-strong:font-bold
                             prose-li:font-sans prose-li:text-white/80
-                            prose-blockquote:border-lsr-orange prose-blockquote:bg-white/5 prose-blockquote:py-2 prose-blockquote:px-6 prose-blockquote:not-italic
+                            prose-blockquote:border-lsr-orange prose-blockquote:bg-white/5 prose-blockquote:py-2 prose-blockquote:px-6 prose-blockquote:not-italic prose-blockquote:font-bold prose-blockquote:text-white
+                            [&_blockquote_p:first-of-type]:before:content-none [&_blockquote_p:last-of-type]:after:content-none
+                            prose-img:border prose-img:border-white/10
+                            prose-h2:text-white prose-h3:text-lsr-orange
                             prose-code:text-lsr-orange prose-code:bg-white/5 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-none prose-code:font-mono prose-code:before:content-none prose-code:after:content-none">
           {content}
         </article>
-        
+
         {relatedPosts.length > 0 && (
           <section className="mt-20 pt-10 border-t border-white/10">
             <h2 className="font-display font-black italic text-2xl md:text-3xl text-white uppercase tracking-normal mb-8">
               More <span className="text-lsr-orange">from LSR</span>
             </h2>
-            <div className="grid gap-6 md:grid-cols-3">
+            <div className="grid gap-4 md:gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {relatedPosts.map(p => (
-                <Link
-                  key={p.slug}
-                  href={`/news/${p.slug}`}
-                  className="group border border-white/10 bg-white/[0.02] p-6 hover:border-lsr-orange/60 transition-colors"
-                >
-                  <time className="font-mono text-[10px] text-lsr-orange uppercase tracking-widest">
-                    {new Date(p.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
-                  </time>
-                  <h3 className="font-display font-black italic text-xl text-white uppercase tracking-normal mt-3 group-hover:text-lsr-orange transition-colors">
-                    {p.title}
-                  </h3>
-                  {p.excerpt && (
-                    <p className="font-sans text-sm text-white/60 mt-3 line-clamp-3">{p.excerpt}</p>
-                  )}
-                </Link>
+                <PostCard key={p.slug} post={p} />
               ))}
             </div>
           </section>
         )}
 
-        <div className="mt-20 pt-10 border-t border-white/10">
-          <div className="flex justify-between items-center">
-            <span className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/30">End of Transmission</span>
-            <div className="h-1 w-12 bg-lsr-orange" />
-          </div>
+        <div className="mt-20 pt-10 border-t border-white/10 flex flex-wrap items-center justify-between gap-4">
+          <Link href="/news" className="group inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/60 hover:text-lsr-orange transition-colors">
+            <ArrowLeft className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-1" />
+            All news
+          </Link>
+          <Link href="/news/subscribe" className="inline-flex items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-lsr-orange hover:text-white transition-colors">
+            <Rss className="h-3.5 w-3.5" />
+            Subscribe
+          </Link>
         </div>
       </div>
-    </main>
+    </div>
   )
 }

@@ -4,7 +4,22 @@ import { useRef, useState } from "react"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 
-export function ImageUploader({ name, defaultValue }: { name: string, defaultValue?: string | null }) {
+export function ImageUploader({
+  name,
+  defaultValue,
+  onChange,
+  ...buttonProps
+}: {
+  /** Form field name for a hidden input, for plain <form> posts */
+  name?: string
+  defaultValue?: string | null
+  /** Called with the uploaded image's URL, or null when it's removed */
+  onChange?: (url: string | null) => void
+  /** Set by a form field wrapper so its label and messages point at the upload button */
+  id?: string
+  "aria-describedby"?: string
+  "aria-invalid"?: boolean
+}) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<string | null>(defaultValue ?? null)
 
@@ -30,6 +45,7 @@ export function ImageUploader({ name, defaultValue }: { name: string, defaultVal
     }
 
     setPreview(json.secure_url as string)
+    onChange?.(json.secure_url as string)
   }
 
   function chooseFile() {
@@ -50,15 +66,18 @@ export function ImageUploader({ name, defaultValue }: { name: string, defaultVal
 
       <div className="flex gap-2">
         <input ref={inputRef} type="file" accept="image/*" hidden onChange={onFile} />
-        <input type="hidden" name={name} value={preview ?? ""} />
-        <Button type="button" onClick={chooseFile}>
+        {name && <input type="hidden" name={name} value={preview ?? ""} />}
+        <Button type="button" onClick={chooseFile} {...buttonProps}>
           {preview ? "Change" : "Upload"} image
         </Button>
         {preview && (
           <Button
             type="button"
             variant="outline"
-            onClick={() => setPreview(null)}
+            onClick={() => {
+              setPreview(null)
+              onChange?.(null)
+            }}
           >
             Remove
           </Button>

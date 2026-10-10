@@ -23,6 +23,7 @@ import {
   saveEntrantApplication,
   searchEntrantUsers,
 } from "@/app/admin/league-entries/actions";
+import { formatCents } from "@/lib/money";
 
 type SeasonOption = { id: string; slug: string; name: string };
 type StatusFilter = "all" | "paid" | "manual" | "awaiting" | "ended";
@@ -190,7 +191,7 @@ export function LeagueEntriesConsole({
                     {r.status === "none" && !r.application ? "No entry" : STATUS_BADGE[r.status].label}
                   </span>
                   {r.status === "paid" && r.paidCents !== null && (
-                    <div className="mt-1 text-white/40">${(r.paidCents / 100).toFixed(2)}{r.returningRate && " · returning"}</div>
+                    <div className="mt-1 text-white/40">{formatCents(r.paidCents)}{r.returningRate && " · returning"}</div>
                   )}
                   {r.paidAt && r.status !== "none" && <div className="text-white/30">{new Date(r.paidAt).toLocaleDateString()}</div>}
                 </td>

@@ -102,10 +102,10 @@ export function AddToCartButton({
     <Button
       onClick={handleAddToCart}
       disabled={isUpdating}
-      className="w-full bg-white text-lsr-charcoal font-black uppercase tracking-[0.2em] h-14 rounded-none hover:bg-lsr-orange hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+      className="w-full bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal font-sans text-xs font-bold uppercase tracking-[0.2em] h-14 rounded-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
     >
       {isUpdating && <Loader2 className="h-4 w-4 animate-spin" />}
-      {isUpdating ? "Adding..." : "Add to Cart"}
+      {isUpdating ? "Adding…" : "Add to cart"}
     </Button>
   );
 }

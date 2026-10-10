@@ -17,6 +17,12 @@ export const TIMEZONES = [
 
 export const DEFAULT_TIMEZONE = "America/Chicago";
 
+/** "CT" rather than CDT/CST, which flips mid-season when daylight saving ends */
+export function zoneLabel(date: Date, timeZone: string): string {
+  if (timeZone === "America/Chicago") return "CT";
+  return new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(date).find((part) => part.type === "timeZoneName")?.value ?? "";
+}
+
 /**
  * Converts a UTC Date object to a "YYYY-MM-DDTHH:mm" string 
  * relative to the target timezone.

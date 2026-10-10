@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -73,10 +74,13 @@ export function AttendanceManager({
                         </h1>
                         
                         <div className="bg-white p-4 rounded-none shadow-2xl ring-1 ring-white/10">
-                            <img 
-                                src={qrDataUrl} 
-                                alt="Check-in QR Code" 
-                                className="w-[45vh] h-[45vh] max-w-full object-contain" 
+                            <Image
+                                src={qrDataUrl}
+                                alt="Check-in QR Code"
+                                width={600}
+                                height={600}
+                                unoptimized
+                                className="w-[45vh] h-[45vh] max-w-full object-contain"
                             />
                         </div>
                         
@@ -124,7 +128,7 @@ export function AttendanceManager({
                                 <DialogTitle>Check-in QR Code</DialogTitle>
                             </DialogHeader>
                             <div className="flex flex-col items-center justify-center p-6 space-y-4">
-                                <img src={qrDataUrl} alt="QR Code" className="w-64 h-64 border rounded-lg bg-white" />
+                                <Image src={qrDataUrl} alt="QR Code" width={256} height={256} unoptimized className="w-64 h-64 border rounded-lg bg-white" />
                                 <div className="text-center text-sm text-muted-foreground break-all">
                                     {checkInUrl}
                                 </div>

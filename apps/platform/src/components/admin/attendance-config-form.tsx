@@ -40,7 +40,7 @@ export function AttendanceConfigForm({ event, checkInCount = 0 }: { event: Event
             <Label htmlFor="attendanceEnabled" className="font-sans font-bold uppercase tracking-widest text-xs cursor-pointer">Enable Check-in System</Label>
         </div>
         <p className="text-[10px] text-white/40 pl-12 leading-relaxed">
-            When enabled, users must scan a QR code to be marked as "Attended". 
+            When enabled, users must scan a QR code to be marked as &ldquo;Attended&rdquo;. 
             <br/>
             When disabled, all registered users are automatically assumed to have attended once the event concludes.
         </p>

@@ -115,13 +115,14 @@ We track tasks and bugs as [GitHub Issues](https://github.com/longhorn-sim-racin
 
 ## How CI works
 
-The CI pipeline (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests (draft PRs are skipped until they're marked ready for review). After installing dependencies and generating the Prisma client, it runs three checks:
+The CI pipeline (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests (draft PRs are skipped until they're marked ready for review). After installing dependencies and generating the Prisma client, it runs four checks:
 
-1. **Lint** -- ESLint across the platform app
+1. **Lint** -- ESLint across the platform app; any warning fails it
 2. **Type check** -- `tsc --noEmit` for TypeScript correctness
-3. **Build** -- Full production build to catch build errors
+3. **Unit tests** -- `pnpm test` (Vitest); tests sit next to the code as `*.test.ts` and need no database
+4. **Build** -- Full production build to catch build errors
 
-All three should pass before you merge. See [deployment.md](./deployment.md) for more on the deployment process, including how database migrations are deployed.
+All four should pass before you merge. Run `pnpm test` locally before pushing, or `pnpm test:watch` (from `apps/platform`) while you work. See [deployment.md](./deployment.md) for more on the deployment process, including how database migrations are deployed.
 
 ## Key documentation
 

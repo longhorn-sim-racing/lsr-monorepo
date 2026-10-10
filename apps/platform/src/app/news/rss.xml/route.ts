@@ -1,12 +1,8 @@
 import { getAllPosts } from "@/lib/news"
+import { getSiteUrl } from "@/lib/site-url"
 
-export const revalidate = 60 // rebuild feed at most once per minute
-
-function baseUrl() {
-  if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
-  return "http://localhost:3000"
-}
+// Built per request; the CDN keeps each copy for a minute (Cache-Control below)
+export const dynamic = "force-dynamic"
 
 function esc(s: string) {
   return s
@@ -17,43 +13,46 @@ function esc(s: string) {
     .replaceAll("'", "&apos;")
 }
 
-export const dynamic = 'force-dynamic'
-
 export async function GET() {
-  const site = baseUrl()
-  let posts: Awaited<ReturnType<typeof getAllPosts>>;
+  const site = getSiteUrl()
+  const self = `${site}/news/rss.xml`
+  let posts: Awaited<ReturnType<typeof getAllPosts>>
   try {
     posts = await getAllPosts()
-  } catch {
-    posts = []
+  } catch (error) {
+    // Not an empty 200: feed readers would drop every item, and the CDN would keep it
+    console.error("[rss] Failed to load posts:", error)
+    return new Response("The news feed is temporarily unavailable.", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "120" },
+    })
   }
 
   const items = posts
-    .map(p => {
+    .map((p) => {
       const link = `${site}/news/${p.slug}`
-      const pub = new Date(p.date).toUTCString()
-      const desc = p.excerpt ? `<description><![CDATA[${p.excerpt}]]></description>` : ""
       return `
-        <item>
-          <title>${esc(p.title)}</title>
-          <link>${esc(link)}</link>
-          <guid isPermaLink="true">${esc(link)}</guid>
-          <pubDate>${pub}</pubDate>
-          ${desc}
-        </item>`
+    <item>
+      <title>${esc(p.title)}</title>
+      <link>${esc(link)}</link>
+      <guid isPermaLink="true">${esc(link)}</guid>
+      <pubDate>${new Date(p.date).toUTCString()}</pubDate>${p.excerpt ? `
+      <description>${esc(p.excerpt)}</description>` : ""}
+    </item>`
     })
-    .join("\n")
+    .join("")
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
-  <rss version="2.0">
-    <channel>
-      <title>Longhorn Sim Racing — News</title>
-      <link>${site}/news</link>
-      <description>Announcements and blog posts from Longhorn Sim Racing.</description>
-      <language>en</language>
-      ${items}
-    </channel>
-  </rss>`
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Longhorn Sim Racing — News</title>
+    <link>${esc(`${site}/news`)}</link>
+    <atom:link href="${esc(self)}" rel="self" type="application/rss+xml" />
+    <description>Announcements and blog posts from Longhorn Sim Racing.</description>
+    <language>en</language>${items}
+  </channel>
+</rss>
+`
 
   return new Response(xml, {
     headers: {

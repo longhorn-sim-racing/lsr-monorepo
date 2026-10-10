@@ -16,7 +16,7 @@ export default async function AdminUserEditPage({
     params: Promise<{ id: string }>;
 }) {
     const { id } = await params;
-    const currentUser = await requireOfficer();
+    await requireOfficer();
 
     const user = await prisma.user.findUnique({
         where: { id },
@@ -89,7 +89,6 @@ export default async function AdminUserEditPage({
             {/* Edit form */}
             <UserEditForm
                 user={user}
-                currentUser={currentUser}
                 allRoles={allRoles}
                 allTiers={allTiers}
             />

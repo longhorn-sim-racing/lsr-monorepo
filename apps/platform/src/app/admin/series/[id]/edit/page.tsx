@@ -17,9 +17,9 @@ export default async function EditSeriesPage({ params }: EditSeriesArgs) {
   }
 
   return (
-    <main className="mx-auto max-w-2xl p-8">
+    <div className="mx-auto max-w-2xl p-8">
       <h1 className="text-3xl font-bold mb-6">Edit Series</h1>
       <SeriesForm series={series} />
-    </main>
+    </div>
   );
 }

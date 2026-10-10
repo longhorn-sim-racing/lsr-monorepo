@@ -30,6 +30,8 @@ for (const file of [".env.local", ".env"]) {
     if (process.env[key] === undefined) process.env[key] = value;
   }
 }
+// Throwaway users have fake addresses, and receipts email whatever their settings: keep email off.
+delete process.env.RESEND_API_KEY;
 
 const dbHost = (() => {
   try {

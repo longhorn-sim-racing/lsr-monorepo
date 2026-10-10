@@ -70,6 +70,25 @@ All from `apps/platform/public/images`:
 | `gal_11.jpg` | Race cars parked in a garage | Parking lot, "next" slides |
 | `gal_08.jpeg` | Members at the sim rigs (portrait) | The wrap slide's right-hand panel |
 
+GT7 renders of the team liveries, in `liveries/` (all 16:9 unless noted):
+
+| File | Shows |
+|---|---|
+| `liveries/daytona-grid-pair.webp` | The white Porsche and orange Mercedes on the Daytona grid with a driver between them |
+| `liveries/daytona-porsche-driver.webp` | The Porsche and a driver in the Daytona paddock (3840 wide) |
+| `liveries/le-mans-amg.webp` | The orange Mercedes parked at Le Mans (3840 wide) |
+| `liveries/le-mans-amg-pit-exit.webp` | The orange Mercedes leaving the Le Mans pits at night (3840 wide) |
+| `liveries/nurburgring-porsche-golden-hour.webp` | The Porsche at the Nürburgring Karussell, golden hour |
+| `liveries/nurburgring-amg.webp` | The orange Mercedes at the Karussell, sunset |
+| `liveries/nurburgring-dusk.webp` | Three cars at dusk under the moon (dark) |
+| `liveries/nurburgring-porsche-chase.webp` | Chase-cam shot of the Porsche from behind |
+| `liveries/watkins-glen-turn-5.webp` | Both cars through Turn 5 at Watkins Glen |
+| `liveries/daytona-night-amg.webp`, `daytona-night-porsche.webp` | Night shots at Daytona (square) |
+
+The renders show real brand logos on the liveries. The board approved featuring them anyway.
+
+More event photos (WEC, COTA, Race Club, merch) are in the gallery on Cloudinary, under `gallery/<album>/` in cloud `daklxjoxr`.
+
 Photos are `object-fit:cover`. Use only club photos, never stock images.
 
 ## Content rules

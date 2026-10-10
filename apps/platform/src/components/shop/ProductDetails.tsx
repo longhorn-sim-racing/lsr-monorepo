@@ -10,7 +10,7 @@ import { useTrackProductView } from "./RecentlyViewed";
 import { SizeGuide } from "./SizeGuide";
 import { WishlistButton } from "./WishlistButton";
 import { cleanProductDescription, hasOnDemandBoilerplate, ON_DEMAND_TEXT } from "@/lib/product-content";
-import { PackageOpen } from "lucide-react";
+import { Lock, PackageOpen } from "lucide-react";
 
 interface ProductDetailsProps {
   product: Product;
@@ -34,8 +34,11 @@ export function ProductDetails({
   return (
     <>
       <div className="flex flex-col">
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <h1 className="font-display font-black italic text-4xl md:text-5xl uppercase tracking-normal leading-none">
+        {product.productType && (
+          <p className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">{product.productType}</p>
+        )}
+        <div className="mt-2 mb-5 flex items-start justify-between gap-4">
+          <h1 className="min-w-0 break-words font-display font-black italic text-5xl md:text-6xl uppercase leading-[0.9]">
             {product.title}
           </h1>
           <WishlistButton
@@ -47,15 +50,15 @@ export function ProductDetails({
               price: product.priceRange.minVariantPrice,
             }}
             size="lg"
-            className="flex-shrink-0"
+            className="flex-shrink-0 border border-white/15 hover:border-white/40"
           />
         </div>
 
         <div className="mb-8 flex items-baseline gap-4">
           <AnimatedPrice
             price={selectedVariant?.price || product.priceRange.minVariantPrice}
-            className="text-2xl md:text-3xl font-sans font-bold text-lsr-orange"
-            currencyCodeClassName="text-sm text-white/40 ml-1"
+            className="font-display font-black italic text-4xl text-lsr-orange"
+            currencyCodeClassName="ml-1 font-sans not-italic text-xs font-bold tracking-[0.2em] text-white/45"
           />
         </div>
 
@@ -68,7 +71,7 @@ export function ProductDetails({
             ) && <SizeGuide descriptionHtml={product.descriptionHtml} />}
           </div>
 
-          <div ref={addToCartRef} className="pt-4 border-t border-white/10">
+          <div ref={addToCartRef} className="space-y-3 border-t border-white/10 pt-6">
             <AddToCartButton
               variant={selectedVariant}
               availableForSale={
@@ -76,9 +79,16 @@ export function ProductDetails({
               }
               productTitle={product.title}
             />
+            {process.env.NEXT_PUBLIC_SHOP_ENABLED === "true" && (
+              <p className="font-sans text-xs leading-relaxed text-white/50">
+                <Lock className="mr-1.5 inline h-3.5 w-3.5 -translate-y-px" aria-hidden />
+                Secure checkout through Shopify. Questions? Email{" "}
+                <a href="mailto:info@longhornsimracing.org" className="font-bold text-white/70 hover:text-lsr-orange">info@longhornsimracing.org</a>
+              </p>
+            )}
           </div>
 
-          <div className="prose prose-invert prose-sm text-white/60 font-sans leading-relaxed">
+          <div className="prose prose-invert prose-sm max-w-none font-sans leading-relaxed prose-p:text-white/70 prose-li:text-white/70 prose-li:marker:text-lsr-orange prose-strong:text-white prose-headings:font-display prose-headings:italic prose-headings:uppercase">
             {cleanedDescriptionHtml ? (
               <div
                 dangerouslySetInnerHTML={{ __html: cleanedDescriptionHtml }}
@@ -89,11 +99,12 @@ export function ProductDetails({
           </div>
 
           {showOnDemandNote && (
-            <div className="lg:hidden mt-8 pt-8 border-t border-white/10 flex gap-4">
-               <PackageOpen className="w-5 h-5 text-lsr-orange shrink-0 mt-0.5" />
+            <div className="relative flex gap-4 border border-white/10 bg-white/[0.02] p-5 lg:hidden">
+               <div className="absolute top-0 left-0 h-1 w-16 bg-lsr-orange" />
+               <PackageOpen className="mt-0.5 h-5 w-5 shrink-0 text-lsr-orange" aria-hidden />
                <div className="space-y-2">
-                   <h4 className="font-display font-black uppercase text-xs tracking-widest text-white/80">Made to Order</h4>
-                   <p className="text-[11px] text-white/50 font-sans leading-relaxed">
+                   <p className="font-sans font-bold text-[11px] uppercase tracking-[0.2em] text-white">Made to order</p>
+                   <p className="font-sans text-sm leading-relaxed text-white/60">
                        {ON_DEMAND_TEXT}
                    </p>
                </div>

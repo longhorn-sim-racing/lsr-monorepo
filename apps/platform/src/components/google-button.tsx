@@ -4,6 +4,7 @@
 import { Button } from "@/components/ui/button"
 import { createSupabaseBrowser } from "@/lib/supabase-browser"
 import { siGoogle } from "simple-icons/icons" // tree-shaken import
+import { getSiteUrl } from "@/lib/site-url"
 
 function GoogleIcon({ className }: { className?: string }) {
   return (
@@ -24,8 +25,7 @@ function GoogleIcon({ className }: { className?: string }) {
 export function GoogleButton({ next }: { next?: string }) {
   const handle = async () => {
     const supabase = createSupabaseBrowser();
-    const origin = process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin;
-    const redirectTo = `${origin.replace(/\/$/, '')}/auth/callback${next ? `?next=${encodeURIComponent(next)}` : ''}`;
+    const redirectTo = `${getSiteUrl()}/auth/callback${next ? `?next=${encodeURIComponent(next)}` : ''}`;
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo },
@@ -33,7 +33,12 @@ export function GoogleButton({ next }: { next?: string }) {
   };
 
   return (
-    <Button onClick={handle} className="w-full" variant="outline">
+    <Button
+      type="button"
+      onClick={handle}
+      variant="outline"
+      className="h-11 w-full rounded-none border-white/15 bg-white/[0.04] font-sans text-sm font-bold text-white hover:border-white/40 hover:bg-white/10 hover:text-white"
+    >
       <GoogleIcon className="mr-2 h-4 w-4" />
       Continue with Google
     </Button>

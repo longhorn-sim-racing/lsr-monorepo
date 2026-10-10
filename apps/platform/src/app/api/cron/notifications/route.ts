@@ -105,8 +105,7 @@ async function scheduleEventReminders(): Promise<number> {
     for (const registration of event.registrations) {
       const user = registration.user;
 
-      // Check if user wants event reminders
-      if (!user.marketingOptIn) continue;
+      // Check if user wants event reminders (their own setting; the marketing opt-in doesn't apply)
       if (user.notificationPrefs && !user.notificationPrefs.emailEventReminder) continue;
 
       // Check if reminder already exists for this user/event combo

@@ -44,17 +44,17 @@ export function FilterableProductGrid({ products }: { products: Product[] }) {
       <ProductFilters products={products} onFilter={setFilteredProducts} />
 
       {filteredProducts.length === 0 ? (
-        <div className="text-center py-20">
-          <p className="text-white/60 font-sans text-lg">
-            No products found matching your search.
-          </p>
+        <div className="relative border border-white/10 bg-white/[0.02] px-6 py-14 text-center">
+          <div className="absolute top-0 left-0 h-1 w-16 bg-lsr-orange" />
+          <p className="font-display font-black italic text-2xl uppercase text-white">Nothing matches that</p>
+          <p className="mt-2 font-sans text-sm text-white/60">Try another search, or clear the filters to see everything.</p>
         </div>
       ) : (
         <motion.div
           variants={container}
           initial="hidden"
           animate="show"
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6"
         >
           <AnimatePresence mode="popLayout">
             {filteredProducts.map((product) => (
@@ -63,6 +63,7 @@ export function FilterableProductGrid({ products }: { products: Product[] }) {
                 variants={item}
                 layout
                 exit="exit"
+                className="h-full"
               >
                 <ProductCard product={product} />
               </motion.div>

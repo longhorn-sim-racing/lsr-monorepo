@@ -1,10 +1,22 @@
 "use client"
-export default function Error({ error, reset }: { error: Error; reset: () => void }) {
+
+import { RouteError } from "@/components/route-error"
+
+export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
-    <main className="mx-auto max-w-6xl p-8">
-      <h1 className="text-2xl font-bold">Something went wrong</h1>
-      <p className="text-muted-foreground mt-2">{error.message}</p>
-      <button className="mt-4 rounded-md border px-3 py-2" onClick={() => reset()}>Try again</button>
-    </main>
+    <RouteError
+      error={error}
+      reset={reset}
+      code="500"
+      kicker="Something went wrong"
+      title={
+        <>
+          Red <span className="text-lsr-orange">flag</span>
+        </>
+      }
+      back={{ href: "/", label: "Back to the homepage" }}
+    >
+      <p>Something broke on our side while loading this page. Try again in a moment.</p>
+    </RouteError>
   )
 }

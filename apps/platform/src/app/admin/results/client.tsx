@@ -42,6 +42,7 @@ import {
 import { uploadResult } from "@/app/admin/results/actions";
 import { type RawResultUpload, type User, type Event } from "@prisma/client";
 import { cn } from "@/lib/utils";
+import { unexpectedError } from "@/lib/action-result";
 
 type ResultWithUser = RawResultUpload & {
   uploadedBy: User;
@@ -80,13 +81,16 @@ export function ResultsAdminClient({
     formData.append("file", values.file);
 
     try {
-      const newResult = await uploadResult(formData);
-      if (newResult) {
-        setResults((prev) => [{ ...newResult, event: null }, ...prev]);
+      const result = await uploadResult(formData);
+      if (!result.ok) {
+        setError(result.error);
+      } else {
+        setResults((prev) => [{ ...result.data, event: null }, ...prev]);
         setIsUploadOpen(false);
       }
     } catch (error) {
-      setError(error instanceof Error ? error.message : "An unknown error occurred");
+      console.error(error);
+      setError(unexpectedError(error, "Couldn't upload the file"));
     } finally {
       setIsUploading(false);
       form.reset();
@@ -313,7 +317,7 @@ export function ResultsAdminClient({
                     {/* Uploaded By */}
                     <div className="w-40 shrink-0 text-xs text-white/60 truncate flex items-center gap-2">
                         {result.uploadedBy.avatarUrl && (
-                             // eslint-disable-next-line @next/next/no-img-element
+                             // eslint-disable-next-line @next/next/no-img-element -- avatar URLs can come from any host, which next/image would reject
                              <img src={result.uploadedBy.avatarUrl} alt="" className="w-4 h-4 rounded-full" />
                          )}
                          <span>{result.uploadedBy.displayName || result.uploadedBy.email}</span>

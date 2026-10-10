@@ -7,10 +7,16 @@ import {
   sendBulkNotification,
   cancelNotification,
   retryNotification,
+  countEmailRecipients,
+  getEmailUsage,
+  TRANSACTIONAL_HEADROOM,
 } from "@/server/services/notification.service";
 import { setSystemSetting, getSystemSetting, SETTINGS } from "@/lib/email/settings";
 import { NotificationChannel } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
+import type { ActionResult } from "@/lib/action-result";
+import { fromZonedTime } from "date-fns-tz";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
 
 export async function getNotificationStats() {
   await requireOfficer();
@@ -111,7 +117,12 @@ export async function retryFailedNotification(notificationId: string) {
   revalidatePath("/admin/notifications");
 }
 
-export async function sendCustomNotification(formData: FormData) {
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** What a send did, for the composer's message */
+export type SendSummary = { scheduled: boolean; recipients: number; emailsSent: number; emailsFailed: number };
+
+export async function sendCustomNotification(formData: FormData): Promise<ActionResult<SendSummary>> {
   const user = await requireOfficer();
 
   const recipientType = formData.get("recipientType") as string;
@@ -133,79 +144,106 @@ export async function sendCustomNotification(formData: FormData) {
   if (sendEmail) channels.push("EMAIL");
 
   if (channels.length === 0) {
-    throw new Error("At least one channel must be selected");
+    return { ok: false, error: "Pick at least one channel: in-app, email or both." };
   }
 
-  if (!title || !body) {
-    throw new Error("Title and body are required");
+  if (!title?.trim() || !body?.trim()) {
+    return { ok: false, error: "Write a title and a message." };
   }
 
-  const scheduledDate = scheduledFor ? new Date(scheduledFor) : undefined;
+  // datetime-local has no zone; officers schedule in Central time, and the server runs in UTC
+  const scheduledDate = scheduledFor ? fromZonedTime(scheduledFor, DEFAULT_TIMEZONE) : undefined;
+  if (scheduledDate && Number.isNaN(scheduledDate.getTime())) {
+    return { ok: false, error: "Pick a valid date and time to schedule it." };
+  }
 
-  if ((recipientType === "single" || recipientType === "multiple") && userIdsJson) {
-    const userIds: string[] = JSON.parse(userIdsJson);
-
-    if (userIds.length === 0) {
-      throw new Error("At least one recipient is required");
+  let recipientIds: string[];
+  if (recipientType === "single" || recipientType === "multiple") {
+    recipientIds = userIdsJson ? JSON.parse(userIdsJson) : [];
+    if (recipientIds.length === 0) {
+      return { ok: false, error: "Search for and add at least one recipient." };
     }
-
-    const targetUsers = await prisma.user.findMany({
-      where: { id: { in: userIds } },
-      select: { id: true, displayName: true },
-    });
-
-    await sendBulkNotification({
-      userIds,
-      type: "CUSTOM",
-      title,
-      body,
-      actionUrl,
-      channels,
-      scheduledFor: scheduledDate,
-      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-    });
-
-    const userNames = targetUsers.map((u) => u.displayName).join(", ");
-    await createAuditLog({
-      actorUserId: user.id,
-      actionType: "CREATE",
-      entityType: "NOTIFICATION",
-      entityId: userIds.length === 1 ? "custom" : "multi",
-      targetUserId: userIds.length === 1 ? userIds[0] : undefined,
-      summary: userIds.length === 1
-        ? `Sent custom notification "${title}" to ${userNames}`
-        : `Sent custom notification "${title}" to ${userIds.length} users: ${userNames}`,
-      after: { title, body, channels, scheduledFor: scheduledDate?.toISOString() },
-      metadata: { recipientType, recipientCount: userIds.length, userIds, actionUrl },
-    });
   } else if (recipientType === "all") {
-    const users = await prisma.user.findMany({
-      where: { status: "active" },
-      select: { id: true },
-    });
-    await sendBulkNotification({
-      userIds: users.map((u) => u.id),
-      type: "CUSTOM",
-      title,
-      body,
-      actionUrl,
-      channels,
-      scheduledFor: scheduledDate,
-      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-    });
+    const active = await prisma.user.findMany({ where: { status: "active" }, select: { id: true } });
+    recipientIds = active.map((u) => u.id);
+  } else {
+    return { ok: false, error: "Choose who to send it to." };
+  }
 
+  // Resend refuses email past its daily limit, so check an immediate email send first. Scheduled
+  // sends aren't checked: the day they go out isn't known yet.
+  if (sendEmail && !scheduledDate && formData.get("sendAnyway") !== "on") {
+    const [{ sentToday, dailyLimit }, emailCount] = await Promise.all([
+      getEmailUsage(),
+      countEmailRecipients(recipientIds, "CUSTOM"),
+    ]);
+    if (dailyLimit !== null) {
+      const left = Math.max(0, dailyLimit - sentToday - TRANSACTIONAL_HEADROOM);
+      const perDay = dailyLimit - TRANSACTIONAL_HEADROOM;
+      if (emailCount > perDay) {
+        return {
+          ok: false,
+          error: `This would send ${plural(emailCount, "email")}, more than the ${perDay} a day an announcement can use (the plan's ${dailyLimit}, minus ${TRANSACTIONAL_HEADROOM} kept for confirmations and receipts). Send it in-app only, or split the recipients across days.`,
+        };
+      }
+      if (emailCount > left) {
+        return {
+          ok: false,
+          error: `This would send ${plural(emailCount, "email")}, but only ${left} of today's ${dailyLimit} are left (${sentToday} sent, ${TRANSACTIONAL_HEADROOM} kept for confirmations and receipts). The limit resets at 7 pm Central (6 pm in winter). Send fewer, send it after the reset, or tick "Send anyway".`,
+        };
+      }
+    }
+  }
+
+  // Everything that can fail runs before the send, so an error never reports a sent message as unsent
+  const userNames =
+    recipientType === "all"
+      ? ""
+      : (await prisma.user.findMany({ where: { id: { in: recipientIds } }, select: { displayName: true } }))
+          .map((u) => u.displayName)
+          .join(", ");
+
+  const sent = await sendBulkNotification({
+    userIds: recipientIds,
+    type: "CUSTOM",
+    title,
+    body,
+    actionUrl,
+    channels,
+    scheduledFor: scheduledDate,
+    metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+  });
+
+  if (recipientType === "all") {
     await createAuditLog({
       actorUserId: user.id,
       actionType: "CREATE",
       entityType: "NOTIFICATION",
       entityId: "bulk",
-      summary: `Sent bulk notification "${title}" to ${users.length} active members`,
+      summary: `Sent bulk notification "${title}" to ${recipientIds.length} active members`,
       after: { title, body, channels, scheduledFor: scheduledDate?.toISOString() },
-      metadata: { recipientType: "all", recipientCount: users.length, actionUrl },
+      metadata: { recipientType: "all", recipientCount: recipientIds.length, emails: sent, actionUrl },
+    });
+  } else {
+    await createAuditLog({
+      actorUserId: user.id,
+      actionType: "CREATE",
+      entityType: "NOTIFICATION",
+      entityId: recipientIds.length === 1 ? "custom" : "multi",
+      targetUserId: recipientIds.length === 1 ? recipientIds[0] : undefined,
+      summary: recipientIds.length === 1
+        ? `Sent custom notification "${title}" to ${userNames}`
+        : `Sent custom notification "${title}" to ${recipientIds.length} users: ${userNames}`,
+      after: { title, body, channels, scheduledFor: scheduledDate?.toISOString() },
+      metadata: { recipientType, recipientCount: recipientIds.length, emails: sent, userIds: recipientIds, actionUrl },
     });
   }
 
   revalidatePath("/admin/notifications");
+  return {
+    ok: true,
+    data: { scheduled: !!scheduledDate, recipients: recipientIds.length, emailsSent: sent.emailsSent, emailsFailed: sent.emailsFailed },
+  };
 }
 
 export async function getEmailSettings() {

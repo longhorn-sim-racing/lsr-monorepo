@@ -15,6 +15,7 @@ import {
 import { Send, User, Users, Search, Loader2, X, UserPlus } from "lucide-react";
 import { sendCustomNotification, searchUsers } from "../actions";
 import { toast } from "sonner";
+import { unexpectedError } from "@/lib/action-result";
 
 type UserResult = {
   id: string;
@@ -23,7 +24,14 @@ type UserResult = {
   handle: string;
 };
 
-export function NotificationComposer() {
+export function NotificationComposer({
+  emailUsage,
+  keptForReceipts,
+}: {
+  emailUsage: { sentToday: number; dailyLimit: number | null };
+  keptForReceipts: number;
+}) {
+  const [scheduled, setScheduled] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [recipientType, setRecipientType] = useState<"single" | "multiple" | "all">("single");
   const [selectedUsers, setSelectedUsers] = useState<UserResult[]>([]);
@@ -64,7 +72,10 @@ export function NotificationComposer() {
     setSelectedUsers((prev) => prev.filter((u) => u.id !== userId));
   };
 
-  const handleSubmit = async (formData: FormData) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const formData = new FormData(form);
     formData.set("recipientType", recipientType);
     if (selectedUsers.length > 0) {
       formData.set("userIds", JSON.stringify(selectedUsers.map((u) => u.id)));
@@ -72,20 +83,30 @@ export function NotificationComposer() {
 
     startTransition(async () => {
       try {
-        await sendCustomNotification(formData);
-        const count = recipientType === "all" ? "all members" : `${selectedUsers.length} user(s)`;
-        toast.success(`Notification sent to ${count}`);
-        // Reset form
+        const result = await sendCustomNotification(formData);
+        if (!result.ok) {
+          toast.error(result.error);
+          return;
+        }
+        const { scheduled: wasScheduled, recipients, emailsSent, emailsFailed } = result.data;
+        const who = recipientType === "all" ? "all members" : `${recipients} ${recipients === 1 ? "member" : "members"}`;
+        if (wasScheduled) toast.success(`Scheduled for ${who}`);
+        else if (emailsFailed > 0) {
+          toast.warning(`Sent to ${who}, but ${emailsFailed} of ${emailsSent + emailsFailed} emails failed. Check Activity before resending.`);
+        } else toast.success(`Sent to ${who}${emailsSent ? ` (${emailsSent} ${emailsSent === 1 ? "email" : "emails"})` : ""}`);
+        form.reset();
+        setScheduled(false);
         setSelectedUsers([]);
         setSearchQuery("");
-      } catch {
-        toast.error("Failed to send notification");
+      } catch (error) {
+        console.error(error);
+        toast.error(unexpectedError(error, "Couldn't send the notification"));
       }
     });
   };
 
   return (
-    <form action={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-6">
       <div className="border border-white/10 bg-white/[0.02] p-6 space-y-6">
         {/* Recipient Selection */}
         <div className="space-y-4">
@@ -250,6 +271,32 @@ export function NotificationComposer() {
               </Label>
             </div>
           </div>
+          {sendEmail && (
+            <div className="space-y-2 text-xs text-white/50">
+              {emailUsage.dailyLimit === null ? (
+                <p>{emailUsage.sentToday} emails sent today. This email plan has no daily limit.</p>
+              ) : (
+                <p>
+                  {emailUsage.sentToday} of {emailUsage.dailyLimit} daily emails sent today; the limit resets at 7 pm Central (6 pm
+                  in winter). An immediate send that would go over is stopped first, keeping {keptForReceipts} for confirmations and receipts.
+                  Scheduled sends aren&apos;t checked.
+                </p>
+              )}
+              {emailUsage.dailyLimit !== null && !scheduled && (
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id="sendAnyway"
+                    name="sendAnyway"
+                    className="mt-0.5 rounded-none border-white/30 data-[state=checked]:bg-lsr-orange data-[state=checked]:border-lsr-orange"
+                  />
+                  <Label htmlFor="sendAnyway" className="cursor-pointer text-xs leading-relaxed text-white/70">
+                    Send anyway, even if it goes over. Resend refuses emails past the limit, so some members may not get it, and
+                    confirmations and receipts won&apos;t go out until the reset.
+                  </Label>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Title */}
@@ -320,11 +367,12 @@ export function NotificationComposer() {
             htmlFor="scheduledFor"
             className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60"
           >
-            Schedule For (Optional)
+            Schedule For, Central Time (Optional)
           </Label>
           <Input
             id="scheduledFor"
             name="scheduledFor"
+            onChange={(e) => setScheduled(e.target.value !== "")}
             type="datetime-local"
             className="rounded-none bg-white/5 border-white/10 text-white"
           />

@@ -94,7 +94,7 @@ export default async function ProductPage({
   ) || product.variants[0];
 
   return (
-    <div className="px-6 md:px-8 pb-10 md:pb-14 pt-10">
+    <div className="px-6 md:px-8 pb-16 md:pb-24 pt-8 md:pt-12">
       <div className="max-w-6xl mx-auto">
         <Breadcrumbs
           items={[
@@ -106,17 +106,18 @@ export default async function ProductPage({
           ]}
         />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20">
+        <div className="grid grid-cols-1 gap-10 lg:grid-cols-2 lg:gap-16">
             {/* Gallery */}
             <div className="space-y-6">
                 <ProductGallery images={product.images} />
                 
                 {hasOnDemandBoilerplate(product.descriptionHtml) && (
-                    <div className="hidden lg:flex gap-4 p-5 border border-white/10 bg-white/[0.02]">
-                        <PackageOpen className="w-5 h-5 text-lsr-orange shrink-0 mt-0.5" />
+                    <div className="relative hidden gap-4 border border-white/10 bg-white/[0.02] p-6 lg:flex">
+                        <div className="absolute top-0 left-0 h-1 w-16 bg-lsr-orange" />
+                        <PackageOpen className="mt-0.5 h-5 w-5 shrink-0 text-lsr-orange" aria-hidden />
                         <div className="space-y-2">
-                            <h4 className="font-display font-black uppercase text-xs tracking-widest text-white/80">Made to Order</h4>
-                            <p className="text-[11px] text-white/50 font-sans leading-relaxed">
+                            <p className="font-sans font-bold text-[11px] uppercase tracking-[0.2em] text-white">Made to order</p>
+                            <p className="font-sans text-sm leading-relaxed text-white/60">
                                 {ON_DEMAND_TEXT}
                             </p>
                         </div>

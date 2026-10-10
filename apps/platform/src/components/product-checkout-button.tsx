@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { formatCents } from "@/lib/money";
 
 type CheckoutProduct = "ANNUAL_DUES" | "LEAGUE_FEE";
 
@@ -62,7 +63,7 @@ export function ProductCheckoutButton({
       disabled={loading}
       className="h-auto min-h-12 max-w-full whitespace-normal rounded-none bg-lsr-orange px-6 py-3 text-center font-sans text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-white hover:text-lsr-charcoal"
     >
-      {loading ? "Starting checkout..." : `${label} — $${(priceCents / 100).toFixed(2)}`}
+      {loading ? "Starting checkout..." : `${label} — ${formatCents(priceCents)}`}
     </Button>
   );
 }

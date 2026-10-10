@@ -1,7 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { StatusIndicator } from "@/lib/status-indicators";
 
-/** Compact inline icons with tooltips — for drivers table and user menu. */
+/** Compact inline icons with tooltips — for the drivers page and user menu. */
 export function StatusIcons({
   indicators,
   size = 12,

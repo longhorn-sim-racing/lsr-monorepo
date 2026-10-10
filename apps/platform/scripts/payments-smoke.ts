@@ -34,6 +34,8 @@ for (const file of [".env.local", ".env"]) {
     if (process.env[key] === undefined) process.env[key] = value;
   }
 }
+// Throwaway users have fake addresses, and receipts email whatever their settings: keep email off.
+delete process.env.RESEND_API_KEY;
 if (process.env.STRIPE_TEST_SECRET_KEY) {
   process.env.STRIPE_SECRET_KEY = process.env.STRIPE_TEST_SECRET_KEY;
 }
@@ -156,7 +158,7 @@ async function main() {
       email: `payments-smoke-${ts}@example.invalid`,
       handle: `payments-smoke-${ts}`,
       displayName: "Payments Smoke",
-      marketingOptIn: false, // no email attempts; in-app notifications only
+      marketingOptIn: false, // receipts still get an email row (sending is off, see above)
     },
   });
   console.log(`user ${user.id} (${user.handle})`);
@@ -206,8 +208,8 @@ async function main() {
 
     const notif1 = await prisma.notification.findMany({ where: { userId: user.id, type: "DUES_CONFIRMED" } });
     check(
-      "Notification DUES_CONFIRMED in-app only (opted out of email)",
-      notif1.length === 1 && notif1[0].channel === "IN_APP" && notif1[0].actionUrl === "/account",
+      "Notification DUES_CONFIRMED in-app + email receipt (despite marketing opt-out)",
+      notif1.map((n) => n.channel).sort().join(",") === "EMAIL,IN_APP" && notif1.every((n) => n.actionUrl === "/account"),
       notif1.map((n) => `${n.channel}:${n.status}`).join(",")
     );
 

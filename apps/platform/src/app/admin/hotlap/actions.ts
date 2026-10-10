@@ -9,6 +9,7 @@ import {
   type HotlapSettings,
 } from "@/lib/email/settings";
 import { createAuditLog } from "@/server/audit/log";
+import type { ActionResult } from "@/lib/action-result";
 
 export async function getHotlapSettings(): Promise<HotlapSettings | null> {
   await requireOfficer();
@@ -16,7 +17,7 @@ export async function getHotlapSettings(): Promise<HotlapSettings | null> {
   return data ?? null;
 }
 
-export async function updateHotlapSettings(formData: FormData) {
+export async function updateHotlapSettings(formData: FormData): Promise<ActionResult> {
   const user = await requireOfficer();
 
   const videoUrl = (formData.get("videoUrl") as string)?.trim();
@@ -26,7 +27,7 @@ export async function updateHotlapSettings(formData: FormData) {
   const lapTime = (formData.get("lapTime") as string)?.trim();
 
   if (!videoUrl || !driverName || !car || !track || !lapTime) {
-    throw new Error("All fields are required");
+    return { ok: false, error: "Fill in every field: video link, driver, car, track and lap time." };
   }
 
   const previous = await getSystemSetting<HotlapSettings>(SETTINGS.HOTLAP);
@@ -46,4 +47,5 @@ export async function updateHotlapSettings(formData: FormData) {
 
   revalidatePath("/");
   revalidatePath("/admin/hotlap");
+  return { ok: true };
 }

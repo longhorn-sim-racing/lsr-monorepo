@@ -3,6 +3,7 @@ import { requireOfficer } from "@/server/auth/guards";
 import { prisma } from "@/server/db";
 import { getEntrantRows } from "@/server/queries/league-entrants";
 import { equipmentLabel, experienceLabel } from "@/schemas/league-application.schema";
+import { centsToDollarInput } from "@/lib/money";
 
 const csvCell = (value: unknown) => {
   let s = value === null || value === undefined ? "" : String(value);
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
       r.application?.equipment.map(equipmentLabel).join("; "),
       r.application ? (r.application.canCommit ? "yes" : "no") : "",
       r.status,
-      r.paidCents !== null ? (r.paidCents / 100).toFixed(2) : "",
+      centsToDollarInput(r.paidCents),
       r.paidAt,
       r.returningRate ? "yes" : "",
       r.application?.createdAt,

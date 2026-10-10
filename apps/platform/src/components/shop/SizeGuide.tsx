@@ -8,7 +8,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Ruler } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 
 interface SizeChartData {
   headers: string[];
@@ -130,7 +130,11 @@ function parseSizeGuide(html?: string): SizeChartData | null {
 }
 
 export function SizeGuide({ descriptionHtml }: SizeGuideProps) {
-  const chartData = useMemo(() => parseSizeGuide(descriptionHtml), [descriptionHtml]);
+  // Parsed after mount: it needs DOMParser, and the server and the first client render must match
+  const [chartData, setChartData] = useState<SizeChartData | null>(null);
+  useEffect(() => {
+    setChartData(parseSizeGuide(descriptionHtml));
+  }, [descriptionHtml]);
 
   if (!chartData) {
     return null;
@@ -139,8 +143,8 @@ export function SizeGuide({ descriptionHtml }: SizeGuideProps) {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <button className="flex items-center gap-2 text-sm text-white/60 hover:text-lsr-orange transition-colors underline underline-offset-4">
-          <Ruler className="h-4 w-4" />
+        <button type="button" className="inline-flex h-10 items-center gap-2 font-sans text-[11px] font-bold uppercase tracking-[0.2em] text-white/60 transition-colors hover:text-lsr-orange">
+          <Ruler className="h-4 w-4" aria-hidden />
           Size Guide
         </button>
       </DialogTrigger>

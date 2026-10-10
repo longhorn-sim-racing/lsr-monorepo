@@ -6,6 +6,7 @@ import { prisma } from "@/server/db";
 import { requireUser } from "@/server/auth/guards";
 import { revalidatePath } from "next/cache";
 import { RACING_NUMBER_COLOR, RACING_NUMBER_FONTS } from "@/lib/racing-number";
+import type { ActionResult } from "@/lib/action-result";
 
 const schema = z.object({
   racingNumber: z.number().int().min(0).max(999),
@@ -20,12 +21,12 @@ const schema = z.object({
   racingNumberBorder: z.boolean().optional().default(false),
 });
 
-export async function setRacingNumberAction(input: z.infer<typeof schema>) {
+export async function setRacingNumberAction(input: z.infer<typeof schema>): Promise<ActionResult> {
   const user = await requireUser();
 
   const parsed = schema.safeParse(input);
   if (!parsed.success) {
-    throw new Error("Invalid racing number data.");
+    return { ok: false, error: "Pick a number from 0 to 999 and a style from the list." };
   }
 
   // Check uniqueness
@@ -35,7 +36,7 @@ export async function setRacingNumberAction(input: z.infer<typeof schema>) {
   });
 
   if (existing && existing.id !== user.id) {
-    throw new Error("This racing number is already reserved by another driver.");
+    return { ok: false, error: "That number is already taken by another driver. Pick a different one." };
   }
 
   try {
@@ -52,11 +53,12 @@ export async function setRacingNumberAction(input: z.infer<typeof schema>) {
   } catch (error) {
     // Unique constraint: someone claimed the number between the check above and this write.
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      throw new Error("This racing number is already reserved by another driver.");
+      return { ok: false, error: "That number is already taken by another driver. Pick a different one." };
     }
     throw error;
   }
 
   // Revalidate to hide the prompt
   revalidatePath("/", "layout");
+  return { ok: true };
 }
