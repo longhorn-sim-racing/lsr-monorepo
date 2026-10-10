@@ -63,19 +63,24 @@ export function RacingNumberDialog({
         setLoading(false);
         return;
       }
-      await setRacingNumberAction({
+      const result = await setRacingNumberAction({
         racingNumber: parsed,
         racingNumberColor: color,
         racingNumberFont: font,
         racingNumberItalic: isItalic,
         racingNumberBorder: hasBorder,
       });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
       toast.success(isUpdateMode ? "Racing number updated successfully!" : "Racing number reserved successfully!");
       setOpen(false);
       if (onSuccess) onSuccess();
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error && err.message ? err.message : "Failed to save number. It might be taken.");
+      console.error(err);
+      toast.error("Couldn't save your number. Check your connection and try again.");
     } finally {
       setLoading(false);
     }

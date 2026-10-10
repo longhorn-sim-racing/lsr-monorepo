@@ -9,6 +9,7 @@ import { z } from "zod";
 import { fromZonedTime } from "date-fns-tz";
 import { createAuditLog } from "@/server/audit/log";
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
+import type { ActionResult } from "@/lib/action-result";
 
 // Season dates are Central-time days; the end date runs to the end of that day so a
 // season (and league entry into it) doesn't close the morning of its last race.
@@ -123,14 +124,14 @@ export async function deleteSeason(id: string) {
     revalidateSeriesPages();
 }
 
-export async function recomputeStandings(seasonId: string) {
+export async function recomputeStandings(seasonId: string): Promise<ActionResult> {
     const user = await requireOfficer();
 
     const season = await prisma.season.findUnique({
         where: { id: seasonId },
     });
-    if (!season) throw new Error("Season not found");
-    if (!season.seriesId) throw new Error("Season must have a Series assigned to recompute");
+    if (!season) return { ok: false, error: "That season no longer exists. Refresh the page." };
+    if (!season.seriesId) return { ok: false, error: "Assign this season to a series before recomputing its standings." };
 
     // 1. Fetch Events in Season Range with Results (include QUALIFYING for positions gained)
     const events = await prisma.event.findMany({
@@ -317,4 +318,5 @@ export async function recomputeStandings(seasonId: string) {
     revalidatePath(`/admin/seasons`);
     revalidateDriverList();
     revalidateSeriesPages();
+    return { ok: true };
 }

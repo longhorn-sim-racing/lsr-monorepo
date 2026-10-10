@@ -5,21 +5,22 @@ import { prisma } from "@/server/db";
 import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/server/audit/log";
 import { revalidateAfterResultsIngestion } from "@/server/cache/revalidate-public";
+import type { ActionResult } from "@/lib/action-result";
 
 export async function uploadResult(formData: FormData) {
   const user = await requireOfficer();
 
-  const file = formData.get("file") as File;
-  if (!file) {
-    throw new Error("No file provided");
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false as const, error: "Choose a results file to upload." };
   }
 
   const fileText = await file.text();
   let rawJson;
   try {
     rawJson = JSON.parse(fileText);
-  } catch (error) {
-    throw new Error("Invalid JSON file");
+  } catch {
+    return { ok: false as const, error: `${file.name} isn't valid JSON. Upload the results .json file the server saved.` };
   }
 
   const fileBuffer = await file.arrayBuffer();
@@ -51,7 +52,7 @@ export async function uploadResult(formData: FormData) {
 
   revalidatePath("/admin/results");
 
-  return newResult;
+  return { ok: true as const, data: newResult };
 }
 
 export async function previewParseResult(uploadId: string) {
@@ -62,7 +63,7 @@ export async function previewParseResult(uploadId: string) {
   });
 
   if (!upload) {
-    throw new Error("Upload not found");
+    return { ok: false as const, error: "That upload no longer exists. Go back to the results list." };
   }
 
   const { rawJson } = upload;
@@ -72,7 +73,7 @@ export async function previewParseResult(uploadId: string) {
       where: { id: uploadId },
       data: { status: "FAILED", errorMessage: "Invalid JSON structure" },
     });
-    throw new Error("Invalid JSON structure");
+    return { ok: false as const, error: "This file isn't a results file: it has no session data." };
   }
 
   const { Result: results, Laps: laps } = rawJson as {
@@ -163,7 +164,7 @@ export async function previewParseResult(uploadId: string) {
   revalidatePath(`/admin/results/${uploadId}`);
   revalidatePath(`/admin/results`);
 
-  return updatedUpload;
+  return { ok: true as const, data: updatedUpload };
 }
 
 export async function bindEventToUpload(
@@ -171,11 +172,11 @@ export async function bindEventToUpload(
   eventId: string,
   pointsSystem: string | null = null,
   sessionLabel: string | null = null,
-) {
+): Promise<ActionResult> {
   const user = await requireOfficer();
 
   const event = await prisma.event.findUnique({ where: { id: eventId } });
-  if (!event) throw new Error("Event not found");
+  if (!event) return { ok: false, error: "That event no longer exists. Refresh and pick another." };
 
   // Practice and qualifying sessions never award points
   const effectivePoints = (sessionLabel === "PRACTICE" || sessionLabel === "QUALIFYING")
@@ -197,9 +198,10 @@ export async function bindEventToUpload(
   });
 
   revalidatePath(`/admin/results/${uploadId}`);
+  return { ok: true };
 }
 
-export async function deleteUpload(uploadId: string, force: boolean = false) {
+export async function deleteUpload(uploadId: string, force: boolean = false): Promise<ActionResult> {
   const user = await requireOfficer();
 
   const upload = await prisma.rawResultUpload.findUnique({
@@ -207,10 +209,10 @@ export async function deleteUpload(uploadId: string, force: boolean = false) {
     include: { ingestedSessions: true },
   });
 
-  if (!upload) throw new Error("Upload not found");
+  if (!upload) return { ok: false, error: "That upload was already deleted." };
 
   if (upload.ingestedSessions.length > 0 && !force) {
-    throw new Error("Cannot delete ingested upload without force option");
+    return { ok: false, error: "These results are already ingested. Use the force delete to remove them and their race records." };
   }
 
   await prisma.rawResultUpload.delete({
@@ -226,6 +228,7 @@ export async function deleteUpload(uploadId: string, force: boolean = false) {
   });
 
   revalidatePath("/admin/results");
+  return { ok: true };
 }
 
 function calculatePoints(position: number, system: string | null): number {
@@ -246,22 +249,22 @@ function calculatePoints(position: number, system: string | null): number {
     return 0;
 }
 
-export async function ingestUpload(uploadId: string) {
+export async function ingestUpload(uploadId: string): Promise<ActionResult> {
   const user = await requireOfficer();
 
   const upload = await prisma.rawResultUpload.findUnique({
     where: { id: uploadId },
   });
 
-  if (!upload) throw new Error("Upload not found");
-  if (!upload.eventId) throw new Error("No event assigned to upload");
-  if (upload.status === "INGESTED") throw new Error("Already ingested");
+  if (!upload) return { ok: false, error: "That upload no longer exists. Go back to the results list." };
+  if (!upload.eventId) return { ok: false, error: "Link this upload to an event before ingesting it." };
+  if (upload.status === "INGESTED") return { ok: false, error: "These results are already ingested." };
 
   const data = upload.rawJson as any;
   const pointsSystem = upload.pointsSystem || "F1"; // Default if not set, though we should set it.
 
   // Basic validation
-  if (!data.Result) throw new Error("Invalid JSON data: Missing Result array");
+  if (!data.Result) return { ok: false, error: "This file has no Result list, so there's nothing to ingest." };
 
   await prisma.$transaction(async (tx) => {
     // 1. Create RaceSession
@@ -552,4 +555,5 @@ export async function ingestUpload(uploadId: string) {
   revalidateAfterResultsIngestion({
     eventSlug: eventMeta?.slug,
   });
+  return { ok: true };
 }

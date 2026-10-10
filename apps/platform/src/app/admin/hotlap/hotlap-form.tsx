@@ -1,7 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { toast } from "sonner";
 import { updateHotlapSettings } from "./actions";
+import { useFormAction } from "@/components/admin/use-form-action";
 import type { HotlapSettings } from "@/lib/email/settings";
 
 type Props = {
@@ -9,20 +10,10 @@ type Props = {
 };
 
 export default function HotlapForm({ initial }: Props) {
-  const [error, formAction, isPending] = useActionState(
-    async (_prev: string | null, formData: FormData) => {
-      try {
-        await updateHotlapSettings(formData);
-        return null;
-      } catch (e) {
-        return e instanceof Error ? e.message : "Something went wrong";
-      }
-    },
-    null
-  );
+  const { onSubmit, error, pending: isPending } = useFormAction(updateHotlapSettings, () => toast.success("Hotlap saved"));
 
   return (
-    <form action={formAction} className="space-y-6 max-w-xl">
+    <form onSubmit={onSubmit} className="space-y-6 max-w-xl">
       {error && (
         <div className="rounded-md bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">
           {error}

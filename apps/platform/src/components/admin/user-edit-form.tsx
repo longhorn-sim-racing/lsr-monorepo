@@ -84,11 +84,16 @@ export function UserEditForm({ user, currentUser, allRoles, allTiers }: UserEdit
 
         startTransition(async () => {
             try {
-                await updateUser(user.id, payload);
+                const result = await updateUser(user.id, payload);
+                if (!result.ok) {
+                    toast.error(result.error);
+                    return;
+                }
                 toast.success("User updated successfully");
                 router.refresh();
-            } catch (error: any) {
-                toast.error(error.message || "Failed to update user");
+            } catch (error) {
+                console.error(error);
+                toast.error("Couldn't save the user. Check your connection and try again.");
             }
         });
     };

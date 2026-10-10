@@ -80,13 +80,16 @@ export function ResultsAdminClient({
     formData.append("file", values.file);
 
     try {
-      const newResult = await uploadResult(formData);
-      if (newResult) {
-        setResults((prev) => [{ ...newResult, event: null }, ...prev]);
+      const result = await uploadResult(formData);
+      if (!result.ok) {
+        setError(result.error);
+      } else {
+        setResults((prev) => [{ ...result.data, event: null }, ...prev]);
         setIsUploadOpen(false);
       }
     } catch (error) {
-      setError(error instanceof Error ? error.message : "An unknown error occurred");
+      console.error(error);
+      setError("Something went wrong. Check your connection and try again.");
     } finally {
       setIsUploading(false);
       form.reset();

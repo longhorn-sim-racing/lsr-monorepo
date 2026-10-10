@@ -6,6 +6,7 @@ import { createAuditLog } from "@/server/audit/log";
 import { revalidatePath } from "next/cache";
 import { revalidateDriverList } from "@/server/cache/revalidate-public";
 import { syncManualMembershipEntitlement } from "@/server/services/membership.service";
+import type { ActionResult } from "@/lib/action-result";
 
 export type UpdateUserPayload = {
     displayName: string;
@@ -21,7 +22,7 @@ export type UpdateUserPayload = {
     activeMembershipValidTo: Date | null;
 };
 
-export async function updateUser(userId: string, payload: UpdateUserPayload) {
+export async function updateUser(userId: string, payload: UpdateUserPayload): Promise<ActionResult> {
     const currentUser = await requireOfficer();
 
     // 1. Fetch target user to check for Officer protection
@@ -34,7 +35,7 @@ export async function updateUser(userId: string, payload: UpdateUserPayload) {
     });
 
     if (!targetUser) {
-        throw new Error("User not found");
+        return { ok: false, error: "That user no longer exists. Go back to the user list and refresh." };
     }
 
     const isTargetOfficer = targetUser.roles.some((r) => ["admin", "officer"].includes(r.role.key));
@@ -49,13 +50,13 @@ export async function updateUser(userId: string, payload: UpdateUserPayload) {
     if ((isTargetOfficer || isTargetAdmin) && !isCurrentSystemAdmin) {
         // Exception: Officer editing THEMSELVES? (Maybe allow title, but usually not roles)
         // For now, strict: Officers cannot edit other Officers or Admins.
-        throw new Error("Only Administrators can modify Officer/Admin accounts.");
+        return { ok: false, error: "Only admins can edit officer and admin accounts." };
     }
 
     // Also prevent Officer from PROMOTING someone to Officer/Admin
     const isPromotingToOfficer = payload.roleKeys.some(k => ["admin", "officer"].includes(k));
     if (isPromotingToOfficer && !isCurrentSystemAdmin) {
-        throw new Error("Only Administrators can promote users to Officer roles.");
+        return { ok: false, error: "Only admins can give someone the officer or admin role." };
     }
 
     // 2. Validate & Update Basic Info
@@ -63,17 +64,17 @@ export async function updateUser(userId: string, payload: UpdateUserPayload) {
     const trimmedHandle = payload.handle.trim().toLowerCase();
 
     if (!trimmedName) {
-        throw new Error("Display name cannot be empty.");
+        return { ok: false, error: "Enter a display name." };
     }
     if (!trimmedHandle || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trimmedHandle)) {
-        throw new Error("Handle must be lowercase alphanumeric with hyphens (e.g. john-doe).");
+        return { ok: false, error: "The handle can only use lowercase letters, numbers and single hyphens, like john-doe." };
     }
 
     // Check handle uniqueness if changed
     if (trimmedHandle !== targetUser.handle) {
         const handleTaken = await prisma.user.findUnique({ where: { handle: trimmedHandle } });
         if (handleTaken) {
-            throw new Error(`Handle "@${trimmedHandle}" is already taken.`);
+            return { ok: false, error: `@${trimmedHandle} is already taken. Pick a different handle.` };
         }
     }
 
@@ -219,4 +220,5 @@ export async function updateUser(userId: string, payload: UpdateUserPayload) {
         revalidatePath(`/drivers/${targetUser.handle}`);
     }
     revalidateDriverList();
+    return { ok: true };
 }

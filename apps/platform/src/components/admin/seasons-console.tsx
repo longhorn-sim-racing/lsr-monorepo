@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { deleteSeason, recomputeStandings } from "@/app/admin/seasons/actions";
 import { cn } from "@/lib/utils";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { toast } from "sonner";
 
 type SeasonWithSeries = Season & {
   series: EventSeries | null;
@@ -216,7 +217,14 @@ export function SeasonsConsole({ initialSeasons }: SeasonsConsoleProps) {
                     {/* Actions */}
                     <div className="w-32 shrink-0 flex items-center justify-end gap-1">
                         
-                        <form action={recomputeStandings.bind(null, season.id)}>
+                        <form
+                            onSubmit={async (e) => {
+                                e.preventDefault();
+                                const result = await recomputeStandings(season.id);
+                                if (result.ok) toast.success(`Standings recomputed for ${season.name}`);
+                                else toast.error(result.error);
+                            }}
+                        >
                             <ConfirmSubmitButton
                                 size="icon"
                                 variant="ghost"

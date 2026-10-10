@@ -61,10 +61,12 @@ export function ResultDetailClient({
     setIsProcessing(true);
     setError(null);
     try {
-      const updatedResult = await previewParseResult(result.id);
-      setResult(updatedResult as ResultWithRelations);
+      const parsed = await previewParseResult(result.id);
+      if (!parsed.ok) setError(parsed.error);
+      else setResult(parsed.data as ResultWithRelations);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "An unknown error occurred");
+      console.error(error);
+      setError("Something went wrong. Check your connection and try again.");
     } finally {
       setIsProcessing(false);
     }
@@ -76,7 +78,11 @@ export function ResultDetailClient({
       setError(null);
       try {
           const effectivePoints = isNonRace ? "NONE" : selectedPointsSystem;
-          await bindEventToUpload(result.id, selectedEventId, effectivePoints, selectedSessionLabel);
+          const bound = await bindEventToUpload(result.id, selectedEventId, effectivePoints, selectedSessionLabel);
+          if (!bound.ok) {
+              setError(bound.error);
+              return;
+          }
           router.refresh();
           setResult(prev => ({
               ...prev,
@@ -84,8 +90,9 @@ export function ResultDetailClient({
               pointsSystem: effectivePoints,
               sessionLabel: selectedSessionLabel
           }));
-      } catch (e: any) {
-          setError(e.message);
+      } catch (e) {
+          console.error(e);
+          setError("Something went wrong. Check your connection and try again.");
       } finally {
           setIsProcessing(false);
       }
@@ -106,12 +113,17 @@ export function ResultDetailClient({
       }, 500);
 
       try {
-          await ingestUpload(result.id);
+          const ingested = await ingestUpload(result.id);
+          if (!ingested.ok) {
+              setError(ingested.error);
+              return;
+          }
           setProgress(100);
           router.refresh();
           setResult(prev => ({ ...prev, status: "INGESTED" }));
-      } catch (e: any) {
-          setError(e.message);
+      } catch (e) {
+          console.error(e);
+          setError("Something went wrong. Check your connection and try again.");
       } finally {
           clearInterval(interval);
           setTimeout(() => {
@@ -125,10 +137,16 @@ export function ResultDetailClient({
       if (!confirm(force ? "DELETE EVERYTHING including ingested data?" : "Delete upload?")) return;
       setIsProcessing(true);
       try {
-          await deleteUpload(result.id, force);
+          const deleted = await deleteUpload(result.id, force);
+          if (!deleted.ok) {
+              setError(deleted.error);
+              setIsProcessing(false);
+              return;
+          }
           router.push("/admin/results");
-      } catch (e: any) {
-          setError(e.message);
+      } catch (e) {
+          console.error(e);
+          setError("Something went wrong. Check your connection and try again.");
           setIsProcessing(false);
       }
   };
