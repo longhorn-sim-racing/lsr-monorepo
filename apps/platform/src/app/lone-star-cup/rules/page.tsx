@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { ArrowLeft, ChevronDown, Mail } from "lucide-react";
 import { isViewerOfficer } from "@/server/auth/guards";
 import { getPageBySlug, LSC_RULES_SLUG, renderPageMarkdown } from "@/lib/pages";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +47,7 @@ export default async function LoneStarCupRulesPage() {
 
   const content = await renderPageMarkdown(page.bodyMd);
   const toc = sections(page.bodyMd);
-  const updated = page.updatedAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
+  const updated = page.updatedAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: DEFAULT_TIMEZONE });
 
   const tocList = (
     <ol className="space-y-1 font-sans text-sm">

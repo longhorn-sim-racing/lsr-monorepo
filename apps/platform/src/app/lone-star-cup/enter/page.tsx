@@ -15,10 +15,10 @@ import { LSC_RULES_SLUG } from "@/lib/page-slugs";
 import { publicEventWhere } from "@/lib/events";
 import { parseRoundTitle } from "@/lib/rounds";
 import { seasonLabel, seasonTerm } from "@/lib/seasons";
-import { DEFAULT_TIMEZONE } from "@/lib/dates";
-import { zoneLabel } from "@/server/queries/schedule";
+import { DEFAULT_TIMEZONE, zoneLabel } from "@/lib/dates";
 import { UpdateRacingNumberButton } from "@/components/racing-number-prompt";
 import { Button } from "@/components/ui/button";
+import { formatCents } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +27,6 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 function Shell({ kicker, children }: { kicker: string; children: React.ReactNode }) {
   return (
@@ -157,11 +156,11 @@ export default async function EnterLoneStarCupPage() {
           <div className="absolute top-0 left-0 h-1 w-24 bg-lsr-orange" />
           <Image src="/images/lone-star-cup-logo.png" alt="" width={509} height={218} className="h-auto w-32" />
           <p className="mt-5 font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-white/45">{label} entry</p>
-          <p className="mt-2 font-display font-black italic text-6xl leading-none text-white">{dollars(price.amountCents)}</p>
+          <p className="mt-2 font-display font-black italic text-6xl leading-none text-white">{formatCents(price.amountCents)}</p>
           {price.tier === "returning" ? (
             <p className="mt-2 font-sans text-sm font-bold text-emerald-300">Returning driver rate</p>
           ) : price.returningAmountCents !== null ? (
-            <p className="mt-2 font-sans text-sm text-white/55">{dollars(price.returningAmountCents)} for returning drivers</p>
+            <p className="mt-2 font-sans text-sm text-white/55">{formatCents(price.returningAmountCents)} for returning drivers</p>
           ) : null}
           <p className="mt-4 font-sans text-sm leading-relaxed text-white/70">Covers both the Lone Star Cup and the Formula Sunday League.</p>
 

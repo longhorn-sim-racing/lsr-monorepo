@@ -3,8 +3,8 @@ import Link from "next/link"
 import { ArrowRight, Check, Clock, MapPin, Monitor, Moon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ScheduleEvent } from "@/server/queries/schedule"
+import { formatCentsShort } from "@/lib/money"
 
-const dollars = (cents: number) => `$${(cents / 100).toFixed(cents % 100 ? 2 : 0)}`
 
 export function EventTitle({ event }: { event: ScheduleEvent }) {
   if (!event.round) return <>{event.title}</>
@@ -121,7 +121,7 @@ export function AgendaRow({ event, titleAs: Title = "h4" }: { event: ScheduleEve
               </a>
             ) : register ? (
               <span className="inline-flex h-9 items-center bg-lsr-orange px-4 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white">
-                {event.registration === "waitlist" ? "Join waitlist" : `Register${event.feeCents ? ` · ${dollars(event.feeCents)}` : ""}`}
+                {event.registration === "waitlist" ? "Join waitlist" : `Register${event.feeCents ? ` · ${formatCentsShort(event.feeCents)}` : ""}`}
               </span>
             ) : note ? (
               <span className="font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/50">{note}</span>

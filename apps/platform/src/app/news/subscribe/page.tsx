@@ -5,6 +5,7 @@ import { siInstagram } from "simple-icons/icons"
 import { BrandIcon } from "@/components/brand-icon"
 import { INSTAGRAM_PROFILE_URL } from "@/lib/instagram"
 import { CopyButton } from "./copy-button"
+import { getSiteUrl } from "@/lib/site-url"
 
 export const metadata: Metadata = {
   title: "Follow LSR",
@@ -15,9 +16,7 @@ export const metadata: Metadata = {
 const DISCORD_URL = "https://discord.gg/5Uv9YwpnFz"
 
 export default function SubscribePage() {
-  // The same base the sitemap uses, so the server and the browser show one URL
-  const base = (process.env.NEXT_PUBLIC_SITE_URL || "https://www.longhornsimracing.org").replace(/\/$/, "")
-  const feedUrl = `${base}/news/rss.xml`
+  const feedUrl = `${getSiteUrl()}/news/rss.xml`
   const encoded = encodeURIComponent(feedUrl)
   const readers = [
     { name: "Feedly", href: `https://feedly.com/i/subscription/feed/${encoded}` },

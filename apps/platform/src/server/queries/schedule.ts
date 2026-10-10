@@ -5,6 +5,7 @@ import { publicUserSelect } from "@/lib/public-user"
 import { DEFAULT_TIMEZONE } from "@/lib/dates"
 import { parseRoundTitle } from "@/lib/rounds"
 import { slugify } from "@/lib/slug"
+import { zoneLabel } from "@/lib/dates"
 
 /**
  * One event on the public schedule. Everything here ends up in the page's HTML, so public fields
@@ -61,12 +62,6 @@ function familyOf(series: { title: string; slug: string } | null) {
   if (!series) return OTHER_FAMILY
   if (series.slug.includes("lone-star-cup")) return "Lone Star Cup"
   return series.title.replace(/\s+(S|Season\s*)\d+$/i, "").trim() || series.title
-}
-
-/** "CT" rather than CDT/CST, which flips mid-season when daylight saving ends */
-export function zoneLabel(date: Date, timeZone: string) {
-  if (timeZone === "America/Chicago") return "CT"
-  return new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(date).find((part) => part.type === "timeZoneName")?.value ?? ""
 }
 
 function format(date: Date, timeZone: string, options: Intl.DateTimeFormatOptions) {

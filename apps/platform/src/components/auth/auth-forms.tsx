@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { GoogleButton } from "@/components/google-button"
 import { authInput, authLabel, authSubmit } from "./auth-styles"
+import { getSiteUrl } from "@/lib/site-url"
 
 export type AuthMode = "signin" | "signup"
 
@@ -109,12 +110,11 @@ export function AuthForms({
     setError(null)
     startTransition(async () => {
       const supabase = createSupabaseBrowser()
-      const origin = process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin
       const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: `${origin.replace(/\/$/, "")}/auth/callback`,
+          emailRedirectTo: `${getSiteUrl()}/auth/callback`,
           data: { displayName, eid, marketingOptIn: marketing },
         },
       })

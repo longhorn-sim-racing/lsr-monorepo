@@ -11,7 +11,7 @@ import { RacingNumber } from "@/components/racing-number";
 import { StatusIcons } from "@/components/status-indicators";
 import { getStatusIndicators } from "@/lib/status-indicators";
 import { parseRoundTitle } from "@/lib/rounds";
-import { DEFAULT_TIMEZONE } from "@/lib/dates";
+import { DEFAULT_TIMEZONE, zoneLabel } from "@/lib/dates";
 import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { getRoster, type Roster as RosterData, type RosterDriver } from "@/server/queries/roster";
 import { Roster } from "./roster";
@@ -95,11 +95,7 @@ function Badges({ driver }: { driver: RosterDriver }) {
 
 /** "Sat, Oct 10 · 10:00 AM CT" in the event's own time zone */
 function raceTime(date: Date, timeZone: string) {
-  // "CT" rather than CDT/CST, which flips mid-season when daylight saving ends
-  const zone =
-    timeZone === "America/Chicago"
-      ? "CT"
-      : (new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(date).find((part) => part.type === "timeZoneName")?.value ?? "");
+  const zone = zoneLabel(date, timeZone);
   const day = date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone });
   const time = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
   return `${day} · ${time} ${zone}`.trim();

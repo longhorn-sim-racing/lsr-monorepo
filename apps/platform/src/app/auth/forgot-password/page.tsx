@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { AuthNotice } from "@/components/auth/auth-forms"
 import { authInput, authLabel, authSubmit } from "@/components/auth/auth-styles"
 import { AuthShell } from "../auth-shell"
+import { getSiteUrl } from "@/lib/site-url"
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("")
@@ -21,9 +22,8 @@ export default function ForgotPasswordPage() {
     setError("")
     startTransition(async () => {
       const supabase = createSupabaseBrowser()
-      const origin = process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${origin.replace(/\/$/, "")}/auth/update-password`,
+        redirectTo: `${getSiteUrl()}/auth/update-password`,
       })
       if (error) setError(error.message)
       else setSent(true)

@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { RacingNumber, type RacingNumberStyle } from "@/components/racing-number";
+import { formatCents } from "@/lib/money";
 
 type Attendee = RacingNumberStyle & {
   displayName: string;
@@ -190,7 +191,6 @@ export function EventRegistrationPanel({
   const canRegister = snapshot.windowStatus === "OPEN" && (!isFull || snapshot.waitlistEnabled);
   const myStatus = snapshot.myStatus;
   const isPaidEvent = snapshot.registrationFeeCents != null && snapshot.registrationFeeCents > 0;
-  const formatPrice = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
   return (
     <div className="space-y-6">
@@ -251,7 +251,7 @@ export function EventRegistrationPanel({
                             {myStatus === "REGISTERED" ? "Registered" :
                             myStatus === "WAITLISTED" ? "On Waitlist" :
                             (isFull && snapshot.waitlistEnabled) ? "Join Waitlist" :
-                            isPaidEvent ? `Register — ${formatPrice(snapshot.registrationFeeCents!)}` :
+                            isPaidEvent ? `Register — ${formatCents(snapshot.registrationFeeCents!)}` :
                             "Attending"
                             }
                         </Button>

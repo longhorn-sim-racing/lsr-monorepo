@@ -2,6 +2,7 @@ import Link from "next/link"
 import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ProductCheckoutButton } from "@/components/product-checkout-button"
+import { formatCents } from "@/lib/money"
 
 export type EntryState =
   | { kind: "entered" }
@@ -17,7 +18,6 @@ export type EntryState =
       isReturning: boolean
     }
 
-const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`
 
 const primary =
   "h-auto min-h-12 rounded-none bg-lsr-orange px-7 py-3 font-sans text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-white hover:text-lsr-charcoal"
@@ -45,7 +45,7 @@ export function EntryCta({ state, align = "start" }: { state: EntryState; align?
     return (
       <div className={`flex flex-col gap-2 ${items}`}>
         <Button asChild className={primary}>
-          <Link href="/auth/signin?next=/lone-star-cup/enter">Sign in to enter — {dollars(state.priceCents)}</Link>
+          <Link href="/auth/signin?next=/lone-star-cup/enter">Sign in to enter — {formatCents(state.priceCents)}</Link>
         </Button>
         <p className="font-sans text-[11px] text-white/45">Sign in or make an account, then fill out the entry form.</p>
       </div>
@@ -74,12 +74,12 @@ export function EntryCta({ state, align = "start" }: { state: EntryState; align?
         </>
       ) : (
         <Button asChild className={primary}>
-          <Link href="/lone-star-cup/enter">Enter the Lone Star Cup — {dollars(state.priceCents)}</Link>
+          <Link href="/lone-star-cup/enter">Enter the Lone Star Cup — {formatCents(state.priceCents)}</Link>
         </Button>
       )}
       {state.returningCents !== null && (
         <p className="font-sans text-[10px] font-bold uppercase tracking-[0.2em] text-white/45">
-          {state.isReturning ? "Returning driver rate applied" : `Returning drivers pay ${dollars(state.returningCents)}`}
+          {state.isReturning ? "Returning driver rate applied" : `Returning drivers pay ${formatCents(state.returningCents)}`}
         </p>
       )}
       <p className="font-sans text-[11px] text-white/40">

@@ -16,6 +16,7 @@ import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { getDriverProfile, type DriverProfile } from "@/server/queries/driver-profile";
 import { getSchedule } from "@/server/queries/schedule";
 import { initials } from "../names";
+import { CANONICAL_SITE_URL } from "@/lib/site-url";
 
 export const dynamic = "force-dynamic";
 
@@ -140,7 +141,7 @@ export default async function DriverProfilePage({ params }: { params: Promise<{ 
     url: `https://www.longhornsimracing.org/drivers/${user.handle}`,
     image: user.avatarUrl || undefined,
     description: user.bio || undefined,
-    memberOf: { "@type": "SportsOrganization", name: "Longhorn Sim Racing", url: "https://www.longhornsimracing.org" },
+    memberOf: { "@type": "SportsOrganization", name: "Longhorn Sim Racing", url: CANONICAL_SITE_URL },
     sameAs: [...links.map((l) => l.href), ...(website ? [website] : [])],
   };
   const breadcrumbJsonLd = {

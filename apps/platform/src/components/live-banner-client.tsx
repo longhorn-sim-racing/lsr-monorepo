@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import Link from "next/link"
 import { X, Tv, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { DEFAULT_TIMEZONE } from "@/lib/dates"
 
 type Props = {
   event: {
@@ -12,6 +13,7 @@ type Props = {
     streamUrl: string | null
     startsAtUtc: Date
     endsAtUtc: Date
+    timezone: string | null
   }
 }
 
@@ -32,7 +34,7 @@ export function LiveBannerClient({ event }: Props) {
       hour: 'numeric',
       minute: '2-digit',
       hour12: true,
-      timeZone: 'America/Chicago' // Matching project locale context
+      timeZone: event.timezone || DEFAULT_TIMEZONE
     }).format(new Date(date)).toLowerCase()
   }
 

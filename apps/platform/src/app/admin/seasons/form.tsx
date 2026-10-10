@@ -8,6 +8,7 @@ import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { Season, EventSeries } from "@prisma/client";
 import { formatInTimeZone } from "date-fns-tz";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
 
 function SubmitButton({ isEditing }: { isEditing: boolean }) {
   const { pending } = useFormStatus();
@@ -35,7 +36,7 @@ export function SeasonForm({
   // Helper for date input format YYYY-MM-DD (season dates are Central time)
   const formatDate = (date: Date | null | undefined) => {
       if (!date) return "";
-      return formatInTimeZone(new Date(date), "America/Chicago", "yyyy-MM-dd");
+      return formatInTimeZone(new Date(date), DEFAULT_TIMEZONE, "yyyy-MM-dd");
   }
   
   const handleRecompute = async () => {

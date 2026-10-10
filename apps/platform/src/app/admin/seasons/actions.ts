@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { fromZonedTime } from "date-fns-tz";
 import { createAuditLog } from "@/server/audit/log";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
 
 // Season dates are Central-time days; the end date runs to the end of that day so a
 // season (and league entry into it) doesn't close the morning of its last race.
@@ -17,8 +18,8 @@ const seasonSchema = z.object({
   year: z.coerce.number().int().min(2000),
   seriesId: z.string().optional(),
   leagueId: z.string().optional(),
-  startAt: z.string().optional().transform(val => val ? fromZonedTime(`${val}T00:00:00`, "America/Chicago") : null),
-  endAt: z.string().optional().transform(val => val ? fromZonedTime(`${val}T23:59:59.999`, "America/Chicago") : null),
+  startAt: z.string().optional().transform(val => val ? fromZonedTime(`${val}T00:00:00`, DEFAULT_TIMEZONE) : null),
+  endAt: z.string().optional().transform(val => val ? fromZonedTime(`${val}T23:59:59.999`, DEFAULT_TIMEZONE) : null),
   pointsRule: z.string().optional(),
 });
 
