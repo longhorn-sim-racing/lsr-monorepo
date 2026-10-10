@@ -24,7 +24,13 @@ type UserResult = {
   handle: string;
 };
 
-export function NotificationComposer({ emailUsage }: { emailUsage: { sentToday: number; dailyLimit: number | null } }) {
+export function NotificationComposer({
+  emailUsage,
+  keptForReceipts,
+}: {
+  emailUsage: { sentToday: number; dailyLimit: number | null };
+  keptForReceipts: number;
+}) {
   const [scheduled, setScheduled] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [recipientType, setRecipientType] = useState<"single" | "multiple" | "all">("single");
@@ -272,7 +278,7 @@ export function NotificationComposer({ emailUsage }: { emailUsage: { sentToday: 
               ) : (
                 <p>
                   {emailUsage.sentToday} of {emailUsage.dailyLimit} daily emails sent today; the limit resets at 7 pm Central (6 pm
-                  in winter). An immediate send that would go over is stopped first, keeping 10 for confirmations and receipts.
+                  in winter). An immediate send that would go over is stopped first, keeping {keptForReceipts} for confirmations and receipts.
                   Scheduled sends aren&apos;t checked.
                 </p>
               )}

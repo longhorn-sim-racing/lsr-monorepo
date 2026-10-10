@@ -12,7 +12,7 @@ import { NotificationSettings } from "./_components/notification-settings";
 import { NotificationCleanup } from "./_components/notification-cleanup";
 import { Bell, Send, Clock, Settings } from "lucide-react";
 import { requireOfficerPage } from "@/server/auth/guards";
-import { getEmailUsage } from "@/server/services/notification.service";
+import { getEmailUsage, TRANSACTIONAL_HEADROOM } from "@/server/services/notification.service";
 
 export const dynamic = "force-dynamic";
 // Sending to every member takes several batch calls; leave room beyond the default time limit
@@ -103,7 +103,7 @@ export default async function AdminNotificationsPage() {
         </TabsContent>
 
         <TabsContent value="compose" className="mt-6">
-          <NotificationComposer emailUsage={emailUsage} />
+          <NotificationComposer emailUsage={emailUsage} keptForReceipts={TRANSACTIONAL_HEADROOM} />
         </TabsContent>
 
         <TabsContent value="settings" className="mt-6 space-y-6">

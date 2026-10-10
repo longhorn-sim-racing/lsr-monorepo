@@ -361,6 +361,11 @@ async function claimNotification(notification: NotificationWithUser): Promise<bo
 
 // A short pause between batch calls, well inside Resend's rate limit
 const BATCH_PAUSE_MS = 600;
+// Result writes run this many at a time, so a small serverless connection pool doesn't time out
+const RESULT_WRITE_CONCURRENCY = 10;
+
+/** Emails kept back from officer sends so registration confirmations and receipts still go out that day */
+export const TRANSACTIONAL_HEADROOM = 10;
 
 /**
  * Send claimed email notifications: one Resend call for a single email, batch calls of up to
@@ -389,36 +394,50 @@ async function deliverEmails(notifications: NotificationWithUser[]): Promise<{ s
     // A fresh key per attempt: the email service's own retries can't duplicate a send, while an
     // officer's later retry is a new attempt that still goes out
     const idempotencyKey = `notifications-${randomUUID()}`;
-    const sent =
-      ready.length === 1
-        ? [await sendEmail(ready[0].email, { idempotencyKey })]
-        : ready.length > 1
-          ? await sendBatchEmails(
-              ready.map((r) => r.email),
-              { idempotencyKey }
-            )
-          : [];
+    let sent: SendEmailResult[];
+    try {
+      sent =
+        ready.length === 1
+          ? [await sendEmail(ready[0].email, { idempotencyKey })]
+          : ready.length > 1
+            ? await sendBatchEmails(
+                ready.map((r) => r.email),
+                { idempotencyKey }
+              )
+            : [];
+    } catch (error) {
+      // Thrown before Resend was called (the email service handles its own network errors), so
+      // nothing in this chunk went out; earlier chunks may have, so carry on rather than throw
+      console.error("[Notification] Couldn't send a batch of emails:", error);
+      sent = ready.map(() => ({ success: false, error: `Not sent: ${error instanceof Error ? error.message : String(error)}` }));
+    }
     ready.forEach((r, i) => results.set(r.id, sent[i] ?? { success: false, error: "No result from the email service" }));
 
     // Independent writes: one failure must not undo the record of emails that went out. A row whose
     // write fails stays claimed, and failInterruptedEmails flags it later as possibly sent.
     const sentAt = new Date();
-    const writes = await Promise.allSettled(
-      chunk.map((notification) => {
-        const result = results.get(notification.id)!;
-        if (result.success) sentCount++;
-        else failedCount++;
-        return prisma.notification.update({
-          where: { id: notification.id },
-          data: {
-            status: result.success ? "SENT" : "FAILED",
-            sentAt: result.success ? sentAt : null,
-            emailMessageId: result.messageId,
-            emailError: result.error,
-          },
-        });
-      })
-    );
+    const writes: PromiseSettledResult<unknown>[] = [];
+    for (let i = 0; i < chunk.length; i += RESULT_WRITE_CONCURRENCY) {
+      const group = chunk.slice(i, i + RESULT_WRITE_CONCURRENCY);
+      writes.push(
+        ...(await Promise.allSettled(
+          group.map((notification) => {
+            const result = results.get(notification.id)!;
+            if (result.success) sentCount++;
+            else failedCount++;
+            return prisma.notification.update({
+              where: { id: notification.id },
+              data: {
+                status: result.success ? "SENT" : "FAILED",
+                sentAt: result.success ? sentAt : null,
+                emailMessageId: result.messageId,
+                emailError: result.error,
+              },
+            });
+          })
+        ))
+      );
+    }
     const unrecorded = writes.filter((w): w is PromiseRejectedResult => w.status === "rejected");
     if (unrecorded.length) {
       console.error(`[Notification] Couldn't record ${unrecorded.length} email results:`, unrecorded[0].reason);

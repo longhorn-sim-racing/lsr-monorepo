@@ -7,6 +7,7 @@ const service = vi.hoisted(() => ({
   retryNotification: vi.fn(),
   countEmailRecipients: vi.fn(),
   getEmailUsage: vi.fn(),
+  TRANSACTIONAL_HEADROOM: 10,
 }))
 const audit = vi.hoisted(() => ({ createAuditLog: vi.fn() }))
 
@@ -107,7 +108,14 @@ describe("sendCustomNotification", () => {
     it("says so when a send can't fit in any single day", async () => {
       db.user.findMany.mockResolvedValue(members(250))
       const result = await sendCustomNotification(form())
-      expect(!result.ok && result.error).toMatch(/250 emails, more than the 100 a day/)
+      expect(!result.ok && result.error).toMatch(/250 emails, more than the 90 a day an announcement can use \(the plan's 100, minus 10/)
+    })
+
+    it("counts the kept-back emails against a send that's just under the plan's limit", async () => {
+      db.user.findMany.mockResolvedValue(members(95))
+      const result = await sendCustomNotification(form())
+      expect(!result.ok && result.error).toMatch(/95 emails, more than the 90 a day/)
+      expect(service.sendBulkNotification).not.toHaveBeenCalled()
     })
 
     it("lets an officer send anyway", async () => {

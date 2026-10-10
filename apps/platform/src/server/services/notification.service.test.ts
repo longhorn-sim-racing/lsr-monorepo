@@ -261,6 +261,21 @@ describe("sendBulkNotification", () => {
     expect(db.notification.update).toHaveBeenCalledTimes(2)
   })
 
+  it("keeps going, and doesn't throw, when a later batch fails before reaching Resend", async () => {
+    const users = Array.from({ length: 150 }, (_, i) => member(`u${i + 1}`))
+    db.user.findMany.mockResolvedValue(users)
+    email.sendBatchEmails
+      .mockImplementationOnce(async (emails: unknown[]) => emails.map((_, i) => ({ success: true, messageId: `m${i}` })))
+      .mockRejectedValueOnce(new Error("Can't reach database server"))
+
+    const counts = await withFakeTimers(() => bulk(users.map((u) => u.id)))
+
+    expect(counts).toEqual({ inApp: 0, emails: 150, emailsSent: 100, emailsFailed: 50 })
+    const updates = finalUpdates()
+    expect(updates.n1).toMatchObject({ status: "SENT" })
+    expect(updates.n150).toMatchObject({ status: "FAILED", emailError: expect.stringContaining("Not sent") })
+  })
+
   it("fails an email whose template breaks, without holding up the rest", async () => {
     db.user.findMany.mockResolvedValue([member("u1"), member("u2"), member("u3")])
     templates.getEmailTemplate.mockImplementationOnce(() => {

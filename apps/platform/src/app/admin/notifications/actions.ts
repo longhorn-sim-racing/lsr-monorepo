@@ -9,6 +9,7 @@ import {
   retryNotification,
   countEmailRecipients,
   getEmailUsage,
+  TRANSACTIONAL_HEADROOM,
 } from "@/server/services/notification.service";
 import { setSystemSetting, getSystemSetting, SETTINGS } from "@/lib/email/settings";
 import { NotificationChannel } from "@prisma/client";
@@ -116,9 +117,6 @@ export async function retryFailedNotification(notificationId: string) {
   revalidatePath("/admin/notifications");
 }
 
-// Kept back from officer sends so registration confirmations and receipts still go out that day
-const TRANSACTIONAL_HEADROOM = 10;
-
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** What a send did, for the composer's message */
@@ -181,10 +179,11 @@ export async function sendCustomNotification(formData: FormData): Promise<Action
     ]);
     if (dailyLimit !== null) {
       const left = Math.max(0, dailyLimit - sentToday - TRANSACTIONAL_HEADROOM);
-      if (emailCount > dailyLimit - TRANSACTIONAL_HEADROOM) {
+      const perDay = dailyLimit - TRANSACTIONAL_HEADROOM;
+      if (emailCount > perDay) {
         return {
           ok: false,
-          error: `This would send ${plural(emailCount, "email")}, more than the ${dailyLimit} a day the email plan allows. Send it in-app only, or split the recipients across days.`,
+          error: `This would send ${plural(emailCount, "email")}, more than the ${perDay} a day an announcement can use (the plan's ${dailyLimit}, minus ${TRANSACTIONAL_HEADROOM} kept for confirmations and receipts). Send it in-app only, or split the recipients across days.`,
         };
       }
       if (emailCount > left) {
