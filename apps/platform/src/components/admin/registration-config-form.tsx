@@ -8,15 +8,22 @@ import { Label } from "@/components/ui/label";
 import { updateEventRegistrationConfig } from "@/app/admin/events/actions";
 import { Event } from "@prisma/client";
 import { dateToZonedValue, DEFAULT_TIMEZONE } from "@/lib/dates";
+import { centsToDollarInput } from "@/lib/money";
+import { useFormAction } from "./use-form-action";
+import { toast } from "sonner";
 
 export function RegistrationConfigForm({ event }: { event: Event }) {
   const timezone = event.timezone || DEFAULT_TIMEZONE;
-  const [fee, setFee] = useState(event.registrationFeeCents ? (event.registrationFeeCents / 100).toFixed(2) : "");
+  const [fee, setFee] = useState(centsToDollarInput(event.registrationFeeCents || null));
   const [autoPromote, setAutoPromote] = useState(event.waitlistAutoPromote);
   const isPaid = parseFloat(fee) > 0;
+  const { onSubmit, error, pending } = useFormAction(
+    (formData) => updateEventRegistrationConfig(event.id, formData),
+    () => toast.success("Registration settings saved")
+  );
 
   return (
-    <form action={updateEventRegistrationConfig.bind(null, event.id)} className="space-y-6 border border-white/10 bg-white/[0.02] p-6 rounded-lg">
+    <form onSubmit={onSubmit} className="space-y-6 border border-white/10 bg-white/[0.02] p-6 rounded-lg">
       <h2 className="text-xl font-display font-black italic uppercase text-white">Registration Settings</h2>
       
       <div className="flex items-center space-x-3 p-4 border border-white/5 bg-white/5 rounded-md">
@@ -105,8 +112,10 @@ export function RegistrationConfigForm({ event }: { event: Event }) {
         </div>
       </div>
 
-      <Button type="submit" className="w-full bg-lsr-orange hover:bg-lsr-orange/90 text-white uppercase tracking-widest text-xs font-bold h-10">
-        Update Configuration
+      {error && <p role="alert" className="border border-red-400/30 bg-red-500/10 px-4 py-3 font-sans text-xs leading-relaxed text-red-200">{error}</p>}
+
+      <Button type="submit" disabled={pending} className="w-full bg-lsr-orange hover:bg-lsr-orange/90 text-white uppercase tracking-widest text-xs font-bold h-10">
+        {pending ? "Saving..." : "Update Configuration"}
       </Button>
     </form>
   );
