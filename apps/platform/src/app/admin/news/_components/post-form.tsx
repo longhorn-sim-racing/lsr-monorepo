@@ -275,7 +275,7 @@ export function PostForm({ post, users, availableTags }: PostFormProps) {
                                                 setOpenTag(false);
                                             }}
                                         >
-                                            Create "{tagInput}"
+                                            Create &ldquo;{tagInput}&rdquo;
                                         </div>
                                     </div>
                                 )}

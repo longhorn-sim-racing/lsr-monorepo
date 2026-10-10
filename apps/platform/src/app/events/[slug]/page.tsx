@@ -20,6 +20,8 @@ import { prisma } from "@/server/db";
 import { StreamPlayer } from "@/components/stream-player";
 import { DatabaseUnavailable } from "@/components/database-unavailable";
 import { initials } from "@/app/drivers/names";
+import { CANONICAL_SITE_URL } from "@/lib/site-url";
+import { formatCents } from "@/lib/money";
 
 // Per request, not ISR: an officer's draft preview must never be cached for everyone else.
 export const dynamic = "force-dynamic";
@@ -289,7 +291,7 @@ export default async function EventPage({ params }: EventPageArgs) {
     endDate: endsAt.toISOString(),
     eventStatus: statusMap[event.status] ?? "https://schema.org/EventScheduled",
     eventAttendanceMode: attendanceMode,
-    url: `https://www.longhornsimracing.org/events/${event.slug}`,
+    url: `${CANONICAL_SITE_URL}/events/${event.slug}`,
     image: event.heroImageUrl || undefined,
     location: venue
       ? {
@@ -305,12 +307,12 @@ export default async function EventPage({ params }: EventPageArgs) {
           },
         }
       : event.meetingUrl
-        ? { "@type": "VirtualLocation", url: `https://www.longhornsimracing.org/events/${event.slug}` }
+        ? { "@type": "VirtualLocation", url: `${CANONICAL_SITE_URL}/events/${event.slug}` }
         : undefined,
     organizer: {
       "@type": "SportsOrganization",
       name: "Longhorn Sim Racing",
-      url: "https://www.longhornsimracing.org",
+      url: CANONICAL_SITE_URL,
     },
   };
 
@@ -318,9 +320,9 @@ export default async function EventPage({ params }: EventPageArgs) {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.longhornsimracing.org/" },
-      { "@type": "ListItem", position: 2, name: "Events", item: "https://www.longhornsimracing.org/events" },
-      { "@type": "ListItem", position: 3, name: event.title, item: `https://www.longhornsimracing.org/events/${event.slug}` },
+      { "@type": "ListItem", position: 1, name: "Home", item: `${CANONICAL_SITE_URL}/` },
+      { "@type": "ListItem", position: 2, name: "Events", item: `${CANONICAL_SITE_URL}/events` },
+      { "@type": "ListItem", position: 3, name: event.title, item: `${CANONICAL_SITE_URL}/events/${event.slug}` },
     ],
   };
   const jsonLd = (data: object) => JSON.stringify(data).replace(/</g, "\\u003c");
@@ -472,7 +474,7 @@ export default async function EventPage({ params }: EventPageArgs) {
                 {isPaidEvent && (
                   <p className="mt-2 inline-flex items-center gap-2 font-sans text-sm text-white/75">
                     <CreditCard className="h-4 w-4 text-lsr-orange" aria-hidden />
-                    ${((event.registrationFeeCents ?? 0) / 100).toFixed(2)} to register
+                    {formatCents(event.registrationFeeCents ?? 0)} to register
                   </p>
                 )}
                 {isCheckinRequired && (

@@ -23,6 +23,7 @@ export async function LiveBanner() {
     slug: event.slug,
     streamUrl: event.streamUrl,
     startsAtUtc: event.startsAtUtc,
-    endsAtUtc: event.endsAtUtc
+    endsAtUtc: event.endsAtUtc,
+    timezone: event.timezone
   }} />;
 }

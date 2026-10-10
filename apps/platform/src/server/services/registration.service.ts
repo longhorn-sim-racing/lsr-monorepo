@@ -4,6 +4,7 @@ import { createAuditLog } from "@/server/audit/log";
 import { sendNotification } from "@/server/services/notification.service";
 import { runAfterResponse } from "@/server/after-response";
 import { formatInTimeZone } from "date-fns-tz";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
 
 /**
  * Core Registration Service
@@ -38,7 +39,7 @@ export async function notifyPromotedUsers(
               eventId: event.id,
               title: event.title,
               startsAt: event.startsAtUtc,
-              timezone: event.timezone || "America/Chicago",
+              timezone: event.timezone || DEFAULT_TIMEZONE,
               slug: event.slug,
               heroImageUrl: event.heroImageUrl,
             },
@@ -302,7 +303,7 @@ export async function registerForEvent(
   try {
     // Notify the registering user if they got registered
     if (result.status === "REGISTERED") {
-      const tz = result.event.timezone || "America/Chicago";
+      const tz = result.event.timezone || DEFAULT_TIMEZONE;
       const eventDate = formatInTimeZone(result.event.startsAtUtc, tz, "EEEE, MMMM d 'at' h:mm a");
       await runAfterResponse(
         () =>
@@ -445,7 +446,7 @@ export async function adminOverrideRegistration(
               eventId,
               title: result.event.title,
               startsAt: result.event.startsAtUtc,
-              timezone: result.event.timezone || "America/Chicago",
+              timezone: result.event.timezone || DEFAULT_TIMEZONE,
               slug: result.event.slug,
               heroImageUrl: result.event.heroImageUrl,
             },

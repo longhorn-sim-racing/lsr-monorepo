@@ -27,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { unexpectedError } from "@/lib/action-result";
 
 type ResultWithRelations = RawResultUpload & {
   uploadedBy: User;
@@ -39,6 +40,9 @@ type EventSummary = {
     startsAtUtc: Date;
 }
 
+
+/** One row of parseReport.drivers, as previewParseResult writes it */
+type ParsedDriver = { guid: string; driverName: string; carModel: string };
 export function ResultDetailClient({ 
     result: initialResult,
     events 
@@ -61,10 +65,12 @@ export function ResultDetailClient({
     setIsProcessing(true);
     setError(null);
     try {
-      const updatedResult = await previewParseResult(result.id);
-      setResult(updatedResult as ResultWithRelations);
+      const parsed = await previewParseResult(result.id);
+      if (!parsed.ok) setError(parsed.error);
+      else setResult(parsed.data as ResultWithRelations);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "An unknown error occurred");
+      console.error(error);
+      setError(unexpectedError(error));
     } finally {
       setIsProcessing(false);
     }
@@ -76,7 +82,11 @@ export function ResultDetailClient({
       setError(null);
       try {
           const effectivePoints = isNonRace ? "NONE" : selectedPointsSystem;
-          await bindEventToUpload(result.id, selectedEventId, effectivePoints, selectedSessionLabel);
+          const bound = await bindEventToUpload(result.id, selectedEventId, effectivePoints, selectedSessionLabel);
+          if (!bound.ok) {
+              setError(bound.error);
+              return;
+          }
           router.refresh();
           setResult(prev => ({
               ...prev,
@@ -84,8 +94,9 @@ export function ResultDetailClient({
               pointsSystem: effectivePoints,
               sessionLabel: selectedSessionLabel
           }));
-      } catch (e: any) {
-          setError(e.message);
+      } catch (e) {
+          console.error(e);
+          setError(unexpectedError(e));
       } finally {
           setIsProcessing(false);
       }
@@ -106,12 +117,17 @@ export function ResultDetailClient({
       }, 500);
 
       try {
-          await ingestUpload(result.id);
+          const ingested = await ingestUpload(result.id);
+          if (!ingested.ok) {
+              setError(ingested.error);
+              return;
+          }
           setProgress(100);
           router.refresh();
           setResult(prev => ({ ...prev, status: "INGESTED" }));
-      } catch (e: any) {
-          setError(e.message);
+      } catch (e) {
+          console.error(e);
+          setError(unexpectedError(e));
       } finally {
           clearInterval(interval);
           setTimeout(() => {
@@ -125,10 +141,16 @@ export function ResultDetailClient({
       if (!confirm(force ? "DELETE EVERYTHING including ingested data?" : "Delete upload?")) return;
       setIsProcessing(true);
       try {
-          await deleteUpload(result.id, force);
+          const deleted = await deleteUpload(result.id, force);
+          if (!deleted.ok) {
+              setError(deleted.error);
+              setIsProcessing(false);
+              return;
+          }
           router.push("/admin/results");
-      } catch (e: any) {
-          setError(e.message);
+      } catch (e) {
+          console.error(e);
+          setError(unexpectedError(e));
           setIsProcessing(false);
       }
   };
@@ -272,7 +294,7 @@ export function ResultDetailClient({
                 </div>
             </div>
 
-            <h3 className="font-bold mb-2">Drivers ({(result.parseReport?.drivers as any[])?.length || 0})</h3>
+            <h3 className="font-bold mb-2">Drivers ({(result.parseReport?.drivers as ParsedDriver[] | null)?.length || 0})</h3>
             <div className="max-h-96 overflow-auto border rounded">
                 <Table>
                 <TableHeader>
@@ -283,7 +305,7 @@ export function ResultDetailClient({
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {(result.parseReport.drivers as any[]).map((driver) => (
+                    {(result.parseReport.drivers as ParsedDriver[]).map((driver) => (
                     <TableRow key={driver.guid}>
                         <TableCell className="font-mono text-xs">{driver.guid}</TableCell>
                         <TableCell>{driver.driverName}</TableCell>

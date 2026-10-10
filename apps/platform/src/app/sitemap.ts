@@ -3,11 +3,12 @@ import { prisma } from "@/server/db"
 import { getProducts } from "@/lib/shopify/catalog"
 import { publicEventWhere } from "@/lib/events"
 import { publishedPostWhere } from "@/lib/news"
+import { getSiteUrl } from "@/lib/site-url"
 
 export const dynamic = 'force-dynamic'
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const base = process.env.NEXT_PUBLIC_SITE_URL || "https://www.longhornsimracing.org"
+  const base = getSiteUrl()
 
   // 1. Static Pages
   const staticRoutes: MetadataRoute.Sitemap = [

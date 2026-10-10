@@ -8,6 +8,7 @@ import { LogoTile } from "@/components/logo-tile"
 import { SPONSORS, GOLD_SPONSORS, sponsorHref, type Sponsor } from "@/lib/sponsors"
 import { getClubStats } from "@/server/queries/club-stats"
 import { COMPARE, TIERS, tierIndex, type TierId } from "./tiers"
+import { CANONICAL_SITE_URL } from "@/lib/site-url"
 
 export const metadata: Metadata = {
   title: "Sponsors",
@@ -17,7 +18,6 @@ export const metadata: Metadata = {
   },
 };
 
-const SITE_URL = "https://www.longhornsimracing.org"
 const OUTREACH_EMAIL = "outreach@longhornsimracing.org"
 const PACKET_URL = "/SPONSOR_BENEFITS.pdf"
 const VENMO_URL = "https://www.paypal.com/qrcodes/venmocs/e3fd69ab-c345-4b53-add6-4f8037a4760d?created=1767404952.8381681&printed=1"
@@ -37,7 +37,7 @@ const partnerListJsonLd = {
     item: {
       "@type": "Organization",
       name: p.name,
-      logo: `${SITE_URL}${p.lightLogo ?? p.logo}`,
+      logo: `${CANONICAL_SITE_URL}${p.lightLogo ?? p.logo}`,
       ...(p.url ? { url: p.url } : {}),
       ...(p.description ? { description: p.description } : {}),
     },

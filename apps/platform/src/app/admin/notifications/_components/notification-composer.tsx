@@ -15,6 +15,7 @@ import {
 import { Send, User, Users, Search, Loader2, X, UserPlus } from "lucide-react";
 import { sendCustomNotification, searchUsers } from "../actions";
 import { toast } from "sonner";
+import { unexpectedError } from "@/lib/action-result";
 
 type UserResult = {
   id: string;
@@ -64,7 +65,10 @@ export function NotificationComposer() {
     setSelectedUsers((prev) => prev.filter((u) => u.id !== userId));
   };
 
-  const handleSubmit = async (formData: FormData) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const formData = new FormData(form);
     formData.set("recipientType", recipientType);
     if (selectedUsers.length > 0) {
       formData.set("userIds", JSON.stringify(selectedUsers.map((u) => u.id)));
@@ -72,20 +76,25 @@ export function NotificationComposer() {
 
     startTransition(async () => {
       try {
-        await sendCustomNotification(formData);
+        const result = await sendCustomNotification(formData);
+        if (!result.ok) {
+          toast.error(result.error);
+          return;
+        }
         const count = recipientType === "all" ? "all members" : `${selectedUsers.length} user(s)`;
         toast.success(`Notification sent to ${count}`);
-        // Reset form
+        form.reset();
         setSelectedUsers([]);
         setSearchQuery("");
-      } catch {
-        toast.error("Failed to send notification");
+      } catch (error) {
+        console.error(error);
+        toast.error(unexpectedError(error, "Couldn't send the notification"));
       }
     });
   };
 
   return (
-    <form action={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-6">
       <div className="border border-white/10 bg-white/[0.02] p-6 space-y-6">
         {/* Recipient Selection */}
         <div className="space-y-4">
@@ -320,7 +329,7 @@ export function NotificationComposer() {
             htmlFor="scheduledFor"
             className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60"
           >
-            Schedule For (Optional)
+            Schedule For, Central Time (Optional)
           </Label>
           <Input
             id="scheduledFor"

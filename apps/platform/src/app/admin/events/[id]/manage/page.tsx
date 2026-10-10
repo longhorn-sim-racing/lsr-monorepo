@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { LiveTailButton } from "@/components/admin/live-tail-button";
 import { requireOfficerPage } from "@/server/auth/guards";
+import { getSiteUrl } from "@/lib/site-url";
 
 export default async function ManageEventPage({ params }: { params: Promise<{ id: string }> }) {
   await requireOfficerPage();
@@ -32,13 +33,8 @@ export default async function ManageEventPage({ params }: { params: Promise<{ id
 
   const { event, lists } = attendanceState;
 
-  // 2. Prepare QR
-  // Determine Check-in URL. Ideally from ENV or request headers, but usually relative in Next.js needs absolute for QR.
-  // We'll use NEXT_PUBLIC_SITE_URL or vercel url or fallback.
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL 
-      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) 
-      || "http://localhost:3000";
-  const checkInUrl = `${baseUrl}/check-in/${event.id}`;
+  // 2. Prepare QR (needs an absolute URL)
+  const checkInUrl = `${getSiteUrl()}/check-in/${event.id}`;
   const qrDataUrl = await generateQrCodeDataUrl(checkInUrl);
 
   // 3. Prepare Registrations for RegistrationManager

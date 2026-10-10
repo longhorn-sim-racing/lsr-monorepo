@@ -11,15 +11,25 @@ import { Event, EventSeries, Venue } from "@prisma/client";
 import { useState } from "react";
 import { DEFAULT_TIMEZONE, TIMEZONES, dateToZonedValue } from "@/lib/dates";
 import { Tag, Clock, Info, Users, QrCode, Megaphone } from "lucide-react";
+import { centsToDollarInput } from "@/lib/money";
+import { useFormAction } from "./use-form-action";
 
 export function EventForm({ event, series, venues }: { event?: Event, series: EventSeries[], venues: Venue[] }) {
   const [timezone, setTimezone] = useState<string>(event?.timezone || DEFAULT_TIMEZONE);
   const [slug, setSlug] = useState(event?.slug ?? "");
   const [slugTouched, setSlugTouched] = useState(!!event);
+  const { onSubmit, error, pending } = useFormAction((formData) => (event ? updateEvent(event.id, formData) : createEvent(formData)));
 
   return (
     <div className="max-w-5xl mx-auto font-mono text-sm border border-white/10 bg-white/[0.02] p-8 md:p-12 rounded-xl shadow-2xl">
-      <form action={event ? updateEvent.bind(null, event.id) : createEvent} className="space-y-16">
+      <form
+        onSubmit={onSubmit}
+        // Enter would submit with the first button, "Save as Draft", and un-publish the event; use the buttons
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && e.target instanceof HTMLInputElement) e.preventDefault();
+        }}
+        className="space-y-16"
+      >
         <input type="hidden" name="timezone" value={timezone} />
         
         {/* Basic Info */}
@@ -255,7 +265,7 @@ export function EventForm({ event, series, venues }: { event?: Event, series: Ev
                   type="number"
                   min="0"
                   step="0.01"
-                  defaultValue={event?.registrationFeeCents ? (event.registrationFeeCents / 100).toFixed(2) : ""}
+                  defaultValue={centsToDollarInput(event?.registrationFeeCents || null)}
                   placeholder="0.00 (Free)"
                   className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors w-1/3"
                 />
@@ -319,7 +329,8 @@ export function EventForm({ event, series, venues }: { event?: Event, series: Ev
             )}
           </div>
 
-          <div className="bg-white/[0.02] border border-white/5 p-6 md:p-8">
+          <div className="bg-white/[0.02] border border-white/5 p-6 md:p-8 space-y-6">
+            {error && <p role="alert" className="border border-red-400/30 bg-red-500/10 px-4 py-3 font-sans text-xs leading-relaxed text-red-200">{error}</p>}
             <div className="flex flex-col lg:flex-row items-end gap-8">
                  <div className="flex flex-col gap-2 w-full lg:w-auto lg:flex-grow">
                     <Label htmlFor="scheduleDate" className="uppercase tracking-widest text-[10px] text-white/40">
@@ -339,15 +350,15 @@ export function EventForm({ event, series, venues }: { event?: Event, series: Ev
                  </div>
 
                  <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-end">
-                    <Button type="submit" name="submitAction" value="draft" variant="ghost" className="text-white/40 hover:text-white font-bold uppercase tracking-widest text-[10px] h-10 px-4">
+                    <Button type="submit" name="submitAction" value="draft" disabled={pending} variant="ghost" className="text-white/40 hover:text-white font-bold uppercase tracking-widest text-[10px] h-10 px-4">
                         Save as Draft
                     </Button>
                     
-                    <Button type="submit" name="submitAction" value="schedule" variant="outline" className="border-white/20 text-white hover:bg-white/5 hover:border-lsr-orange hover:text-lsr-orange font-bold uppercase tracking-widest text-[10px] h-10 px-6">
+                    <Button type="submit" name="submitAction" value="schedule" disabled={pending} variant="outline" className="border-white/20 text-white hover:bg-white/5 hover:border-lsr-orange hover:text-lsr-orange font-bold uppercase tracking-widest text-[10px] h-10 px-6">
                         Schedule
                     </Button>
 
-                    <Button type="submit" name="submitAction" value="publish" className="bg-lsr-orange hover:bg-lsr-orange/90 text-white font-bold uppercase tracking-widest text-[10px] h-10 px-8 shadow-lg">
+                    <Button type="submit" name="submitAction" value="publish" disabled={pending} className="bg-lsr-orange hover:bg-lsr-orange/90 text-white font-bold uppercase tracking-widest text-[10px] h-10 px-8 shadow-lg">
                         {event ? "Publish / Save" : "Publish Now"}
                     </Button>
                  </div>

@@ -13,6 +13,7 @@ import { getInstagramFeed } from "@/server/queries/instagram"
 import { INSTAGRAM_PROFILE_URL } from "@/lib/instagram"
 import { FeaturedPost, PostCard } from "./post-card"
 import { InstagramFeed } from "./instagram-feed"
+import { CANONICAL_SITE_URL } from "@/lib/site-url"
 
 export const metadata: Metadata = {
   title: "Team News",
@@ -146,7 +147,7 @@ export default async function NewsIndexPage({
     itemListElement: allPosts.map((p, i) => ({
       "@type": "ListItem",
       position: i + 1,
-      url: `https://www.longhornsimracing.org/news/${p.slug}`,
+      url: `${CANONICAL_SITE_URL}/news/${p.slug}`,
       name: p.title,
     })),
   };

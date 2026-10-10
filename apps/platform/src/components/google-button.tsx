@@ -4,6 +4,7 @@
 import { Button } from "@/components/ui/button"
 import { createSupabaseBrowser } from "@/lib/supabase-browser"
 import { siGoogle } from "simple-icons/icons" // tree-shaken import
+import { getSiteUrl } from "@/lib/site-url"
 
 function GoogleIcon({ className }: { className?: string }) {
   return (
@@ -24,8 +25,7 @@ function GoogleIcon({ className }: { className?: string }) {
 export function GoogleButton({ next }: { next?: string }) {
   const handle = async () => {
     const supabase = createSupabaseBrowser();
-    const origin = process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin;
-    const redirectTo = `${origin.replace(/\/$/, '')}/auth/callback${next ? `?next=${encodeURIComponent(next)}` : ''}`;
+    const redirectTo = `${getSiteUrl()}/auth/callback${next ? `?next=${encodeURIComponent(next)}` : ''}`;
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo },

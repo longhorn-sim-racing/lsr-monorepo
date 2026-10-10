@@ -227,7 +227,7 @@ function DriverRow({ driver }: { driver: DriverWithUser }) {
             {driver.user ? (
                 <div className="flex items-center gap-2 text-green-400">
                     {driver.user.avatarUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element
+                        // eslint-disable-next-line @next/next/no-img-element -- avatar URLs can come from any host, which next/image would reject
                         <img src={driver.user.avatarUrl} alt="" className="w-4 h-4 rounded-full" />
                     )}
                     <span className="font-bold">{driver.user.displayName}</span>

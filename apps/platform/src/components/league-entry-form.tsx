@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { startProductCheckout } from "@/components/product-checkout-button";
 import { RACING_EQUIPMENT_OPTIONS, SIM_EXPERIENCE_OPTIONS, type LeagueApplicationInput } from "@/schemas/league-application.schema";
 import { submitLeagueApplication } from "@/app/lone-star-cup/enter/actions";
+import { formatCents } from "@/lib/money";
 
 export type LeagueEntryFormDefaults = {
   discordUsername: string;
@@ -177,7 +178,7 @@ export function LeagueEntryForm({
         disabled={loading}
         className="mt-4 h-14 w-full rounded-none bg-lsr-orange font-sans text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-white hover:text-lsr-charcoal"
       >
-        {loading ? "Starting checkout..." : `${isUpdate ? "Save and pay" : "Continue to payment"} — $${(priceCents / 100).toFixed(2)}`}
+        {loading ? "Starting checkout..." : `${isUpdate ? "Save and pay" : "Continue to payment"} — ${formatCents(priceCents)}`}
       </Button>
     </form>
   );

@@ -23,10 +23,10 @@ export async function POST(
     );
 
     return NextResponse.json(result);
-  } catch (error: any) {
+  } catch (error) {
     console.error("Check-in error:", error);
     return NextResponse.json(
-      { message: error.message || "Failed to check in" },
+      { message: error instanceof Error && error.message ? error.message : "Failed to check in" },
       { status: 400 }
     );
   }

@@ -15,6 +15,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { deleteSeason, recomputeStandings } from "@/app/admin/seasons/actions";
 import { cn } from "@/lib/utils";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { toast } from "sonner";
+import { unexpectedError } from "@/lib/action-result";
 
 type SeasonWithSeries = Season & {
   series: EventSeries | null;
@@ -28,6 +30,7 @@ type SortField = "startAt" | "name" | "year";
 type SortDirection = "asc" | "desc";
 
 export function SeasonsConsole({ initialSeasons }: SeasonsConsoleProps) {
+  const [recomputingId, setRecomputingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState<SortField>("startAt");
   const [sortDir, setSortDir] = useState<SortDirection>("desc");
@@ -62,21 +65,14 @@ export function SeasonsConsole({ initialSeasons }: SeasonsConsoleProps) {
 
     // Sort
     result.sort((a, b) => {
-      let fieldA: string | number | Date | null = a[sortField];
-      let fieldB: string | number | Date | null = b[sortField];
-      
-      // Handle null dates for sorting
-      if (sortField === "startAt") {
-          fieldA = fieldA ? new Date(fieldA as Date).getTime() : 0;
-          fieldB = fieldB ? new Date(fieldB as Date).getTime() : 0;
-      }
-
-      if (fieldA === fieldB) return 0;
-      
-      // We know fieldA/B are comparable now (both numbers if dates, or string/number)
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      const comparison = fieldA > fieldB ? 1 : -1;
+      // Dates compare by time (missing ones first); everything else as numbers or text
+      const sortKey = (value: string | number | Date | null) =>
+        sortField === "startAt" ? (value ? new Date(value).getTime() : 0) : (value ?? "");
+      const keyA = sortKey(a[sortField]);
+      const keyB = sortKey(b[sortField]);
+      if (keyA === keyB) return 0;
+      const comparison =
+        typeof keyA === "number" && typeof keyB === "number" ? keyA - keyB : String(keyA).localeCompare(String(keyB));
       return sortDir === "asc" ? comparison : -comparison;
     });
 
@@ -216,15 +212,31 @@ export function SeasonsConsole({ initialSeasons }: SeasonsConsoleProps) {
                     {/* Actions */}
                     <div className="w-32 shrink-0 flex items-center justify-end gap-1">
                         
-                        <form action={recomputeStandings.bind(null, season.id)}>
+                        <form
+                            onSubmit={async (e) => {
+                                e.preventDefault();
+                                setRecomputingId(season.id);
+                                try {
+                                    const result = await recomputeStandings(season.id);
+                                    if (result.ok) toast.success(`Standings recomputed for ${season.name}`);
+                                    else toast.error(result.error);
+                                } catch (error) {
+                                    console.error(error);
+                                    toast.error(unexpectedError(error, "Couldn't recompute the standings"));
+                                } finally {
+                                    setRecomputingId(null);
+                                }
+                            }}
+                        >
                             <ConfirmSubmitButton
+                                disabled={recomputingId !== null}
                                 size="icon"
                                 variant="ghost"
                                 className="h-7 w-7 text-white/20 group-hover:text-white/70 hover:!text-blue-400 hover:bg-white/10 transition-colors"
                                 title="Recompute Standings"
                                 message="Are you sure you want to recompute standings for this season? This will recalculate all driver points based on race results."
                             >
-                                <RefreshCw size={14} />
+                                <RefreshCw size={14} className={recomputingId === season.id ? "animate-spin" : undefined} />
                             </ConfirmSubmitButton>
                         </form>
 

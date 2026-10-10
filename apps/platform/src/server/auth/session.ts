@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { after } from 'next/server';
 import { prisma } from '@/server/db';
 import { User } from '@prisma/client';
+import type { User as AuthUser } from '@supabase/supabase-js';
 import { slugify } from '@/lib/slug';
 import { revalidateDriverList } from '@/server/cache/revalidate-public';
 
@@ -12,7 +13,7 @@ export type SessionUser = {
   roles: string[];
 };
 
-async function provisionUser(authUser: any) {
+async function provisionUser(authUser: AuthUser) {
   return prisma.$transaction(async (tx) => {
     // Double-check inside transaction to prevent race conditions
     const existingUser = await tx.user.findUnique({ where: { id: authUser.id } });

@@ -21,12 +21,13 @@ import { ProductPaymentToast } from "@/components/product-checkout-button";
 import { Button } from "@/components/ui/button";
 import { publicUserSelect } from "@/lib/public-user";
 import { publicEventWhere } from "@/lib/events";
-import { DEFAULT_TIMEZONE } from "@/lib/dates";
+import { DEFAULT_TIMEZONE, zoneLabel } from "@/lib/dates";
 import { parseRoundTitle } from "@/lib/rounds";
 import { seasonLabel, seasonTerm } from "@/lib/seasons";
 import { OFFICERS } from "@/app/about/roster";
 import { EntryCta, type EntryState } from "./entry-cta";
 import { LiveStream } from "./live-stream";
+import { formatCents } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
@@ -129,11 +130,7 @@ function driverName(result: ReturnType<typeof podiumOf>[number] | undefined) {
 }
 
 function roundDate(date: Date, timeZone: string) {
-  // "CT" rather than CDT/CST, which flips mid-season when daylight saving ends
-  const zone =
-    timeZone === "America/Chicago"
-      ? "CT"
-      : (new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(date).find((part) => part.type === "timeZoneName")?.value ?? "");
+  const zone = zoneLabel(date, timeZone);
   return {
     day: date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone }),
     time: `${date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone })} ${zone}`.trim(),
@@ -744,9 +741,9 @@ export default async function LoneStarCupPage() {
                 {
                   title: "Pay the entry fee",
                   body: entryPrice
-                    ? `${entryPrice.tier === "returning" ? "Your returning-driver rate is" : "It's"} $${(entryPrice.amountCents / 100).toFixed(2)}${
+                    ? `${entryPrice.tier === "returning" ? "Your returning-driver rate is" : "It's"} ${formatCents(entryPrice.amountCents)}${
                         entryPrice.returningAmountCents !== null && entryPrice.tier !== "returning"
-                          ? ` ($${(entryPrice.returningAmountCents / 100).toFixed(2)} for returning drivers)`
+                          ? ` (${formatCents(entryPrice.returningAmountCents)} for returning drivers)`
                           : ""
                       }, paid securely on Stripe.`
                     : "Paid securely on Stripe once the form is in.",

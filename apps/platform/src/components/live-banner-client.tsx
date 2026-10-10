@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import Link from "next/link"
 import { X, Tv, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { DEFAULT_TIMEZONE, zoneLabel } from "@/lib/dates"
 
 type Props = {
   event: {
@@ -12,6 +13,7 @@ type Props = {
     streamUrl: string | null
     startsAtUtc: Date
     endsAtUtc: Date
+    timezone: string | null
   }
 }
 
@@ -32,7 +34,7 @@ export function LiveBannerClient({ event }: Props) {
       hour: 'numeric',
       minute: '2-digit',
       hour12: true,
-      timeZone: 'America/Chicago' // Matching project locale context
+      timeZone: event.timezone || DEFAULT_TIMEZONE
     }).format(new Date(date)).toLowerCase()
   }
 
@@ -76,7 +78,7 @@ export function LiveBannerClient({ event }: Props) {
                     {/* Center: Time | Title */}
                     <div className="flex items-center gap-4 flex-1 justify-center text-center">
                         <div className="flex items-center font-sans font-bold text-[11px] uppercase tracking-wider text-white/40">
-                            {formatTime(event.startsAtUtc)} - {formatTime(event.endsAtUtc)}
+                            {formatTime(event.startsAtUtc)} - {formatTime(event.endsAtUtc)} {zoneLabel(new Date(event.startsAtUtc), event.timezone || DEFAULT_TIMEZONE)}
                         </div>
                         
                         <div className="w-px h-3 bg-white/10" />
@@ -170,7 +172,7 @@ export function LiveBannerClient({ event }: Props) {
                     {/* Bottom Row: Centered Time | Title */}
                     <div className="flex items-center justify-center gap-2 px-2 text-center overflow-hidden">
                         <div className="font-sans font-bold text-[9px] text-white/40 uppercase tracking-wider shrink-0">
-                            {formatTime(event.startsAtUtc)} - {formatTime(event.endsAtUtc)}
+                            {formatTime(event.startsAtUtc)} - {formatTime(event.endsAtUtc)} {zoneLabel(new Date(event.startsAtUtc), event.timezone || DEFAULT_TIMEZONE)}
                         </div>
                         
                         <div className="w-px h-2 bg-white/10 shrink-0" />

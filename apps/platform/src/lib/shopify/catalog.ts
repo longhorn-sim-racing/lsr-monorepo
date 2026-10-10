@@ -1,10 +1,10 @@
 import { shopifyFetch } from './client';
 import { PRODUCTS_QUERY, PRODUCT_BY_HANDLE_QUERY } from './queries';
-import { mapProduct, removeEdgesAndNodes } from './mappers';
+import { mapProduct, removeEdgesAndNodes, type RawProduct } from './mappers';
 import { Product } from './types';
 
 export async function getProducts(): Promise<Product[]> {
-  const { body } = await shopifyFetch<any>({
+  const { body } = await shopifyFetch<{ products: { edges: { node: RawProduct }[] } | { nodes: RawProduct[] } }>({
     query: PRODUCTS_QUERY,
     revalidate: 1,
   });
@@ -13,7 +13,7 @@ export async function getProducts(): Promise<Product[]> {
 }
 
 export async function getProductByHandle(handle: string): Promise<Product | null> {
-  const { body } = await shopifyFetch<any>({
+  const { body } = await shopifyFetch<{ product: RawProduct | null }>({
     query: PRODUCT_BY_HANDLE_QUERY,
     variables: { handle },
     revalidate: 1,

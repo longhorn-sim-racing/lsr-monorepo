@@ -10,6 +10,7 @@ import { isEventPublic } from "@/lib/events"
 import { getGalleryAlbums, getUnsortedGalleryImages } from "@/server/queries/gallery"
 import { GalleryBrowser } from "./gallery-browser"
 import type { GalleryAlbumSummary, GalleryPhoto } from "./types"
+import { DEFAULT_TIMEZONE } from "@/lib/dates"
 
 export const metadata: Metadata = {
   title: "Gallery",
@@ -46,7 +47,7 @@ async function loadAlbums(): Promise<GalleryAlbumSummary[]> {
     const summaries: GalleryAlbumSummary[] = albums.map((album) => ({
       slug: album.slug,
       title: album.title,
-      dateLabel: album.date ? formatInTimeZone(album.date, "America/Chicago", "MMM yyyy") : null,
+      dateLabel: album.date ? formatInTimeZone(album.date, DEFAULT_TIMEZONE, "MMM yyyy") : null,
       description: album.description,
       eventHref: album.event && isEventPublic(album.event) ? `/events/${album.event.slug}` : null,
       photos: album.images.map((image) => toPhoto(image, album.slug, album.title)),

@@ -3,6 +3,7 @@ import { NotificationChannel, Prisma } from "@prisma/client";
 import { sendEmail, type SendEmailResult } from "@/lib/email/resend";
 import { getEmailTemplate } from "@/lib/email/templates";
 import { subHours, subMinutes } from "date-fns";
+import { getSiteUrl } from "@/lib/site-url";
 
 export type NotificationType =
   | "REGISTRATION_CONFIRMED"
@@ -304,12 +305,7 @@ async function processEmailNotification(
   // For emails, relative actionUrls need a full base URL (unlike in-app where Next.js handles it)
   let actionUrl = notification.actionUrl ?? undefined;
   if (actionUrl && actionUrl.startsWith("/")) {
-    const baseUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      (process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : "http://localhost:3000");
-    actionUrl = `${baseUrl.replace(/\/$/, "")}${actionUrl}`;
+    actionUrl = `${getSiteUrl()}${actionUrl}`;
   }
 
   let result: SendEmailResult;

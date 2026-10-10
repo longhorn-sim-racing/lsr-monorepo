@@ -5,8 +5,8 @@ export async function POST() {
   try {
     const cart = await createCart();
     return NextResponse.json({ ok: true, cart });
-  } catch (e: any) {
+  } catch (e) {
     console.error("Error creating cart:", e);
-    return NextResponse.json({ ok: false, error: e.message || "Unknown error" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "Unknown error" }, { status: 500 });
   }
 }

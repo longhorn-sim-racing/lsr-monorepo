@@ -9,6 +9,8 @@ import { priceForUser, productRequiresMembership } from "@/server/services/produ
 import { getLeagueApplication, getOpenLeagueSeason } from "@/server/services/league-entry.service";
 import { expireOpenCheckouts } from "@/server/services/checkout-sessions";
 import type Stripe from "stripe";
+import { getSiteUrl } from "@/lib/site-url";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
 
 // ---------------------------------------------------------------------------
 // Checkout Session Creation
@@ -73,7 +75,7 @@ export async function createEventCheckoutSession(
     },
   });
 
-  const baseUrl = getBaseUrl();
+  const baseUrl = getSiteUrl();
 
   const session = await getStripe().checkout.sessions.create({
     mode: "payment",
@@ -122,15 +124,6 @@ export type CheckoutProductType = "ANNUAL_DUES" | "LEAGUE_FEE";
 const PRODUCT_RETURN_PATHS: Record<string, string> = {
   "lone-star-cup": "/lone-star-cup",
 };
-
-function getBaseUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    (process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : "http://localhost:3000")
-  );
-}
 
 /**
  * Starts a Stripe Checkout for a Product-backed purchase (annual dues or a
@@ -223,7 +216,7 @@ export async function createProductCheckoutSession(
 
   const returnPath =
     (leagueSlug && PRODUCT_RETURN_PATHS[leagueSlug]) || "/account";
-  const baseUrl = getBaseUrl();
+  const baseUrl = getSiteUrl();
 
   let session: Stripe.Checkout.Session;
   try {
@@ -465,7 +458,7 @@ async function grantEventSeat(
     where: { id: meta.eventId },
   });
   if (event) {
-    const tz = event.timezone || "America/Chicago";
+    const tz = event.timezone || DEFAULT_TIMEZONE;
     const eventDate = formatInTimeZone(event.startsAtUtc, tz, "EEEE, MMMM d 'at' h:mm a");
     const registered = registrationStatus === "REGISTERED";
     await runAfterResponse(
@@ -681,7 +674,7 @@ async function grantProduct(
 
   // Send notification once the response is out
   const isDues = product.type === "ANNUAL_DUES";
-  const through = formatInTimeZone(result.validTo, "America/Chicago", "MMMM d, yyyy");
+  const through = formatInTimeZone(result.validTo, DEFAULT_TIMEZONE, "MMMM d, yyyy");
   const leagueName = product.league?.name ?? "the league";
   const actionUrl = isDues
     ? "/account"

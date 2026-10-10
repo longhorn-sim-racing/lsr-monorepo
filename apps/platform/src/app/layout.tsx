@@ -7,13 +7,13 @@ import { SpeedInsights } from "@vercel/speed-insights/next"
 import React from "react";
 import { SiteFooter } from "@/components/site-footer"
 import { LiveBanner } from "@/components/live-banner";
-import { MaintenanceBanner } from "@/components/maintenance-banner";
 import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { prisma } from "@/server/db";
 import { Toaster } from "@/components/ui/sonner";
 import { CartProvider } from "@/lib/shopify/CartContext";
 import { RacingNumberPrompt } from "@/components/racing-number-prompt";
 import { unstable_rethrow } from "next/navigation";
+import { CANONICAL_SITE_URL } from "@/lib/site-url";
 
 const montserrat = Montserrat({
   subsets: ["latin"],
@@ -37,7 +37,7 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: { default: "Longhorn Sim Racing | UT Austin", template: "%s | LSR" },
   description: "UT Austin Longhorn Sim Racing Club",
-  metadataBase: new URL("https://www.longhornsimracing.org"),
+  metadataBase: new URL(CANONICAL_SITE_URL),
   manifest: "/manifest.json",
   keywords: [
     "sim racing",
@@ -88,8 +88,8 @@ const organizationJsonLd = {
   "@type": "SportsOrganization",
   name: "Longhorn Sim Racing",
   alternateName: "LSR",
-  url: "https://www.longhornsimracing.org",
-  logo: "https://www.longhornsimracing.org/brand/logos/black_logo_white_square.png",
+  url: CANONICAL_SITE_URL,
+  logo: `${CANONICAL_SITE_URL}/brand/logos/black_logo_white_square.png`,
   description:
     "UT Austin's premier sim racing organization. Events, drivers, race results, and championship series.",
   sport: "Sim Racing",
@@ -155,7 +155,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
     />
     <CartProvider>
-      {/* <MaintenanceBanner /> */}
+      {/* Maintenance: import MaintenanceBanner from "@/components/maintenance-banner" and render <MaintenanceBanner /> here */}
       <LiveBanner />
       <SiteHeader user={user} roles={roles} activeTierKey={activeTierKey} />
       <main className="flex-1">{children}</main>

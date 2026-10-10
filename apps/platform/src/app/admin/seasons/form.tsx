@@ -8,6 +8,9 @@ import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { Season, EventSeries } from "@prisma/client";
 import { formatInTimeZone } from "date-fns-tz";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
+import { toast } from "sonner";
+import { unexpectedError } from "@/lib/action-result";
 
 function SubmitButton({ isEditing }: { isEditing: boolean }) {
   const { pending } = useFormStatus();
@@ -30,19 +33,25 @@ export function SeasonForm({
   const action = initialData ? updateSeason.bind(null, initialData.id) : createSeason;
   
   // Helper to safely access nested JSON or property
-  const defaultPointsRule = (initialData?.pointsRule as any)?.system || "F1";
+  const defaultPointsRule = (initialData?.pointsRule as { system?: string } | null | undefined)?.system || "F1";
 
   // Helper for date input format YYYY-MM-DD (season dates are Central time)
   const formatDate = (date: Date | null | undefined) => {
       if (!date) return "";
-      return formatInTimeZone(new Date(date), "America/Chicago", "yyyy-MM-dd");
+      return formatInTimeZone(new Date(date), DEFAULT_TIMEZONE, "yyyy-MM-dd");
   }
   
   const handleRecompute = async () => {
       if(!initialData) return;
       if(confirm("Recompute standings for this season based on ingested results? This will overwrite manual edits to Entry stats.")) {
-          await recomputeStandings(initialData.id);
-          alert("Standings recomputed.");
+          try {
+              const result = await recomputeStandings(initialData.id);
+              if (result.ok) toast.success("Standings recomputed");
+              else toast.error(result.error);
+          } catch (error) {
+              console.error(error);
+              toast.error(unexpectedError(error, "Couldn't recompute the standings"));
+          }
       }
   }
 

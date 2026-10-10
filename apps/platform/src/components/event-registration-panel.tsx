@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { RacingNumber, type RacingNumberStyle } from "@/components/racing-number";
+import { formatCents } from "@/lib/money";
 
 type Attendee = RacingNumberStyle & {
   displayName: string;
@@ -56,7 +57,7 @@ export function EventRegistrationPanel({
     }
   }, [searchParams]);
 
-  const fetchSnapshot = async () => {
+  const fetchSnapshot = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/events/${eventSlug}/registration`);
@@ -69,11 +70,12 @@ export function EventRegistrationPanel({
     } finally {
       setLoading(false);
     }
-  };
+  }, [eventSlug]);
 
+  // Again when someone signs in or out, since the snapshot includes their own registration
   useEffect(() => {
     fetchSnapshot();
-  }, [eventSlug, userLoggedIn]);
+  }, [fetchSnapshot, userLoggedIn]);
 
   const handleAction = async (intent: "YES" | "NO") => {
     if (!userLoggedIn) return;
@@ -190,7 +192,6 @@ export function EventRegistrationPanel({
   const canRegister = snapshot.windowStatus === "OPEN" && (!isFull || snapshot.waitlistEnabled);
   const myStatus = snapshot.myStatus;
   const isPaidEvent = snapshot.registrationFeeCents != null && snapshot.registrationFeeCents > 0;
-  const formatPrice = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
   return (
     <div className="space-y-6">
@@ -251,7 +252,7 @@ export function EventRegistrationPanel({
                             {myStatus === "REGISTERED" ? "Registered" :
                             myStatus === "WAITLISTED" ? "On Waitlist" :
                             (isFull && snapshot.waitlistEnabled) ? "Join Waitlist" :
-                            isPaidEvent ? `Register — ${formatPrice(snapshot.registrationFeeCents!)}` :
+                            isPaidEvent ? `Register — ${formatCents(snapshot.registrationFeeCents!)}` :
                             "Attending"
                             }
                         </Button>

@@ -11,6 +11,9 @@ import {
 import { setSystemSetting, getSystemSetting, SETTINGS } from "@/lib/email/settings";
 import { NotificationChannel } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
+import type { ActionResult } from "@/lib/action-result";
+import { fromZonedTime } from "date-fns-tz";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
 
 export async function getNotificationStats() {
   await requireOfficer();
@@ -111,7 +114,7 @@ export async function retryFailedNotification(notificationId: string) {
   revalidatePath("/admin/notifications");
 }
 
-export async function sendCustomNotification(formData: FormData) {
+export async function sendCustomNotification(formData: FormData): Promise<ActionResult> {
   const user = await requireOfficer();
 
   const recipientType = formData.get("recipientType") as string;
@@ -133,20 +136,24 @@ export async function sendCustomNotification(formData: FormData) {
   if (sendEmail) channels.push("EMAIL");
 
   if (channels.length === 0) {
-    throw new Error("At least one channel must be selected");
+    return { ok: false, error: "Pick at least one channel: in-app, email or both." };
   }
 
-  if (!title || !body) {
-    throw new Error("Title and body are required");
+  if (!title?.trim() || !body?.trim()) {
+    return { ok: false, error: "Write a title and a message." };
   }
 
-  const scheduledDate = scheduledFor ? new Date(scheduledFor) : undefined;
+  // datetime-local has no zone; officers schedule in Central time, and the server runs in UTC
+  const scheduledDate = scheduledFor ? fromZonedTime(scheduledFor, DEFAULT_TIMEZONE) : undefined;
+  if (scheduledDate && Number.isNaN(scheduledDate.getTime())) {
+    return { ok: false, error: "Pick a valid date and time to schedule it." };
+  }
 
-  if ((recipientType === "single" || recipientType === "multiple") && userIdsJson) {
-    const userIds: string[] = JSON.parse(userIdsJson);
+  if (recipientType === "single" || recipientType === "multiple") {
+    const userIds: string[] = userIdsJson ? JSON.parse(userIdsJson) : [];
 
     if (userIds.length === 0) {
-      throw new Error("At least one recipient is required");
+      return { ok: false, error: "Search for and add at least one recipient." };
     }
 
     const targetUsers = await prisma.user.findMany({
@@ -203,9 +210,12 @@ export async function sendCustomNotification(formData: FormData) {
       after: { title, body, channels, scheduledFor: scheduledDate?.toISOString() },
       metadata: { recipientType: "all", recipientCount: users.length, actionUrl },
     });
+  } else {
+    return { ok: false, error: "Choose who to send it to." };
   }
 
   revalidatePath("/admin/notifications");
+  return { ok: true };
 }
 
 export async function getEmailSettings() {
