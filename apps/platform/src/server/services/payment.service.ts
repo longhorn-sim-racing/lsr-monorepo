@@ -722,9 +722,11 @@ type MembershipChange = {
 };
 
 async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
-  // Find payment by the payment_intent stored in providerRef
+  // Find payment by the payment_intent stored in providerRef. Without one, `providerRef: null`
+  // would match any payment that never got a Stripe reference.
+  if (typeof charge.payment_intent !== "string") return;
   const payment = await prisma.payment.findFirst({
-    where: { providerRef: charge.payment_intent as string },
+    where: { providerRef: charge.payment_intent },
   });
   if (!payment) return; // Not a payment we track
 

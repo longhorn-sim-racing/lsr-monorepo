@@ -5,7 +5,7 @@ import { ArrowRight, ArrowUpRight, Check, Download, FileText, Instagram, Mail, M
 import { Button } from "@/components/ui/button"
 import { CloudinaryImage } from "@/components/cloudinary-image"
 import { LogoTile } from "@/components/logo-tile"
-import { SPONSORS, GOLD_SPONSORS, sponsorHref, type Sponsor } from "@/lib/sponsors"
+import { SPONSORS, GOLD_SPONSORS, sponsorHref, type Sponsor, DONATE_URL, LSR_EIN } from "@/lib/sponsors"
 import { getClubStats } from "@/server/queries/club-stats"
 import { COMPARE, TIERS, tierIndex, type TierId } from "./tiers"
 import { CANONICAL_SITE_URL } from "@/lib/site-url"
@@ -20,7 +20,6 @@ export const metadata: Metadata = {
 
 const OUTREACH_EMAIL = "outreach@longhornsimracing.org"
 const PACKET_URL = "/SPONSOR_BENEFITS.pdf"
-const VENMO_URL = "https://www.paypal.com/qrcodes/venmocs/e3fd69ab-c345-4b53-add6-4f8037a4760d?created=1767404952.8381681&printed=1"
 
 function mailto(subject?: string) {
   return `mailto:${OUTREACH_EMAIL}${subject ? `?subject=${encodeURIComponent(subject)}` : ""}`
@@ -622,7 +621,7 @@ export default async function SponsorsPage() {
                 Tax <span className="text-lsr-orange">exemption</span>
               </h3>
               <p className="mt-4 font-sans text-sm text-white/65 leading-relaxed flex-1">
-                W-9 available upon request. All donors will receive a receipt for tax exemption as we are a 501(c)3 nonprofit organization.
+                LSR is a 501(c)(3) nonprofit (EIN {LSR_EIN}). Receipts and a W-9 are available on request.
               </p>
               <a
                 href={mailto("W-9 Request")}
@@ -659,20 +658,23 @@ export default async function SponsorsPage() {
               </dl>
             </div>
 
-            <div className="flex flex-col border border-white/10 bg-white/[0.02] p-6 md:p-8">
+            <div id="donate" className="flex flex-col scroll-mt-24 border border-white/10 bg-white/[0.02] p-6 md:p-8">
               <h3 className="font-display font-black italic text-2xl text-white uppercase tracking-normal">
                 To <span className="text-lsr-orange">donate</span>
               </h3>
-              <p className="mt-4 font-sans text-sm text-white/65 leading-relaxed flex-1">
-                Please make a donation through Venmo or make a check payable to:{" "}
-                <span className="text-white font-bold">Longhorn Sim Racing</span>
-              </p>
+              <div className="mt-4 flex-1 space-y-3 font-sans text-sm text-white/65 leading-relaxed">
+                <p>
+                  Give any amount online through Stripe, or make a check payable to:{" "}
+                  <span className="text-white font-bold">Longhorn Sim Racing</span>
+                </p>
+                <p className="text-xs text-white/50">Donations are tax-deductible to the extent allowed by law.</p>
+              </div>
               <Button
                 asChild
                 className="mt-6 w-full sm:w-fit rounded-none border border-white/15 bg-transparent text-white hover:bg-white hover:text-lsr-charcoal font-bold uppercase tracking-widest text-[10px] h-11 px-6 transition-all"
               >
-                <a href={VENMO_URL} target="_blank" rel="noopener noreferrer">
-                  Donate via Venmo
+                <a href={DONATE_URL} target="_blank" rel="noopener noreferrer">
+                  Donate online
                   <ArrowUpRight className="w-3.5 h-3.5 ml-2" />
                 </a>
               </Button>
