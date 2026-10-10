@@ -24,7 +24,14 @@ type UserResult = {
   handle: string;
 };
 
-export function NotificationComposer() {
+export function NotificationComposer({
+  emailUsage,
+  keptForReceipts,
+}: {
+  emailUsage: { sentToday: number; dailyLimit: number | null };
+  keptForReceipts: number;
+}) {
+  const [scheduled, setScheduled] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [recipientType, setRecipientType] = useState<"single" | "multiple" | "all">("single");
   const [selectedUsers, setSelectedUsers] = useState<UserResult[]>([]);
@@ -81,9 +88,14 @@ export function NotificationComposer() {
           toast.error(result.error);
           return;
         }
-        const count = recipientType === "all" ? "all members" : `${selectedUsers.length} user(s)`;
-        toast.success(`Notification sent to ${count}`);
+        const { scheduled: wasScheduled, recipients, emailsSent, emailsFailed } = result.data;
+        const who = recipientType === "all" ? "all members" : `${recipients} ${recipients === 1 ? "member" : "members"}`;
+        if (wasScheduled) toast.success(`Scheduled for ${who}`);
+        else if (emailsFailed > 0) {
+          toast.warning(`Sent to ${who}, but ${emailsFailed} of ${emailsSent + emailsFailed} emails failed. Check Activity before resending.`);
+        } else toast.success(`Sent to ${who}${emailsSent ? ` (${emailsSent} ${emailsSent === 1 ? "email" : "emails"})` : ""}`);
         form.reset();
+        setScheduled(false);
         setSelectedUsers([]);
         setSearchQuery("");
       } catch (error) {
@@ -259,6 +271,32 @@ export function NotificationComposer() {
               </Label>
             </div>
           </div>
+          {sendEmail && (
+            <div className="space-y-2 text-xs text-white/50">
+              {emailUsage.dailyLimit === null ? (
+                <p>{emailUsage.sentToday} emails sent today. This email plan has no daily limit.</p>
+              ) : (
+                <p>
+                  {emailUsage.sentToday} of {emailUsage.dailyLimit} daily emails sent today; the limit resets at 7 pm Central (6 pm
+                  in winter). An immediate send that would go over is stopped first, keeping {keptForReceipts} for confirmations and receipts.
+                  Scheduled sends aren&apos;t checked.
+                </p>
+              )}
+              {emailUsage.dailyLimit !== null && !scheduled && (
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id="sendAnyway"
+                    name="sendAnyway"
+                    className="mt-0.5 rounded-none border-white/30 data-[state=checked]:bg-lsr-orange data-[state=checked]:border-lsr-orange"
+                  />
+                  <Label htmlFor="sendAnyway" className="cursor-pointer text-xs leading-relaxed text-white/70">
+                    Send anyway, even if it goes over. Resend refuses emails past the limit, so some members may not get it, and
+                    confirmations and receipts won&apos;t go out until the reset.
+                  </Label>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Title */}
@@ -334,6 +372,7 @@ export function NotificationComposer() {
           <Input
             id="scheduledFor"
             name="scheduledFor"
+            onChange={(e) => setScheduled(e.target.value !== "")}
             type="datetime-local"
             className="rounded-none bg-white/5 border-white/10 text-white"
           />

@@ -1,9 +1,12 @@
 import { prisma } from "@/server/db";
 import { NotificationChannel, Prisma } from "@prisma/client";
-import { sendEmail, type SendEmailResult } from "@/lib/email/resend";
+import { sendEmail, sendBatchEmails, MAX_BATCH_EMAILS, type SendEmailParams, type SendEmailResult } from "@/lib/email/resend";
 import { getEmailTemplate } from "@/lib/email/templates";
+import { randomUUID } from "node:crypto";
 import { subHours, subMinutes } from "date-fns";
 import { getSiteUrl } from "@/lib/site-url";
+
+type NotificationWithUser = Prisma.NotificationGetPayload<{ include: { user: true } }>;
 
 export type NotificationType =
   | "REGISTRATION_CONFIRMED"
@@ -84,8 +87,13 @@ export async function sendNotification({
   }
 }
 
+/** Rows created per channel; for an immediate send, how many emails Resend took and how many failed */
+export type BulkSendCounts = { inApp: number; emails: number; emailsSent: number; emailsFailed: number };
+
 /**
- * Send notification to multiple users.
+ * Send notification to multiple users. Rows are created in one query, and the emails go out
+ * through Resend's batch API (up to 100 per call) instead of one call per member.
+ * Returns how many rows were created for each channel.
  */
 export async function sendBulkNotification({
   userIds,
@@ -96,19 +104,75 @@ export async function sendBulkNotification({
   metadata,
   channels,
   scheduledFor,
-}: Omit<SendNotificationParams, "userId" | "receipt"> & { userIds: string[] }): Promise<void> {
-  for (const userId of userIds) {
-    await sendNotification({
-      userId,
-      type,
-      title,
-      body,
-      actionUrl,
-      metadata,
-      channels,
-      scheduledFor,
-    });
+}: Omit<SendNotificationParams, "userId" | "receipt"> & { userIds: string[] }): Promise<BulkSendCounts> {
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, marketingOptIn: true, notificationPrefs: true },
+  });
+
+  // Unscheduled rows are created already claimed (SENT), so no other path can pick one up before
+  // this one delivers it; an email's sentAt waits for Resend, as in claimNotification.
+  const now = new Date();
+  const rows: Prisma.NotificationCreateManyInput[] = [];
+  for (const user of users) {
+    for (const channel of channels) {
+      if (channel === "EMAIL" && !shouldSendEmail(user, type)) continue;
+      rows.push({
+        userId: user.id,
+        channel,
+        type,
+        title,
+        body,
+        actionUrl,
+        metadata: metadata as Prisma.InputJsonValue,
+        status: scheduledFor ? "PENDING" : "SENT",
+        sentAt: scheduledFor || channel === "EMAIL" ? null : now,
+        scheduledFor,
+      });
+    }
   }
+  if (rows.length === 0) return { inApp: 0, emails: 0, emailsSent: 0, emailsFailed: 0 };
+
+  const created = await prisma.notification.createManyAndReturn({ data: rows, include: { user: true } });
+  const emails = created.filter((n) => n.channel === "EMAIL");
+  const delivered = scheduledFor ? { sent: 0, failed: 0 } : await deliverEmails(emails);
+
+  return { inApp: created.length - emails.length, emails: emails.length, emailsSent: delivered.sent, emailsFailed: delivered.failed };
+}
+
+/** How many of these users would get an email of this type, after their email settings */
+export async function countEmailRecipients(userIds: string[], type: NotificationType): Promise<number> {
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { marketingOptIn: true, notificationPrefs: true },
+  });
+  return users.filter((user) => shouldSendEmail(user, type)).length;
+}
+
+/**
+ * Resend's daily email limit: 100 on the free plan. Set RESEND_DAILY_LIMIT for another plan,
+ * or "none" (or 0) for a plan without one.
+ */
+function dailyEmailLimit(): number | null {
+  const raw = process.env.RESEND_DAILY_LIMIT?.trim().toLowerCase();
+  if (!raw) return 100;
+  if (raw === "none" || raw === "0") return null;
+  const limit = Number(raw);
+  return Number.isInteger(limit) && limit > 0 ? limit : 100;
+}
+
+/**
+ * Emails sent today against Resend's daily limit. Resend's day is the UTC day (it resets at
+ * 7 pm Central, 6 pm in winter). Counts the app's own emails, so other mail on the account
+ * can make the real number higher.
+ */
+export async function getEmailUsage(): Promise<{ sentToday: number; dailyLimit: number | null }> {
+  const startOfUtcDay = new Date();
+  startOfUtcDay.setUTCHours(0, 0, 0, 0);
+  const sentToday = await prisma.notification.count({
+    where: { channel: "EMAIL", emailMessageId: { not: null }, sentAt: { gte: startOfUtcDay } },
+  });
+  return { sentToday, dailyLimit: dailyEmailLimit() };
 }
 
 // Announcement-style emails: these also need the marketing opt-in. Everything else is about
@@ -202,9 +266,7 @@ export async function processUserNotifications(userId: string): Promise<void> {
     include: { user: true },
   });
 
-  for (const notification of notifications) {
-    await processNotification(notification);
-  }
+  await processNotifications(notifications);
 }
 
 /**
@@ -220,18 +282,9 @@ export async function processScheduledNotifications(): Promise<number> {
     take: 100, // Process in batches
   });
 
-  let processed = 0;
-  for (const notification of notifications) {
-    if (await processNotification(notification)) processed++;
-  }
-
-  return processed;
+  return processNotifications(notifications);
 }
 
-/**
- * Retry unscheduled notifications whose immediate send never happened (for cron job).
- * Only rows created between UNSCHEDULED_RETRY_AFTER_MINUTES and UNSCHEDULED_MAX_AGE_HOURS ago.
- */
 /**
  * An email row is claimed (PENDING → SENT, sentAt null) before Resend is called. If the
  * function died before Resend answered, mark it FAILED so it shows up for a retry
@@ -246,11 +299,18 @@ export async function failInterruptedEmails(): Promise<number> {
       emailMessageId: null,
       updatedAt: { lt: subMinutes(new Date(), INTERRUPTED_EMAIL_AFTER_MINUTES) },
     },
-    data: { status: "FAILED", emailError: "Interrupted before the send was confirmed; retry to resend." },
+    data: {
+      status: "FAILED",
+      emailError: "Interrupted before the send was confirmed, so it may have gone out. Check with the member before retrying.",
+    },
   });
   return count;
 }
 
+/**
+ * Retry unscheduled notifications whose immediate send never happened (for cron job).
+ * Only rows created between UNSCHEDULED_RETRY_AFTER_MINUTES and UNSCHEDULED_MAX_AGE_HOURS ago.
+ */
 export async function processStuckNotifications(): Promise<number> {
   const now = new Date();
   const notifications = await prisma.notification.findMany({
@@ -267,78 +327,139 @@ export async function processStuckNotifications(): Promise<number> {
     take: 100, // Process in batches
   });
 
-  let processed = 0;
-  for (const notification of notifications) {
-    if (await processNotification(notification)) processed++;
-  }
-
-  return processed;
+  return processNotifications(notifications);
 }
 
 /**
- * Process a single notification. It's claimed first with a conditional PENDING → SENT
- * update, so when two paths pick up the same row (the user's own flush and the cron
- * retry) only one delivers it. Returns false when another path already claimed it.
+ * Claim each notification, then send the claimed emails in batches. Returns how many were claimed.
  */
-async function processNotification(
-  notification: Prisma.NotificationGetPayload<{ include: { user: true } }>
-): Promise<boolean> {
+async function processNotifications(notifications: NotificationWithUser[]): Promise<number> {
+  const claimedEmails: NotificationWithUser[] = [];
+  let claimed = 0;
+  for (const notification of notifications) {
+    if (!(await claimNotification(notification))) continue;
+    claimed++;
+    if (notification.channel === "EMAIL") claimedEmails.push(notification);
+  }
+  await deliverEmails(claimedEmails);
+  return claimed;
+}
+
+/**
+ * Claim a notification with a conditional PENDING → SENT update, so when two paths pick up the
+ * same row (the user's own flush and the cron retry) only one delivers it. Returns false when
+ * another path already claimed it. In-app notifications are delivered by this update.
+ */
+async function claimNotification(notification: NotificationWithUser): Promise<boolean> {
   const { count } = await prisma.notification.updateMany({
     where: { id: notification.id, status: "PENDING" },
     // IN_APP notifications are delivered by this update; an email's sentAt waits for Resend.
     data: { status: "SENT", sentAt: notification.channel === "EMAIL" ? null : new Date() },
   });
-  if (count === 0) return false;
-
-  if (notification.channel === "EMAIL") {
-    await processEmailNotification(notification);
-  }
-  return true;
+  return count > 0;
 }
 
+// A short pause between batch calls, well inside Resend's rate limit
+const BATCH_PAUSE_MS = 600;
+// Result writes run this many at a time, so a small serverless connection pool doesn't time out
+const RESULT_WRITE_CONCURRENCY = 10;
+
+/** Emails kept back from officer sends so registration confirmations and receipts still go out that day */
+export const TRANSACTIONAL_HEADROOM = 10;
+
 /**
- * Process an email notification (already claimed by processNotification).
+ * Send claimed email notifications: one Resend call for a single email, batch calls of up to
+ * MAX_BATCH_EMAILS otherwise. Each row ends SENT with its message id, or FAILED (retryable).
+ * Never throws once anything may have gone out, so callers can't mistake a sent email for a failed one.
  */
-async function processEmailNotification(
-  notification: Prisma.NotificationGetPayload<{ include: { user: true } }>
-): Promise<void> {
-  // For emails, relative actionUrls need a full base URL (unlike in-app where Next.js handles it)
+async function deliverEmails(notifications: NotificationWithUser[]): Promise<{ sent: number; failed: number }> {
+  let sentCount = 0;
+  let failedCount = 0;
+  for (let start = 0; start < notifications.length; start += MAX_BATCH_EMAILS) {
+    if (start > 0) await new Promise((resolve) => setTimeout(resolve, BATCH_PAUSE_MS));
+    const chunk = notifications.slice(start, start + MAX_BATCH_EMAILS);
+
+    const results = new Map<string, SendEmailResult>();
+    const ready: { id: string; email: SendEmailParams }[] = [];
+    for (const notification of chunk) {
+      try {
+        ready.push({ id: notification.id, email: buildEmail(notification) });
+      } catch (error) {
+        // Claimed but not sent: mark it FAILED (retryable by an officer) instead of leaving it SENT.
+        console.error(`[Notification] Email ${notification.id} threw before sending:`, error);
+        results.set(notification.id, { success: false, error: String(error) });
+      }
+    }
+
+    // A fresh key per attempt: the email service's own retries can't duplicate a send, while an
+    // officer's later retry is a new attempt that still goes out
+    const idempotencyKey = `notifications-${randomUUID()}`;
+    let sent: SendEmailResult[];
+    try {
+      sent =
+        ready.length === 1
+          ? [await sendEmail(ready[0].email, { idempotencyKey })]
+          : ready.length > 1
+            ? await sendBatchEmails(
+                ready.map((r) => r.email),
+                { idempotencyKey }
+              )
+            : [];
+    } catch (error) {
+      // Thrown before Resend was called (the email service handles its own network errors), so
+      // nothing in this chunk went out; earlier chunks may have, so carry on rather than throw
+      console.error("[Notification] Couldn't send a batch of emails:", error);
+      sent = ready.map(() => ({ success: false, error: `Not sent: ${error instanceof Error ? error.message : String(error)}` }));
+    }
+    ready.forEach((r, i) => results.set(r.id, sent[i] ?? { success: false, error: "No result from the email service" }));
+
+    // Independent writes: one failure must not undo the record of emails that went out. A row whose
+    // write fails stays claimed, and failInterruptedEmails flags it later as possibly sent.
+    const sentAt = new Date();
+    const writes: PromiseSettledResult<unknown>[] = [];
+    for (let i = 0; i < chunk.length; i += RESULT_WRITE_CONCURRENCY) {
+      const group = chunk.slice(i, i + RESULT_WRITE_CONCURRENCY);
+      writes.push(
+        ...(await Promise.allSettled(
+          group.map((notification) => {
+            const result = results.get(notification.id)!;
+            if (result.success) sentCount++;
+            else failedCount++;
+            return prisma.notification.update({
+              where: { id: notification.id },
+              data: {
+                status: result.success ? "SENT" : "FAILED",
+                sentAt: result.success ? sentAt : null,
+                emailMessageId: result.messageId,
+                emailError: result.error,
+              },
+            });
+          })
+        ))
+      );
+    }
+    const unrecorded = writes.filter((w): w is PromiseRejectedResult => w.status === "rejected");
+    if (unrecorded.length) {
+      console.error(`[Notification] Couldn't record ${unrecorded.length} email results:`, unrecorded[0].reason);
+    }
+  }
+  return { sent: sentCount, failed: failedCount };
+}
+
+/** The email for a notification; relative action links get the site's base URL */
+function buildEmail(notification: NotificationWithUser): SendEmailParams {
   let actionUrl = notification.actionUrl ?? undefined;
   if (actionUrl && actionUrl.startsWith("/")) {
     actionUrl = `${getSiteUrl()}${actionUrl}`;
   }
-
-  let result: SendEmailResult;
-  try {
-    const template = getEmailTemplate({
-      type: notification.type,
-      title: notification.title,
-      body: notification.body,
-      actionUrl,
-      metadata: notification.metadata as Record<string, unknown> | undefined,
-    });
-
-    result = await sendEmail({
-      to: notification.user.email,
-      subject: notification.title,
-      html: template.html,
-      text: template.text,
-    });
-  } catch (error) {
-    // Claimed but not sent: mark it FAILED (retryable by an officer) instead of leaving it SENT.
-    console.error(`[Notification] Email ${notification.id} threw before sending:`, error);
-    result = { success: false, error: String(error) };
-  }
-
-  await prisma.notification.update({
-    where: { id: notification.id },
-    data: {
-      status: result.success ? "SENT" : "FAILED",
-      sentAt: result.success ? new Date() : null,
-      emailMessageId: result.messageId,
-      emailError: result.error,
-    },
+  const template = getEmailTemplate({
+    type: notification.type,
+    title: notification.title,
+    body: notification.body,
+    actionUrl,
+    metadata: notification.metadata as Record<string, unknown> | undefined,
   });
+  return { to: notification.user.email, subject: notification.title, html: template.html, text: template.text };
 }
 
 /**
@@ -373,7 +494,7 @@ export async function retryNotification(notificationId: string): Promise<void> {
     },
   });
 
-  await processNotification(notification);
+  await processNotifications([notification]);
 }
 
 /**
