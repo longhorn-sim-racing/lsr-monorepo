@@ -8,7 +8,7 @@ import { formatPostDate, PostCard } from "../post-card"
 import { Metadata } from "next"
 import { DatabaseUnavailable } from "@/components/database-unavailable"
 import { isViewerOfficer } from "@/server/auth/guards"
-import { CANONICAL_SITE_URL } from "@/lib/site-url";
+import { CANONICAL_SITE_URL } from "@/lib/site-url"
 
 // Per request, not ISR: an officer's draft preview must never be cached for everyone else.
 export const dynamic = "force-dynamic";
