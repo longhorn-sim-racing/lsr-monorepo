@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   },
 }
 
-const LAST_UPDATED = "May 16, 2026"
+const LAST_UPDATED = "October 10, 2026"
 const EFFECTIVE_DATE = "May 16, 2026"
 const CONTACT_EMAIL = "info@longhornsimracing.org"
 
@@ -260,8 +260,8 @@ export default function TermsPage() {
           <Section id="payments" title="7. Payments, Refunds, and Donations">
             <SubSection title="7.1 Payment processors">
               <P>
-                Paid event registrations are processed through Stripe. Sponsorship and donation
-                payments may be processed through Venmo, PayPal, Stripe, or other providers we
+                Paid event registrations and online donations are processed through Stripe.
+                Sponsorship payments may also be made by check or through other providers we
                 identify at the time of the transaction. Your use of these processors is subject
                 to their own terms and privacy policies. We do not receive or store your full
                 payment card information.

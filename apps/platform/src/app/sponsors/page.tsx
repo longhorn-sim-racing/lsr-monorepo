@@ -20,7 +20,8 @@ export const metadata: Metadata = {
 
 const OUTREACH_EMAIL = "outreach@longhornsimracing.org"
 const PACKET_URL = "/SPONSOR_BENEFITS.pdf"
-const VENMO_URL = "https://www.paypal.com/qrcodes/venmocs/e3fd69ab-c345-4b53-add6-4f8037a4760d?created=1767404952.8381681&printed=1"
+// Stripe Payment Link (donor chooses the amount); the webhook ignores sessions it didn't create
+const DONATE_URL = "https://donate.stripe.com/14AeVceMOd4eg8Zbadew800"
 
 function mailto(subject?: string) {
   return `mailto:${OUTREACH_EMAIL}${subject ? `?subject=${encodeURIComponent(subject)}` : ""}`
@@ -663,16 +664,21 @@ export default async function SponsorsPage() {
               <h3 className="font-display font-black italic text-2xl text-white uppercase tracking-normal">
                 To <span className="text-lsr-orange">donate</span>
               </h3>
-              <p className="mt-4 font-sans text-sm text-white/65 leading-relaxed flex-1">
-                Please make a donation through Venmo or make a check payable to:{" "}
-                <span className="text-white font-bold">Longhorn Sim Racing</span>
-              </p>
+              <div className="mt-4 flex-1 space-y-3 font-sans text-sm text-white/65 leading-relaxed">
+                <p>
+                  Give any amount online through Stripe, or make a check payable to:{" "}
+                  <span className="text-white font-bold">Longhorn Sim Racing</span>
+                </p>
+                <p className="text-xs text-white/50">
+                  LSR is a 501(c)(3) nonprofit (EIN 39-2193405), so donations are tax-deductible to the extent allowed by law.
+                </p>
+              </div>
               <Button
                 asChild
                 className="mt-6 w-full sm:w-fit rounded-none border border-white/15 bg-transparent text-white hover:bg-white hover:text-lsr-charcoal font-bold uppercase tracking-widest text-[10px] h-11 px-6 transition-all"
               >
-                <a href={VENMO_URL} target="_blank" rel="noopener noreferrer">
-                  Donate via Venmo
+                <a href={DONATE_URL} target="_blank" rel="noopener noreferrer">
+                  Donate online
                   <ArrowUpRight className="w-3.5 h-3.5 ml-2" />
                 </a>
               </Button>

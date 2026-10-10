@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   },
 }
 
-const LAST_UPDATED = "May 16, 2026"
+const LAST_UPDATED = "October 10, 2026"
 const EFFECTIVE_DATE = "May 16, 2026"
 const CONTACT_EMAIL = "info@longhornsimracing.org"
 
@@ -162,8 +162,9 @@ export default function PrivacyPage() {
                   amount, status, and timestamp &mdash; not your full payment card number.
                 </li>
                 <li>
-                  Sponsorship donations made via Venmo or PayPal are processed by those services;
-                  we do not receive your payment card information.
+                  Online donations are processed by Stripe, the same way; we receive only the
+                  amount, the transaction reference, and the name and email you give Stripe, not
+                  your payment card information.
                 </li>
               </UL>
             </SubSection>
