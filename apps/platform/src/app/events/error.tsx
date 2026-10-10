@@ -10,12 +10,12 @@ export default function EventsError({ error, reset }: { error: Error & { digest?
       kicker="Events"
       title={
         <>
-          Couldn&apos;t load <span className="text-lsr-orange">this event</span>
+          Couldn&apos;t load <span className="text-lsr-orange">events</span>
         </>
       }
-      back={{ href: "/events", label: "All events" }}
+      back={{ href: "/", label: "Back to the homepage" }}
     >
-      <p>Something broke on our side while loading the schedule. Your registrations are safe; try again in a moment.</p>
+      <p>Something broke on our side while loading this page. Your registrations are safe; try again in a moment.</p>
     </RouteError>
   )
 }

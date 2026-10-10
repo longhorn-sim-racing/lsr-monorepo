@@ -16,6 +16,7 @@ import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { getRoster, type Roster as RosterData, type RosterDriver } from "@/server/queries/roster";
 import { Roster } from "./roster";
 import { initials } from "./names";
+import { CANONICAL_SITE_URL } from "@/lib/site-url";
 
 export const dynamic = "force-dynamic";
 
@@ -380,7 +381,7 @@ export default async function DriversIndexPage() {
     itemListElement: drivers.map((driver, i) => ({
       "@type": "ListItem",
       position: i + 1,
-      url: `https://www.longhornsimracing.org/drivers/${driver.handle}`,
+      url: `${CANONICAL_SITE_URL}/drivers/${driver.handle}`,
       name: driver.displayName,
     })),
   };

@@ -18,7 +18,6 @@ export type EntryState =
       isReturning: boolean
     }
 
-
 const primary =
   "h-auto min-h-12 rounded-none bg-lsr-orange px-7 py-3 font-sans text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-white hover:text-lsr-charcoal"
 

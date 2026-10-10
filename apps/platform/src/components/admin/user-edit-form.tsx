@@ -13,6 +13,7 @@ import { updateUser, type UpdateUserPayload } from "@/server/actions/users";
 import { useRouter } from "next/navigation";
 import { format, addMonths } from "date-fns";
 import { Loader2 } from "lucide-react";
+import { unexpectedError } from "@/lib/action-result";
 
 type FullUser = User & {
     officerTitle: string | null;
@@ -92,7 +93,7 @@ export function UserEditForm({ user, allRoles, allTiers }: UserEditFormProps) {
                 router.refresh();
             } catch (error) {
                 console.error(error);
-                toast.error("Couldn't save the user. Check your connection and try again.");
+                toast.error(unexpectedError(error, "Couldn't save the user"));
             }
         });
     };

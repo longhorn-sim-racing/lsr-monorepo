@@ -42,6 +42,7 @@ import {
 import { uploadResult } from "@/app/admin/results/actions";
 import { type RawResultUpload, type User, type Event } from "@prisma/client";
 import { cn } from "@/lib/utils";
+import { unexpectedError } from "@/lib/action-result";
 
 type ResultWithUser = RawResultUpload & {
   uploadedBy: User;
@@ -89,7 +90,7 @@ export function ResultsAdminClient({
       }
     } catch (error) {
       console.error(error);
-      setError("Something went wrong. Check your connection and try again.");
+      setError(unexpectedError(error, "Couldn't upload the file"));
     } finally {
       setIsUploading(false);
       form.reset();

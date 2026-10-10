@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { setRacingNumberAction } from "@/server/actions/racing-number";
 import { toast } from "sonner";
 import { RACING_NUMBER_FONTS, type RacingNumberStyle } from "@/lib/racing-number";
+import { unexpectedError } from "@/lib/action-result";
 
 export type { RacingNumberStyle } from "@/lib/racing-number";
 
@@ -80,7 +81,7 @@ export function RacingNumberDialog({
       router.refresh();
     } catch (err) {
       console.error(err);
-      toast.error("Couldn't save your number. Check your connection and try again.");
+      toast.error(unexpectedError(err, "Couldn't save your number"));
     } finally {
       setLoading(false);
     }

@@ -24,6 +24,7 @@ import { getAllTimeLeaders } from "@/server/queries/roster"
 import { getLoneStarCupSnapshot } from "@/server/queries/lone-star-cup"
 import { getGalleryHighlights } from "@/server/queries/gallery"
 import { getInstagramFeed } from "@/server/queries/instagram"
+import { CANONICAL_SITE_URL } from "@/lib/site-url"
 
 export const dynamic = "force-dynamic"
 
@@ -188,7 +189,7 @@ export default async function Home() {
     "@type": "WebSite",
     name: "Longhorn Sim Racing",
     alternateName: "LSR",
-    url: "https://www.longhornsimracing.org/",
+    url: `${CANONICAL_SITE_URL}/`,
   }
 
   return (

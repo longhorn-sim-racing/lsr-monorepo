@@ -19,8 +19,13 @@ export async function GET() {
   let posts: Awaited<ReturnType<typeof getAllPosts>>
   try {
     posts = await getAllPosts()
-  } catch {
-    posts = []
+  } catch (error) {
+    // Not an empty 200: feed readers would drop every item, and the CDN would keep it
+    console.error("[rss] Failed to load posts:", error)
+    return new Response("The news feed is temporarily unavailable.", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "120" },
+    })
   }
 
   const items = posts

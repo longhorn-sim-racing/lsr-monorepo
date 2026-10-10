@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils"
 import type { ScheduleEvent } from "@/server/queries/schedule"
 import { formatCentsShort } from "@/lib/money"
 
-
 export function EventTitle({ event }: { event: ScheduleEvent }) {
   if (!event.round) return <>{event.title}</>
   return (

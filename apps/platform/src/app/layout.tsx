@@ -89,7 +89,7 @@ const organizationJsonLd = {
   name: "Longhorn Sim Racing",
   alternateName: "LSR",
   url: CANONICAL_SITE_URL,
-  logo: "https://www.longhornsimracing.org/brand/logos/black_logo_white_square.png",
+  logo: `${CANONICAL_SITE_URL}/brand/logos/black_logo_white_square.png`,
   description:
     "UT Austin's premier sim racing organization. Events, drivers, race results, and championship series.",
   sport: "Sim Racing",

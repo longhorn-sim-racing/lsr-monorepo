@@ -27,7 +27,6 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-
 function Shell({ kicker, children }: { kicker: string; children: React.ReactNode }) {
   return (
     <div className="bg-lsr-charcoal text-white min-h-screen">

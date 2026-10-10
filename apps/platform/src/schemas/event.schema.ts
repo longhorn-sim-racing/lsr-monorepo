@@ -114,7 +114,7 @@ export function parseEventForm(formData: FormData) {
   const startsAtUtc = zoned(f.startsAtUtc, f.timezone);
   const endsAtUtc = zoned(f.endsAtUtc, f.timezone);
   if (!startsAtUtc || !endsAtUtc) problems.push("The start or end time isn't a valid date");
-  else if (endsAtUtc <= startsAtUtc) problems.push("The event must end after it starts");
+  else if (endsAtUtc < startsAtUtc) problems.push("The event can't end before it starts");
 
   const registrationOpensAt = zoned(f.registrationOpensAt, f.timezone);
   const registrationClosesAt = zoned(f.registrationClosesAt, f.timezone);

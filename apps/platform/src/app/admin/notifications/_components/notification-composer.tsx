@@ -15,6 +15,7 @@ import {
 import { Send, User, Users, Search, Loader2, X, UserPlus } from "lucide-react";
 import { sendCustomNotification, searchUsers } from "../actions";
 import { toast } from "sonner";
+import { unexpectedError } from "@/lib/action-result";
 
 type UserResult = {
   id: string;
@@ -85,8 +86,9 @@ export function NotificationComposer() {
         form.reset();
         setSelectedUsers([]);
         setSearchQuery("");
-      } catch {
-        toast.error("Couldn't send the notification. Check your connection and try again.");
+      } catch (error) {
+        console.error(error);
+        toast.error(unexpectedError(error, "Couldn't send the notification"));
       }
     });
   };
@@ -327,7 +329,7 @@ export function NotificationComposer() {
             htmlFor="scheduledFor"
             className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60"
           >
-            Schedule For (Optional)
+            Schedule For, Central Time (Optional)
           </Label>
           <Input
             id="scheduledFor"

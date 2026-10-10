@@ -12,6 +12,8 @@ import { setSystemSetting, getSystemSetting, SETTINGS } from "@/lib/email/settin
 import { NotificationChannel } from "@prisma/client";
 import { createAuditLog } from "@/server/audit/log";
 import type { ActionResult } from "@/lib/action-result";
+import { fromZonedTime } from "date-fns-tz";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
 
 export async function getNotificationStats() {
   await requireOfficer();
@@ -141,7 +143,11 @@ export async function sendCustomNotification(formData: FormData): Promise<Action
     return { ok: false, error: "Write a title and a message." };
   }
 
-  const scheduledDate = scheduledFor ? new Date(scheduledFor) : undefined;
+  // datetime-local has no zone; officers schedule in Central time, and the server runs in UTC
+  const scheduledDate = scheduledFor ? fromZonedTime(scheduledFor, DEFAULT_TIMEZONE) : undefined;
+  if (scheduledDate && Number.isNaN(scheduledDate.getTime())) {
+    return { ok: false, error: "Pick a valid date and time to schedule it." };
+  }
 
   if (recipientType === "single" || recipientType === "multiple") {
     const userIds: string[] = userIdsJson ? JSON.parse(userIdsJson) : [];

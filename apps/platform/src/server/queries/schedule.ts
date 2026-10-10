@@ -2,10 +2,9 @@ import { EventStatus } from "@prisma/client"
 import { prisma } from "@/server/db"
 import { publicEventWhere, isEventLive } from "@/lib/events"
 import { publicUserSelect } from "@/lib/public-user"
-import { DEFAULT_TIMEZONE } from "@/lib/dates"
 import { parseRoundTitle } from "@/lib/rounds"
 import { slugify } from "@/lib/slug"
-import { zoneLabel } from "@/lib/dates"
+import { DEFAULT_TIMEZONE, zoneLabel } from "@/lib/dates"
 
 /**
  * One event on the public schedule. Everything here ends up in the page's HTML, so public fields

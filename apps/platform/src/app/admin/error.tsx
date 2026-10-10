@@ -1,11 +1,15 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useTransition } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { AlertTriangle } from "lucide-react"
 
 // Renders inside the admin layout, so the sidebar stays and officers can go elsewhere
 export default function AdminError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  const router = useRouter()
+  const [retrying, startRetry] = useTransition()
+
   useEffect(() => {
     console.error(error)
   }, [error])
@@ -17,16 +21,18 @@ export default function AdminError({ error, reset }: { error: Error & { digest?:
         <div className="min-w-0">
           <h1 className="text-base font-bold text-white">This admin page hit an error</h1>
           <p className="mt-1 text-sm leading-relaxed text-white/70">
-            Try again, or open another section from the sidebar. If it keeps happening, send the reference below to the Tech Team.
+            Try again, or open another section from the sidebar.
+            {error.digest ? " If it keeps happening, send the reference below to the Tech Team." : " If it keeps happening, tell the Tech Team what you were doing."}
           </p>
           {error.digest && <p className="mt-3 font-mono text-xs text-white/50">Reference: {error.digest}</p>}
           <div className="mt-5 flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => reset()}
+              disabled={retrying}
+              onClick={() => startRetry(() => { router.refresh(); reset() })}
               className="inline-flex h-9 items-center bg-lsr-orange px-4 text-xs font-bold uppercase tracking-wider text-white hover:bg-lsr-orange/90"
             >
-              Try again
+              {retrying ? "Trying again..." : "Try again"}
             </button>
             <Link
               href="/admin"

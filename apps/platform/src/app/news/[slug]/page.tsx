@@ -8,6 +8,7 @@ import { formatPostDate, PostCard } from "../post-card"
 import { Metadata } from "next"
 import { DatabaseUnavailable } from "@/components/database-unavailable"
 import { isViewerOfficer } from "@/server/auth/guards"
+import { CANONICAL_SITE_URL } from "@/lib/site-url";
 
 // Per request, not ISR: an officer's draft preview must never be cached for everyone else.
 export const dynamic = "force-dynamic";
@@ -116,13 +117,13 @@ export default async function NewsPostPage({
       name: "Longhorn Sim Racing",
       logo: {
         "@type": "ImageObject",
-        url: "https://www.longhornsimracing.org/brand/logos/black_logo_white_square.png",
+        url: `${CANONICAL_SITE_URL}/brand/logos/black_logo_white_square.png`,
       },
     },
     keywords: frontmatter.tags,
     mainEntityOfPage: {
       "@type": "WebPage",
-      "@id": `https://www.longhornsimracing.org/news/${slug}`,
+      "@id": `${CANONICAL_SITE_URL}/news/${slug}`,
     },
   };
 
@@ -130,9 +131,9 @@ export default async function NewsPostPage({
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.longhornsimracing.org/" },
-      { "@type": "ListItem", position: 2, name: "News", item: "https://www.longhornsimracing.org/news" },
-      { "@type": "ListItem", position: 3, name: frontmatter.title, item: `https://www.longhornsimracing.org/news/${slug}` },
+      { "@type": "ListItem", position: 1, name: "Home", item: `${CANONICAL_SITE_URL}/` },
+      { "@type": "ListItem", position: 2, name: "News", item: `${CANONICAL_SITE_URL}/news` },
+      { "@type": "ListItem", position: 3, name: frontmatter.title, item: `${CANONICAL_SITE_URL}/news/${slug}` },
     ],
   };
 

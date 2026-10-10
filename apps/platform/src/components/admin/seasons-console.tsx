@@ -16,6 +16,7 @@ import { deleteSeason, recomputeStandings } from "@/app/admin/seasons/actions";
 import { cn } from "@/lib/utils";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { toast } from "sonner";
+import { unexpectedError } from "@/lib/action-result";
 
 type SeasonWithSeries = Season & {
   series: EventSeries | null;
@@ -29,6 +30,7 @@ type SortField = "startAt" | "name" | "year";
 type SortDirection = "asc" | "desc";
 
 export function SeasonsConsole({ initialSeasons }: SeasonsConsoleProps) {
+  const [recomputingId, setRecomputingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState<SortField>("startAt");
   const [sortDir, setSortDir] = useState<SortDirection>("desc");
@@ -213,19 +215,28 @@ export function SeasonsConsole({ initialSeasons }: SeasonsConsoleProps) {
                         <form
                             onSubmit={async (e) => {
                                 e.preventDefault();
-                                const result = await recomputeStandings(season.id);
-                                if (result.ok) toast.success(`Standings recomputed for ${season.name}`);
-                                else toast.error(result.error);
+                                setRecomputingId(season.id);
+                                try {
+                                    const result = await recomputeStandings(season.id);
+                                    if (result.ok) toast.success(`Standings recomputed for ${season.name}`);
+                                    else toast.error(result.error);
+                                } catch (error) {
+                                    console.error(error);
+                                    toast.error(unexpectedError(error, "Couldn't recompute the standings"));
+                                } finally {
+                                    setRecomputingId(null);
+                                }
                             }}
                         >
                             <ConfirmSubmitButton
+                                disabled={recomputingId !== null}
                                 size="icon"
                                 variant="ghost"
                                 className="h-7 w-7 text-white/20 group-hover:text-white/70 hover:!text-blue-400 hover:bg-white/10 transition-colors"
                                 title="Recompute Standings"
                                 message="Are you sure you want to recompute standings for this season? This will recalculate all driver points based on race results."
                             >
-                                <RefreshCw size={14} />
+                                <RefreshCw size={14} className={recomputingId === season.id ? "animate-spin" : undefined} />
                             </ConfirmSubmitButton>
                         </form>
 

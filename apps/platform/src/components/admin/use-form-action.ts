@@ -16,6 +16,10 @@ export function useFormAction(action: (formData: FormData) => Promise<ActionResu
     e.preventDefault();
     const submitter = (e.nativeEvent as SubmitEvent).submitter;
     const formData = new FormData(e.currentTarget, submitter);
+    // Browsers before 2023 ignore the second argument; add the clicked button by hand
+    if (submitter instanceof HTMLButtonElement && submitter.name && !formData.has(submitter.name)) {
+      formData.set(submitter.name, submitter.value);
+    }
     setError(null);
     startTransition(async () => {
       const result = await action(formData);

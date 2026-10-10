@@ -22,7 +22,14 @@ export function EventForm({ event, series, venues }: { event?: Event, series: Ev
 
   return (
     <div className="max-w-5xl mx-auto font-mono text-sm border border-white/10 bg-white/[0.02] p-8 md:p-12 rounded-xl shadow-2xl">
-      <form onSubmit={onSubmit} className="space-y-16">
+      <form
+        onSubmit={onSubmit}
+        // Enter would submit with the first button, "Save as Draft", and un-publish the event; use the buttons
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && e.target instanceof HTMLInputElement) e.preventDefault();
+        }}
+        className="space-y-16"
+      >
         <input type="hidden" name="timezone" value={timezone} />
         
         {/* Basic Info */}

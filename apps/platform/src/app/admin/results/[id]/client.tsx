@@ -27,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { unexpectedError } from "@/lib/action-result";
 
 type ResultWithRelations = RawResultUpload & {
   uploadedBy: User;
@@ -69,7 +70,7 @@ export function ResultDetailClient({
       else setResult(parsed.data as ResultWithRelations);
     } catch (error) {
       console.error(error);
-      setError("Something went wrong. Check your connection and try again.");
+      setError(unexpectedError(error));
     } finally {
       setIsProcessing(false);
     }
@@ -95,7 +96,7 @@ export function ResultDetailClient({
           }));
       } catch (e) {
           console.error(e);
-          setError("Something went wrong. Check your connection and try again.");
+          setError(unexpectedError(e));
       } finally {
           setIsProcessing(false);
       }
@@ -126,7 +127,7 @@ export function ResultDetailClient({
           setResult(prev => ({ ...prev, status: "INGESTED" }));
       } catch (e) {
           console.error(e);
-          setError("Something went wrong. Check your connection and try again.");
+          setError(unexpectedError(e));
       } finally {
           clearInterval(interval);
           setTimeout(() => {
@@ -149,7 +150,7 @@ export function ResultDetailClient({
           router.push("/admin/results");
       } catch (e) {
           console.error(e);
-          setError("Something went wrong. Check your connection and try again.");
+          setError(unexpectedError(e));
           setIsProcessing(false);
       }
   };

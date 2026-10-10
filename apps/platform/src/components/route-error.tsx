@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useTransition } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { StatusScreen, statusPrimary, statusSecondary } from "@/components/status-screen"
 
 /**
@@ -25,6 +26,9 @@ export function RouteError({
   children: React.ReactNode
   back: { href: string; label: string }
 }) {
+  const router = useRouter()
+  const [retrying, startRetry] = useTransition()
+
   useEffect(() => {
     console.error(error)
   }, [error])
@@ -36,8 +40,14 @@ export function RouteError({
       title={title}
       actions={
         <>
-          <button type="button" onClick={() => reset()} className={statusPrimary}>
-            Try again
+          {/* refresh() refetches the server data; reset() alone would re-render the payload that failed */}
+          <button
+            type="button"
+            disabled={retrying}
+            onClick={() => startRetry(() => { router.refresh(); reset() })}
+            className={statusPrimary}
+          >
+            {retrying ? "Trying again..." : "Try again"}
           </button>
           <Link href={back.href} className={statusSecondary}>
             {back.label}

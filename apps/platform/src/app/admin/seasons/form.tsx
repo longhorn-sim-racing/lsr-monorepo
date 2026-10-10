@@ -10,6 +10,7 @@ import { Season, EventSeries } from "@prisma/client";
 import { formatInTimeZone } from "date-fns-tz";
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import { toast } from "sonner";
+import { unexpectedError } from "@/lib/action-result";
 
 function SubmitButton({ isEditing }: { isEditing: boolean }) {
   const { pending } = useFormStatus();
@@ -43,9 +44,14 @@ export function SeasonForm({
   const handleRecompute = async () => {
       if(!initialData) return;
       if(confirm("Recompute standings for this season based on ingested results? This will overwrite manual edits to Entry stats.")) {
-          const result = await recomputeStandings(initialData.id);
-          if (result.ok) toast.success("Standings recomputed");
-          else toast.error(result.error);
+          try {
+              const result = await recomputeStandings(initialData.id);
+              if (result.ok) toast.success("Standings recomputed");
+              else toast.error(result.error);
+          } catch (error) {
+              console.error(error);
+              toast.error(unexpectedError(error, "Couldn't recompute the standings"));
+          }
       }
   }
 

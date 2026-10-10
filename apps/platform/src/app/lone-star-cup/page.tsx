@@ -27,7 +27,7 @@ import { seasonLabel, seasonTerm } from "@/lib/seasons";
 import { OFFICERS } from "@/app/about/roster";
 import { EntryCta, type EntryState } from "./entry-cta";
 import { LiveStream } from "./live-stream";
-import { formatCents } from "@/lib/money"
+import { formatCents } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 

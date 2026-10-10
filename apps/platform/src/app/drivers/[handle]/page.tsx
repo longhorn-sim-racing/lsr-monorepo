@@ -138,7 +138,7 @@ export default async function DriverProfilePage({ params }: { params: Promise<{ 
     "@type": "Person",
     name: user.displayName,
     alternateName: `@${user.handle}`,
-    url: `https://www.longhornsimracing.org/drivers/${user.handle}`,
+    url: `${CANONICAL_SITE_URL}/drivers/${user.handle}`,
     image: user.avatarUrl || undefined,
     description: user.bio || undefined,
     memberOf: { "@type": "SportsOrganization", name: "Longhorn Sim Racing", url: CANONICAL_SITE_URL },
@@ -148,9 +148,9 @@ export default async function DriverProfilePage({ params }: { params: Promise<{ 
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.longhornsimracing.org/" },
-      { "@type": "ListItem", position: 2, name: "Drivers", item: "https://www.longhornsimracing.org/drivers" },
-      { "@type": "ListItem", position: 3, name: user.displayName, item: `https://www.longhornsimracing.org/drivers/${user.handle}` },
+      { "@type": "ListItem", position: 1, name: "Home", item: `${CANONICAL_SITE_URL}/` },
+      { "@type": "ListItem", position: 2, name: "Drivers", item: `${CANONICAL_SITE_URL}/drivers` },
+      { "@type": "ListItem", position: 3, name: user.displayName, item: `${CANONICAL_SITE_URL}/drivers/${user.handle}` },
     ],
   };
   const jsonLd = (data: object) => JSON.stringify(data).replace(/</g, "\\u003c");

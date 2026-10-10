@@ -291,7 +291,7 @@ export default async function EventPage({ params }: EventPageArgs) {
     endDate: endsAt.toISOString(),
     eventStatus: statusMap[event.status] ?? "https://schema.org/EventScheduled",
     eventAttendanceMode: attendanceMode,
-    url: `https://www.longhornsimracing.org/events/${event.slug}`,
+    url: `${CANONICAL_SITE_URL}/events/${event.slug}`,
     image: event.heroImageUrl || undefined,
     location: venue
       ? {
@@ -307,7 +307,7 @@ export default async function EventPage({ params }: EventPageArgs) {
           },
         }
       : event.meetingUrl
-        ? { "@type": "VirtualLocation", url: `https://www.longhornsimracing.org/events/${event.slug}` }
+        ? { "@type": "VirtualLocation", url: `${CANONICAL_SITE_URL}/events/${event.slug}` }
         : undefined,
     organizer: {
       "@type": "SportsOrganization",
@@ -320,9 +320,9 @@ export default async function EventPage({ params }: EventPageArgs) {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.longhornsimracing.org/" },
-      { "@type": "ListItem", position: 2, name: "Events", item: "https://www.longhornsimracing.org/events" },
-      { "@type": "ListItem", position: 3, name: event.title, item: `https://www.longhornsimracing.org/events/${event.slug}` },
+      { "@type": "ListItem", position: 1, name: "Home", item: `${CANONICAL_SITE_URL}/` },
+      { "@type": "ListItem", position: 2, name: "Events", item: `${CANONICAL_SITE_URL}/events` },
+      { "@type": "ListItem", position: 3, name: event.title, item: `${CANONICAL_SITE_URL}/events/${event.slug}` },
     ],
   };
   const jsonLd = (data: object) => JSON.stringify(data).replace(/</g, "\\u003c");

@@ -12,6 +12,7 @@ import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { getSchedule, type ScheduleEvent } from "@/server/queries/schedule";
 import { NextUp } from "@/components/events/next-up";
 import { Schedule } from "./schedule";
+import { CANONICAL_SITE_URL } from "@/lib/site-url";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +76,7 @@ export default async function EventsIndexPage() {
     itemListElement: events.map((event, i) => ({
       "@type": "ListItem",
       position: i + 1,
-      url: `https://www.longhornsimracing.org/events/${event.slug}`,
+      url: `${CANONICAL_SITE_URL}/events/${event.slug}`,
       name: event.title,
     })),
   };
