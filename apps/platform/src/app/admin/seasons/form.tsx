@@ -32,7 +32,7 @@ export function SeasonForm({
   const action = initialData ? updateSeason.bind(null, initialData.id) : createSeason;
   
   // Helper to safely access nested JSON or property
-  const defaultPointsRule = (initialData?.pointsRule as any)?.system || "F1";
+  const defaultPointsRule = (initialData?.pointsRule as { system?: string } | null | undefined)?.system || "F1";
 
   // Helper for date input format YYYY-MM-DD (season dates are Central time)
   const formatDate = (date: Date | null | undefined) => {

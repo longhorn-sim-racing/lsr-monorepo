@@ -316,7 +316,7 @@ export function ResultsAdminClient({
                     {/* Uploaded By */}
                     <div className="w-40 shrink-0 text-xs text-white/60 truncate flex items-center gap-2">
                         {result.uploadedBy.avatarUrl && (
-                             // eslint-disable-next-line @next/next/no-img-element
+                             // eslint-disable-next-line @next/next/no-img-element -- avatar URLs can come from any host, which next/image would reject
                              <img src={result.uploadedBy.avatarUrl} alt="" className="w-4 h-4 rounded-full" />
                          )}
                          <span>{result.uploadedBy.displayName || result.uploadedBy.email}</span>

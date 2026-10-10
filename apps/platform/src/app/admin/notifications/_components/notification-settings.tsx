@@ -24,7 +24,7 @@ export function NotificationSettings({ settings, resendKeyConfigured }: { settin
       try {
         await updateEmailSettings(formData);
         toast.success("Settings saved");
-      } catch (error) {
+      } catch {
         toast.error("Failed to save settings");
       }
     });
@@ -101,7 +101,7 @@ export function NotificationSettings({ settings, resendKeyConfigured }: { settin
               className="rounded-none bg-white/5 border-white/10 text-white"
             />
             <p className="text-xs text-white/40">
-              Format: "Display Name &lt;email@domain.com&gt;"
+              Format: Display Name &lt;email@domain.com&gt;
             </p>
           </div>
         </div>

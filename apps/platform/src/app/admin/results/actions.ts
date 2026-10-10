@@ -6,6 +6,8 @@ import { revalidatePath } from "next/cache";
 import { createAuditLog } from "@/server/audit/log";
 import { revalidateAfterResultsIngestion } from "@/server/cache/revalidate-public";
 import type { ActionResult } from "@/lib/action-result";
+import type { AcResultFile } from "@/lib/results/ac-result-file";
+import type { Prisma } from "@prisma/client";
 
 export async function uploadResult(formData: FormData) {
   const user = await requireOfficer();
@@ -76,10 +78,7 @@ export async function previewParseResult(uploadId: string) {
     return { ok: false as const, error: "This file isn't a results file: it has no session data." };
   }
 
-  const { Result: results, Laps: laps } = rawJson as {
-    Result: any[];
-    Laps: any[];
-  };
+  const { Result: results, Laps: laps } = rawJson as AcResultFile;
 
   const anomalies: string[] = [];
   if (!Array.isArray(results)) {
@@ -260,7 +259,7 @@ export async function ingestUpload(uploadId: string): Promise<ActionResult> {
   if (!upload.eventId) return { ok: false, error: "Link this upload to an event before ingesting it." };
   if (upload.status === "INGESTED") return { ok: false, error: "These results are already ingested." };
 
-  const data = upload.rawJson as any;
+  const data = upload.rawJson as AcResultFile;
   const pointsSystem = upload.pointsSystem || "F1"; // Default if not set, though we should set it.
 
   // Basic validation
@@ -288,10 +287,10 @@ export async function ingestUpload(uploadId: string): Promise<ActionResult> {
     const guidToParticipantId = new Map<string, string>();
 
     const cars = Array.isArray(data.Cars) ? data.Cars : [];
-    const driverGuids = cars.map((c: any) => c.Driver?.Guid).filter(Boolean);
+    const driverGuids = cars.map((c) => c.Driver?.Guid).filter(Boolean);
     
     if (Array.isArray(data.Result)) {
-        data.Result.forEach((r: any) => {
+        data.Result.forEach((r) => {
             if (r.DriverGuid) driverGuids.push(r.DriverGuid);
         });
     }
@@ -305,7 +304,7 @@ export async function ingestUpload(uploadId: string): Promise<ActionResult> {
     // Pre-fetch Car Mappings
     // We need to fetch mappings for all car names in the session
     const carNames = new Set<string>();
-    cars.forEach((c: any) => {
+    cars.forEach((c) => {
         if (c.Model) carNames.add(c.Model);
     });
     const carMappings = await tx.carMapping.findMany({
@@ -367,7 +366,7 @@ export async function ingestUpload(uploadId: string): Promise<ActionResult> {
         // But we rely on 'position' loop variable, so assuming array is ordered.
         
         for (const res of data.Result) {
-            let participantId = guidToParticipantId.get(res.DriverGuid);
+            let participantId = res.DriverGuid ? guidToParticipantId.get(res.DriverGuid) : undefined;
             if (!participantId && res.CarId !== undefined) {
                 participantId = carIdToParticipantId.get(res.CarId);
             }
@@ -403,12 +402,12 @@ export async function ingestUpload(uploadId: string): Promise<ActionResult> {
 
     // 4. Process Laps
     if (Array.isArray(data.Laps)) {
-        const lapsToCreate: any[] = [];
+        const lapsToCreate: Prisma.RaceLapCreateManyInput[] = [];
         const driverLapCounts = new Map<string, number>();
         const sortedLaps = [...data.Laps].sort((a, b) => (a.Timestamp || 0) - (b.Timestamp || 0));
 
         for (const lap of sortedLaps) {
-            let participantId = guidToParticipantId.get(lap.DriverGuid);
+            let participantId = lap.DriverGuid ? guidToParticipantId.get(lap.DriverGuid) : undefined;
             if (!participantId && lap.CarId !== undefined) {
                 participantId = carIdToParticipantId.get(lap.CarId);
             }
@@ -463,7 +462,7 @@ export async function ingestUpload(uploadId: string): Promise<ActionResult> {
 
     // 5. Process Events & Count Collisions
     if (Array.isArray(data.Events)) {
-        const eventsToCreate: any[] = [];
+        const eventsToCreate: Prisma.RaceEventCreateManyInput[] = [];
         const collisionCounts = new Map<string, number>();
 
         for (const evt of data.Events) {

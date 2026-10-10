@@ -39,6 +39,9 @@ type EventSummary = {
     startsAtUtc: Date;
 }
 
+
+/** One row of parseReport.drivers, as previewParseResult writes it */
+type ParsedDriver = { guid: string; driverName: string; carModel: string };
 export function ResultDetailClient({ 
     result: initialResult,
     events 
@@ -290,7 +293,7 @@ export function ResultDetailClient({
                 </div>
             </div>
 
-            <h3 className="font-bold mb-2">Drivers ({(result.parseReport?.drivers as any[])?.length || 0})</h3>
+            <h3 className="font-bold mb-2">Drivers ({(result.parseReport?.drivers as ParsedDriver[] | null)?.length || 0})</h3>
             <div className="max-h-96 overflow-auto border rounded">
                 <Table>
                 <TableHeader>
@@ -301,7 +304,7 @@ export function ResultDetailClient({
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {(result.parseReport.drivers as any[]).map((driver) => (
+                    {(result.parseReport.drivers as ParsedDriver[]).map((driver) => (
                     <TableRow key={driver.guid}>
                         <TableCell className="font-mono text-xs">{driver.guid}</TableCell>
                         <TableCell>{driver.driverName}</TableCell>

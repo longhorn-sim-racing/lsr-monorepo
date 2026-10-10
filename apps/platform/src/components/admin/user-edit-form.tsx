@@ -22,12 +22,11 @@ type FullUser = User & {
 
 interface UserEditFormProps {
     user: FullUser;
-    currentUser: User;
     allRoles: Role[];
     allTiers: MembershipTier[];
 }
 
-export function UserEditForm({ user, currentUser, allRoles, allTiers }: UserEditFormProps) {
+export function UserEditForm({ user, allRoles, allTiers }: UserEditFormProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
 

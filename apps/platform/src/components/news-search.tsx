@@ -21,7 +21,7 @@ export function NewsSearch({ q }: { q: string }) {
       router.replace(`${pathname}?${sp.toString()}`, { scroll: false })
     }, 250)
     return () => clearTimeout(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only typing should update the URL; adding searchParams would loop on our own replace
   }, [term])
 
   return (

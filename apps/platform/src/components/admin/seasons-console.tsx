@@ -63,21 +63,14 @@ export function SeasonsConsole({ initialSeasons }: SeasonsConsoleProps) {
 
     // Sort
     result.sort((a, b) => {
-      let fieldA: string | number | Date | null = a[sortField];
-      let fieldB: string | number | Date | null = b[sortField];
-      
-      // Handle null dates for sorting
-      if (sortField === "startAt") {
-          fieldA = fieldA ? new Date(fieldA as Date).getTime() : 0;
-          fieldB = fieldB ? new Date(fieldB as Date).getTime() : 0;
-      }
-
-      if (fieldA === fieldB) return 0;
-      
-      // We know fieldA/B are comparable now (both numbers if dates, or string/number)
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      const comparison = fieldA > fieldB ? 1 : -1;
+      // Dates compare by time (missing ones first); everything else as numbers or text
+      const sortKey = (value: string | number | Date | null) =>
+        sortField === "startAt" ? (value ? new Date(value).getTime() : 0) : (value ?? "");
+      const keyA = sortKey(a[sortField]);
+      const keyB = sortKey(b[sortField]);
+      if (keyA === keyB) return 0;
+      const comparison =
+        typeof keyA === "number" && typeof keyB === "number" ? keyA - keyB : String(keyA).localeCompare(String(keyB));
       return sortDir === "asc" ? comparison : -comparison;
     });
 

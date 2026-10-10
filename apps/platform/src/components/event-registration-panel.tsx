@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -57,7 +57,7 @@ export function EventRegistrationPanel({
     }
   }, [searchParams]);
 
-  const fetchSnapshot = async () => {
+  const fetchSnapshot = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/events/${eventSlug}/registration`);
@@ -70,11 +70,12 @@ export function EventRegistrationPanel({
     } finally {
       setLoading(false);
     }
-  };
+  }, [eventSlug]);
 
+  // Again when someone signs in or out, since the snapshot includes their own registration
   useEffect(() => {
     fetchSnapshot();
-  }, [eventSlug, userLoggedIn]);
+  }, [fetchSnapshot, userLoggedIn]);
 
   const handleAction = async (intent: "YES" | "NO") => {
     if (!userLoggedIn) return;

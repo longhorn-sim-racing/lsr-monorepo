@@ -193,10 +193,10 @@ export async function getEventAttendanceState(eventId: string) {
     const isCheckInRequired = event.attendanceEnabled || event.attendanceReportingMode === "CHECKIN_REQUIRED";
     
     // Computed Lists for Reporting
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let attendedUsers: any[] = []; 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let noShows: any[] = [];
+    // Check-in records, or (when check-in isn't required) the registrations standing in for them
+    type AttendedRow = (typeof attendances)[number] | ((typeof registrations)[number] & { source: "registration" });
+    let attendedUsers: AttendedRow[] = [];
+    let noShows: typeof missing = [];
     
     if (isCheckInRequired) {
         // Mode: Check-in Required
@@ -206,7 +206,7 @@ export async function getEventAttendanceState(eventId: string) {
     } else {
         // Mode: Assume Registered
         // Attended = All Registered
-        attendedUsers = registrations.map(r => ({ ...r, user: r.user, source: 'registration' })); 
+        attendedUsers = registrations.map(r => ({ ...r, user: r.user, source: 'registration' as const })); 
         // No shows = 0 (by definition)
         noShows = [];
         // Walk-ins = 0 (technically there are no check-ins if disabled, or we ignore them)

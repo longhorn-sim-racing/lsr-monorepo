@@ -26,8 +26,9 @@ export function AuditConsole() {
   const [logs, setLogs] = useState<AuditLogWithActor[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  // The next page to load; a ref so fetchLogs keeps one identity while paging
+  const pageRef = useRef(1);
+  const [hasMore, setHasMore] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch] = useDebounce(search, 500);
   
@@ -51,7 +52,7 @@ export function AuditConsole() {
 
     try {
       const query = new URLSearchParams({
-        page: reset ? "1" : page.toString(),
+        page: reset ? "1" : pageRef.current.toString(),
         limit: "50",
       });
       if (debouncedSearch) query.set("search", debouncedSearch);
@@ -64,7 +65,7 @@ export function AuditConsole() {
 
       if (reset) {
         setLogs(data.items);
-        setPage(2);
+        pageRef.current = 2;
       } else {
         setLogs((prev) => {
            // Dedup in case of overlap
@@ -72,21 +73,21 @@ export function AuditConsole() {
            const newItems = data.items.filter((l: AuditLogWithActor) => !ids.has(l.id));
            return [...prev, ...newItems];
         });
-        setPage((p) => p + 1);
+        pageRef.current += 1;
       }
-      setTotalPages(data.pagination.totalPages);
+      setHasMore(pageRef.current <= data.pagination.totalPages);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [page, debouncedSearch, actionType, entityType]);
+  }, [debouncedSearch, actionType, entityType]);
 
-  // Initial fetch and search change
+  // Initial fetch, and again when the search or filters change
   useEffect(() => {
     fetchLogs(true);
-  }, [debouncedSearch, actionType, entityType]);
+  }, [fetchLogs]);
 
   // Polling for live tail
   useEffect(() => {
@@ -214,7 +215,7 @@ export function AuditConsole() {
               ))}
               
               {/* Load More Trigger */}
-              {!liveTail && (
+              {!liveTail && hasMore && (
                  <div className="pt-4 text-center">
                     <button 
                        onClick={() => fetchLogs()} 
@@ -251,7 +252,7 @@ export function AuditConsole() {
                    <label className="text-xs text-white/40 uppercase font-bold block mb-1">Actor</label>
                    <div className="text-white flex items-center gap-2">
                       {selectedLog.actor?.avatarUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element
+                        // eslint-disable-next-line @next/next/no-img-element -- avatar URLs can come from any host, which next/image would reject
                         <img src={selectedLog.actor.avatarUrl} alt="" className="w-5 h-5 rounded-full" />
                       )}
                       {selectedLog.actor?.displayName || "System"}
@@ -263,7 +264,7 @@ export function AuditConsole() {
                       {selectedLog.targetUser ? (
                         <>
                           {selectedLog.targetUser.avatarUrl && (
-                            // eslint-disable-next-line @next/next/no-img-element
+                            // eslint-disable-next-line @next/next/no-img-element -- avatar URLs can come from any host, which next/image would reject
                             <img src={selectedLog.targetUser.avatarUrl} alt="" className="w-5 h-5 rounded-full" />
                           )}
                           <span className="font-mono">{selectedLog.targetUser.displayName} (@{selectedLog.targetUser.handle})</span>

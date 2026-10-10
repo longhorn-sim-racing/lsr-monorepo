@@ -16,7 +16,7 @@ import { slugify } from "../src/lib/slug";
 interface AuthUser {
   id: string;
   email: string;
-  raw_user_meta_data: Record<string, any> | null;
+  raw_user_meta_data: { full_name?: string; displayName?: string; avatar_url?: string; marketingOptIn?: boolean } | null;
 }
 
 async function main() {
