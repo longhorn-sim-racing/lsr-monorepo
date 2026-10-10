@@ -15,6 +15,8 @@ import { requireOfficerPage } from "@/server/auth/guards";
 import { getEmailUsage } from "@/server/services/notification.service";
 
 export const dynamic = "force-dynamic";
+// Sending to every member takes several batch calls; leave room beyond the default time limit
+export const maxDuration = 60;
 
 export default async function AdminNotificationsPage() {
   await requireOfficerPage();

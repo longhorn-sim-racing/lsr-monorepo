@@ -116,7 +116,15 @@ export async function retryFailedNotification(notificationId: string) {
   revalidatePath("/admin/notifications");
 }
 
-export async function sendCustomNotification(formData: FormData): Promise<ActionResult> {
+// Kept back from officer sends so registration confirmations and receipts still go out that day
+const TRANSACTIONAL_HEADROOM = 10;
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** What a send did, for the composer's message */
+export type SendSummary = { scheduled: boolean; recipients: number; emailsSent: number; emailsFailed: number };
+
+export async function sendCustomNotification(formData: FormData): Promise<ActionResult<SendSummary>> {
   const user = await requireOfficer();
 
   const recipientType = formData.get("recipientType") as string;
@@ -164,20 +172,37 @@ export async function sendCustomNotification(formData: FormData): Promise<Action
     return { ok: false, error: "Choose who to send it to." };
   }
 
-  // Resend rejects everything past the daily limit, so check before an immediate email send
+  // Resend refuses email past its daily limit, so check an immediate email send first. Scheduled
+  // sends aren't checked: the day they go out isn't known yet.
   if (sendEmail && !scheduledDate && formData.get("sendAnyway") !== "on") {
-    const [{ sentLast24h, dailyLimit }, emailCount] = await Promise.all([
+    const [{ sentToday, dailyLimit }, emailCount] = await Promise.all([
       getEmailUsage(),
       countEmailRecipients(recipientIds, "CUSTOM"),
     ]);
-    const left = Math.max(0, dailyLimit - sentLast24h);
-    if (emailCount > left) {
-      return {
-        ok: false,
-        error: `This would send ${emailCount} emails, but only ${left} of the ${dailyLimit} daily emails are left (${sentLast24h} sent in the last 24 hours). Resend rejects the rest. Send fewer, schedule it for tomorrow, or tick "Send anyway".`,
-      };
+    if (dailyLimit !== null) {
+      const left = Math.max(0, dailyLimit - sentToday - TRANSACTIONAL_HEADROOM);
+      if (emailCount > dailyLimit - TRANSACTIONAL_HEADROOM) {
+        return {
+          ok: false,
+          error: `This would send ${plural(emailCount, "email")}, more than the ${dailyLimit} a day the email plan allows. Send it in-app only, or split the recipients across days.`,
+        };
+      }
+      if (emailCount > left) {
+        return {
+          ok: false,
+          error: `This would send ${plural(emailCount, "email")}, but only ${left} of today's ${dailyLimit} are left (${sentToday} sent, ${TRANSACTIONAL_HEADROOM} kept for confirmations and receipts). The limit resets at 7 pm Central (6 pm in winter). Send fewer, send it after the reset, or tick "Send anyway".`,
+        };
+      }
     }
   }
+
+  // Everything that can fail runs before the send, so an error never reports a sent message as unsent
+  const userNames =
+    recipientType === "all"
+      ? ""
+      : (await prisma.user.findMany({ where: { id: { in: recipientIds } }, select: { displayName: true } }))
+          .map((u) => u.displayName)
+          .join(", ");
 
   const sent = await sendBulkNotification({
     userIds: recipientIds,
@@ -198,14 +223,9 @@ export async function sendCustomNotification(formData: FormData): Promise<Action
       entityId: "bulk",
       summary: `Sent bulk notification "${title}" to ${recipientIds.length} active members`,
       after: { title, body, channels, scheduledFor: scheduledDate?.toISOString() },
-      metadata: { recipientType: "all", recipientCount: recipientIds.length, emailCount: sent.emails, actionUrl },
+      metadata: { recipientType: "all", recipientCount: recipientIds.length, emails: sent, actionUrl },
     });
   } else {
-    const targetUsers = await prisma.user.findMany({
-      where: { id: { in: recipientIds } },
-      select: { displayName: true },
-    });
-    const userNames = targetUsers.map((u) => u.displayName).join(", ");
     await createAuditLog({
       actorUserId: user.id,
       actionType: "CREATE",
@@ -216,12 +236,15 @@ export async function sendCustomNotification(formData: FormData): Promise<Action
         ? `Sent custom notification "${title}" to ${userNames}`
         : `Sent custom notification "${title}" to ${recipientIds.length} users: ${userNames}`,
       after: { title, body, channels, scheduledFor: scheduledDate?.toISOString() },
-      metadata: { recipientType, recipientCount: recipientIds.length, emailCount: sent.emails, userIds: recipientIds, actionUrl },
+      metadata: { recipientType, recipientCount: recipientIds.length, emails: sent, userIds: recipientIds, actionUrl },
     });
   }
 
   revalidatePath("/admin/notifications");
-  return { ok: true };
+  return {
+    ok: true,
+    data: { scheduled: !!scheduledDate, recipients: recipientIds.length, emailsSent: sent.emailsSent, emailsFailed: sent.emailsFailed },
+  };
 }
 
 export async function getEmailSettings() {
