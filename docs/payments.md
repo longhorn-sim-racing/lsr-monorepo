@@ -70,6 +70,7 @@ Rules the handler keeps:
 
 - **Each payment grants once.** The `pending` → `succeeded` claim is atomic and happens in the same transaction as the grant, so redelivered or concurrent events grant nothing extra.
 - **Sessions we didn't create are ignored**, not rejected (no `paymentId` in metadata, or an unknown one: Payment Links, `stripe trigger`, another environment). Stripe would otherwise retry them for days.
+- **Donations live only in Stripe.** They go through a Stripe Payment Link (`DONATE_URL` in `src/lib/sponsors.ts`, used by /sponsors and the sponsor packet), so the app keeps no record of them and they don't appear in `/admin/payments`. Look them up and refund them in the Stripe dashboard (filter by metadata `purpose: donation`). Never add a `paymentId` to the link's metadata: Stripe copies it onto every session, and the webhook would then treat donations as app payments.
 - **Duplicates are flagged, never refunded automatically.** If someone pays for something they already have for at least as long (say an officer entered them while their checkout tab was open), the payment is kept, nothing more is granted, `metadata.duplicateOfEntitlementId` is set, and a `PAYMENT_DUPLICATE` audit entry is written. `/admin/payments` tags it **Duplicate — refund** for an officer to refund in Stripe.
 - **Refunds only happen in the Stripe dashboard.** No code moves money.
 

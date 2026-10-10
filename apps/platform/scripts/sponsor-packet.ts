@@ -20,14 +20,13 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import QRCode from "qrcode";
 import { TIERS } from "../src/app/sponsors/tiers";
-import { SPONSORS } from "../src/lib/sponsors";
+import { DONATE_URL, LSR_EIN, SPONSORS } from "../src/lib/sponsors";
 
 const ROOT = resolve(__dirname, "..");
 const PUBLIC = join(ROOT, "public");
 const OUT = join(PUBLIC, "SPONSOR_BENEFITS.pdf");
 
 const OUTREACH_EMAIL = "outreach@longhornsimracing.org";
-const VENMO_URL = "https://www.paypal.com/qrcodes/venmocs/e3fd69ab-c345-4b53-add6-4f8037a4760d?created=1767404952.8381681&printed=1";
 const CLOUD = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "daklxjoxr";
 
 // Rounded down from the About page's live counts (2026-10-08: 105 members, 47 events)
@@ -94,7 +93,7 @@ function chromePath(): string {
 }
 
 async function render(): Promise<string> {
-  const qr = await QRCode.toString(VENMO_URL, { type: "svg", margin: 0, color: { dark: "#1B1B1B", light: "#0000" } });
+  const qr = await QRCode.toString(DONATE_URL, { type: "svg", margin: 0, color: { dark: "#1B1B1B", light: "#0000" } });
   const tiers = [...TIERS].reverse(); // Platinum first, as in the original sheet
 
   return `<!doctype html>
@@ -288,10 +287,10 @@ async function render(): Promise<string> {
   <div class="give">
     <div class="qr">
       ${qr}
-      <div><h3 class="display">To <span class="o">donate</span></h3><p>Scan the code to make a donation through Venmo.</p></div>
+      <div><h3 class="display">To <span class="o">donate</span></h3><p>Scan the code to give any amount online through Stripe, or donate from longhornsimracing.org/sponsors.</p></div>
     </div>
     <div><h3 class="display">Or by <span class="o">check</span></h3><p>Make a check payable to:<br><b>Longhorn Sim Racing</b></p></div>
-    <div class="dark"><h3 class="display">Tax <span class="o">exemption</span></h3><p>W-9 available upon request. All donors will receive a receipt for tax exemption as we are a 501(c)3 nonprofit organization.</p></div>
+    <div class="dark"><h3 class="display">Tax <span class="o">exemption</span></h3><p>LSR is a 501(c)(3) nonprofit (EIN ${LSR_EIN}), so donations are tax-deductible to the extent allowed by law. Receipts and a W-9 are available on request.</p></div>
   </div>
 
   <div class="foot label"><span>Longhorn Sim Racing</span><span class="line"></span><span>${OUTREACH_EMAIL} · longhornsimracing.org/sponsors</span></div>
@@ -314,19 +313,24 @@ async function main() {
 
   // Chrome can exit 0 without printing, so start from no file to tell the two apart (git has the old one)
   rmSync(OUT, { force: true });
-  const result = spawnSync(
-    chromePath(),
-    [
-      "--headless=new",
-      "--disable-gpu",
-      "--no-pdf-header-footer",
-      "--allow-file-access-from-files",
-      "--virtual-time-budget=20000",
-      `--print-to-pdf=${OUT}`,
-      pathToFileURL(page).href,
-    ],
-    { encoding: "utf8" },
-  );
+  let result;
+  try {
+    result = spawnSync(
+      chromePath(),
+      [
+        "--headless=new",
+        "--disable-gpu",
+        "--no-pdf-header-footer",
+        "--allow-file-access-from-files",
+        "--virtual-time-budget=20000",
+        `--print-to-pdf=${OUT}`,
+        pathToFileURL(page).href,
+      ],
+      { encoding: "utf8" },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
   if (result.status !== 0 || !existsSync(OUT)) {
     console.error(result.stderr || result.stdout);
     throw new Error("Chrome failed to print the packet");

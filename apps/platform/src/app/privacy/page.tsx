@@ -157,14 +157,11 @@ export default function PrivacyPage() {
               <P className="font-bold text-white">Payments</P>
               <UL>
                 <li>
-                  When you pay for an event registration, our payment processor (Stripe) handles
-                  your payment card details directly. We receive only the transaction reference,
-                  amount, status, and timestamp &mdash; not your full payment card number.
-                </li>
-                <li>
-                  Online donations are processed by Stripe, the same way; we receive only the
-                  amount, the transaction reference, and the name and email you give Stripe, not
-                  your payment card information.
+                  When you pay for an event registration or a league entry, or donate online, our
+                  payment processor (Stripe) handles your payment card details directly. We receive
+                  the amount, status, date and transaction reference, the name and email you enter,
+                  and the limited payment details Stripe shares with merchants (such as card brand,
+                  last four digits and billing ZIP code) &mdash; never your full card number.
                 </li>
               </UL>
             </SubSection>
@@ -284,7 +281,7 @@ export default function PrivacyPage() {
                     </tr>
                     <tr>
                       <td className="p-4 font-bold text-white">Stripe</td>
-                      <td className="p-4">Payment processing for event fees</td>
+                      <td className="p-4">Payment processing for event fees, league entries and donations</td>
                       <td className="p-4">Payment card details, billing information, transaction data</td>
                     </tr>
                     <tr>

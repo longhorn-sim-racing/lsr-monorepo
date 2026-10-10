@@ -53,6 +53,13 @@ export const SPONSORS: Sponsor[] = [
 
 export const GOLD_SPONSORS = SPONSORS.filter((sponsor) => sponsor.tier === "gold")
 
+/** The Stripe Payment Link for donations (donor chooses the amount), used by /sponsors and the sponsor packet.
+ *  Payment Link sessions aren't the app's, so the Stripe webhook ignores them. */
+export const DONATE_URL = "https://donate.stripe.com/14AeVceMOd4eg8Zbadew800"
+
+/** LSR's IRS employer ID, shown wherever donations are mentioned (501(c)(3), ruling 2026) */
+export const LSR_EIN = "39-2193405"
+
 /** The sponsor's URL with referral tags, e.g. campaign "sponsor-homepage". */
 export function sponsorHref(url: string, campaign: string): string {
   const u = new URL(url)

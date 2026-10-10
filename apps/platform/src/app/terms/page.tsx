@@ -260,9 +260,9 @@ export default function TermsPage() {
           <Section id="payments" title="7. Payments, Refunds, and Donations">
             <SubSection title="7.1 Payment processors">
               <P>
-                Paid event registrations and online donations are processed through Stripe.
-                Sponsorship payments may also be made by check or through other providers we
-                identify at the time of the transaction. Your use of these processors is subject
+                Paid event registrations, league entry fees and online donations are processed
+                through Stripe. Donations and sponsorship payments may also be made by check or
+                through other providers we identify at the time of the transaction. Your use of these processors is subject
                 to their own terms and privacy policies. We do not receive or store your full
                 payment card information.
               </P>
