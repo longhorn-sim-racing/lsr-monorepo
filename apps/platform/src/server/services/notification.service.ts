@@ -107,7 +107,7 @@ export async function sendBulkNotification({
   });
 
   // Unscheduled rows are created already claimed (SENT), so no other path can pick one up before
-  // this one delivers it; an email's sentAt waits for Resend, like processNotification.
+  // this one delivers it; an email's sentAt waits for Resend, as in claimNotification.
   const now = new Date();
   const rows: Prisma.NotificationCreateManyInput[] = [];
   for (const user of users) {
