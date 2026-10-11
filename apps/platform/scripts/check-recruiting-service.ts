@@ -19,23 +19,31 @@ process.env.RESEND_API_KEY = "";
 
 import { prisma } from "../src/server/db";
 import {
+  bulkDecide,
   composeTrackEmail,
   decideAndNotify,
   failInterruptedEmails,
+  getEmailQuota,
   listEmailsNeedingAttention,
   previewDecisionEmail,
+  resendAllFailed,
   resendEmail,
   submitAndNotify,
 } from "../src/server/services/recruiting-email.service";
+import { createCycle, deleteCycle, getTrackConfigs, listCycles, saveTrackConfig, setActiveCycle, updateCycle } from "../src/server/services/recruiting-cycle.service";
+import { exportRound } from "../src/server/services/recruiting-export.service";
+import { countEmailsNeedingAttention } from "../src/server/repos/application.repo";
 import { tracks } from "../src/schemas/recruiting.schema";
 import {
   RecruitingError,
   addReview,
   getApplicantStatus,
+  getActiveRound,
   getApplicationDetail,
   getMyApplication,
   getOrCreateDraft,
   listTrackApplications,
+  recordApplicationViewed,
   saveDraft,
   setSelectedTracks,
   setTrackStatus,
@@ -227,7 +235,7 @@ async function main() {
     check("search matches name or email", (await listTrackApplications({ cycleId: cycle.id, q: "TEST U3" })).rows.some((r) => r.application.userId === u3.id));
     check("autoSubmitted filter", (await listTrackApplications({ cycleId: cycle.id, q: run, autoSubmitted: true })).total === 0);
     const detail = await getApplicationDetail(d1.id);
-    check("detail returns the applicant narrowly (no email field on user)", detail !== null && !("email" in detail.user) && detail.tracks.length === 2);
+    check("detail returns the applicant narrowly (account email, no full User row)", detail !== null && detail.user.email === u1.email && !("eid" in detail.user) && !("marketingOptIn" in detail.user) && detail.tracks.length === 2);
   }
 
   console.log("--- decisions ---");
@@ -382,6 +390,137 @@ async function main() {
     check("it is shown as expired, not submitted", v.application?.expiredUnsubmitted === true && v.application.state === "DRAFT" && v.round?.window === "closed");
   }
 
+  console.log("--- export (real database) ---");
+  {
+    const u4 = await prisma.user.findUniqueOrThrow({ where: { id: `${run}-u4` } }); // created in the email section above
+    await prisma.application.update({ where: { id: d1.id }, data: { fullName: '=HYPERLINK("http://evil.test","click")' } });
+    const all = await exportRound(officer.id, "fall-2026", { q: run }, { adminBaseUrl: "https://example.test/" });
+    const lines = all ? all.csv.replace(/^\uFEFF/, "").trim().split("\r\n") : [];
+    check("starts with a byte-order mark and one header line", !!all && all.csv.charCodeAt(0) === 0xfeff && lines.length >= 1);
+    check("one row per submitted team application (3 applicants x 2 teams), drafts excluded", !!all && all.rowCount === 6 && lines.length === 7, `rowCount=${all?.rowCount} lines=${lines.length}`);
+    check("the draft applicant is not in the file", !!all && !all.csv.includes(`Test u2`));
+    check("a formula in the applicant's name is neutralized", !!all && all.csv.includes(`"'=HYPERLINK(""http://evil.test"",""click"")"`), all?.csv.slice(0, 300));
+    check("the ACCOUNT email is exported, not the altered copy on the application", !!all && all.csv.includes(u4.email) && !all.csv.includes("attacker@evil.test"));
+    check("rows link to the application in the admin area", !!all && all.csv.includes(`https://example.test/admin/recruiting/${d1.id}`));
+    // Regression: the list used to search and show the email COPIED onto the application, which can differ from the account email
+    const byAccountEmail = await listTrackApplications({ cycleId: cycle.id, q: u4.email });
+    check("the list finds an applicant by their account email even when the application's copy differs", byAccountEmail.rows.length === 2 && byAccountEmail.rows.every((r) => r.application.email === u4.email), `rows=${byAccountEmail.rows.length}`);
+    check("...and never by the altered copy being shown", (await listTrackApplications({ cycleId: cycle.id, q: "attacker@evil.test" })).rows.every((r) => r.application.email !== "attacker@evil.test"));
+    const onlyA = await exportRound(officer.id, "fall-2026", { q: run, track: "team-a" }, { adminBaseUrl: "https://example.test" });
+    check("filters apply to the export", !!onlyA && onlyA.rowCount === 2 && !onlyA.csv.includes(`${tracks.find((t) => t.key === "team-b")!.label}`), `rowCount=${onlyA?.rowCount}`);
+    check("an unknown round exports nothing", (await exportRound(officer.id, "no-such-round", {}, { adminBaseUrl: "https://example.test" })) === null);
+    const audits = await prisma.auditLog.count({ where: { entityType: "RECRUITING_CYCLE", entityId: cycle.id, actionType: "RECRUITING_EXPORTED", actorUserId: officer.id } });
+    check("each export is audit-logged", audits >= 2, `audits=${audits}`);
+    await recordApplicationViewed(officer.id, d1.id, u1.id);
+    check("opening an application is audit-logged", (await prisma.auditLog.count({ where: { entityType: "APPLICATION", entityId: d1.id, actionType: "APPLICATION_VIEWED" } })) === 1);
+  }
+
+  console.log("--- bulk decisions and the daily email limit ---");
+  {
+    const u5 = await makeUser("u5");
+    await setSelectedTracks(u5.id, ["team-a", "team-b"], IN).catch(() => null);
+    // u5 needs its own complete application: it can only be started while a round is active (fall-2026 is)
+    await saveDraft(u5.id, { genericAnswers: GENERIC, resumeUrl: RESUME, trackAnswers: { "team-a": { a_experience: "Built a rig" } } }, IN);
+    await submitAndNotify(u5.id, IN);
+    const app5 = await prisma.application.findFirstOrThrow({ where: { userId: u5.id }, include: { tracks: true } });
+    const t5a = app5.tracks.find((t) => t.track === "team-a")!.id;
+    const t5b = app5.tracks.find((t) => t.track === "team-b")!.id;
+    const originalLimit = process.env.RESEND_DAILY_LIMIT;
+    try {
+      process.env.RESEND_DAILY_LIMIT = "1";
+      const quota = await getEmailQuota();
+      check("the quota counts recruiting mail and reads the plan's limit", quota.dailyLimit === 1 && quota.left === 1 && quota.sentToday === 0, JSON.stringify(quota));
+      await expectError("a batch bigger than what's left of today's limit is refused up front", () => bulkDecide(officer.id, [t5a, t5b], "ACCEPTED", { sendEmail: true }), "EMAIL_LIMIT");
+      const untouched = await prisma.applicationTrack.findMany({ where: { applicationId: app5.id }, select: { status: true } });
+      check("...and nobody was decided", untouched.every((t) => t.status === "SUBMITTED"), JSON.stringify(untouched));
+      const forced = await bulkDecide(officer.id, [t5a, t5b], "ACCEPTED", { sendEmail: true, ignoreLimit: true });
+      check("'send anyway' decides them, with their emails failing honestly (no key)", forced.decided === 2 && forced.emailsFailed === 2 && forced.emailsSent === 0, JSON.stringify(forced));
+    } finally {
+      if (originalLimit === undefined) delete process.env.RESEND_DAILY_LIMIT;
+      else process.env.RESEND_DAILY_LIMIT = originalLimit;
+    }
+    const mixed = await bulkDecide(officer.id, [t5a, "no-such-application", t5b], "IN_REVIEW", { sendEmail: false });
+    check("a bulk change carries on past one it can't make, and says why", mixed.decided === 2 && mixed.failures.length === 1 && mixed.failures[0].applicationTrackId === "no-such-application", JSON.stringify(mixed));
+    const interview = await bulkDecide(officer.id, [t5b], "INTERVIEW", { sendEmail: false });
+    check("Interview is refused per team inside a bulk change", interview.decided === 0 && /does not run interviews/.test(interview.failures[0]?.error ?? ""), JSON.stringify(interview));
+    const own = await bulkDecide(u5.id, [t5a], "ACCEPTED", { sendEmail: false });
+    check("an officer can't bulk-decide their own application", own.decided === 0 && own.failures.length === 1);
+  }
+
+  console.log("--- rounds, booking links, resend-all (real database) ---");
+  const seeded = cycle.id;
+  const roundSlug = (n: string) => `t6-${run}-${n}`;
+  try {
+    const a = await createCycle(officer.id, { name: `T6 ${run} A`, slug: roundSlug("a"), opensAt: new Date("2027-01-01T06:00:00Z"), closesAt: new Date("2027-02-01T06:00:00Z") });
+    check("a new round starts inactive at the current form version", a.isActive === false && a.formVersion >= 1);
+    await expectError("an address already in use is refused with a field message", () => createCycle(officer.id, { name: "again", slug: roundSlug("a"), opensAt: new Date("2027-03-01T06:00:00Z"), closesAt: new Date("2027-04-01T06:00:00Z") }), "INVALID", (e) => "slug" in (e.fieldErrors ?? {}));
+    await expectError("a round that closes before it opens is refused", () => createCycle(officer.id, { name: "bad", slug: roundSlug("bad"), opensAt: new Date("2027-04-01T06:00:00Z"), closesAt: new Date("2027-03-01T06:00:00Z") }), "INVALID");
+    await expectError("an uppercase address is refused", () => createCycle(officer.id, { name: "bad", slug: "Not-OK", opensAt: new Date("2027-03-01T06:00:00Z"), closesAt: new Date("2027-04-01T06:00:00Z") }), "INVALID");
+
+    await saveTrackConfig(officer.id, a.id, "team-a", "https://calendar.app.google/t6-copy-me");
+    check("a booking link is saved for a team that interviews", (await getTrackConfigs(a.id))["team-a"] === "https://calendar.app.google/t6-copy-me");
+    await expectError("a team without interviews can't have a booking link", () => saveTrackConfig(officer.id, a.id, "team-b", "https://calendar.app.google/x"), "INVALID");
+    await expectError("a non-Google host is refused by default", () => saveTrackConfig(officer.id, a.id, "team-a", "https://calendly.com/lsr/x"), "INVALID");
+    await expectError("a plain http link is refused", () => saveTrackConfig(officer.id, a.id, "team-a", "http://calendar.app.google/x", { allowOtherHost: true }), "INVALID");
+    await saveTrackConfig(officer.id, a.id, "team-a", "https://calendly.com/lsr/x", { allowOtherHost: true });
+    check("...unless the officer allows another host", (await getTrackConfigs(a.id))["team-a"] === "https://calendly.com/lsr/x");
+    await saveTrackConfig(officer.id, a.id, "team-a", "https://calendar.app.google/t6-copy-me");
+    check("every link change is audit-logged with before and after", (await prisma.auditLog.count({ where: { entityId: a.id, actionType: "RECRUITING_BOOKING_LINK_CHANGED" } })) === 3);
+
+    const b = await createCycle(officer.id, { name: `T6 ${run} B`, slug: roundSlug("b"), opensAt: new Date("2027-03-01T06:00:00Z"), closesAt: new Date("2027-04-01T06:00:00Z") });
+    check("a new round copies the previous round's booking links", b.copiedLinks === 1 && (await getTrackConfigs(b.id))["team-a"] === "https://calendar.app.google/t6-copy-me", `copied=${b.copiedLinks}`);
+
+    await setActiveCycle(officer.id, a.id);
+    const active = await prisma.recruitingCycle.findMany({ where: { isActive: true }, select: { id: true } });
+    check("activating a round switches the previous one off (exactly one active)", active.length === 1 && active[0].id === a.id, JSON.stringify(active));
+    check("applicants now see the new active round", (await getActiveRound())?.id === a.id);
+    let rawError = "";
+    try {
+      await prisma.recruitingCycle.update({ where: { id: seeded }, data: { isActive: true } });
+    } catch (e) {
+      rawError = e instanceof Error ? e.message : String(e);
+    }
+    check("the database itself refuses a second active round", /Unique constraint|single_active/i.test(rawError), rawError.slice(0, 120));
+    await setActiveCycle(officer.id, null);
+    check("turning recruiting off leaves no active round", (await prisma.recruitingCycle.count({ where: { isActive: true } })) === 0);
+    await expectError("a missing round can't be activated", () => setActiveCycle(officer.id, "no-such-round"), "NOT_FOUND");
+    check("...and that did not turn anything off", (await prisma.recruitingCycle.count({ where: { isActive: true } })) === 0);
+    await setActiveCycle(officer.id, seeded);
+    check("the seeded round is active again", (await getActiveRound())?.slug === "fall-2026");
+
+    const renamed = await updateCycle(officer.id, a.id, { name: `T6 ${run} A (renamed)`, opensAt: new Date("2027-01-02T06:00:00Z"), closesAt: new Date("2027-02-02T06:00:00Z") });
+    check("renaming and re-dating a round keeps its address", renamed.slug === roundSlug("a") && renamed.name.endsWith("(renamed)"));
+
+    // resend-all, isolated in round A: three failed emails on one submitted application
+    const u6 = await makeUser("u6");
+    const appA = await prisma.application.create({ data: { cycleId: a.id, userId: u6.id, formVersion: a.formVersion, state: "SUBMITTED", submittedAt: new Date(), fullName: "Test u6", email: u6.email } });
+    const failedMail = () => ({ applicationId: appA.id, template: "RECEIVED", toEmail: u6.email, subject: "s", body: "b", status: "FAILED" as const, error: "Daily quota exceeded" });
+    await prisma.applicationEmail.createMany({ data: [failedMail(), failedMail(), failedMail()] });
+    check("the 'needs attention' count covers failed mail in the round", (await countEmailsNeedingAttention(a.id)) === 3);
+    const originalLimit2 = process.env.RESEND_DAILY_LIMIT;
+    try {
+      process.env.RESEND_DAILY_LIMIT = "2";
+      await expectError("'resend all' won't start a batch bigger than what's left today", () => resendAllFailed(officer.id, a.id), "EMAIL_LIMIT");
+      const forced = await resendAllFailed(officer.id, a.id, { ignoreLimit: true });
+      check("'resend all' with 'send anyway' tries every failed email in that round only", forced.total === 3 && forced.sent === 0 && forced.failed === 3, JSON.stringify(forced));
+    } finally {
+      if (originalLimit2 === undefined) delete process.env.RESEND_DAILY_LIMIT;
+      else process.env.RESEND_DAILY_LIMIT = originalLimit2;
+    }
+    check("...and each attempt is audit-logged", (await prisma.auditLog.count({ where: { entityType: "APPLICATION_EMAIL", actionType: "APPLICATION_EMAIL_RESENT", targetUserId: u6.id } })) === 3);
+    check("nothing was lost: still 3 failed emails to resend later", (await listEmailsNeedingAttention(a.id)).filter((e) => e.status === "FAILED").length === 3);
+
+    check("round list shows submitted counts", (await listCycles()).find((c) => c.id === a.id)?.submitted === 1);
+    await expectError("a round with applications can't be deleted", () => deleteCycle(officer.id, a.id), "BAD_STATUS");
+    await expectError("the active round can't be deleted", () => deleteCycle(officer.id, seeded), "BAD_STATUS");
+    await deleteCycle(officer.id, b.id);
+    check("an unused inactive round can be deleted", (await prisma.recruitingCycle.count({ where: { id: b.id } })) === 0);
+  } finally {
+    // Leave the seeded round active no matter what happened above
+    await prisma.recruitingCycle.updateMany({ where: { isActive: true, id: { not: seeded } }, data: { isActive: false } });
+    await prisma.recruitingCycle.update({ where: { id: seeded }, data: { isActive: true } });
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
 }
 
@@ -391,6 +530,8 @@ async function cleanup() {
   await prisma.auditLog.deleteMany({ where: { OR: [{ entityId: { in: entityIds } }, { actorUserId: { in: userIds } }, { targetUserId: { in: userIds } }] } });
   await prisma.recruitingTrackConfig.deleteMany({ where: { schedulingUrl: "https://calendar.app.google/example" } });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } }); // cascades applications, teams, reviews, emails
+  await prisma.recruitingCycle.deleteMany({ where: { slug: { startsWith: `t6-${run}` } } }); // their booking links go with them
+  await prisma.recruitingCycle.updateMany({ where: { slug: "fall-2026" }, data: { isActive: true } });
   const left = await prisma.user.count({ where: { id: { in: userIds } } });
   console.log(`cleanup: ${userIds.length} test users removed (${left} left)`);
 }

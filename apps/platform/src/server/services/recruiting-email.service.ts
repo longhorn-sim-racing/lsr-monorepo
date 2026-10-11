@@ -18,6 +18,7 @@ import type { Prisma, TrackStatus } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { createAuditLog } from "@/server/audit/log";
 import { sendEmail } from "@/lib/email/resend";
+import { z } from "zod";
 import { getSiteUrl } from "@/lib/site-url";
 import {
   composeEmail,
@@ -28,6 +29,7 @@ import {
   type RecruitingEmailTemplate,
 } from "@/lib/email/templates/recruiting";
 import { getTrack, isSafeHttpsUrl } from "@/schemas/recruiting.schema";
+import { getEmailUsage } from "@/server/services/notification.service";
 import {
   RecruitingError,
   setTrackStatus,
@@ -346,4 +348,111 @@ export async function decideAndNotify(
   );
   const delivery = decision.emailId ? await deliverEmailSafely(decision.emailId) : null;
   return { ...decision, delivery };
+}
+
+// ---------------------------------------------------------------------------
+// Daily email quota and bulk operations
+// ---------------------------------------------------------------------------
+
+export type EmailQuota = { sentToday: number; dailyLimit: number | null; left: number | null };
+
+/**
+ * Emails Resend has accepted since 00:00 UTC (7 pm Central in summer, 6 pm in winter), counting
+ * BOTH the announcements/receipts tracked by the notification service and recruiting mail,
+ * against the plan's daily limit (RESEND_DAILY_LIMIT, 100 on the free plan). The notification
+ * service's own counter doesn't know about recruiting mail, so use this one for recruiting.
+ */
+export async function getEmailQuota(now: Date = new Date()): Promise<EmailQuota> {
+  const notifications = await getEmailUsage();
+  const startOfUtcDay = new Date(now);
+  startOfUtcDay.setUTCHours(0, 0, 0, 0);
+  const recruiting = await prisma.applicationEmail.count({ where: { status: "SENT", sentAt: { gte: startOfUtcDay } } });
+  const sentToday = notifications.sentToday + recruiting;
+  const { dailyLimit } = notifications;
+  return { sentToday, dailyLimit, left: dailyLimit === null ? null : Math.max(0, dailyLimit - sentToday) };
+}
+
+async function assertQuotaFor(count: number, ignoreLimit: boolean | undefined) {
+  if (count === 0 || ignoreLimit) return;
+  const { sentToday, dailyLimit, left } = await getEmailQuota();
+  if (dailyLimit === null || left === null || count <= left) return;
+  throw new RecruitingError(
+    "EMAIL_LIMIT",
+    `This would send ${count} email${count === 1 ? "" : "s"}, but only ${left} of today's ${dailyLimit} are left (${sentToday} sent today, counting announcements and recruiting). The limit resets at 7 pm Central (6 pm in winter). Send fewer, wait for the reset, or tick "Send anyway" (the rest will show up as failed emails you can resend).`,
+  );
+}
+
+export type BulkDecisionResult = {
+  total: number;
+  decided: number;
+  emailsSent: number;
+  emailsFailed: number;
+  failures: Array<{ applicationTrackId: string; error: string }>;
+};
+
+const idList = z.array(z.string().min(1).max(64)).min(1, "Pick at least one.").max(100, "Pick at most 100 at a time.");
+
+/**
+ * Sets the same status on several team applications, optionally emailing each applicant the
+ * default draft for it. The email quota is checked up front (a half-sent batch is the worst
+ * outcome), then each one is decided on its own: one that can't be (already has that status,
+ * it's the officer's own application...) is reported and the rest continue.
+ */
+export async function bulkDecide(
+  officerId: string,
+  applicationTrackIds: unknown,
+  status: TrackStatus,
+  options: { sendEmail?: boolean; ignoreLimit?: boolean; now?: Date } = {},
+): Promise<BulkDecisionResult> {
+  const parsed = idList.safeParse(applicationTrackIds);
+  if (!parsed.success) {
+    throw new RecruitingError("INVALID", parsed.error.issues[0]?.message ?? "Pick the applications to update.");
+  }
+  const ids = [...new Set(parsed.data)];
+  if (options.sendEmail && !statusToTemplate(status)) {
+    throw new RecruitingError("BAD_STATUS", "No email is sent for that status.");
+  }
+  if (options.sendEmail) await assertQuotaFor(ids.length, options.ignoreLimit);
+
+  const result: BulkDecisionResult = { total: ids.length, decided: 0, emailsSent: 0, emailsFailed: 0, failures: [] };
+  for (const id of ids) {
+    try {
+      const done = await decideAndNotify(officerId, id, status, { sendEmail: options.sendEmail, now: options.now });
+      result.decided++;
+      if (done.delivery?.status === "SENT") result.emailsSent++;
+      else if (done.delivery) result.emailsFailed++;
+    } catch (e) {
+      result.failures.push({ applicationTrackId: id, error: e instanceof RecruitingError ? e.message : "Unexpected error." });
+    }
+  }
+  return result;
+}
+
+export type BulkResendResult = { total: number; sent: number; failed: number };
+
+/**
+ * Resends every failed email in a round (at most 100 at a time), after checking the daily quota.
+ * The usual reason is the daily limit itself: run it again after the limit resets.
+ */
+export async function resendAllFailed(officerId: string, cycleId: string, options: { ignoreLimit?: boolean } = {}): Promise<BulkResendResult> {
+  await failInterruptedEmails();
+  const rows = await prisma.applicationEmail.findMany({
+    where: { status: "FAILED", application: { cycleId } },
+    orderBy: { createdAt: "asc" },
+    take: 100,
+    select: { id: true },
+  });
+  await assertQuotaFor(rows.length, options.ignoreLimit);
+
+  const result: BulkResendResult = { total: rows.length, sent: 0, failed: 0 };
+  for (const row of rows) {
+    try {
+      const done = await resendEmail(officerId, row.id);
+      if (done.status === "SENT") result.sent++;
+      else result.failed++;
+    } catch {
+      result.failed++;
+    }
+  }
+  return result;
 }

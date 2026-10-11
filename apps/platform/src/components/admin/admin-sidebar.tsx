@@ -23,6 +23,7 @@ import {
   Package,
   FileText,
   Instagram,
+  ClipboardList,
 } from "lucide-react";
 
 const pinnedItems = [
@@ -43,6 +44,7 @@ const navItems = [
   { title: "Pages", href: "/admin/pages", icon: FileText },
   { title: "Payments", href: "/admin/payments", icon: CreditCard },
   { title: "Products", href: "/admin/products", icon: Package },
+  { title: "Recruiting", href: "/admin/recruiting", icon: ClipboardList },
   { title: "Results", href: "/admin/results", icon: FileSpreadsheet },
   { title: "Seasons", href: "/admin/seasons", icon: Trophy },
   { title: "Series", href: "/admin/series", icon: LayoutDashboard },

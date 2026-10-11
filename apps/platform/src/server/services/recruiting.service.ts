@@ -44,7 +44,8 @@ export type RecruitingErrorCode =
   | "SELF_REVIEW"
   | "BAD_STATUS"
   | "INTERVIEW_NOT_OFFERED"
-  | "MISSING_SCHEDULING_LINK";
+  | "MISSING_SCHEDULING_LINK"
+  | "EMAIL_LIMIT";
 
 export class RecruitingError extends Error {
   code: RecruitingErrorCode;
@@ -498,6 +499,21 @@ export async function submitApplication(
 
 export const listTrackApplications = repo.listSubmittedTracks;
 export const countTrackApplications = repo.countSubmittedTracks;
+
+/**
+ * Records that an officer opened an application (it shows the applicant's links and answers, so
+ * who looked is worth keeping). Never throws: a logging problem must not stop the page.
+ */
+export async function recordApplicationViewed(officerId: string, applicationId: string, applicantUserId: string) {
+  await createAuditLog({
+    actorUserId: officerId,
+    actionType: "APPLICATION_VIEWED",
+    entityType: "APPLICATION",
+    entityId: applicationId,
+    targetUserId: applicantUserId,
+    summary: "Opened an application",
+  });
+}
 
 /** Null for drafts and unknown ids, so a draft can never be opened by guessing its id. */
 export const getApplicationDetail = repo.findSubmittedApplicationDetail;
