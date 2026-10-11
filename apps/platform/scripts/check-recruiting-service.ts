@@ -9,8 +9,25 @@
 // a migrated + seeded database (`pnpm db:reset`: it uses the seeded active round `fall-2026`),
 // and it refuses to run unless DATABASE_URL points at localhost. It creates its own users and
 // deletes everything it created when it finishes, pass or fail.
+//
+// It also covers recruiting-email.service.ts, but NEVER sends real mail: RESEND_API_KEY is cleared
+// below, so every delivery ends FAILED ("Email service not configured"), which is exactly what
+// lets the queuing, rollback and resend paths be checked against a real database.
+
+// Must stay before anything sends: with no key, sendEmail() refuses instead of calling Resend.
+process.env.RESEND_API_KEY = "";
 
 import { prisma } from "../src/server/db";
+import {
+  composeTrackEmail,
+  decideAndNotify,
+  failInterruptedEmails,
+  listEmailsNeedingAttention,
+  previewDecisionEmail,
+  resendEmail,
+  submitAndNotify,
+} from "../src/server/services/recruiting-email.service";
+import { tracks } from "../src/schemas/recruiting.schema";
 import {
   RecruitingError,
   addReview,
@@ -270,6 +287,93 @@ async function main() {
     const draftTrack = await prisma.applicationTrack.create({ data: { applicationId: (await getOrCreateDraft(u2.id, IN)).id, track: "team-b" } });
     await expectError("can't review a draft's team", () => addReview(officer.id, draftTrack.id, { score: 3 }), "NOT_FOUND");
     await expectError("can't decide a draft's team", () => setTrackStatus(officer.id, draftTrack.id, "IN_REVIEW"), "NOT_FOUND");
+  }
+
+  console.log("--- email (no real mail is sent: RESEND_API_KEY is cleared) ---");
+  {
+    check("the API key is cleared, so nothing can really send", process.env.RESEND_API_KEY === "");
+    const label = (key: string) => tracks.find((t) => t.key === key)!.label;
+    const u4 = await makeUser("u4");
+    await setSelectedTracks(u4.id, ["team-a", "team-b"], IN);
+    await saveDraft(u4.id, { genericAnswers: GENERIC, resumeUrl: RESUME, trackAnswers: { "team-a": { a_experience: "Built a rig" } } }, IN);
+
+    // -- the confirmation email, queued by the submission itself
+    const submitted = await submitAndNotify(u4.id, IN);
+    const app4 = await prisma.application.findFirstOrThrow({ where: { userId: u4.id }, include: { tracks: true, emails: true } });
+    check("submitting queues exactly one confirmation email", app4.state === "SUBMITTED" && app4.emails.length === 1, `emails=${app4.emails.length}`);
+    const received = app4.emails[0];
+    check("it is the application-level RECEIVED email, addressed to the ACCOUNT email", received.template === "RECEIVED" && received.applicationTrackId === null && received.toEmail === u4.email);
+    check("it lists every team applied to", received.body.includes(label("team-a")) && received.body.includes(label("team-b")));
+    check("delivery was attempted and honestly recorded as FAILED, and the submission is unaffected", submitted.delivery?.status === "FAILED" && received.status === "FAILED" && /not configured/i.test(received.error ?? ""), `${received.status} ${received.error}`);
+    await expectError("submitting again is refused", () => submitAndNotify(u4.id, IN), "ALREADY_SUBMITTED");
+    check("...and queued no second confirmation", (await prisma.applicationEmail.count({ where: { applicationId: app4.id } })) === 1);
+
+    const tA = app4.tracks.find((t) => t.track === "team-a")!.id;
+    const tB = app4.tracks.find((t) => t.track === "team-b")!.id;
+    const emailCount = (trackId: string) => prisma.applicationEmail.count({ where: { applicationTrackId: trackId } });
+
+    // -- decision emails (team-a has a booking link from the section above)
+    const d1 = await decideAndNotify(officer.id, tA, "INTERVIEW", { sendEmail: true });
+    const interviewMail = await prisma.applicationEmail.findUniqueOrThrow({ where: { id: d1.emailId! } });
+    check("a decision with 'send email' changes the status and queues one email together", d1.status === "INTERVIEW" && !!d1.emailId && (await emailCount(tA)) === 1);
+    check("the interview email names the team, goes to the account address, and uses the booking link", interviewMail.template === "INTERVIEW" && interviewMail.applicationTrackId === tA && interviewMail.toEmail === u4.email && interviewMail.subject.includes(label("team-a")) && interviewMail.body.includes("https://calendar.app.google/example"), JSON.stringify({ subject: interviewMail.subject }));
+    check("a failed send is recorded on the row, and the decision stands", d1.delivery?.status === "FAILED" && interviewMail.status === "FAILED" && (await prisma.applicationTrack.findUniqueOrThrow({ where: { id: tA } })).status === "INTERVIEW");
+
+    // -- the transaction really rolls back when the email can't be built
+    await setTrackStatus(officer.id, tA, "IN_REVIEW");
+    await prisma.recruitingTrackConfig.deleteMany({ where: { cycleId: cycle.id, track: "team-a" } });
+    const before = await emailCount(tA);
+    await expectError("an email that needs a missing booking link is refused", () => decideAndNotify(officer.id, tA, "INTERVIEW", { sendEmail: true, override: { subject: "Hi", body: "Book here: {{schedulingLink}}" } }), "MISSING_SCHEDULING_LINK");
+    const afterFail = await prisma.applicationTrack.findUniqueOrThrow({ where: { id: tA } });
+    check("...and the status change was rolled back with it", afterFail.status === "IN_REVIEW" && afterFail.decidedAt === null, `status=${afterFail.status}`);
+    check("...and no email row was left behind", (await emailCount(tA)) === before);
+    await expectError("an unknown placeholder is refused", () => decideAndNotify(officer.id, tA, "ACCEPTED", { sendEmail: true, override: { subject: "Hi", body: "Dear {{applicnatName}}" } }), "INVALID");
+    check("...also with no status change", (await prisma.applicationTrack.findUniqueOrThrow({ where: { id: tA } })).status === "IN_REVIEW");
+    const d2 = await decideAndNotify(officer.id, tA, "INTERVIEW", { sendEmail: true });
+    const noLinkMail = await prisma.applicationEmail.findUniqueOrThrow({ where: { id: d2.emailId! } });
+    check("with no booking link configured the default interview email asks them to reply instead", noLinkMail.body.includes("Reply to this email") && !noLinkMail.body.includes("https://"), noLinkMail.body.slice(0, 160));
+
+    // -- rules around who gets what
+    const bBefore = await emailCount(tB);
+    await expectError("Interview + email for a team without interviews is refused", () => decideAndNotify(officer.id, tB, "INTERVIEW", { sendEmail: true }), "INTERVIEW_NOT_OFFERED");
+    await expectError("an officer can't decide their own application, with or without email", () => decideAndNotify(u4.id, tB, "ACCEPTED", { sendEmail: true }), "SELF_REVIEW");
+    await expectError("'send email' on a status that has no email is refused", () => decideAndNotify(officer.id, tB, "IN_REVIEW", { sendEmail: true }), "BAD_STATUS");
+    check("none of those left an email row", (await emailCount(tB)) === bBefore);
+    const d3 = await decideAndNotify(officer.id, tB, "REJECTED", { sendEmail: false });
+    check("a decision without 'send email' queues nothing", d3.emailId === null && d3.delivery === null && (await emailCount(tB)) === bBefore);
+
+    const d4 = await decideAndNotify(officer.id, tB, "ACCEPTED", { sendEmail: true, override: { subject: "Custom for {{applicantName}}", body: "Edited note." } });
+    const edited = await prisma.applicationEmail.findUniqueOrThrow({ where: { id: d4.emailId! } });
+    check("the officer's edited wording is what is stored (placeholders filled)", edited.subject === `Custom for ${u4.displayName}` && edited.body === "Edited note.", `${edited.subject} | ${edited.body}`);
+
+    await prisma.application.update({ where: { id: app4.id }, data: { email: "attacker@evil.test" } });
+    const d5 = await decideAndNotify(officer.id, tB, "REJECTED", { sendEmail: true });
+    const toMail = await prisma.applicationEmail.findUniqueOrThrow({ where: { id: d5.emailId! } });
+    check("mail goes to the account email even if the application's copy was changed", toMail.toEmail === u4.email, toMail.toEmail);
+
+    const rowsBeforePreview = await prisma.applicationEmail.count({ where: { applicationId: app4.id } });
+    const preview = await previewDecisionEmail(tB, "ACCEPTED");
+    check("previewing shows the final text and HTML and writes nothing", !!preview && preview.subject.includes(label("team-b")) && preview.html.includes("<html") && (await prisma.applicationEmail.count({ where: { applicationId: app4.id } })) === rowsBeforePreview);
+    check("a status with no email has no preview", (await previewDecisionEmail(tB, "IN_REVIEW")) === null);
+    const draftId = (await getMyApplication(u2.id))!.id;
+    const draftTrackId = (await prisma.applicationTrack.create({ data: { applicationId: draftId, track: "team-c" } })).id;
+    await expectError("a draft application can't be emailed or previewed", () => composeTrackEmail(prisma, draftTrackId, "ACCEPTED"), "NOT_FOUND");
+
+    // -- resend and cleanup of stuck mail
+    const r1 = await resendEmail(officer.id, interviewMail.id);
+    check("resending a failed email tries again and records the new outcome", r1.status === "FAILED" && (await prisma.applicationEmail.findUniqueOrThrow({ where: { id: interviewMail.id } })).status === "FAILED");
+    check("...and writes an audit entry", (await prisma.auditLog.count({ where: { entityType: "APPLICATION_EMAIL", entityId: interviewMail.id, actionType: "APPLICATION_EMAIL_RESENT" } })) === 1);
+    await prisma.applicationEmail.update({ where: { id: interviewMail.id }, data: { status: "SENT" } });
+    await expectError("an email already SENT can't be resent", () => resendEmail(officer.id, interviewMail.id), "BAD_STATUS");
+    await expectError("an unknown email id", () => resendEmail(officer.id, "does-not-exist"), "NOT_FOUND");
+
+    const stuck = await prisma.applicationEmail.create({ data: { applicationId: app4.id, template: "ACCEPTED", toEmail: u4.email, subject: "x", body: "y", status: "PENDING", createdAt: new Date(Date.now() - 60 * 60 * 1000) } });
+    const fresh = await prisma.applicationEmail.create({ data: { applicationId: app4.id, template: "ACCEPTED", toEmail: u4.email, subject: "x", body: "y", status: "PENDING" } });
+    const flipped = await failInterruptedEmails();
+    check("an email stuck PENDING for an hour is turned into FAILED", flipped >= 1 && (await prisma.applicationEmail.findUniqueOrThrow({ where: { id: stuck.id } })).status === "FAILED");
+    check("...but a brand-new PENDING one is left alone", (await prisma.applicationEmail.findUniqueOrThrow({ where: { id: fresh.id } })).status === "PENDING");
+    const attention = await listEmailsNeedingAttention(cycle.id);
+    check("the 'needs attention' list shows this applicant's failed and pending mail", attention.some((e) => e.id === stuck.id) && attention.some((e) => e.id === fresh.id) && !attention.some((e) => e.id === interviewMail.id));
   }
 
   console.log("--- a draft left unsubmitted after the deadline ---");

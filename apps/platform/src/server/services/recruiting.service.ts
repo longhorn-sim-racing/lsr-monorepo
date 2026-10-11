@@ -43,7 +43,8 @@ export type RecruitingErrorCode =
   | "ALREADY_SUBMITTED"
   | "SELF_REVIEW"
   | "BAD_STATUS"
-  | "INTERVIEW_NOT_OFFERED";
+  | "INTERVIEW_NOT_OFFERED"
+  | "MISSING_SCHEDULING_LINK";
 
 export class RecruitingError extends Error {
   code: RecruitingErrorCode;
@@ -391,25 +392,54 @@ export async function setSelectedTracks(userId: string, keys: unknown, now: Date
 }
 
 // ---------------------------------------------------------------------------
+// Email rows (the sending itself lives in recruiting-email.service.ts)
+// ---------------------------------------------------------------------------
+
+/** An email to record as PENDING in the same transaction as the change that triggers it. */
+export type QueuedEmail = {
+  applicationId: string;
+  /** null for application-level mail (the confirmation) */
+  applicationTrackId: string | null;
+  template: string;
+  /** The applicant's ACCOUNT email, never a typed-in address */
+  toEmail: string;
+  subject: string;
+  body: string;
+};
+
+/**
+ * Called inside the transaction, after the change has been validated. Returns the email to
+ * queue, or null for none. Throwing aborts the whole change, so a decision that needs an email
+ * it can't build (e.g. a missing booking link) is not saved without one.
+ */
+export type EmailHook<Context> = (tx: Prisma.TransactionClient, context: Context) => Promise<QueuedEmail | null>;
+
+async function queueEmail(tx: Prisma.TransactionClient, email: QueuedEmail): Promise<string> {
+  const row = await tx.applicationEmail.create({ data: { ...email, status: "PENDING" }, select: { id: true } });
+  return row.id;
+}
+
+// ---------------------------------------------------------------------------
 // Applicant: submitting
 // ---------------------------------------------------------------------------
 
 /**
  * Turns a locked DRAFT into SUBMITTED. The conditional update (`state = 'DRAFT'`) is what
  * makes a double-click, two tabs, or the deadline sweep racing the Submit button safe:
- * exactly one caller gets `true`. Callers must hold the row lock and have checked
- * completeness. Also used by the deadline sweep (auto = true).
+ * exactly one caller gets `submitted: true`. Callers must hold the row lock and have checked
+ * completeness. Also used by the deadline sweep (auto = true). If an email hook is given, its
+ * email is queued in the same transaction (so "submitted" and "confirmation owed" can't diverge).
  */
 export async function finalizeSubmission(
   tx: Prisma.TransactionClient,
   app: { id: string; userId: string; tracks: Array<{ track: string }> },
-  opts: { auto: boolean; now: Date },
-): Promise<boolean> {
+  opts: { auto: boolean; now: Date; email?: EmailHook<{ applicationId: string; userId: string; auto: boolean }> },
+): Promise<{ submitted: boolean; emailId: string | null }> {
   const res = await tx.application.updateMany({
     where: { id: app.id, state: "DRAFT" },
     data: { state: "SUBMITTED", submittedAt: opts.now, autoSubmitted: opts.auto },
   });
-  if (res.count !== 1) return false;
+  if (res.count !== 1) return { submitted: false, emailId: null };
 
   await tx.applicationTrack.updateMany({ where: { applicationId: app.id }, data: { status: "SUBMITTED" } });
 
@@ -427,11 +457,21 @@ export async function finalizeSubmission(
     },
     tx,
   );
-  return true;
+
+  const queued = opts.email ? await opts.email(tx, { applicationId: app.id, userId: app.userId, auto: opts.auto }) : null;
+  const emailId = queued ? await queueEmail(tx, queued) : null;
+  return { submitted: true, emailId };
 }
 
-/** The applicant presses Submit. Final: nothing is editable afterwards. */
-export async function submitApplication(userId: string, now: Date = new Date()) {
+/**
+ * The applicant presses Submit. Final: nothing is editable afterwards. `hooks.email` queues the
+ * confirmation email atomically (see recruiting-email.service.ts: submitAndNotify).
+ */
+export async function submitApplication(
+  userId: string,
+  now: Date = new Date(),
+  hooks: { email?: EmailHook<{ applicationId: string; userId: string; auto: boolean }> } = {},
+) {
   const cycle = await requireOpenRound(now);
   const existing = await repo.findApplicationByUser(userId, cycle.id);
   if (!existing) throw new RecruitingError("NOT_FOUND", "Start your application first.");
@@ -446,9 +486,9 @@ export async function submitApplication(userId: string, now: Date = new Date()) 
     if (!report.complete) {
       throw new RecruitingError("INCOMPLETE", "Your application is not complete yet.", { report });
     }
-    const ok = await finalizeSubmission(tx, app, { auto: false, now });
-    if (!ok) throw new RecruitingError("ALREADY_SUBMITTED", "This application has already been submitted.");
-    return { applicationId: app.id, userId: app.userId, tracks: app.tracks.map((t) => t.track) };
+    const done = await finalizeSubmission(tx, app, { auto: false, now, email: hooks.email });
+    if (!done.submitted) throw new RecruitingError("ALREADY_SUBMITTED", "This application has already been submitted.");
+    return { applicationId: app.id, userId: app.userId, tracks: app.tracks.map((t) => t.track), emailId: done.emailId };
   });
 }
 
@@ -466,7 +506,8 @@ export const getApplicationDetail = repo.findSubmittedApplicationDetail;
 const OFFICER_STATUSES: readonly TrackStatus[] = ["IN_REVIEW", "INTERVIEW", "ACCEPTED", "REJECTED"];
 
 /**
- * Sets one team's status for an applicant. Does not send email (that is layered on top).
+ * Sets one team's status for an applicant. Does not send email itself: `hooks.email` queues one
+ * atomically with the change (see recruiting-email.service.ts: decideAndNotify).
  * Rules: the application must be submitted; an officer cannot decide their own
  * application; Interview only exists for teams that run interviews (checked here, not
  * just hidden in the UI). Moving back to In review clears the decision fields.
@@ -476,6 +517,7 @@ export async function setTrackStatus(
   applicationTrackId: string,
   status: TrackStatus,
   now: Date = new Date(),
+  hooks: { email?: EmailHook<{ applicationTrackId: string; applicationId: string; applicantUserId: string; track: string; status: TrackStatus }> } = {},
 ) {
   if (!OFFICER_STATUSES.includes(status)) {
     throw new RecruitingError("BAD_STATUS", "That status can't be set.");
@@ -521,6 +563,17 @@ export async function setTrackStatus(
       tx,
     );
 
+    const queued = hooks.email
+      ? await hooks.email(tx, {
+          applicationTrackId: row.id,
+          applicationId: row.application.id,
+          applicantUserId: row.application.userId,
+          track: row.track,
+          status,
+        })
+      : null;
+    const emailId = queued ? await queueEmail(tx, queued) : null;
+
     return {
       applicationTrackId: row.id,
       applicationId: row.application.id,
@@ -528,6 +581,7 @@ export async function setTrackStatus(
       track: row.track,
       previousStatus: row.status,
       status,
+      emailId,
     };
   });
 }
