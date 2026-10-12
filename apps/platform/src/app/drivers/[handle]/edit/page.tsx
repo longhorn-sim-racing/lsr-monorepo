@@ -13,13 +13,10 @@ import { AvatarUploader } from '@/components/avatar-uploader';
 import { UpdateRacingNumberButton } from '@/components/racing-number-prompt';
 import { RacingNumber } from '@/components/racing-number';
 import { initials } from '../../names';
+import { EidField } from './eid-field';
+import { inputClass, labelClass } from './form-styles';
 
 export const dynamic = 'force-dynamic';
-
-const labelClass = 'font-sans font-bold text-[11px] uppercase tracking-[0.2em] text-white/55';
-// 16px text on phones so iOS doesn't zoom into the field
-const inputClass =
-  'h-12 rounded-none border-white/15 bg-white/[0.04] text-base text-white placeholder:text-white/30 focus-visible:border-lsr-orange focus-visible:ring-1 focus-visible:ring-lsr-orange md:text-sm';
 
 function FormField({ id, label, hint, children }: { id: string; label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -33,7 +30,7 @@ function FormField({ id, label, hint, children }: { id: string; label: string; h
 
 function Step({ n, title, children }: { n: string; title: string; children: React.ReactNode }) {
   return (
-    <section className="relative border border-white/10 bg-white/[0.02] p-5 md:p-7">
+    <section id={title.toLowerCase().replace(/\s+/g, '-')} className="scroll-mt-24 relative border border-white/10 bg-white/[0.02] p-5 md:p-7">
       <div className="absolute top-0 left-0 h-1 w-16 bg-lsr-orange" />
       <h2 className="flex items-baseline gap-3 font-display font-black italic text-2xl uppercase text-white">
         <span className="text-lsr-orange">{n}</span>
@@ -110,7 +107,7 @@ export default async function EditDriverPage({
               <UpdateRacingNumberButton user={pageUser} />
             </div>
             <p className="mt-5 border-t border-white/10 pt-5 font-sans text-xs leading-relaxed text-white/50">
-              Your car number and photo save right away. The rest saves with the button at the bottom.
+              Your car number, photo and UT EID save right away. The rest saves with the button at the bottom.
             </p>
           </aside>
 
@@ -119,8 +116,12 @@ export default async function EditDriverPage({
               <AvatarUploader initialUrl={pageUser.avatarUrl} />
             </Step>
 
+            <Step n="2" title="Private">
+              <EidField initialEid={pageUser.eid} />
+            </Step>
+
             <form action={updateProfile} className="space-y-4">
-              <Step n="2" title="Driver details">
+              <Step n="3" title="Driver details">
                 <FormField id="displayName" label="Display name" hint="How you show up on the roster and in results.">
                   <Input id="displayName" name="displayName" defaultValue={pageUser.displayName} required className={inputClass} />
                 </FormField>
@@ -146,7 +147,7 @@ export default async function EditDriverPage({
                 </FormField>
               </Step>
 
-              <Step n="3" title="Links">
+              <Step n="4" title="Links">
                 <div className="grid gap-6 sm:grid-cols-2">
                   <FormField id="instagram" label="Instagram">
                     <Input id="instagram" name="instagram" type="url" placeholder="https://instagram.com/handle" defaultValue={socials.instagram ?? ''} className={inputClass} />
