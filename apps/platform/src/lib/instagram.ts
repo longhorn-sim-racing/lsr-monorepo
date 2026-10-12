@@ -3,7 +3,7 @@
 // INSTAGRAM_GRAPH_URL points it at a stand-in server for local testing.
 const GRAPH_URL = process.env.INSTAGRAM_GRAPH_URL || "https://graph.instagram.com"
 
-export const INSTAGRAM_PROFILE_URL = "https://instagram.com/longhorn_sim_racing"
+export { INSTAGRAM_URL as INSTAGRAM_PROFILE_URL } from "@/lib/socials"
 
 export type InstagramMediaType = "IMAGE" | "VIDEO" | "CAROUSEL_ALBUM"
 
