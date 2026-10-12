@@ -30,6 +30,8 @@ export function MobileNav() {
         <Menu className="h-5 w-5" />
       </DialogPrimitive.Trigger>
       <DialogPrimitive.Portal>
+        {/* Radix locks page scrolling through the overlay, so the menu needs one even though it covers the screen */}
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[60] bg-lsr-charcoal" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
           className="fixed inset-0 z-[60] flex flex-col overflow-y-auto bg-lsr-charcoal text-white data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-4 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"

@@ -96,7 +96,7 @@ export function SiteFooter() {
           </div>
 
           {/* Links */}
-          <div className="grid grid-cols-2 gap-10 sm:grid-cols-3 lg:pt-2">
+          <nav aria-label="Footer" className="grid grid-cols-2 gap-10 sm:grid-cols-3 lg:pt-2">
             {COLUMNS.map((column) => (
               <div key={column.title} className="space-y-5">
                 <h3 className="font-sans text-[10px] font-bold uppercase tracking-[0.3em] text-lsr-orange">{column.title}</h3>
@@ -114,7 +114,7 @@ export function SiteFooter() {
                 </ul>
               </div>
             ))}
-          </div>
+          </nav>
         </div>
 
         {/* Bottom bar */}

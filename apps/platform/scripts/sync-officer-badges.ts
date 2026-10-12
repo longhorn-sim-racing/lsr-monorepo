@@ -2,16 +2,15 @@
  * Makes the staff badges on the site match the officer roster on /about.
  *
  * Badges come from the database (each user's officerTitle plus the officer/admin roles), while
- * /about reads src/app/about/roster.ts. When the roster changes, run this to bring the
- * database in line:
- * - every roster officer with an account gets the officer role (admins keep admin) and their
- *   roster title, e.g. "Media Officer" or "Business Lead";
- * - anyone else with the officer role or a title loses both. Admin roles are never added or
- *   removed here; admins who aren't on the roster are only reported.
+ * /about reads src/app/about/roster.ts. When the roster changes, update HANDLES below and run
+ * this to bring the database in line:
+ * - every roster officer in HANDLES gets the officer role (admins keep admin) and their roster
+ *   title, e.g. "Media Officer" or "Business Lead";
+ * - anyone else with the officer role or a title loses both. Admins are never changed here,
+ *   only reported, and accounts that might belong to an unmapped roster officer are skipped.
  *
- * Accounts are matched by display name, or by HANDLES below when the names differ. Add
- * `--map "Roster Name=handle"` for a one-off match. Unmatched officers are listed so they can
- * sign up first.
+ * Only HANDLES (or `--map "Roster Name=handle"` for a one-off) decides who gets a badge. Display
+ * names are only used to suggest handles, because members can set their own display name.
  *
  * Dry run by default: prints the plan and writes nothing.
  *
@@ -31,11 +30,29 @@ if (!process.env.DATABASE_URL) {
 }
 (process.env as Record<string, string | undefined>).NODE_ENV ??= "production";
 
-/** Roster names whose site account goes by another name. */
+/** Each roster officer's site handle. Officers without an account yet are left out. */
 const HANDLES: Record<string, string> = {
+  "Dylan Foley": "dylan-foley",
+  "Bryan Reyes": "bryan-reyes",
+  "Armando Martinez": "armando-martinez",
+  "Mark Yuan": "zeste",
+  "Prakul Sherikar": "prakul-sherikar",
+  "Jacob Pineda": "jacob-pineda",
   "Constanza Jongkind": "connie-jongkind",
   "George Lawrence": "leorge-gawrence",
+  "Alejandro Palacios": "alejandro-palacios",
+  "Grant Ruhland": "grant-ruhland",
+  "Diane Chagoya": "diane-chagoya",
+  "Anuja Manjrekar": "anuja-manjrekar",
+  "Harshika Mandula": "harshika-mandula",
+  "Leisha Jhamnani": "leisha-jhamnani",
+  "Jaylon Collins": "jaylon-collins",
+  "Boen Kelly": "boen-kelly",
+  "Jose Varela": "jose-varela",
+  "Cooper Tomlin": "cooper-tomlin",
+  "Gray Marshall": "gray-marshall",
   "Alexander Spears": "alexander-jae-spears",
+  "Arav Agarwal": "arav-agarwal",
 };
 
 function argValues(flag: string): string[] {
@@ -53,6 +70,13 @@ for (const pair of argValues("--map")) {
     process.exit(1);
   }
   HANDLES[name] = handle.replace(/^@/, "").toLowerCase();
+}
+
+for (const name of Object.keys(HANDLES)) {
+  if (!OFFICERS.some((o) => o.name === name)) {
+    console.error(`HANDLES has "${name}", who isn't on the roster. Fix the name or remove the entry.`);
+    process.exit(1);
+  }
 }
 
 /** The badge text for a roster entry: generic "Officer" titles get their team's name. */
@@ -85,67 +109,77 @@ async function main() {
     select: {
       id: true,
       handle: true,
+      email: true,
       displayName: true,
+      status: true,
       officerTitle: true,
       roles: { select: { role: { select: { key: true } } } },
     },
   });
-  const roleKeys = (u: (typeof users)[number]) => u.roles.map((r) => r.role.key);
+  type U = (typeof users)[number];
+  const roleKeys = (u: U) => u.roles.map((r) => r.role.key);
+  const who = (u: U) => `${u.displayName} (@${u.handle}, ${u.email.split("@")[1]})`;
   const officerRole = await prisma.role.findUnique({ where: { key: "officer" } });
   if (!officerRole) throw new Error('The "officer" role is missing.');
 
   type Change = { userId: string; label: string; title: string | null; addOfficer: boolean; removeOfficer: boolean };
   const changes: Change[] = [];
-  const unmatched: string[] = [];
-  const matchedIds = new Set<string>();
+  const notes: string[] = [];
+  const mappedIds = new Set<string>();
+  /** Accounts that might belong to an officer without a handle yet: never stripped. */
+  const protectedIds = new Set<string>();
 
   for (const officer of OFFICERS) {
     const handle = HANDLES[officer.name];
-    const candidates = handle
-      ? users.filter((u) => u.handle === handle)
-      : users.filter((u) => norm(u.displayName) === norm(officer.name));
-    if (candidates.length !== 1) {
-      unmatched.push(`${officer.name}: ${candidates.length ? `${candidates.length} accounts (${candidates.map((u) => "@" + u.handle).join(", ")}); pick one with --map` : "no account"}`);
+    if (!handle) {
+      const candidates = users.filter((u) => norm(u.displayName).startsWith(norm(officer.name)));
+      candidates.forEach((u) => protectedIds.add(u.id));
+      notes.push(
+        candidates.length
+          ? `${officer.name}: no handle yet; maybe ${candidates.map(who).join(" or ")}. Add to HANDLES or pass --map.`
+          : `${officer.name}: no handle yet and no account found.`
+      );
       continue;
     }
-    const user = candidates[0];
-    matchedIds.add(user.id);
+    const user = users.find((u) => u.handle === handle);
+    if (!user) {
+      notes.push(`${officer.name}: no account with handle @${handle}.`);
+      continue;
+    }
+    mappedIds.add(user.id);
+    if (user.status !== "active") {
+      notes.push(`${officer.name}: @${handle} is ${user.status}; skipped.`);
+      continue;
+    }
     const title = badgeTitle(officer);
     const keys = roleKeys(user);
     const addOfficer = !keys.includes("officer") && !keys.includes("admin");
     if (user.officerTitle !== title || addOfficer) {
-      changes.push({
-        userId: user.id,
-        label: `${officer.name} (@${user.handle})`,
-        title,
-        addOfficer,
-        removeOfficer: false,
-      });
-      console.log(
-        `  update  ${officer.name} (@${user.handle}): ${JSON.stringify(user.officerTitle)} → ${JSON.stringify(title)}${addOfficer ? ", add officer role" : ""}`
-      );
+      changes.push({ userId: user.id, label: who(user), title, addOfficer, removeOfficer: false });
+      console.log(`  update  ${who(user)}: ${JSON.stringify(user.officerTitle)} → ${JSON.stringify(title)}${addOfficer ? ", add officer role" : ""}`);
     } else {
-      console.log(`  ok      ${officer.name} (@${user.handle}): ${JSON.stringify(title)}`);
+      console.log(`  ok      ${who(user)}: ${JSON.stringify(title)}`);
     }
   }
 
-  const adminsOffRoster: string[] = [];
   for (const user of users) {
-    if (matchedIds.has(user.id)) continue;
+    if (mappedIds.has(user.id)) continue;
     const keys = roleKeys(user);
-    if (keys.includes("admin")) adminsOffRoster.push(`${user.displayName} (@${user.handle}), title ${JSON.stringify(user.officerTitle)}`);
     const removeOfficer = keys.includes("officer");
-    if (!removeOfficer && !user.officerTitle) continue;
-    changes.push({ userId: user.id, label: `${user.displayName} (@${user.handle})`, title: null, addOfficer: false, removeOfficer });
-    console.log(
-      `  remove  ${user.displayName} (@${user.handle}): ${removeOfficer ? "officer role, " : ""}title ${JSON.stringify(user.officerTitle)}`
-    );
+    if (!removeOfficer && !user.officerTitle && !keys.includes("admin")) continue;
+    if (keys.includes("admin")) {
+      notes.push(`${who(user)} is an admin but not on the roster; left alone (title ${JSON.stringify(user.officerTitle)}).`);
+      continue;
+    }
+    if (protectedIds.has(user.id)) {
+      notes.push(`${who(user)} might be an unmapped roster officer; left alone until mapped.`);
+      continue;
+    }
+    changes.push({ userId: user.id, label: who(user), title: null, addOfficer: false, removeOfficer });
+    console.log(`  remove  ${who(user)}: ${removeOfficer ? "officer role, " : ""}title ${JSON.stringify(user.officerTitle)}`);
   }
 
-  if (unmatched.length) console.log(`\nOn the roster without a match:\n${unmatched.map((u) => `  ${u}`).join("\n")}`);
-  if (adminsOffRoster.length) {
-    console.log(`\nAdmins not on the roster (left alone; they still show a staff badge):\n${adminsOffRoster.map((a) => `  ${a}`).join("\n")}`);
-  }
+  if (notes.length) console.log(`\nNotes:\n${notes.map((n) => `  ${n}`).join("\n")}`);
   console.log(`\n${changes.length} change${changes.length === 1 ? "" : "s"} planned.`);
 
   if (!APPLY || changes.length === 0) {
@@ -163,45 +197,49 @@ async function main() {
     process.exit(1);
   }
 
-  await prisma.$transaction(async (tx) => {
-    for (const change of changes) {
-      const before = await tx.user.findUniqueOrThrow({
-        where: { id: change.userId },
-        select: { officerTitle: true, roles: { select: { role: { select: { key: true } } } } },
-      });
-      await tx.user.update({ where: { id: change.userId }, data: { officerTitle: change.title } });
-      if (change.addOfficer) {
-        await tx.userRole.upsert({
-          where: { userId_roleId: { userId: change.userId, roleId: officerRole.id } },
-          create: { userId: change.userId, roleId: officerRole.id },
-          update: {},
+  await prisma.$transaction(
+    async (tx) => {
+      for (const change of changes) {
+        const before = await tx.user.findUniqueOrThrow({
+          where: { id: change.userId },
+          select: { officerTitle: true, roles: { select: { role: { select: { key: true } } } } },
         });
+        await tx.user.update({ where: { id: change.userId }, data: { officerTitle: change.title } });
+        if (change.addOfficer) {
+          await tx.userRole.upsert({
+            where: { userId_roleId: { userId: change.userId, roleId: officerRole.id } },
+            create: { userId: change.userId, roleId: officerRole.id },
+            update: {},
+          });
+        }
+        if (change.removeOfficer) {
+          await tx.userRole.deleteMany({ where: { userId: change.userId, roleId: officerRole.id } });
+        }
+        const beforeRoles = before.roles.map((r) => r.role.key);
+        const afterRoles = change.addOfficer
+          ? [...beforeRoles, "officer"]
+          : change.removeOfficer
+            ? beforeRoles.filter((r) => r !== "officer")
+            : beforeRoles;
+        await createAuditLog(
+          {
+            actorUserId: actor.id,
+            actionType: "UPDATE",
+            entityType: "USER",
+            entityId: change.userId,
+            targetUserId: change.userId,
+            summary: `Synced staff badge for ${change.label} with the officer roster`,
+            before: { officerTitle: before.officerTitle, roles: beforeRoles },
+            after: { officerTitle: change.title, roles: afterRoles },
+            metadata: { source: "scripts/sync-officer-badges.ts" },
+          },
+          tx
+        );
       }
-      if (change.removeOfficer) {
-        await tx.userRole.deleteMany({ where: { userId: change.userId, roleId: officerRole.id } });
-      }
-      const beforeRoles = before.roles.map((r) => r.role.key);
-      const afterRoles = change.addOfficer
-        ? [...beforeRoles, "officer"]
-        : change.removeOfficer
-          ? beforeRoles.filter((r) => r !== "officer")
-          : beforeRoles;
-      await createAuditLog(
-        {
-          actorUserId: actor.id,
-          actionType: "UPDATE",
-          entityType: "USER",
-          entityId: change.userId,
-          targetUserId: change.userId,
-          summary: `Synced staff badge for ${change.label} with the officer roster`,
-          before: { officerTitle: before.officerTitle, roles: beforeRoles },
-          after: { officerTitle: change.title, roles: afterRoles },
-          metadata: { source: "scripts/sync-officer-badges.ts" },
-        },
-        tx
-      );
-    }
-  });
+    },
+    // A first run makes a couple dozen changes over a remote connection; the default 5s is too short
+    { timeout: 60_000, maxWait: 10_000 }
+  );
 
   console.log(`Applied ${changes.length} change${changes.length === 1 ? "" : "s"}.`);
   await prisma.$disconnect();

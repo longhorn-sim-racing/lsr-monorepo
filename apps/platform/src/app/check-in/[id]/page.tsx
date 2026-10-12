@@ -10,7 +10,7 @@ import { DEFAULT_TIMEZONE } from "@/lib/dates";
 /** Phones scan into this page at the door: a photo backdrop with the card centred over it */
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative flex min-h-[calc(100svh-5rem)] items-center justify-center overflow-hidden bg-lsr-charcoal px-4 py-12">
+    <div className="relative flex min-h-[calc(100svh-4rem)] md:min-h-[calc(100svh-5rem)] items-center justify-center overflow-hidden bg-lsr-charcoal px-4 py-12">
       <div className="absolute inset-0 z-0">
         <CloudinaryImage publicId="gallery/wec-at-cota-2025/dsc09855" alt="" fill preload sizes="100vw" className="object-cover object-[center_30%] opacity-40" />
         <div className="absolute inset-0 bg-gradient-to-b from-lsr-charcoal/70 via-lsr-charcoal/60 to-lsr-charcoal" />

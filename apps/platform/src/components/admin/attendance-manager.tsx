@@ -57,7 +57,7 @@ export function AttendanceManager({
     // Fullscreen Overlay
     if (isFullscreen) {
         return (
-            <div className="fixed inset-x-0 bottom-0 top-20 z-40 bg-black/40 backdrop-blur-sm p-6 animate-in fade-in duration-300">
+            <div className="fixed inset-x-0 bottom-0 top-16 md:top-20 z-40 bg-black/40 backdrop-blur-sm p-6 animate-in fade-in duration-300">
                 <div className="bg-lsr-charcoal/95 border border-white/10 rounded-xl h-full w-full flex flex-col items-center justify-center shadow-2xl relative overflow-hidden p-8 sm:p-16">
                     <Button 
                         onClick={() => setIsFullscreen(false)} 
