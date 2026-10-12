@@ -497,6 +497,97 @@ export async function submitApplication(
 }
 
 // ---------------------------------------------------------------------------
+// Deadline sweep
+// ---------------------------------------------------------------------------
+
+export type SweepResult = {
+  /** false when the round hasn't closed yet (nothing is touched before the deadline) */
+  ran: boolean;
+  /** Drafts looked at */
+  checked: number;
+  /** Complete drafts that were submitted, with the confirmation emails queued for them */
+  submitted: number;
+  emailIds: string[];
+  /** Left as drafts: no team chosen, or something required is missing (never submitted, officers never see them) */
+  skippedNoTeams: number;
+  skippedIncomplete: number;
+  /** Already submitted by the applicant between the lookup and the lock (not an error) */
+  alreadySubmitted: number;
+  /** Drafts that threw; the rest of the sweep carries on */
+  failed: number;
+  /** true if the time budget ran out before every draft was looked at (the next run continues) */
+  timedOut: boolean;
+};
+
+/**
+ * The deadline job. After a round's `closesAt`, every DRAFT that is complete is submitted for the
+ * applicant (autoSubmitted = true) and every incomplete one is left alone. Each application is
+ * handled in its own transaction under its row lock with a conditional update, so:
+ *  - an applicant pressing Submit at the same moment gets exactly one submission and one email,
+ *  - running the sweep twice (or two sweeps at once) changes nothing the second time,
+ *  - one broken row can't stop the others.
+ * It only converts state: writes after the deadline are refused by the applicant functions on their own.
+ * `submittedAt` is the deadline itself, so an auto-submitted application reads as submitted at the deadline
+ * rather than whenever the job happened to run.
+ */
+export async function sweepCycle(
+  cycleId: string,
+  now: Date = new Date(),
+  hooks: { email?: EmailHook<{ applicationId: string; userId: string; auto: boolean }>; budgetMs?: number } = {},
+): Promise<SweepResult> {
+  const result: SweepResult = {
+    ran: false,
+    checked: 0,
+    submitted: 0,
+    emailIds: [],
+    skippedNoTeams: 0,
+    skippedIncomplete: 0,
+    alreadySubmitted: 0,
+    failed: 0,
+    timedOut: false,
+  };
+  const cycle = await repo.findCycleById(cycleId);
+  if (!cycle || cycleWindow(cycle, now) !== "closed") return result;
+  result.ran = true;
+
+  const started = Date.now();
+  const budgetMs = hooks.budgetMs ?? 40_000;
+  const drafts = await prisma.application.findMany({
+    where: { cycleId, state: "DRAFT" },
+    orderBy: { id: "asc" },
+    select: { id: true },
+  });
+
+  for (const { id } of drafts) {
+    if (Date.now() - started > budgetMs) {
+      result.timedOut = true;
+      break;
+    }
+    result.checked += 1;
+    try {
+      const outcome = await prisma.$transaction(async (tx) => {
+        const app = await lockApplication(tx, id);
+        if (!app || app.state !== "DRAFT") return { kind: "already" } as const;
+        if (app.tracks.length === 0) return { kind: "no-teams" } as const;
+        if (!checkCompleteness(toSnapshot(app)).complete) return { kind: "incomplete" } as const;
+        const done = await finalizeSubmission(tx, app, { auto: true, now: cycle.closesAt, email: hooks.email });
+        return done.submitted ? ({ kind: "submitted", emailId: done.emailId } as const) : ({ kind: "already" } as const);
+      });
+      if (outcome.kind === "submitted") {
+        result.submitted += 1;
+        if (outcome.emailId) result.emailIds.push(outcome.emailId);
+      } else if (outcome.kind === "no-teams") result.skippedNoTeams += 1;
+      else if (outcome.kind === "incomplete") result.skippedIncomplete += 1;
+      else result.alreadySubmitted += 1;
+    } catch (e) {
+      result.failed += 1;
+      console.error("[Recruiting] Sweep could not process an application:", e instanceof Error ? e.message : e);
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Officers
 // ---------------------------------------------------------------------------
 

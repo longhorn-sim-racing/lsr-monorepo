@@ -34,6 +34,7 @@ import {
   RecruitingError,
   setTrackStatus,
   submitApplication,
+  sweepCycle,
   type EmailHook,
   type QueuedEmail,
 } from "@/server/services/recruiting.service";
@@ -320,6 +321,63 @@ export async function submitAndNotify(userId: string, now: Date = new Date()) {
   const result = await submitApplication(userId, now, { email: receivedEmailHook });
   const delivery = result.emailId ? await deliverEmailSafely(result.emailId) : null;
   return { ...result, delivery };
+}
+
+export type SweepSummary = {
+  cycles: number;
+  submitted: number;
+  emailsSent: number;
+  emailsFailed: number;
+  skippedNoTeams: number;
+  skippedIncomplete: number;
+  failed: number;
+  timedOut: boolean;
+  interruptedEmails: number;
+};
+
+/**
+ * The deadline job end to end: for every closed round that still has drafts, auto-submit the complete
+ * ones (the "received" confirmation, auto-submit wording, is queued in the same transaction), then
+ * send the confirmations after the commits. A confirmation that fails to send stays on the Emails page
+ * for a manual resend; it never undoes a submission. Safe to run as often as you like.
+ * `cycleId` limits it to one round (the admin button); the cron passes none.
+ */
+export async function sweepAndNotify(options: { cycleId?: string; now?: Date } = {}): Promise<SweepSummary> {
+  const now = options.now ?? new Date();
+  const summary: SweepSummary = {
+    cycles: 0,
+    submitted: 0,
+    emailsSent: 0,
+    emailsFailed: 0,
+    skippedNoTeams: 0,
+    skippedIncomplete: 0,
+    failed: 0,
+    timedOut: false,
+    interruptedEmails: await failInterruptedEmails(now),
+  };
+
+  const cycles = await prisma.recruitingCycle.findMany({
+    where: { ...(options.cycleId ? { id: options.cycleId } : {}), closesAt: { lte: now }, applications: { some: { state: "DRAFT" } } },
+    orderBy: { closesAt: "asc" },
+    select: { id: true },
+  });
+
+  for (const { id } of cycles) {
+    const swept = await sweepCycle(id, now, { email: receivedEmailHook });
+    if (!swept.ran) continue;
+    summary.cycles += 1;
+    summary.submitted += swept.submitted;
+    summary.skippedNoTeams += swept.skippedNoTeams;
+    summary.skippedIncomplete += swept.skippedIncomplete;
+    summary.failed += swept.failed;
+    summary.timedOut = summary.timedOut || swept.timedOut;
+    for (const emailId of swept.emailIds) {
+      const delivery = await deliverEmailSafely(emailId);
+      if (delivery.status === "SENT") summary.emailsSent += 1;
+      else if (delivery.status === "FAILED") summary.emailsFailed += 1;
+    }
+  }
+  return summary;
 }
 
 /**

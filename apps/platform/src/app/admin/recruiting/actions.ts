@@ -8,7 +8,7 @@ import { unexpectedError } from "@/lib/action-result";
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import type { RecruitingActionResult } from "@/lib/recruiting/action-result";
 import { addReview, isRecruitingError, RecruitingError } from "@/server/services/recruiting.service";
-import { bulkDecide, decideAndNotify, previewDecisionEmail, resendAllFailed, resendEmail } from "@/server/services/recruiting-email.service";
+import { bulkDecide, decideAndNotify, previewDecisionEmail, resendAllFailed, resendEmail, sweepAndNotify } from "@/server/services/recruiting-email.service";
 import { createCycle, deleteCycle, saveTrackConfig, setActiveCycle, updateCycle } from "@/server/services/recruiting-cycle.service";
 
 // Server actions can be called by anyone who can craft a request, so each one checks that the
@@ -102,6 +102,14 @@ export async function resendAllFailedAction(cycleId: string, options: { ignoreLi
   return run(async (officerId) =>
     resendAllFailed(officerId, idSchema.parse(cycleId), { ignoreLimit: z.boolean().optional().parse(options.ignoreLimit) }),
   );
+}
+
+/**
+ * "Run sweep now" for a closed round: the same job the cron runs every 15 minutes. Does nothing
+ * before the deadline, and nothing new if it has already run.
+ */
+export async function runSweepAction(cycleId: string) {
+  return run(async () => sweepAndNotify({ cycleId: idSchema.parse(cycleId) }));
 }
 
 // ---------------------------------------------------------------------------

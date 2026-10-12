@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import {
   createCycleAction,
   deleteCycleAction,
+  runSweepAction,
   saveBookingLinkAction,
   setActiveCycleAction,
   updateCycleAction,
@@ -120,6 +121,30 @@ export function CyclesConsole({
                       {c.slug !== selectedSlug && (
                         <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-[11px] uppercase tracking-wider text-white/60 hover:text-white">
                           <Link href={`/admin/recruiting/cycles?cycle=${c.slug}`}>Booking links</Link>
+                        </Button>
+                      )}
+                      {c.window === "closed" && c.drafts > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-[11px] uppercase tracking-wider text-sky-300/80 hover:text-sky-300"
+                          onClick={() =>
+                            setConfirm({
+                              title: `Run the deadline sweep for ${c.name}?`,
+                              body: `This submits every complete draft for its applicant (and emails them a confirmation). Incomplete drafts are left alone and never submitted. It also runs by itself every 15 minutes, and running it again changes nothing.`,
+                              action: async () => {
+                                const res = await runSweepAction(c.id);
+                                if (res.ok) {
+                                  const d = res.data;
+                                  toast.message(`${d.submitted} submitted, ${d.skippedIncomplete + d.skippedNoTeams} incomplete left as drafts${d.emailsFailed > 0 ? `, ${d.emailsFailed} confirmation email(s) failed (see Emails)` : ""}${d.timedOut ? ". Time ran out: run it again to continue" : ""}.`);
+                                }
+                                return res;
+                              },
+                              success: "Sweep finished.",
+                            })
+                          }
+                        >
+                          Run sweep now
                         </Button>
                       )}
                       {c.isActive ? (

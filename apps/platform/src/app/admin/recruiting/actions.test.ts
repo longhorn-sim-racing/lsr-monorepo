@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const guards = vi.hoisted(() => ({ requireOfficer: vi.fn() }));
 const recruiting = vi.hoisted(() => ({ addReview: vi.fn() }));
-const email = vi.hoisted(() => ({ bulkDecide: vi.fn(), decideAndNotify: vi.fn(), previewDecisionEmail: vi.fn(), resendAllFailed: vi.fn(), resendEmail: vi.fn() }));
+const email = vi.hoisted(() => ({ bulkDecide: vi.fn(), decideAndNotify: vi.fn(), previewDecisionEmail: vi.fn(), resendAllFailed: vi.fn(), resendEmail: vi.fn(), sweepAndNotify: vi.fn() }));
 const cycles = vi.hoisted(() => ({ createCycle: vi.fn(), deleteCycle: vi.fn(), saveTrackConfig: vi.fn(), setActiveCycle: vi.fn(), updateCycle: vi.fn() }));
 const cache = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
 
@@ -22,6 +22,7 @@ import {
   previewDecisionAction,
   resendAllFailedAction,
   resendEmailAction,
+  runSweepAction,
   saveBookingLinkAction,
   setActiveCycleAction,
   updateCycleAction,
@@ -42,6 +43,7 @@ describe("access", () => {
     ["addReviewAction", () => addReviewAction("t1", { score: 3 })],
     ["resendEmailAction", () => resendEmailAction("e1")],
     ["resendAllFailedAction", () => resendAllFailedAction("c1")],
+    ["runSweepAction", () => runSweepAction("c1")],
     ["createCycleAction", () => createCycleAction({ name: "Fall", slug: "fall", opensAt: "2026-10-01T00:00", closesAt: "2026-10-16T23:59" })],
     ["updateCycleAction", () => updateCycleAction("c1", { name: "Fall", opensAt: "2026-10-01T00:00", closesAt: "2026-10-16T23:59" })],
     ["setActiveCycleAction", () => setActiveCycleAction("c1")],
@@ -189,5 +191,22 @@ describe("rounds", () => {
   it("shows a taken address on the right field", async () => {
     cycles.createCycle.mockRejectedValue(new RecruitingError("INVALID", "A round with that address already exists.", { fieldErrors: { slug: "That address is already used by another round." } }));
     expect(await createCycleAction({ name: "Fall", slug: "fall", opensAt: "2026-10-01T00:00", closesAt: "2026-10-16T23:59" })).toMatchObject({ ok: false, fieldErrors: { slug: expect.any(String) } });
+  });
+});
+
+describe("run sweep now", () => {
+  it("sweeps only the round it was asked about and returns the summary", async () => {
+    const summary = { cycles: 1, submitted: 3, emailsSent: 3, emailsFailed: 0, skippedNoTeams: 0, skippedIncomplete: 2, failed: 0, timedOut: false, interruptedEmails: 0 };
+    email.sweepAndNotify.mockResolvedValue(summary);
+    const result = await runSweepAction("c1");
+    expect(result).toEqual({ ok: true, data: summary });
+    expect(email.sweepAndNotify).toHaveBeenCalledWith({ cycleId: "c1" });
+    expect(cache.revalidatePath).toHaveBeenCalledWith("/admin/recruiting", "layout");
+  });
+
+  it("rejects an empty id before touching the service", async () => {
+    const result = await runSweepAction("");
+    expect(result.ok).toBe(false);
+    expect(email.sweepAndNotify).not.toHaveBeenCalled();
   });
 });

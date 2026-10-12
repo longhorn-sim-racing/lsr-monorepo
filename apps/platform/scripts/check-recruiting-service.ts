@@ -29,6 +29,7 @@ import {
   resendAllFailed,
   resendEmail,
   submitAndNotify,
+  sweepAndNotify,
 } from "../src/server/services/recruiting-email.service";
 import { createCycle, deleteCycle, getTrackConfigs, listCycles, saveTrackConfig, setActiveCycle, updateCycle } from "../src/server/services/recruiting-cycle.service";
 import { exportRound } from "../src/server/services/recruiting-export.service";
@@ -48,6 +49,7 @@ import {
   setSelectedTracks,
   setTrackStatus,
   submitApplication,
+  sweepCycle,
   type RecruitingErrorCode,
 } from "../src/server/services/recruiting.service";
 
@@ -521,6 +523,69 @@ async function main() {
     await prisma.recruitingCycle.update({ where: { id: seeded }, data: { isActive: true } });
   }
 
+  console.log("--- deadline sweep ---");
+  {
+    const sw = await prisma.recruitingCycle.create({
+      data: { slug: `t8-${run}`, name: `T8 ${run}`, opensAt: new Date("2026-01-01T06:00:00Z"), closesAt: new Date("2026-02-01T06:00:00Z") },
+    });
+    const draft = async (label: string, opts: { resume?: boolean; teams?: string[]; submitted?: boolean } = {}) => {
+      const u = await makeUser(label);
+      const app = await prisma.application.create({
+        data: {
+          cycleId: sw.id,
+          userId: u.id,
+          formVersion: sw.formVersion,
+          state: opts.submitted ? "SUBMITTED" : "DRAFT",
+          submittedAt: opts.submitted ? new Date("2026-01-20T12:00:00Z") : null,
+          fullName: `Test ${label}`,
+          email: u.email,
+          eid: u.eid,
+          gradYear: 2028,
+          major: "Testing",
+          resumeUrl: opts.resume === false ? null : RESUME,
+          genericAnswers: GENERIC,
+          tracks: { create: (opts.teams ?? ["team-b"]).map((track) => ({ track, answers: {} })) },
+        },
+      });
+      return { u, app };
+    };
+    const complete1 = await draft("sw1");
+    const complete2 = await draft("sw2");
+    const noResume = await draft("sw3", { resume: false });
+    const noTeams = await draft("sw4", { teams: [] });
+    const already = await draft("sw5", { submitted: true });
+    const stateOf = (id: string) => prisma.application.findUniqueOrThrow({ where: { id }, include: { tracks: true } });
+    const emailsFor = (id: string) => prisma.applicationEmail.findMany({ where: { applicationId: id } });
+
+    const early = await sweepCycle(sw.id, new Date("2026-01-15T12:00:00Z"));
+    check("before the deadline the sweep does nothing", !early.ran && early.submitted === 0 && (await stateOf(complete1.app.id)).state === "DRAFT");
+    const openRound = await sweepCycle(cycle.id, IN);
+    check("an open round is never swept", !openRound.ran && openRound.checked === 0);
+
+    const first = await sweepAndNotify({ cycleId: sw.id });
+    check("complete drafts are submitted, the rest are left alone", first.submitted === 2 && first.skippedIncomplete === 1 && first.skippedNoTeams === 1 && first.failed === 0, JSON.stringify(first));
+    const c1 = await stateOf(complete1.app.id);
+    check("auto-submitted: state, flag, and submittedAt = the deadline", c1.state === "SUBMITTED" && c1.autoSubmitted && c1.submittedAt?.getTime() === sw.closesAt.getTime(), `${c1.state} ${c1.autoSubmitted} ${c1.submittedAt?.toISOString()}`);
+    check("...and its teams are submitted too", c1.tracks.length === 1 && c1.tracks.every((t) => t.status === "SUBMITTED"));
+    check("an incomplete draft stays a draft, never submitted", (await stateOf(noResume.app.id)).state === "DRAFT" && (await emailsFor(noResume.app.id)).length === 0);
+    check("a draft with no team stays a draft", (await stateOf(noTeams.app.id)).state === "DRAFT");
+    const alreadyRow = await stateOf(already.app.id);
+    check("an application the applicant already submitted is untouched", alreadyRow.state === "SUBMITTED" && !alreadyRow.autoSubmitted && alreadyRow.submittedAt?.toISOString() === "2026-01-20T12:00:00.000Z");
+    const mail1 = await emailsFor(complete1.app.id);
+    check("exactly one confirmation, to the account email", mail1.length === 1 && mail1[0].template === "RECEIVED" && mail1[0].toEmail === complete1.u.email, JSON.stringify(mail1.map((m) => m.toEmail)));
+    check("no real mail went out (no API key), so the confirmations show as failed for resend", first.emailsSent === 0 && first.emailsFailed === 2, JSON.stringify(first));
+    check("each auto-submit is audit-logged with no acting user", (await prisma.auditLog.count({ where: { actionType: "APPLICATION_AUTO_SUBMITTED", actorUserId: null, targetUserId: { in: [complete1.u.id, complete2.u.id] } } })) === 2);
+
+    const second = await sweepAndNotify({ cycleId: sw.id });
+    check("running it again changes nothing", second.submitted === 0 && (await emailsFor(complete1.app.id)).length === 1 && (await emailsFor(complete2.app.id)).length === 1, JSON.stringify(second));
+
+    const racer = await draft("sw6");
+    const [r1, r2] = await Promise.all([sweepAndNotify({ cycleId: sw.id }), sweepAndNotify({ cycleId: sw.id })]);
+    check("two sweeps at once submit it exactly once, with exactly one email", r1.submitted + r2.submitted === 1 && (await emailsFor(racer.app.id)).length === 1, `${r1.submitted}+${r2.submitted} emails=${(await emailsFor(racer.app.id)).length}`);
+
+    await expectError("applicants still can't write after the deadline", () => saveDraft(noResume.u.id, { resumeUrl: RESUME }, AFTER), "ROUND_CLOSED");
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
 }
 
@@ -530,6 +595,7 @@ async function cleanup() {
   await prisma.auditLog.deleteMany({ where: { OR: [{ entityId: { in: entityIds } }, { actorUserId: { in: userIds } }, { targetUserId: { in: userIds } }] } });
   await prisma.recruitingTrackConfig.deleteMany({ where: { schedulingUrl: "https://calendar.app.google/example" } });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } }); // cascades applications, teams, reviews, emails
+  await prisma.recruitingCycle.deleteMany({ where: { slug: `t8-${run}` } });
   await prisma.recruitingCycle.deleteMany({ where: { slug: { startsWith: `t6-${run}` } } }); // their booking links go with them
   await prisma.recruitingCycle.updateMany({ where: { slug: "fall-2026" }, data: { isActive: true } });
   const left = await prisma.user.count({ where: { id: { in: userIds } } });
