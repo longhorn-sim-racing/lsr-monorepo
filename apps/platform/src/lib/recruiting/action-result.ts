@@ -1,3 +1,5 @@
+import type { CompletenessReport } from "@/schemas/recruiting.schema";
+
 /**
  * What the recruiting server actions return. Like `ActionResult` (return a problem, don't throw it:
  * production replaces a thrown error's message with a generic one), plus per-field messages so a
@@ -6,4 +8,4 @@
  */
 export type RecruitingActionResult<T = undefined> =
   | { ok: true; data: T }
-  | { ok: false; error: string; fieldErrors?: Record<string, string>; code?: string };
+  | { ok: false; error: string; fieldErrors?: Record<string, string>; code?: string; report?: CompletenessReport };

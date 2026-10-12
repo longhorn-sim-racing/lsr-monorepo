@@ -164,6 +164,8 @@ export type ApplicantStatusView = {
     state: "DRAFT" | "SUBMITTED";
     submittedAt: Date | null;
     autoSubmitted: boolean;
+    /** The page the applicant last saved, so the form reopens there */
+    draftStep: string | null;
     /** A draft whose round has closed: it was not submitted and never will be. */
     expiredUnsubmitted: boolean;
     profile: { fullName: string | null; email: string | null; eid: string | null; gradYear: number | null; major: string | null };
@@ -203,6 +205,7 @@ export async function getApplicantStatus(userId: string, now: Date = new Date())
       state: app.state,
       submittedAt: app.submittedAt,
       autoSubmitted: app.autoSubmitted,
+      draftStep: app.draftStep,
       expiredUnsubmitted: app.state === "DRAFT" && window === "closed",
       profile: { fullName: app.fullName, email: app.email, eid: app.eid, gradYear: app.gradYear, major: app.major },
       resumeUrl: app.resumeUrl,
