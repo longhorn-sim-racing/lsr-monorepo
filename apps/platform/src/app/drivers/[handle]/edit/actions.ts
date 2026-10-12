@@ -6,6 +6,9 @@ import { requireUser } from '@/server/auth/guards';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { revalidateDriverList } from '@/server/cache/revalidate-public';
+import type { ActionResult } from '@/lib/action-result';
+import { eidInputSchema } from '@/schemas/eid.schema';
+import { EID_TAKEN, setUserEid } from '@/server/services/eid.service';
 
 // Schema shared by the action
 const UserSchema = z.object({
@@ -112,4 +115,24 @@ export async function clearAvatar() {
 
   revalidatePath(`/drivers/${user.handle}`);
   revalidateDriverList();
+}
+
+/** Saves (or, when blank, removes) the signed-in user's UT EID. Returns the stored value. */
+export async function saveEid(value: string): Promise<ActionResult<string | null>> {
+  const user = await requireUser();
+
+  const parsed = eidInputSchema.safeParse(value);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "That UT EID doesn't look right." };
+  }
+
+  const eid = parsed.data;
+  if (eid === user.eid) return { ok: true, data: eid };
+  if ((await setUserEid(user.id, eid)) === 'taken') {
+    return { ok: false, error: `${EID_TAKEN} If it's yours, email info@longhornsimracing.org and we'll sort it out.` };
+  }
+
+  revalidatePath('/account');
+  revalidatePath(`/drivers/${user.handle}/edit`);
+  return { ok: true, data: eid };
 }

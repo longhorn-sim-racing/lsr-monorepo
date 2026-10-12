@@ -9,101 +9,99 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Button } from "@/components/ui/button"
-import { ChevronDown, Menu, ShoppingCart } from "lucide-react"
+import { ChevronDown, ShoppingCart } from "lucide-react"
 import { usePathname } from "next/navigation"
 import { User } from "@prisma/client"
 import { useCart } from "@/lib/shopify/CartContext"
 import { WishlistIndicator } from "@/components/shop/WishlistIndicator"
 import { NotificationBell } from "@/components/notification-bell"
+import { MobileNav } from "@/components/mobile-nav"
+import { MORE_NAV, PRIMARY_NAV, isActivePath } from "@/components/site-nav"
 import { motion, AnimatePresence } from "framer-motion"
+
+const linkBase = "group/link relative px-2 py-2 lg:px-3 font-sans text-[11px] font-bold uppercase tracking-[0.2em] transition-colors"
+
+/** The orange bar under a nav link: shown for the current section, grows in on hover otherwise. */
+function ActiveBar({ active }: { active: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`absolute inset-x-2 -bottom-0.5 h-0.5 lg:inset-x-3 origin-left bg-lsr-orange transition-transform duration-300 ${
+        active ? "scale-x-100" : "scale-x-0 group-hover/link:scale-x-100"
+      }`}
+    />
+  )
+}
 
 export function SiteHeader({ user, roles, activeTierKey }: { user: User | null, roles: string[], activeTierKey: string | null }) {
   const pathname = usePathname()
-  const isHome = pathname === "/"
   const isShopPage = pathname.startsWith("/shop")
   const { cartCount } = useCart()
   const showCart = cartCount > 0 || isShopPage
+  const moreActive = MORE_NAV.some((link) => isActivePath(pathname, link.href))
 
   return (
-    <header className="sticky top-0 z-50 bg-lsr-charcoal/95 backdrop-blur-md border-b border-white/5">
-      <nav className="mx-auto max-w-6xl flex h-20 items-center justify-between px-6">
-        <Link href="/" className="flex items-center gap-4 group">
-          {/* Logo Image: Always visible */}
-          <div className="relative">
-            <Image
-              src="/brand/logos/white_logo2.png"
-              alt="LSR logo"
-              width={64}
-              height={64}
-              className="rounded-none transition-transform group-hover:scale-110 duration-500"
-              priority
-            />
-          </div>
-          
-          {/* Brand Text: Hidden on Home, Hidden on Mobile (non-home), Visible on Desktop (non-home) */}
-          <div className={`flex flex-col ${isHome ? 'hidden' : 'hidden sm:flex'}`}>
-            <span className="font-display font-black italic text-lg sm:text-2xl tracking-normal leading-none uppercase text-white whitespace-nowrap">
-              Longhorn Sim Racing
-            </span>
-            <span className="font-sans font-bold text-[7px] sm:text-[8px] uppercase tracking-[0.2em] sm:tracking-[0.25em] text-white/50 leading-none mt-1 whitespace-nowrap">
-              University of Texas at Austin
-            </span>
-          </div>
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-lsr-charcoal/95 backdrop-blur-md">
+      <nav aria-label="Main" className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-6 md:h-20">
+        <Link href="/" aria-label="Longhorn Sim Racing home" className="group shrink-0">
+          <Image
+            src="/brand/logos/white_logo2.png"
+            alt=""
+            width={96}
+            height={32}
+            className="h-auto w-14 transition-transform duration-500 group-hover:scale-105 md:w-[72px]"
+            priority
+          />
         </Link>
 
-        <div className="flex items-center gap-6">
-          {/* Desktop navigation links */}
-          <div className="hidden md:flex items-center gap-8 font-sans font-bold text-[10px] uppercase tracking-[0.25em] text-white/70">
-            <Link href="/events" className="hover:text-lsr-orange transition-colors relative group/link">
-              Events
-              <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-lsr-orange transition-all group-hover/link:w-full" />
-            </Link>
-            {!isShopPage && (
-              <Link href="/drivers" className="hover:text-lsr-orange transition-colors relative group/link">
-                Drivers
-                <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-lsr-orange transition-all group-hover/link:w-full" />
-              </Link>
-            )}
-            <Link href="/shop" className="hover:text-lsr-orange transition-colors relative group/link">
-              Merch
-              <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-lsr-orange transition-all group-hover/link:w-full" />
-            </Link>
-            <Link href="/lone-star-cup" className="hover:text-lsr-orange transition-colors relative group/link text-lsr-orange/80">
-              LSC
-              <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-lsr-orange transition-all group-hover/link:w-full" />
-            </Link>
+        <div className="flex items-center gap-2 md:gap-4">
+          {/* Desktop navigation */}
+          <div className="hidden items-center md:flex">
+            {PRIMARY_NAV.map((link) => {
+              const active = isActivePath(pathname, link.href)
+              const accent = link.href === "/lone-star-cup"
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  aria-current={active ? "page" : undefined}
+                  className={`${linkBase} ${active ? "text-white" : accent ? "text-lsr-orange hover:text-white" : "text-white/65 hover:text-white"}`}
+                >
+                  {link.label}
+                  <ActiveBar active={active} />
+                </Link>
+              )
+            })}
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex items-center gap-1.5 hover:text-lsr-orange transition-colors outline-none group/more">
-                <span>More</span>
-                <ChevronDown className="h-3 w-3 opacity-50 group-hover/more:opacity-100 transition-opacity" />
+              <DropdownMenuTrigger
+                className={`${linkBase} flex items-center gap-1.5 outline-none ${moreActive ? "text-white" : "text-white/65 hover:text-white"}`}
+              >
+                More
+                <ChevronDown className="h-3 w-3 opacity-60" />
+                <ActiveBar active={moreActive} />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-lsr-charcoal border-white/10 rounded-none p-2 min-w-[160px]">
-                {isShopPage && (
-                  <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                    <Link href="/drivers" className="font-sans font-bold text-[9px] uppercase tracking-widest py-2">Drivers</Link>
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                  <Link href="/news" className="font-sans font-bold text-[9px] uppercase tracking-widest py-2">News</Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                  <Link href="/about" className="font-sans font-bold text-[9px] uppercase tracking-widest py-2">About</Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                  <Link href="/gallery" className="font-sans font-bold text-[9px] uppercase tracking-widest py-2">Gallery</Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                  <Link href="/sponsors" className="font-sans font-bold text-[9px] uppercase tracking-widest py-2">Sponsors</Link>
-                </DropdownMenuItem>
+              <DropdownMenuContent align="end" sideOffset={12} className="min-w-[180px] rounded-none border-white/10 bg-lsr-charcoal p-1.5">
+                {MORE_NAV.map((link) => {
+                  const active = isActivePath(pathname, link.href)
+                  return (
+                    <DropdownMenuItem key={link.href} asChild className="cursor-pointer rounded-none focus:bg-lsr-orange focus:text-white">
+                      <Link
+                        href={link.href}
+                        aria-current={active ? "page" : undefined}
+                        className={`px-3 py-2.5 font-sans text-[11px] font-bold uppercase tracking-[0.2em] ${active ? "text-lsr-orange" : "text-white/80"}`}
+                      >
+                        {link.label}
+                      </Link>
+                    </DropdownMenuItem>
+                  )
+                })}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
 
-          <div className="h-6 w-px bg-white/10 hidden md:block" />
+          <div className="hidden h-6 w-px bg-white/10 md:block" />
 
-          {/* User menu */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 md:gap-3">
             {/* Notification bell - only for authenticated users */}
             {user && <NotificationBell />}
             <WishlistIndicator />
@@ -134,42 +132,9 @@ export function SiteHeader({ user, roles, activeTierKey }: { user: User | null, 
             </AnimatePresence>
 
             <UserMenuClient user={user} roles={roles} activeTierKey={activeTierKey} />
-            
-            {/* Mobile hamburger menu */}
+
             <div className="md:hidden">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="hover:bg-white/5 rounded-none">
-                    <Menu className="h-6 w-6" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="bg-lsr-charcoal border-white/10 rounded-none w-56 p-2">
-                  <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                    <Link href="/about" className="font-sans font-bold text-[10px] uppercase tracking-widest py-3">About</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                    <Link href="/drivers" className="font-sans font-bold text-[10px] uppercase tracking-widest py-3">Drivers</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                    <Link href="/events" className="font-sans font-bold text-[10px] uppercase tracking-widest py-3">Events</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                    <Link href="/shop" className="font-sans font-bold text-[10px] uppercase tracking-widest py-3">Merch</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                    <Link href="/gallery" className="font-sans font-bold text-[10px] uppercase tracking-widest py-3">Gallery</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                    <Link href="/news" className="font-sans font-bold text-[10px] uppercase tracking-widest py-3">News</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                    <Link href="/sponsors" className="font-sans font-bold text-[10px] uppercase tracking-widest py-3">Sponsors</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild className="focus:bg-lsr-orange focus:text-white rounded-none cursor-pointer">
-                    <Link href="/lone-star-cup" className="font-sans font-bold text-[10px] uppercase tracking-widest py-3 text-lsr-orange">LSC</Link>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <MobileNav />
             </div>
           </div>
         </div>

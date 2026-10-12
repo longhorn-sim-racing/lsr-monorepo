@@ -14,6 +14,7 @@ import { CartProvider } from "@/lib/shopify/CartContext";
 import { RacingNumberPrompt } from "@/components/racing-number-prompt";
 import { unstable_rethrow } from "next/navigation";
 import { CANONICAL_SITE_URL } from "@/lib/site-url";
+import { CONTACT_EMAIL, DISCORD_URL, INSTAGRAM_URL, LINKEDIN_URL, TWITCH_URL } from "@/lib/socials";
 
 const montserrat = Montserrat({
   subsets: ["latin"],
@@ -107,13 +108,8 @@ const organizationJsonLd = {
       addressCountry: "US",
     },
   },
-  email: "info@longhornsimracing.org",
-  sameAs: [
-    "https://discord.gg/5Uv9YwpnFz",
-    "https://instagram.com/longhorn_sim_racing",
-    "https://www.twitch.tv/longhorn_sim_racing",
-    "https://www.linkedin.com/company/longhorn-sim-racing",
-  ],
+  email: CONTACT_EMAIL,
+  sameAs: [DISCORD_URL, INSTAGRAM_URL, TWITCH_URL, LINKEDIN_URL],
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

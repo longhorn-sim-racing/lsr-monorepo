@@ -69,7 +69,14 @@ export default async function AccountPage() {
     { label: 'Email', value: user.email ?? '' },
     {
       label: 'UT EID',
-      value: user.eid ?? <span className="text-white/45">Not added yet. You can add it when you enter the Lone Star Cup.</span>,
+      value: (
+        <span>
+          {user.eid ?? <span className="text-white/45">Not added yet.</span>}{' '}
+          <Link href={`/drivers/${user.handle}/edit#private`} className="font-bold text-lsr-orange hover:underline">
+            {user.eid ? 'Change' : 'Add it'}
+          </Link>
+        </span>
+      ),
     },
   ];
 

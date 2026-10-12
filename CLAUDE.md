@@ -43,7 +43,7 @@ pnpm test             # Unit tests (Vitest); pnpm test:watch to rerun on save
 pnpm db:migrate       # Create/apply migrations (prisma migrate dev)
 pnpm db:reset         # Reset, re-apply migrations and re-seed
 pnpm db:generate      # Regenerate Prisma client
-pnpm set-role <userId> <role>  # Assign role to user
+pnpm set-role <email|handle|userId> <role>  # Assign role to user
 ```
 
 ## Architecture
@@ -81,7 +81,6 @@ Server Components fetch data directly via Prisma or `src/server/queries/`. Use `
 - Roles in `src/lib/roles.ts`: `officer` and `admin` grant admin console access; `lsc_driver` and `collegiate_driver` are display badges only
 - Guards in `src/server/auth/guards.ts`: `requireUser()`, `requireRole(role | roles)`, `requireOfficer()` (admin or officer, throws), `requireOfficerPage()` (same check, redirects to `/403`)
 - Each admin page must check access itself (`requireOfficerPage()`); the admin layout checks too, but layouts don't re-run on partial renders. Each Server Action checks its own access
-- `requireRole` also lets in emails listed in the `ADMIN_EMAILS` env var (checked after the session lookup)
 - JIT user provisioning: `getSessionUser()` creates the Prisma `User` on first Supabase sign-in
 
 ### Public Pages and Privacy
@@ -129,11 +128,12 @@ Required in `apps/platform/.env.local`:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (from `supabase status -o env`)
 - `DATABASE_URL` (local: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`)
 - `DIRECT_URL` (same as `DATABASE_URL` for local dev)
-- `ADMIN_EMAILS` (comma-separated admin email allowlist)
 
 Optional ones (site URL, Stripe, Resend, Cloudinary, Shopify) are listed in `apps/platform/.env.example`.
 
 Prisma reads `.env` (not `.env.local`), so `DATABASE_URL` and `DIRECT_URL` must also be in `apps/platform/.env`.
+
+Admin access comes only from roles: `pnpm set-role <email|handle|userId> admin` (see `docs/local-dev.md`).
 
 Production credentials live only in Vercel — never in local env files.
 

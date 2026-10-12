@@ -66,7 +66,7 @@ From `apps/platform/`:
 | `pnpm db:generate` | Regenerate Prisma client |
 | `pnpm db:migrate` | Create and apply a database migration |
 | `pnpm db:reset` | Reset and re-seed the database |
-| `pnpm set-role <userId> <role>` | Assign a role to a user |
+| `pnpm set-role <email\|handle\|userId> <role>` | Assign a role to a user |
 
 ## Documentation
 

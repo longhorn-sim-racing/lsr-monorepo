@@ -79,12 +79,12 @@ export function UserMenuClient({
         >
           <DropdownMenu open={open} onOpenChange={setOpen}>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="h-10 gap-2 sm:gap-3 rounded-none border-white/10 bg-white/5 hover:bg-white/10 text-white font-bold transition-all px-2 sm:px-4">
+              <Button variant="outline" className="h-10 gap-2 lg:gap-3 rounded-none border-white/10 bg-white/5 hover:bg-white/10 text-white font-bold transition-all px-2 lg:px-4">
                 <Avatar className="h-6 w-6 rounded-none border border-white/20">
                   <AvatarImage src={user.avatarUrl ?? undefined} alt={user.displayName ?? 'User avatar'} className="rounded-none" />
                   <AvatarFallback className="text-[9px] font-black uppercase bg-lsr-orange text-white rounded-none">{initials || "U"}</AvatarFallback>
                 </Avatar>
-                <span className="hidden sm:inline-flex items-center gap-1.5 truncate max-w-[10rem] font-sans text-[10px] uppercase tracking-widest leading-none">
+                <span className="hidden lg:inline-flex items-center gap-1.5 truncate max-w-[10rem] font-sans text-[10px] uppercase tracking-widest leading-none">
                   {user.displayName}
                   <TooltipProvider>
                     <StatusIcons

@@ -1,153 +1,155 @@
+import Image from "next/image"
 import Link from "next/link"
-import { Rss, ExternalLink } from "lucide-react"
+import { ArrowUpRight, Linkedin, Rss } from "lucide-react"
 import { BrandIcon } from "@/components/brand-icon"
 import { siInstagram, siTwitch, siDiscord } from "simple-icons/icons"
+import { CONTACT_EMAIL, DISCORD_URL, INSTAGRAM_URL, LINKEDIN_URL, TWITCH_URL } from "@/lib/socials"
+
+const COLUMNS: { title: string; links: { href: string; label: string }[] }[] = [
+  {
+    title: "Race",
+    links: [
+      { href: "/events", label: "Events" },
+      { href: "/lone-star-cup", label: "Lone Star Cup" },
+      { href: "/drivers", label: "Drivers" },
+    ],
+  },
+  {
+    title: "Club",
+    links: [
+      { href: "/about", label: "About" },
+      { href: "/news", label: "News" },
+      { href: "/gallery", label: "Gallery" },
+    ],
+  },
+  {
+    title: "Support",
+    links: [
+      { href: "/sponsors", label: "Sponsors" },
+      { href: "/sponsors#donate", label: "Donate" },
+      { href: "/shop", label: "Merch" },
+    ],
+  },
+]
+
+const iconButton =
+  "flex h-11 w-11 items-center justify-center border border-white/15 text-white/70 transition-colors hover:border-lsr-orange hover:text-lsr-orange"
+
+const credits = [
+  { name: "Gray Marshall", href: "https://graymarshall.dev" },
+  { name: "Alexander Spears", href: "https://www.linkedin.com/in/alexander-spears/" },
+  { name: "Arav Agarwal", href: "https://www.linkedin.com/in/arav-agarwal1/" },
+]
 
 export function SiteFooter() {
   const year = new Date().getFullYear()
 
   return (
-    <footer role="contentinfo" className="border-t border-white/5 bg-black">
-      <div className="mx-auto max-w-6xl px-6 py-16 md:py-24">
-        <div className="grid gap-12 sm:grid-cols-2 lg:grid-cols-4">
+    <footer role="contentinfo" className="relative overflow-hidden border-t border-white/10 bg-black">
+      <div aria-hidden className="h-0.5 bg-gradient-to-r from-lsr-orange via-lsr-orange/40 to-transparent" />
+
+      <div className="relative mx-auto max-w-6xl px-6 pt-16 pb-10 md:pt-20">
+        <div className="grid gap-14 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)] lg:gap-16">
           {/* Brand */}
-          <div className="space-y-6">
-            <Link href="/" className="flex flex-col gap-1 group">
-              <div className="flex flex-col">
-                <span className="font-display font-black italic text-xl tracking-normal leading-none uppercase text-white group-hover:text-[#FF8000] transition-colors">
+          <div className="space-y-7">
+            <Link href="/" className="group inline-flex items-center gap-4">
+              <Image src="/brand/logos/white_logo2.png" alt="" width={96} height={32} className="h-auto w-16" />
+              <span className="flex flex-col">
+                <span className="font-display text-2xl font-black uppercase italic leading-none text-white transition-colors group-hover:text-lsr-orange">
                   Longhorn Sim Racing
                 </span>
-                <span className="font-sans font-bold text-[7px] uppercase tracking-[0.2em] text-white/40 leading-none mt-1">
+                <span className="mt-1.5 font-sans text-[9px] font-bold uppercase tracking-[0.25em] text-white/45">
                   University of Texas at Austin
                 </span>
-              </div>
+              </span>
             </Link>
-            <p className="font-sans text-xs text-white/30 uppercase tracking-widest leading-loose max-w-[240px]">
+            <p className="max-w-sm font-sans text-sm leading-relaxed text-white/60">
               UT Austin&apos;s premier simulation racing organization. Performance. Engineering. Community.
             </p>
-          </div>
-
-          {/* Quick links */}
-          <div className="space-y-6">
-            <h3 className="font-sans font-black text-[10px] uppercase tracking-[0.3em] text-white/20">The Grid</h3>
-            <nav aria-label="Footer" className="flex flex-col gap-3 text-xs font-bold uppercase tracking-widest">
-              <Link href="/about" className="text-white/60 hover:text-lsr-orange transition-colors">About</Link>
-              <Link href="/news" className="text-white/60 hover:text-lsr-orange transition-colors">News</Link>
-              <Link href="/events" className="text-white/60 hover:text-lsr-orange transition-colors">Events</Link>
-              <Link href="/drivers" className="text-white/60 hover:text-lsr-orange transition-colors">Drivers</Link>
-              <Link href="/shop" className="text-white/60 hover:text-lsr-orange transition-colors">Merch</Link>
-              <Link href="/gallery" className="text-white/60 hover:text-lsr-orange transition-colors">Gallery</Link>
-              <Link href="/sponsors" className="text-white/60 hover:text-lsr-orange transition-colors">Sponsors</Link>
-              <Link href="/lone-star-cup" className="text-white/60 hover:text-lsr-orange transition-colors">LSC</Link>
-              <Link href="/privacy" className="text-white/60 hover:text-lsr-orange transition-colors">Privacy</Link>
-              <Link href="/terms" className="text-white/60 hover:text-lsr-orange transition-colors">Terms</Link>
-            </nav>
-          </div>
-
-          {/* Contact */}
-          <div className="space-y-6 text-xs">
-            <h3 className="font-sans font-black text-[10px] uppercase tracking-[0.3em] text-white/20">Headquarters</h3>
-            <div className="space-y-4">
-              <p className="text-white/60 font-bold uppercase tracking-widest">Austin, Texas</p>
+            <div className="space-y-1.5">
               <a
-                href="mailto:info@longhornsimracing.org"
-                className="flex items-center gap-3 text-white/60 hover:text-lsr-orange transition-colors font-bold uppercase tracking-widest group"
+                href={`mailto:${CONTACT_EMAIL}`}
+                className="inline-flex items-center gap-1 font-sans text-sm font-bold text-white/80 transition-colors hover:text-lsr-orange"
               >
-                info@longhornsimracing.org
+                {CONTACT_EMAIL}
+                <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
               </a>
+              <p className="font-sans text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">Austin, Texas</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" aria-label="Discord" className={iconButton}>
+                <BrandIcon icon={siDiscord} className="h-4 w-4" />
+              </a>
+              <a href={INSTAGRAM_URL} target="_blank" rel="noopener noreferrer" aria-label="Instagram" className={iconButton}>
+                <BrandIcon icon={siInstagram} className="h-4 w-4" />
+              </a>
+              <a href={TWITCH_URL} target="_blank" rel="noopener noreferrer" aria-label="Twitch" className={iconButton}>
+                <BrandIcon icon={siTwitch} className="h-4 w-4" />
+              </a>
+              <a href={LINKEDIN_URL} target="_blank" rel="noopener noreferrer" aria-label="LinkedIn" className={iconButton}>
+                <Linkedin className="h-4 w-4" />
+              </a>
+              <Link href="/news/subscribe" aria-label="RSS and updates" className={iconButton}>
+                <Rss className="h-4 w-4" />
+              </Link>
             </div>
           </div>
 
-          {/* Social */}
-          <div className="space-y-6 text-xs">
-            <h3 className="font-sans font-black text-[10px] uppercase tracking-[0.3em] text-white/20">Network</h3>
-            <ul className="grid grid-cols-2 gap-x-4 gap-y-3">
-              <li>
-                <a
-                  href="https://discord.gg/5Uv9YwpnFz"
-                  target="_blank" rel="noreferrer"
-                  className="flex items-center gap-2 text-white/60 hover:text-lsr-orange transition-colors font-bold uppercase tracking-widest"
-                >
-                  <BrandIcon icon={siDiscord} className="h-3 w-3" />
-                  Discord
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://instagram.com/longhorn_sim_racing"
-                  target="_blank" rel="noreferrer"
-                  className="flex items-center gap-2 text-white/60 hover:text-lsr-orange transition-colors font-bold uppercase tracking-widest"
-                >
-                  <BrandIcon icon={siInstagram} className="h-3 w-3" />
-                  Insta
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://www.twitch.tv/longhorn_sim_racing"
-                  target="_blank" rel="noreferrer"
-                  className="flex items-center gap-2 text-white/60 hover:text-lsr-orange transition-colors font-bold uppercase tracking-widest"
-                >
-                  <BrandIcon icon={siTwitch} className="h-3 w-3" />
-                  Twitch
-                </a>
-              </li>
-              <li>
-                <a
-                  href="https://www.linkedin.com/company/longhorn-sim-racing"
-                  target="_blank" rel="noreferrer"
-                  className="flex items-center gap-2 text-white/60 hover:text-lsr-orange transition-colors font-bold uppercase tracking-widest"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  LinkedIn
-                </a>
-              </li>
-              <li>
-                <Link href="/news/subscribe" className="flex items-center gap-2 text-white/60 hover:text-lsr-orange transition-colors font-bold uppercase tracking-widest">
-                  <Rss className="h-3 w-3" />
-                  RSS
-                </Link>
-              </li>
-            </ul>
-          </div>
+          {/* Links */}
+          <nav aria-label="Footer" className="grid grid-cols-2 gap-10 sm:grid-cols-3 lg:pt-2">
+            {COLUMNS.map((column) => (
+              <div key={column.title} className="space-y-5">
+                <h3 className="font-sans text-[10px] font-bold uppercase tracking-[0.3em] text-lsr-orange">{column.title}</h3>
+                <ul className="space-y-3">
+                  {column.links.map((link) => (
+                    <li key={link.href}>
+                      <Link
+                        href={link.href}
+                        className="font-sans text-xs font-bold uppercase tracking-widest text-white/65 transition-colors hover:text-lsr-orange"
+                      >
+                        {link.label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </nav>
         </div>
 
         {/* Bottom bar */}
-        <div
-          className="mt-20 flex flex-col items-start justify-between gap-6 border-t border-white/5 pt-10 text-[9px] font-bold uppercase tracking-[0.2em] text-white/20 sm:flex-row">
-          <p>© {year} Longhorn Sim Racing · University of Texas at Austin</p>
-          <div className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:gap-6">
-            <p>Built with Next.js • Vercel • Made by{" "}
-              <a
-                href="https://graymarshall.dev"
-                target="_blank"
-                rel="noreferrer"
-                className="text-white/40 hover:text-white transition-colors"
-              >
-                Gray Marshall
-              </a>
-              ,{" "}
-              <a
-                href="https://www.linkedin.com/in/alexander-spears/"
-                target="_blank"
-                rel="noreferrer"
-                className="text-white/40 hover:text-white transition-colors"
-              >
-                Alexander Spears
-              </a>
-              ,{" "}
-              <a
-                href="https://www.linkedin.com/in/arav-agarwal1/"
-                target="_blank"
-                rel="noreferrer"
-                className="text-white/40 hover:text-white transition-colors"
-              >
-                Arav Agarwal
-              </a>
+        <div className="mt-16 flex flex-col gap-6 border-t border-white/10 pt-8 font-sans text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-2">
+            <p>© {year} Longhorn Sim Racing</p>
+            <p>University of Texas at Austin · A 501(c)(3) nonprofit</p>
+          </div>
+          <div className="space-y-2 md:text-right">
+            <div className="flex gap-6 md:justify-end">
+              <Link href="/privacy" className="transition-colors hover:text-white">Privacy</Link>
+              <Link href="/terms" className="transition-colors hover:text-white">Terms</Link>
+            </div>
+            <p>
+            Built with Next.js • Vercel • Made by{" "}
+            {credits.map((person, i) => (
+              <span key={person.name}>
+                <a href={person.href} target="_blank" rel="noreferrer" className="whitespace-nowrap text-white/60 transition-colors hover:text-white">
+                  {person.name}
+                </a>
+                {i < credits.length - 1 ? ", " : ""}
+              </span>
+            ))}
             </p>
           </div>
         </div>
       </div>
+
+      {/* Oversized outline wordmark along the bottom edge */}
+      <p
+        aria-hidden
+        className="pointer-events-none -mb-[1.5vw] select-none whitespace-nowrap text-center font-display text-[8vw] font-black uppercase italic leading-none text-transparent [-webkit-text-stroke:1px_rgba(255,255,255,0.08)]"
+      >
+        Longhorn Sim Racing
+      </p>
     </footer>
   )
 }
