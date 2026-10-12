@@ -1,5 +1,6 @@
 // The officer roster shown on /about. Source of truth: the president's roster post to the
-// exec team (2026-09-28). Update this file when roles change.
+// exec team (2026-09-28). Update this file when roles change, then run
+// scripts/sync-officer-badges.ts so the staff badges on the site match it.
 //
 // Photos: run scripts/crop-headshot.py on the original (it frames the face to match the
 // others and writes public/images/officers/<slug>.jpg), then set `photo` to that path.
