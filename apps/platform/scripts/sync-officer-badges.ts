@@ -86,7 +86,9 @@ function badgeTitle(officer: Officer): string {
   return team ? `${team.name} Officer` : officer.title;
 }
 
-const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+/** Lowercased, accents folded (Peña → pena), single spaces. */
+const norm = (s: string) =>
+  s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
 
 function describeTarget(url: string): string {
   try {
@@ -131,8 +133,9 @@ async function main() {
 
   for (const officer of OFFICERS) {
     const handle = HANDLES[officer.name];
+    // Whatever happens below, accounts that might be this officer's are never stripped
+    const candidates = users.filter((u) => norm(u.displayName).startsWith(norm(officer.name)));
     if (!handle) {
-      const candidates = users.filter((u) => norm(u.displayName).startsWith(norm(officer.name)));
       candidates.forEach((u) => protectedIds.add(u.id));
       notes.push(
         candidates.length
@@ -143,11 +146,13 @@ async function main() {
     }
     const user = users.find((u) => u.handle === handle);
     if (!user) {
+      candidates.forEach((u) => protectedIds.add(u.id));
       notes.push(`${officer.name}: no account with handle @${handle}.`);
       continue;
     }
     mappedIds.add(user.id);
     if (user.status !== "active") {
+      candidates.forEach((u) => protectedIds.add(u.id));
       notes.push(`${officer.name}: @${handle} is ${user.status}; skipped.`);
       continue;
     }
