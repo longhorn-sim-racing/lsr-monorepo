@@ -8,11 +8,11 @@ export const PRIMARY_NAV: NavLink[] = [
   { href: "/lone-star-cup", label: "LSC" },
   { href: "/drivers", label: "Drivers" },
   { href: "/news", label: "News" },
+  { href: "/about", label: "About" },
 ]
 
 /** Under "More" on desktop. */
 export const MORE_NAV: NavLink[] = [
-  { href: "/about", label: "About" },
   { href: "/gallery", label: "Gallery" },
   { href: "/sponsors", label: "Sponsors" },
   { href: "/shop", label: "Merch" },

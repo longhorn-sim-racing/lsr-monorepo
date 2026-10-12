@@ -19,14 +19,14 @@ import { MobileNav } from "@/components/mobile-nav"
 import { MORE_NAV, PRIMARY_NAV, isActivePath } from "@/components/site-nav"
 import { motion, AnimatePresence } from "framer-motion"
 
-const linkBase = "group/link relative px-3 py-2 font-sans text-[11px] font-bold uppercase tracking-[0.2em] transition-colors"
+const linkBase = "group/link relative px-2 py-2 lg:px-3 font-sans text-[11px] font-bold uppercase tracking-[0.2em] transition-colors"
 
 /** The orange bar under a nav link: shown for the current section, grows in on hover otherwise. */
 function ActiveBar({ active }: { active: boolean }) {
   return (
     <span
       aria-hidden
-      className={`absolute inset-x-3 -bottom-0.5 h-0.5 origin-left bg-lsr-orange transition-transform duration-300 ${
+      className={`absolute inset-x-2 -bottom-0.5 h-0.5 lg:inset-x-3 origin-left bg-lsr-orange transition-transform duration-300 ${
         active ? "scale-x-100" : "scale-x-0 group-hover/link:scale-x-100"
       }`}
     />
@@ -35,7 +35,6 @@ function ActiveBar({ active }: { active: boolean }) {
 
 export function SiteHeader({ user, roles, activeTierKey }: { user: User | null, roles: string[], activeTierKey: string | null }) {
   const pathname = usePathname()
-  const isHome = pathname === "/"
   const isShopPage = pathname.startsWith("/shop")
   const { cartCount } = useCart()
   const showCart = cartCount > 0 || isShopPage
@@ -44,32 +43,15 @@ export function SiteHeader({ user, roles, activeTierKey }: { user: User | null, 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-lsr-charcoal/95 backdrop-blur-md">
       <nav aria-label="Main" className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-6 md:h-20">
-        <Link href="/" aria-label="Longhorn Sim Racing home" className="group flex shrink-0 items-center gap-4">
+        <Link href="/" aria-label="Longhorn Sim Racing home" className="group shrink-0">
           <Image
             src="/brand/logos/white_logo2.png"
             alt=""
             width={96}
             height={32}
-            className="h-auto w-14 transition-transform duration-500 group-hover:scale-105 md:w-16"
+            className="h-auto w-14 transition-transform duration-500 group-hover:scale-105 md:w-[72px]"
             priority
           />
-
-          {/* Wordmark: the home page hero already says it, and phones don't have the room */}
-          <span className={`${isHome ? "hidden" : "hidden sm:flex"} items-center gap-4`}>
-            <span aria-hidden className="flex gap-1">
-              <span className="h-6 w-1.5 -skew-x-[20deg] bg-lsr-orange" />
-              <span className="h-6 w-1.5 -skew-x-[20deg] bg-lsr-orange/70" />
-              <span className="h-6 w-1.5 -skew-x-[20deg] bg-lsr-orange/40" />
-            </span>
-            <span className="flex flex-col">
-              <span className="whitespace-nowrap font-display text-xl font-black uppercase italic leading-none text-white lg:text-2xl">
-                Longhorn Sim Racing
-              </span>
-              <span className="mt-1.5 whitespace-nowrap font-sans text-[9px] font-bold uppercase tracking-[0.25em] text-white/50">
-                University of Texas at Austin
-              </span>
-            </span>
-          </span>
         </Link>
 
         <div className="flex items-center gap-2 md:gap-4">

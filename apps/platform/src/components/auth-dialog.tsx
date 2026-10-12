@@ -49,8 +49,8 @@ export function AuthDialog() {
           }}
           className="rounded-none bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal font-bold uppercase tracking-widest text-[10px] h-9 px-3 md:px-6 transition-all"
         >
-          <span className="sm:hidden">Sign In</span>
-          <span className="hidden sm:inline">Sign In / Create Account</span>
+          <span className="lg:hidden">Sign In</span>
+          <span className="hidden lg:inline">Sign In / Create Account</span>
         </Button>
       </DialogTrigger>
 
