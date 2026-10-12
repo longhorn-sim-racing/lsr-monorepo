@@ -11,6 +11,7 @@ import {
   isTrackKey,
   parseAnswers,
   questionsForTrack,
+  trackQuestions,
   tracks,
   validateContent,
   type DraftSnapshot,
@@ -215,7 +216,7 @@ describe("draftPatchSchema", () => {
 
 describe("checkCompleteness", () => {
   const profile = { fullName: "Ada Lovelace", email: "ada@example.com", eid: "al123", gradYear: 2028, major: "Math" };
-  const generic = { why_join: "Because.", sim_experience: 3 };
+  const generic = {}; // there are no general questions
   const resume = "https://example.com/r.pdf";
   const draft = (over: Partial<DraftSnapshot> = {}): DraftSnapshot => ({
     ...profile,
@@ -230,7 +231,7 @@ describe("checkCompleteness", () => {
   it("flags every section of an empty draft", () => {
     const report = checkCompleteness({ tracks: [] });
     expect(report.complete).toBe(false);
-    expect(incompleteKeys({ tracks: [] })).toEqual(expect.arrayContaining(["profile", "general", "tracks", "links"]));
+    expect(incompleteKeys({ tracks: [] })).toEqual(expect.arrayContaining(["profile", "tracks", "links"]));
   });
 
   it("accepts a complete single-team draft", () => {
@@ -275,6 +276,10 @@ describe("lookups and shipped content", () => {
     expect(isTrackKey("__proto__")).toBe(false);
     expect(getTrack("team-a")?.interviewRequired).toBe(true);
     expect(getTrack("team-b")?.interviewRequired).toBe(false);
+    expect(isTrackKey("technology")).toBe(true);
+    expect(isTrackKey("community")).toBe(true);
+    expect(getTrack("technology")?.interviewRequired).toBe(true);
+    expect(getTrack("community")?.interviewRequired).toBe(true);
   });
 
   it("returns no questions for an unknown team", () => {
@@ -285,9 +290,62 @@ describe("lookups and shipped content", () => {
     for (const t of tracks) expect(questionsForTrack(t.key).length).toBeLessThanOrEqual(5);
   });
 
+  it("has the Technology and Community questions the leads sent", () => {
+    const tech = questionsForTrack("technology");
+    expect(tech.map((q) => [q.id, q.type, q.required])).toEqual([
+      ["tech_areas", "multi_choice", true],
+      ["tech_experience", "single_choice", true],
+      ["tech_built", "long_text", true],
+      ["tech_link", "link", false],
+      ["tech_hours", "single_choice", true],
+    ]);
+    expect((tech[0] as unknown as { options: string[] }).options).toHaveLength(7);
+    expect((tech[4] as unknown as { options: string[] }).options).toEqual(["1–3", "3–5", "5–8", "8+"]);
+
+    const community = questionsForTrack("community");
+    expect(community.map((q) => [q.id, q.type, q.required])).toEqual([
+      ["comm_interest", "multi_choice", true],
+      ["comm_why", "long_text", true],
+      ["comm_organized", "long_text", true],
+      ["comm_event", "long_text", true],
+      ["comm_hours", "single_choice", true],
+    ]);
+    expect((community[0] as unknown as { options: string[] }).options).toEqual(["Sim Racing", "Real Life Racing Events", "Formula 1", "Meeting new Motorsports Fans"]);
+  });
+
+  it("asks no general questions (name, EID, year and major are the About you page)", () => {
+    expect(genericQuestions).toEqual([]);
+  });
+
+  it("completes with real answers for both real teams", () => {
+    const profile = { fullName: "Ada Lovelace", email: "ada@example.com", eid: "al123", gradYear: 2028, major: "Math" };
+    const draft = (over: Partial<DraftSnapshot>): DraftSnapshot => ({ ...profile, genericAnswers: {}, resumeUrl: "https://example.com/r.pdf", portfolioLinks: [], tracks: [], ...over });
+    const incompleteKeys = (d: DraftSnapshot) => checkCompleteness(d).sections.filter((s) => !s.complete).map((s) => s.key);
+    const d = draft({
+      tracks: [
+        { track: "technology", answers: { tech_areas: ["UI/UX design"], tech_experience: "Classes or tutorials", tech_built: "A bot", tech_hours: "3–5" } },
+        { track: "community", answers: { comm_interest: ["Formula 1"], comm_why: "x", comm_organized: "x", comm_event: "x", comm_hours: "1–3" } },
+      ],
+    });
+    expect(checkCompleteness(d).complete).toBe(true);
+    // each team's required questions are enforced
+    expect(incompleteKeys(draft({ tracks: [{ track: "technology", answers: {} }] }))).toEqual(["track:technology"]);
+    expect(incompleteKeys(draft({ tracks: [{ track: "community", answers: {} }] }))).toEqual(["track:community"]);
+  });
+
   it("keeps the launch gates visible: placeholder content must be replaced before launch", () => {
     // When the real teams are in, set PLACEHOLDER_CONTENT to false and update this expectation.
     expect(PLACEHOLDER_CONTENT).toBe(true);
     expect(FORM_VERSION).toBe(1);
+  });
+
+  it("when the placeholder flag is turned off, no placeholder team or question may be left", () => {
+    // Fails the moment someone flips PLACEHOLDER_CONTENT to false with a stand-in still in the content.
+    const leftovers = [
+      ...tracks.filter((t) => /placeholder/i.test(`${t.label} ${t.blurb}`)).map((t) => t.key),
+      ...Object.values(trackQuestions).flatMap((qs) => qs.filter((q) => /placeholder/i.test(q.label)).map((q) => q.id)),
+    ];
+    if (!PLACEHOLDER_CONTENT) expect(leftovers).toEqual([]);
+    else expect(leftovers.length).toBeGreaterThan(0);
   });
 });

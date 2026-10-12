@@ -101,11 +101,15 @@ export type TrackDefinition = {
   interviewRequired: boolean;
 };
 
-// PLACEHOLDERS: replace with the real teams once the leads reply (see PLACEHOLDER_CONTENT).
+// Technology and Community are real (transcribed from the leads' questions). The three
+// "(placeholder)" teams stand in for teams that haven't sent theirs yet; replace each one when it does
+// (see PLACEHOLDER_CONTENT). Their keys are used by the tests, so keep them until they are replaced.
 export const tracks = [
-  { key: 'team-a', label: 'Team A (placeholder)', blurb: 'Placeholder team that interviews.', interviewRequired: true },
-  { key: 'team-b', label: 'Team B (placeholder)', blurb: 'Placeholder team with no interview.', interviewRequired: false },
-  { key: 'team-c', label: 'Team C (placeholder)', blurb: 'Placeholder team with the maximum five questions.', interviewRequired: true },
+  { key: 'technology', label: 'Technology', blurb: 'Web, data, infrastructure and broadcast tech behind the club.', interviewRequired: true },
+  { key: 'community', label: 'Community', blurb: 'Events, socials and growing the club community.', interviewRequired: true },
+  { key: 'team-a', label: 'Team A (placeholder)', blurb: 'Placeholder for a team whose questions are not in yet. Interviews.', interviewRequired: true },
+  { key: 'team-b', label: 'Team B (placeholder)', blurb: 'Placeholder for a team whose questions are not in yet. No interview.', interviewRequired: false },
+  { key: 'team-c', label: 'Team C (placeholder)', blurb: 'Placeholder for a team whose questions are not in yet. Five questions.', interviewRequired: true },
 ] as const satisfies readonly TrackDefinition[];
 
 export type TrackKey = (typeof tracks)[number]['key'];
@@ -114,16 +118,59 @@ export type TrackKey = (typeof tracks)[number]['key'];
 // Questions
 // ---------------------------------------------------------------------------
 
-// PLACEHOLDER general questions (owned by the platform team, not the leads).
-// Name, email, UT EID, year and major are collected separately as the profile step.
-export const genericQuestions: readonly GenericQuestion[] = [
-  { id: 'why_join', type: 'long_text', label: 'Why do you want to join Longhorn Sim Racing?', required: true },
-  { id: 'sim_experience', type: 'scale', label: 'How much sim racing experience do you have?', help: '1 is none, 5 is a lot.', min: 1, max: 5, required: true },
-  { id: 'other_commitments', type: 'short_text', label: 'Anything else we should know about your schedule?', required: false },
-];
+// General (platform-owned) questions. There are none: name, email, UT EID, graduation year and
+// major are collected on the "About you" page, and everything else is asked per team. If a general
+// question is ever added, the form shows a "General questions" page again by itself.
+export const genericQuestions: readonly GenericQuestion[] = [];
 
-// PLACEHOLDER team questions. Ids must be unique across every list in this file, so prefix them with the team.
+// Team questions. Ids must be unique across every list in this file, so prefix them with the team.
+// Technology and Community are the leads' wording, verbatim; the `[Placeholder]` ones are stand-ins.
 export const trackQuestions: Record<TrackKey, Upto5<TrackQuestion>> = {
+  technology: [
+    {
+      id: 'tech_areas',
+      type: 'multi_choice',
+      label: 'Which areas of the Tech Team interest you most?',
+      options: [
+        'Web development (front end)',
+        'Back end and databases',
+        'UI/UX design',
+        'Race data and stats (results, live timing)',
+        'Infrastructure and DevOps',
+        'AI tools and automation',
+        'Stream and broadcast tech (overlays, OBS)',
+      ],
+      required: true,
+    },
+    {
+      id: 'tech_experience',
+      type: 'single_choice',
+      label: 'How much experience do you have building software?',
+      options: ['None yet, but I want to learn', 'Classes or tutorials', 'Personal or class projects', 'Internship or job experience'],
+      required: true,
+    },
+    { id: 'tech_built', type: 'long_text', label: "Tell us about something you've built or worked on, and what you'd like to build at LSR.", required: true },
+    { id: 'tech_link', type: 'link', label: 'GitHub, portfolio, or project link', required: false },
+    { id: 'tech_hours', type: 'single_choice', label: 'How many hours a week could you give the Tech Team?', options: ['1–3', '3–5', '5–8', '8+'], required: true },
+  ],
+  community: [
+    {
+      id: 'comm_interest',
+      type: 'multi_choice',
+      label: 'What is your primary interest in our club?',
+      options: ['Sim Racing', 'Real Life Racing Events', 'Formula 1', 'Meeting new Motorsports Fans'],
+      required: true,
+    },
+    { id: 'comm_why', type: 'long_text', label: 'Why are you interested in becoming a Community Officer at LSR?', required: true },
+    { id: 'comm_organized', type: 'long_text', label: 'Tell us about a time you were in charge of organizing events, planning, or engaging a community?', required: true },
+    {
+      id: 'comm_event',
+      type: 'long_text',
+      label: 'If you were in charge of creating one event for LSR relating to sim racing, motorsports, or a fun social activity, what would you choose to plan?',
+      required: true,
+    },
+    { id: 'comm_hours', type: 'single_choice', label: 'Roughly how many hours a week would you be able to work for LSR?', options: ['1–3', '3–5', '5–8', '8+'], required: true },
+  ],
   'team-a': [
     { id: 'a_experience', type: 'long_text', label: '[Placeholder] Describe your relevant experience.', required: true },
     { id: 'a_portfolio', type: 'link', label: '[Placeholder] Link to a past project.', required: false },

@@ -127,6 +127,7 @@ describe("buildExportCsv", () => {
 
   it("repeats the general answers on each of an applicant's rows", () => {
     const q = genericQuestions[0];
+    if (!q) return; // no general questions today (covered with a mocked set in general-questions.test.ts)
     const general = { [q.id]: q.type === "scale" ? 4 : "same answer" };
     const rows = parse(buildExportCsv([row({ genericAnswers: general }), row({ track: teamB.key, genericAnswers: general })], { adminBaseUrl: BASE }));
     const i = col(rows[0], q.label);

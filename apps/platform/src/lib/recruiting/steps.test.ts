@@ -63,13 +63,18 @@ function completeState(teams: string[] = [firstTeam]): FormState {
 }
 
 describe("buildSteps", () => {
-  it("is five pages with no teams chosen", () => {
-    expect(buildSteps([]).map((s) => s.key)).toEqual(["about", "general", "teams", "links", "review"]);
+  it("is four pages with no teams chosen: there are no general questions to ask", () => {
+    expect(buildSteps([]).map((s) => s.key)).toEqual(["about", "teams", "links", "review"]);
+  });
+
+  it("adds a General questions page only when there are general questions", () => {
+    expect(buildSteps([], true).map((s) => s.key)).toEqual(["about", "general", "teams", "links", "review"]);
+    expect(buildSteps([], false).map((s) => s.key)).toEqual(["about", "teams", "links", "review"]);
   });
 
   it("adds one page per chosen team, between choosing and the resume", () => {
     const keys = buildSteps([firstTeam, secondTeam]).map((s) => s.key);
-    expect(keys).toEqual(["about", "general", "teams", `team:${firstTeam}`, `team:${secondTeam}`, "links", "review"]);
+    expect(keys).toEqual(["about", "teams", `team:${firstTeam}`, `team:${secondTeam}`, "links", "review"]);
   });
 
   it("orders team pages as the teams are listed on the form, not in click order", () => {
@@ -78,7 +83,7 @@ describe("buildSteps", () => {
   });
 
   it("ignores a team that isn't on the form", () => {
-    expect(buildSteps(["not-a-team"]).map((s) => s.key)).toEqual(["about", "general", "teams", "links", "review"]);
+    expect(buildSteps(["not-a-team"]).map((s) => s.key)).toEqual(["about", "teams", "links", "review"]);
   });
 
   it("labels team pages with the team's name", () => {
@@ -103,9 +108,9 @@ describe("moving between pages", () => {
   });
 
   it("steps forward and back, and stops at the ends", () => {
-    expect(nextStepKey(steps, "about")).toBe("general");
+    expect(nextStepKey(steps, "about")).toBe("teams");
     expect(nextStepKey(steps, "review")).toBeNull();
-    expect(prevStepKey(steps, "general")).toBe("about");
+    expect(prevStepKey(steps, "teams")).toBe("about");
     expect(prevStepKey(steps, "about")).toBeNull();
     expect(nextStepKey(steps, "team:gone" as StepKey)).toBeNull();
   });
@@ -274,7 +279,6 @@ describe("what the form sends is what the server accepts", () => {
     if (general.ok) {
       const parsed = parseAnswers(genericQuestions, general.patch.genericAnswers, "draft");
       expect(parsed.errors).toEqual({});
-      expect(Object.keys(parsed.value).length).toBeGreaterThan(0);
     }
     const team = patchForStep(`team:${firstTeam}`, state);
     expect(team.ok).toBe(true);

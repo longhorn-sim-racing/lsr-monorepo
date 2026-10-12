@@ -94,10 +94,12 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
         </dl>
       </section>
 
-      <section className="rounded-lg border border-white/10 bg-black/40 p-4">
-        <h2 className="mb-3 text-[11px] uppercase tracking-wider text-lsr-orange">General answers</h2>
-        <AnswerList entries={answerEntries(genericQuestions, app.genericAnswers)} />
-      </section>
+      {genericQuestions.length > 0 && (
+        <section className="rounded-lg border border-white/10 bg-black/40 p-4">
+          <h2 className="mb-3 text-[11px] uppercase tracking-wider text-lsr-orange">General answers</h2>
+          <AnswerList entries={answerEntries(genericQuestions, app.genericAnswers)} />
+        </section>
+      )}
 
       {app.tracks.map((t) => {
         const def = getTrack(t.track);

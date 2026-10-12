@@ -85,7 +85,7 @@ export default async function ApplyPage() {
         <section aria-labelledby="how-heading" className="space-y-3 font-sans text-sm leading-relaxed text-white/65">
           <h2 id="how-heading" className="font-display text-2xl font-black uppercase italic text-white">How it works</h2>
           <ol className="list-decimal space-y-2 pl-5">
-            <li>Answer a few general questions, then one page of questions for each team you pick.</li>
+            <li>Check your details, pick the teams you want, and answer one page of questions for each.</li>
             <li>Add a link to your resume. Your progress is saved as you go, so you can leave and come back.</li>
             <li>Submit. All your teams are submitted together, and you can&apos;t edit afterwards.</li>
             <li>If your application is complete at the deadline, we submit it for you. An unfinished application is not submitted.</li>

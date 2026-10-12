@@ -103,7 +103,7 @@ async function makeUser(label: string, extra: Record<string, unknown> = {}) {
 const IN = new Date("2026-11-15T12:00:00Z");
 const BEFORE = new Date("2026-09-01T12:00:00Z");
 const AFTER = new Date("2027-01-01T12:00:00Z");
-const GENERIC = { why_join: "Because", sim_experience: 3 };
+const GENERIC = {}; // there are no general questions
 const RESUME = "https://example.com/resume.pdf";
 
 async function main() {
@@ -142,25 +142,28 @@ async function main() {
   await expectError("unknown top-level field rejected (can't smuggle `state`)", () => saveDraft(u1.id, { state: "SUBMITTED" }, IN), "INVALID");
   await expectError("can't set another user's id", () => saveDraft(u1.id, { userId: u2.id }, IN), "INVALID");
   await expectError("profile email must stay the account email", () => saveDraft(u1.id, { profile: { email: "someone-else@example.com" } }, IN), "INVALID", (e) => "profile.email" in (e.fieldErrors ?? {}));
-  await saveDraft(u1.id, { step: "general", profile: { major: "Math" }, genericAnswers: { why_join: "  Love racing  " } }, IN);
-  await saveDraft(u1.id, { genericAnswers: { sim_experience: 3 } }, IN);
+  // There are no general questions: every answer belongs to a team's page, so choose a team first.
+  await setSelectedTracks(u1.id, ["team-c"], IN);
+  await saveDraft(u1.id, { step: "team:team-c", profile: { major: "Math" }, trackAnswers: { "team-c": { c_motivation: "  Love racing  " } } }, IN);
+  await saveDraft(u1.id, { trackAnswers: { "team-c": { c_hours: "4 to 6" } } }, IN);
   {
     const a = await getMyApplication(u1.id);
-    const g = a?.genericAnswers as Record<string, unknown>;
-    check("pages merge instead of overwriting", g.why_join === "Love racing" && g.sim_experience === 3, JSON.stringify(g));
-    check("text is trimmed and the step is remembered", a?.draftStep === "general" && a.major === "Math");
+    const g = a?.tracks.find((t) => t.track === "team-c")?.answers as Record<string, unknown>;
+    check("pages merge instead of overwriting", g.c_motivation === "Love racing" && g.c_hours === "4 to 6", JSON.stringify(g));
+    check("text is trimmed and the step is remembered", a?.draftStep === "team:team-c" && a.major === "Math");
   }
-  await saveDraft(u1.id, { genericAnswers: { why_join: "" } }, IN);
-  check("clearing a field removes it", !("why_join" in ((await getMyApplication(u1.id))?.genericAnswers as Record<string, unknown>)));
-  await expectError("unknown question id rejected", () => saveDraft(u1.id, { genericAnswers: { nope: "x" } }, IN), "INVALID");
-  await expectError("scale out of range rejected", () => saveDraft(u1.id, { genericAnswers: { sim_experience: 9 } }, IN), "INVALID");
+  await saveDraft(u1.id, { trackAnswers: { "team-c": { c_motivation: "" } } }, IN);
+  check("clearing a field removes it", !("c_motivation" in ((await getMyApplication(u1.id))?.tracks.find((t) => t.track === "team-c")?.answers as Record<string, unknown>)));
+  await expectError("unknown question id rejected", () => saveDraft(u1.id, { trackAnswers: { "team-c": { nope: "x" } } }, IN), "INVALID");
+  await expectError("an option that isn't listed is rejected", () => saveDraft(u1.id, { trackAnswers: { "team-c": { c_hours: "99 hours" } } }, IN), "INVALID");
+  await expectError("general answers are rejected: there are no general questions", () => saveDraft(u1.id, { genericAnswers: { why_join: "x" } }, IN), "INVALID");
   await expectError("answers for a team that isn't chosen rejected", () => saveDraft(u1.id, { trackAnswers: { "team-a": { a_experience: "x" } } }, IN), "INVALID");
   await expectError("http resume link rejected", () => saveDraft(u1.id, { resumeUrl: "http://example.com/r.pdf" }, IN), "INVALID");
   await expectError("6 portfolio links rejected", () => saveDraft(u1.id, { portfolioLinks: Array.from({ length: 6 }, (_, i) => ({ label: `L${i}`, url: "https://example.com" })) }, IN), "INVALID");
   {
     // all-or-nothing: one valid change + one invalid change writes nothing
     const before = await getMyApplication(u1.id);
-    await expectError("a bad answer rejects the whole save", () => saveDraft(u1.id, { profile: { major: "Chemistry" }, genericAnswers: { sim_experience: 99 } }, IN), "INVALID");
+    await expectError("a bad answer rejects the whole save", () => saveDraft(u1.id, { profile: { major: "Chemistry" }, trackAnswers: { "team-c": { c_hours: "99 hours" } } }, IN), "INVALID");
     const after = await getMyApplication(u1.id);
     check("...and nothing from it was written", after?.major === before?.major, `${before?.major} -> ${after?.major}`);
   }
@@ -521,6 +524,24 @@ async function main() {
     // Leave the seeded round active no matter what happened above
     await prisma.recruitingCycle.updateMany({ where: { isActive: true, id: { not: seeded } }, data: { isActive: false } });
     await prisma.recruitingCycle.update({ where: { id: seeded }, data: { isActive: true } });
+  }
+
+  console.log("--- the real teams: Technology and Community ---");
+  {
+    const u = await makeUser("real");
+    await getOrCreateDraft(u.id, IN);
+    await setSelectedTracks(u.id, ["technology", "community"], IN);
+    await expectError("a Technology hours answer that isn't an option is rejected", () => saveDraft(u.id, { trackAnswers: { technology: { tech_hours: "2 hours" } } }, IN), "INVALID");
+    await expectError("an empty set of checkboxes can't be submitted (Technology areas are required)", async () => {
+      await saveDraft(u.id, { resumeUrl: RESUME, trackAnswers: { technology: { tech_areas: [], tech_experience: "Classes or tutorials", tech_built: "A stats site", tech_hours: "3–5" }, community: { comm_interest: ["Formula 1"], comm_why: "w", comm_organized: "o", comm_event: "e", comm_hours: "1–3" } } }, IN);
+      await submitApplication(u.id, IN);
+    }, "INCOMPLETE", (e) => e.report?.sections.some((x) => x.key === "track:technology" && !x.complete) === true);
+    await saveDraft(u.id, { trackAnswers: { technology: { tech_areas: ["UI/UX design", "Race data and stats (results, live timing)"], tech_link: "https://github.com/example" } } }, IN);
+    const done = await submitApplication(u.id, IN);
+    check("both real teams submit together with their answers", done.tracks.sort().join() === "community,technology");
+    const saved = await prisma.applicationTrack.findMany({ where: { applicationId: done.applicationId }, orderBy: { track: "asc" } });
+    const tech = saved.find((t) => t.track === "technology")?.answers as Record<string, unknown>;
+    check("the multiple-choice answers were stored as lists", Array.isArray(tech.tech_areas) && (tech.tech_areas as string[]).length === 2 && tech.tech_hours === "3–5", JSON.stringify(tech));
   }
 
   console.log("--- deadline sweep ---");

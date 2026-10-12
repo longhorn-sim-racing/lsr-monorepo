@@ -9,7 +9,7 @@ export function teamStatusCopy(
 ): { headline: string; detail: string; tone: StatusTone } {
   switch (status) {
     case "SUBMITTED":
-      return { headline: "Received", detail: "Officers will review applications after the round closes. You will get an email when there is news.", tone: "neutral" };
+      return { headline: "Received", detail: "Officers review applications as they come in. You will get an email when there is news.", tone: "neutral" };
     case "IN_REVIEW":
       return { headline: "Under review", detail: "An officer is looking at your application for this team.", tone: "progress" };
     case "INTERVIEW":

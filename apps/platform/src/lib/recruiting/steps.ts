@@ -15,7 +15,7 @@ import {
  * The applicant form as a sequence of pages, and what each page saves. Pure functions (no React,
  * no network) so the exact payload each page sends can be tested against the server's schema.
  *
- *   About you > General questions > Choose teams > one page per chosen team > Resume & links > Review
+ *   About you > (General questions, if any) > Choose teams > one page per chosen team > Resume & links > Review
  */
 
 export type StepKey = "about" | "general" | "teams" | `team:${string}` | "links" | "review";
@@ -45,11 +45,12 @@ export function emptyFormState(): FormState {
 const teamKeyOf = (step: StepKey) => (step.startsWith("team:") ? step.slice(5) : null);
 
 /** The pages for the teams chosen so far, kept in the order teams are listed on the form (not click order). */
-export function buildSteps(selectedTeams: readonly string[]): Step[] {
+export function buildSteps(selectedTeams: readonly string[], hasGeneral: boolean = genericQuestions.length > 0): Step[] {
   const chosen = tracks.filter((t) => selectedTeams.includes(t.key));
   return [
     { key: "about", label: "About you" },
-    { key: "general", label: "General questions" },
+    // Only when there are general questions to ask (today there are none: the profile covers it)
+    ...(hasGeneral ? [{ key: "general", label: "General questions" } satisfies Step] : []),
     { key: "teams", label: "Choose teams" },
     ...chosen.map((t): Step => ({ key: `team:${t.key}`, label: t.label })),
     { key: "links", label: "Resume & portfolio" },

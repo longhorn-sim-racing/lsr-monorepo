@@ -24,9 +24,11 @@ export function ApplicationSummary({ profile, resumeUrl, portfolioLinks, generic
         <Row label="Major" value={profile.major} />
       </Block>
 
-      <Block title="General questions">
-        <Answers entries={answerEntries(genericQuestions, genericAnswers)} />
-      </Block>
+      {genericQuestions.length > 0 && (
+        <Block title="General questions">
+          <Answers entries={answerEntries(genericQuestions, genericAnswers)} />
+        </Block>
+      )}
 
       {teams.map((t) => (
         <Block key={t.key} title={teamLabel(t.key)}>

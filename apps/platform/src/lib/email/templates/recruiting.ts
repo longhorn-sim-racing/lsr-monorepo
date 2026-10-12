@@ -134,7 +134,7 @@ export function defaultDraft(template: RecruitingEmailTemplate, options: DraftOp
           ...(options.autoSubmitted
             ? ["You hadn't pressed Submit before the round closed, but your application was complete, so we submitted it for you."]
             : []),
-          "Officers will review applications once the round closes. You will get a separate email from each team as decisions are made, and you can see where each one stands at {{statusUrl}}.",
+          "Officers review applications as they come in. You will get a separate email from each team as decisions are made, and you can see where each one stands at {{statusUrl}}.",
           "Questions? Just reply to this email.",
           SIGN_OFF,
         ].join("\n\n"),
