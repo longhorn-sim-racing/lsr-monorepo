@@ -2,8 +2,8 @@
 
 import Link from "next/link"
 import { memo, useEffect, useRef, useState } from "react"
-import { ChevronLeft } from "lucide-react"
-import { Button, Notice, Select, Textarea } from "@/components/admin/kit"
+import { ChevronLeft, Pencil } from "lucide-react"
+import { Button, Input, Notice, Select, Textarea } from "@/components/admin/kit"
 import { cn } from "@/lib/utils"
 import {
   JACK_PERSONA_NAME,
@@ -43,11 +43,13 @@ type RoomViewProps = {
   onSend: (content: string) => Promise<string | null>
   /** Resolves with an error to show, or null once switched */
   onSwitchPersona: (persona: JackRoomPersonaKey) => Promise<string | null>
+  /** Resolves with an error to show, or null once renamed */
+  onRename: (title: string) => Promise<string | null>
   /** Resolves with an error to show, or null once a run is asked to start */
   onContinue: () => Promise<string | null>
 }
 
-export function JackRoomView({ room, messages, present, connection, stall, rooms, spend, onSend, onSwitchPersona, onContinue }: RoomViewProps) {
+export function JackRoomView({ room, messages, present, connection, stall, rooms, spend, onSend, onSwitchPersona, onRename, onContinue }: RoomViewProps) {
   const title = jackRoomTitle(room)
   // Bumped when this officer sends, so the list jumps to the end even if they'd scrolled up
   const [sentCount, setSentCount] = useState(0)
@@ -70,7 +72,7 @@ export function JackRoomView({ room, messages, present, connection, stall, rooms
               <ChevronLeft className="size-3.5" aria-hidden />
               All rooms
             </Link>
-            <h1 className="truncate font-display text-lg font-semibold leading-tight">{title}</h1>
+            <RoomTitle title={title} saved={room.title} onRename={onRename} />
             <span className="flex flex-wrap items-center gap-x-3">
               <ConnectionLine connection={connection} />
               {spend ? <SpendMeter spend={spend} /> : null}
@@ -87,6 +89,86 @@ export function JackRoomView({ room, messages, present, connection, stall, rooms
         <Composer persona={room.persona} onSend={send} />
       </section>
     </div>
+  )
+}
+
+/** The room's name, with a pencil to rename it in place: Enter saves, Escape cancels */
+function RoomTitle({ title, saved, onRename }: { title: string; saved: string | null; onRename: RoomViewProps["onRename"] }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  function start() {
+    setDraft(saved ?? "")
+    setError(null)
+    setEditing(true)
+  }
+
+  async function save() {
+    if (saving) return
+    if (draft.trim() === (saved ?? "")) return setEditing(false)
+    setSaving(true)
+    setError(null)
+    const problem = await onRename(draft)
+    setSaving(false)
+    if (problem) setError(problem)
+    else setEditing(false)
+  }
+
+  if (!editing)
+    return (
+      <div className="group flex min-w-0 items-center gap-1">
+        <h1 className="truncate font-display text-lg font-semibold leading-tight">{title}</h1>
+        <button
+          type="button"
+          onClick={start}
+          aria-label="Rename room"
+          title="Rename room"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-admin-subtle hover:bg-accent hover:text-foreground"
+        >
+          <Pencil className="size-3.5" aria-hidden />
+        </button>
+      </div>
+    )
+
+  return (
+    <form
+      className="flex min-w-0 flex-col gap-1"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void save()
+      }}
+    >
+      <div className="flex items-center gap-1.5">
+        <label htmlFor="jack-room-rename" className="sr-only">
+          Room name
+        </label>
+        <Input
+          id="jack-room-rename"
+          autoFocus
+          value={draft}
+          maxLength={120}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setEditing(false)
+          }}
+          // 16px on phones so iOS doesn't zoom in on focus
+          className="h-8 w-64 max-w-full text-base font-semibold md:h-7 md:text-sm"
+        />
+        <Button type="submit" size="sm" variant="primary" pending={saving}>
+          Save
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={saving}>
+          Cancel
+        </Button>
+      </div>
+      {error ? (
+        <span role="alert" className="text-xs font-medium text-tone-danger-foreground">
+          {error}
+        </span>
+      ) : null}
+    </form>
   )
 }
 
@@ -158,6 +240,7 @@ function PersonaSwitch({ persona, onSwitch }: { persona: JackRoomPersonaKey; onS
         // 16px on phones so iOS doesn't zoom in on focus
         className="h-8 w-auto text-base font-semibold md:h-7 md:text-sm"
       >
+        <option value="stand">Stand (simple tasks)</option>
         <option value="jack">Jack</option>
         <option value="lift">Lift (higher cost)</option>
       </Select>
@@ -411,7 +494,7 @@ function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: Ro
           </p>
         ) : (
           <span className="text-xs text-admin-subtle">
-            {persona === "lift" ? "Lift answers in this room until someone switches it back to Jack." : "Enter sends, Shift+Enter adds a line."}
+            {persona !== "jack" ? `${JACK_PERSONA_NAME[persona]} answers in this room until someone switches it back to Jack.` : "Enter sends, Shift+Enter adds a line."}
           </span>
         )}
         <Button type="submit" variant="primary" pending={sending} disabled={!content.trim()}>

@@ -5,7 +5,7 @@
  * 5.5). Prints accuracy, cost and latency per model, to pick the default.
  *
  *   pnpm --filter @lsr/platform exec tsx scripts/jack-eval.ts              # both models
- *   pnpm --filter @lsr/platform exec tsx scripts/jack-eval.ts --only=jack  # one model (jack or lift)
+ *   pnpm --filter @lsr/platform exec tsx scripts/jack-eval.ts --only=jack  # one model (jack, lift or stand)
  *   pnpm --filter @lsr/platform exec tsx scripts/jack-eval.ts --dry-run    # plumbing check: fake model, no API calls
  *
  * Options: --as=<email|handle> (the officer asking, who drafts are credited to; default the first
@@ -24,6 +24,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import type { JackRoomPersonaKey } from "../src/lib/jack/types";
 import { checkEvalDatabase, mentionsDollars, mentionsNumber, plain } from "../src/server/jack/eval-support";
 
 /** apps/platform, wherever this is run from: only its env files are read */
@@ -66,8 +67,8 @@ if (!DRY_RUN && !process.env.ANTHROPIC_API_KEY?.trim()) {
   console.error("ANTHROPIC_API_KEY isn't set, so the eval can't ask Claude. Add it, or use --dry-run to check the plumbing with a fake model.");
   process.exit(1);
 }
-if (ONLY && ONLY !== "jack" && ONLY !== "lift") {
-  console.error(`--only must be jack or lift (got "${ONLY}").`);
+if (ONLY && ONLY !== "jack" && ONLY !== "lift" && ONLY !== "stand") {
+  console.error(`--only must be jack, lift or stand (got "${ONLY}").`);
   process.exit(1);
 }
 
@@ -98,7 +99,7 @@ type Question = {
 type EvalContext = {
   prisma: typeof import("../src/server/db").prisma;
   now: Date;
-  persona: "jack" | "lift";
+  persona: JackRoomPersonaKey;
   officer: { id: string; displayName: string };
   startedAt: Date;
   lsc: Awaited<ReturnType<typeof loadLsc>>;
@@ -465,7 +466,7 @@ const QUESTIONS: Question[] = [
 
 type Result = {
   id: string;
-  persona: "jack" | "lift";
+  persona: JackRoomPersonaKey;
   status: "pass" | "fail" | "skip";
   reason?: string;
   expected?: string;
@@ -486,7 +487,7 @@ async function main() {
   if (!database.ok) return; // narrowed above; for TypeScript
 
   const officer = await findOfficer(prisma);
-  const personas = (ONLY ? [ONLY] : ["jack", "lift"]) as ("jack" | "lift")[];
+  const personas = (ONLY ? [ONLY] : ["stand", "jack", "lift"]) as JackRoomPersonaKey[];
   const questions = QUESTIONS.filter((q) => !FILTER || q.id.includes(FILTER));
   const startedAt = new Date();
 
@@ -652,7 +653,7 @@ function report(result: Result) {
   }
 }
 
-function summarize(results: Result[], personas: ("jack" | "lift")[], models: Record<string, { model: string }>) {
+function summarize(results: Result[], personas: JackRoomPersonaKey[], models: Record<string, { model: string }>) {
   console.log("\nSummary");
   console.log("  model               accuracy        cost   avg cost   avg time   p90 time");
   for (const persona of personas) {

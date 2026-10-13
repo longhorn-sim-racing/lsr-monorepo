@@ -19,9 +19,12 @@ export const JACK_MODELS: Record<JackPersonaKey, JackModelConfig> = {
   jack: { persona: "jack", model: "claude-sonnet-5-5", effort: "medium", maxTokens: 16_000, fallbacks: true },
   // Hard questions, chosen per room
   lift: { persona: "lift", model: "claude-opus-5-5", effort: "high", maxTokens: 32_000, fallbacks: true },
-  // Side jobs (naming rooms): short, cheap, no tools
-  stand: { persona: "stand", model: "claude-haiku-5-5", effort: "low", maxTokens: 1_024, fallbacks: false },
+  // Quick, simple questions, chosen per room; the cheapest
+  stand: { persona: "stand", model: "claude-haiku-5-5", effort: "medium", maxTokens: 16_000, fallbacks: false },
 }
+
+/** Stand's side jobs (naming rooms): short, cheap, no tools */
+export const STAND_SIDE_JOB: JackModelConfig = { persona: "stand", model: "claude-haiku-5-5", effort: "low", maxTokens: 1_024, fallbacks: false }
 
 /** Beta headers a room reply sends (see model-loop.ts for what each is for) */
 export const SERVER_FALLBACK_BETA = "server-side-fallback-2026-07-01"

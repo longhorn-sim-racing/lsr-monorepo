@@ -35,6 +35,7 @@ type Options = {
     roomId: string,
     persona: JackRoomPersonaKey
   ) => Promise<ActionResult<{ room: JackRoomView; message: JackMessageView | null }>>
+  rename: (roomId: string, title: string) => Promise<ActionResult<{ room: JackRoomView; message: JackMessageView | null }>>
   resume: (roomId: string) => Promise<ActionResult>
 }
 
@@ -74,7 +75,7 @@ async function socketSettled(supabase: SupabaseClient) {
  * the connection, and whether it looks stuck. All the logic of the room page lives here; the
  * components only draw it.
  */
-export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, setPersona, resume }: Options) {
+export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, setPersona, rename, resume }: Options) {
   const [state, dispatch] = useReducer(roomReducer, initial, initRoomState)
   const [present, setPresent] = useState<JackPresence[]>([])
   const [connection, setConnection] = useState<JackConnection>("connecting")
@@ -223,6 +224,18 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
     [roomId, setPersona]
   )
 
+  const renameRoom = useCallback(
+    async (title: string) => {
+      const result = await rename(roomId, title)
+      if (result.ok) {
+        dispatch({ type: JACK_EVENT.room, room: result.data.room })
+        if (result.data.message) dispatch({ type: JACK_EVENT.created, message: result.data.message })
+      }
+      return result
+    },
+    [roomId, rename]
+  )
+
   /** Asks the server to start a run; the room then waits quietly again before offering it a second time */
   const continueRoom = useCallback(async () => {
     const result = await resume(roomId)
@@ -230,7 +243,7 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
     return result
   }, [roomId, resume])
 
-  return { room: state.room, messages: state.messages, present, connection, stall, send, switchPersona, continueRoom }
+  return { room: state.room, messages: state.messages, present, connection, stall, send, switchPersona, renameRoom, continueRoom }
 }
 
 /** One entry per officer, however many tabs they have open */

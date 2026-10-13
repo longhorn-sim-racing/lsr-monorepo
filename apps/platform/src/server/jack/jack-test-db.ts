@@ -10,7 +10,7 @@ type Where = Record<string, unknown>
 export type FakeRoom = {
   id: string
   title: string | null
-  persona: "jack" | "lift"
+  persona: "jack" | "lift" | "stand"
   createdById: string | null
   createdAt: Date
   updatedAt: Date

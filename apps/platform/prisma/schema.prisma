@@ -906,6 +906,7 @@ enum JackPersona {
 enum JackRoomPersona {
   jack
   lift
+  stand
 }
 
 /// Who a message is from: an officer (user), a model (assistant), or the room itself (system,

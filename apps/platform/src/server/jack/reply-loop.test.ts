@@ -15,7 +15,7 @@ vi.mock("@/server/db", async () => {
 
 import { prisma } from "@/server/db"
 import { runRoom, type ReplyLoopDeps } from "./reply-loop"
-import { setRoomPersona } from "./rooms"
+import { renameRoom, setRoomPersona } from "./rooms"
 import { releaseRoomLock, renewRoomLock, ROOM_LOCK_STALE_MS, tryAcquireRoomLock } from "./room-lock"
 
 const db = prisma as unknown as FakeJackDb
@@ -361,6 +361,20 @@ describe("runRoom", () => {
     expect(created.message.author).toEqual({ kind: "assistant", persona: "lift" })
   })
 
+  it("answers as Stand on Haiku, without the refusal fallback Haiku doesn't have", async () => {
+    db.room(room.id).persona = "stand"
+    ask("How many events this month?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const [params] = claude.calls
+    expect(params.model).toBe("claude-haiku-5-5")
+    expect(params.fallbacks).toBeUndefined()
+    expect(params.betas).toEqual(["thinking-binding-controls-2026-08-01"])
+    expect((params.system as { text: string }[])[0].text).toMatch(/^You are Stand/)
+    expect(replies()[0]).toMatchObject({ kind: "assistant", persona: "stand", status: "done", model: "claude-haiku-5-5" })
+  })
+
   it("doesn't answer system notes", async () => {
     db.addMessage({ roomId: room.id, kind: "system", authorUserId: "officer-gray", content: "Gray switched this room to Lift" })
 
@@ -407,6 +421,54 @@ describe("setRoomPersona", () => {
 
   it("is null for a room that doesn't exist", async () => {
     expect(await setRoomPersona("room-missing", gray, "lift", radio.broadcast)).toBeNull()
+  })
+})
+
+describe("renameRoom", () => {
+  const gray = { id: "officer-gray", displayName: "Gray" }
+
+  it("renames an untitled room, posts who did it, and tells the room", async () => {
+    db.room(room.id).title = null
+    const result = await renameRoom(room.id, gray, "GM 1 planning", radio.broadcast)
+
+    expect(result).toMatchObject({ changed: true, before: null, room: { id: room.id, title: "GM 1 planning" } })
+    expect(db.room(room.id).title).toBe("GM 1 planning")
+    const notes = db.state.messages.filter((m) => m.kind === "system")
+    expect(notes).toHaveLength(1)
+    expect(notes[0]).toMatchObject({ content: "Gray renamed this room “GM 1 planning”", authorUserId: "officer-gray" })
+    expect(radio.sent.map((s) => s.event.type)).toEqual(["room.updated", "message.created"])
+  })
+
+  it("renames a room Stand already named", async () => {
+    db.room(room.id).title = "Lsc Entry Count"
+    const result = await renameRoom(room.id, gray, "LSC entries", radio.broadcast)
+
+    expect(result).toMatchObject({ changed: true, before: "Lsc Entry Count", room: { title: "LSC entries" } })
+  })
+
+  it("does nothing when the name is the same", async () => {
+    db.room(room.id).title = "LSC entries"
+    const result = await renameRoom(room.id, gray, "LSC entries", radio.broadcast)
+
+    expect(result).toMatchObject({ changed: false, room: { title: "LSC entries" } })
+    expect(db.state.messages).toHaveLength(0)
+    expect(radio.broadcast).not.toHaveBeenCalled()
+  })
+
+  it("posts one note when two officers save the same name at once", async () => {
+    db.room(room.id).title = null
+    const dylan = { id: "officer-dylan", displayName: "Dylan" }
+    const results = await Promise.all([
+      renameRoom(room.id, gray, "Sponsors", radio.broadcast),
+      renameRoom(room.id, dylan, "Sponsors", radio.broadcast),
+    ])
+
+    expect(results.filter((r) => r?.changed)).toHaveLength(1)
+    expect(db.state.messages.filter((m) => m.kind === "system")).toHaveLength(1)
+  })
+
+  it("is null for a room that doesn't exist", async () => {
+    expect(await renameRoom("room-missing", gray, "Anything", radio.broadcast)).toBeNull()
   })
 })
 

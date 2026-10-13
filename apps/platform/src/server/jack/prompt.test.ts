@@ -21,6 +21,9 @@ describe("buildSystemPrompt", () => {
     expect(jack[0].cache_control).toEqual({ type: "ephemeral" })
     expect(jack[0].text).toMatch(/^You are Jack/)
     expect(buildSystemPrompt("lift", { schemaNotes: "" })[0].text).toMatch(/^You are Lift/)
+    const stand = buildSystemPrompt("stand", { schemaNotes: "" })[0].text
+    expect(stand).toMatch(/^You are Stand/)
+    expect(stand).toMatch(/suggest switching the room to Jack/)
     expect(jack[0].text).not.toMatch(/\b20\d\d\b/) // no dates
   })
 
