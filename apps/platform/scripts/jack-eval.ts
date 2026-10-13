@@ -9,19 +9,27 @@
  *   pnpm --filter @lsr/platform exec tsx scripts/jack-eval.ts --dry-run    # plumbing check: fake model, no API calls
  *
  * Options: --as=<email|handle> (the officer asking, who drafts are credited to; default the first
- * admin), --filter=<text> (questions whose id contains it), --verbose (print every answer).
+ * officer or admin), --filter=<text> (questions whose id contains it), --verbose (print every answer),
+ * --allow-remote=<host> (see below).
  *
- * Reads .env.local and .env like the dev server (without overriding the environment). Needs
- * DATABASE_URL, and ANTHROPIC_API_KEY unless --dry-run. A real run costs money: a few dollars for
- * both models. The draft_event question creates a DRAFT event, checks it, and deletes it (its audit
- * log entry stays). Nothing else is written.
+ * Reads apps/platform/.env.local and .env (found from this script, not the working directory), without
+ * overriding the environment. Needs DATABASE_URL and JACK_DATABASE_URL on the same database, and
+ * ANTHROPIC_API_KEY unless --dry-run. It refuses to run unless DATABASE_URL is this machine
+ * (127.0.0.1 or localhost), or --allow-remote names its exact host (a copy of real data, never
+ * production). A real run costs money (a few dollars for both models), and it doesn't show in Jack's
+ * spend meter (only in the Anthropic Console). After every question it deletes any event the reply
+ * drafted (DRAFT events only) and the audit entries Jack wrote for this eval since it started. Nothing
+ * else is written.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { checkEvalDatabase, mentionsDollars, mentionsNumber, plain } from "../src/server/jack/eval-support";
 
+/** apps/platform, wherever this is run from: only its env files are read */
+const APP_DIR = resolve(__dirname, "..");
 for (const file of [".env.local", ".env"]) {
-  const path = resolve(process.cwd(), file);
+  const path = resolve(APP_DIR, file);
   if (!existsSync(path)) continue;
   for (const raw of readFileSync(path, "utf8").split(/\r?\n/)) {
     const line = raw.trim();
@@ -45,9 +53,13 @@ const VERBOSE = args.includes("--verbose");
 const ONLY = arg("only");
 const FILTER = arg("filter");
 const AS = arg("as");
+const ALLOW_REMOTE = arg("allow-remote");
+/** The room id the eval's tool calls run in; draft_event's audit entries carry it */
+const EVAL_ROOM_ID = "jack-eval";
 
-if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL isn't set (in the environment, .env.local or .env).");
+const database = checkEvalDatabase({ DATABASE_URL: process.env.DATABASE_URL, JACK_DATABASE_URL: process.env.JACK_DATABASE_URL }, ALLOW_REMOTE);
+if (!database.ok) {
+  console.error(database.error);
   process.exit(1);
 }
 if (!DRY_RUN && !process.env.ANTHROPIC_API_KEY?.trim()) {
@@ -74,7 +86,6 @@ type Expectation = {
   needsModel?: boolean;
   /** A check against the database after the reply (e.g. the draft it made) */
   verify?: () => Promise<string | null>;
-  cleanup?: () => Promise<void>;
 };
 
 type Question = {
@@ -94,32 +105,16 @@ type EvalContext = {
 };
 
 // ---------------------------------------------------------------------------
-// checks
+// checks (the matching itself is in src/server/jack/eval-support.ts, with tests)
 // ---------------------------------------------------------------------------
-
-const plain = (text: string) => text.replace(/ /g, " ");
-
-/** The number appears as a number (13, 1,234), not inside a longer one */
-function mentionsNumber(text: string, n: number): boolean {
-  const forms = new Set([String(n), n.toLocaleString("en-US")]);
-  if (n >= 0 && n <= 12) forms.add(["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"][n]);
-  return [...forms].some((form) => new RegExp(`(?<![\\d.,$])${form.replace(/[.,]/g, "\\$&")}(?![\\d]|[.,]\\d)`, "i").test(text));
-}
-
-/** "$45", "$45.00" or "45.00" for 4,500 cents */
-function mentionsDollars(text: string, cents: number): boolean {
-  const dollars = cents / 100;
-  const forms = [dollars.toFixed(2), dollars.toLocaleString("en-US", { minimumFractionDigits: 2 })];
-  if (Number.isInteger(dollars)) forms.push(`\\$${dollars}`, `\\$${dollars.toLocaleString("en-US")}`);
-  return forms.some((form) => new RegExp(`(?<![\\d.])${form.replace(/(?<!\\)\./g, "\\.")}(?![\\d])`).test(text));
-}
 
 const includesAll = (text: string, needles: string[]) => needles.filter((n) => !text.toLowerCase().includes(n.toLowerCase()));
 
-function number(n: number, what: string): Pick<Expectation, "expected" | "check" | "fakeAnswer"> {
+/** A count, which has to sit next to one of `nouns` (word starts) unless it's the only number in the answer */
+function number(n: number, what: string, nouns: string[]): Pick<Expectation, "expected" | "check" | "fakeAnswer"> {
   return {
     expected: `${n} ${what}`,
-    check: ({ text }) => (mentionsNumber(text, n) ? null : `doesn't say ${n}`),
+    check: ({ text }) => (mentionsNumber(text, n, nouns) ? null : `doesn't say ${n} ${what}`),
     fakeAnswer: `There are ${n} ${what}.`,
   };
 }
@@ -131,6 +126,8 @@ function mentionsDate(text: string, at: Date): boolean {
     new RegExp(`${form.replace(/\//g, "\\/")}(?!\\d)`, "i").test(t)
   );
 }
+
+const PEOPLE = ["people", "person", "member", "officer", "user", "driver", "account", "checkout", "attendee"];
 
 // ---------------------------------------------------------------------------
 // ground truth helpers
@@ -157,6 +154,13 @@ function nextFriday7pm(now: Date): Date {
   return fromZonedTime(`${formatInTimeZone(day, TZ, "yyyy-MM-dd")}T19:00:00`, TZ);
 }
 
+/** What a payment was for: its product, or for an event fee (no product) the event in its metadata */
+function purchaseKey(payment: { productId: string | null; metadata: unknown }): string {
+  if (payment.productId) return `product:${payment.productId}`;
+  const eventId = (payment.metadata as Record<string, unknown> | null)?.eventId;
+  return `event:${typeof eventId === "string" ? eventId : "unknown"}`;
+}
+
 // ---------------------------------------------------------------------------
 // the questions
 // ---------------------------------------------------------------------------
@@ -168,32 +172,40 @@ const QUESTIONS: Question[] = [
     truth: async ({ lsc }) => {
       if (!lsc) return null;
       const count = lsc.entrants.filter((e) => e.application).length;
-      return number(count, "applications");
+      return number(count, "applications", ["application", "form", "submission", "entr"]);
     },
   },
   {
     id: "lsc-paid",
     ask: "How many drivers have paid their LSC entry fee this season?",
-    truth: async ({ lsc }) => (lsc ? number(lsc.entrants.filter((e) => e.status === "paid").length, "paid entries") : null),
+    truth: async ({ lsc }) => (lsc ? number(lsc.entrants.filter((e) => e.status === "paid").length, "paid entries", ["paid", "driver", "entr", "fee", "people"]) : null),
   },
   {
     id: "lsc-entries",
     ask: "How many LSC entries are active this season, counting both paid ones and ones an officer entered by hand?",
-    truth: async ({ lsc }) => (lsc ? number(lsc.entrants.filter((e) => e.status === "paid" || e.status === "manual").length, "active entries") : null),
+    truth: async ({ lsc }) =>
+      lsc ? number(lsc.entrants.filter((e) => e.status === "paid" || e.status === "manual").length, "active entries", ["active", "entr", "driver", "total"]) : null,
   },
   {
     id: "lsc-other-schools",
     ask: "How many of this season's LSC applications came from a school other than UT Austin?",
-    truth: async ({ lsc }) => (lsc ? number(lsc.entrants.filter((e) => e.application && e.application.school).length, "applications from other schools") : null),
+    truth: async ({ lsc }) =>
+      lsc
+        ? number(lsc.entrants.filter((e) => e.application && e.application.school).length, "applications from other schools", ["application", "school", "driver", "entr", "form", "other"])
+        : null,
   },
   {
     id: "lsc-missing-results",
     ask: "Which LSC rounds this season have already happened but don't have results uploaded yet?",
     truth: async ({ prisma, lsc, now }) => {
       if (!lsc?.season.seriesId) return null;
+      // Results are in when a race session has results, as Recompute standings counts them
       const rounds = await prisma.event.findMany({
-        where: { seriesId: lsc.season.seriesId, startsAtUtc: { lt: now } },
-        select: { title: true, _count: { select: { ingestedSessions: true } } },
+        where: {
+          seriesId: lsc.season.seriesId,
+          startsAtUtc: { gte: lsc.season.startAt ?? undefined, lte: lsc.season.endAt ?? undefined, lt: now },
+        },
+        select: { title: true, _count: { select: { ingestedSessions: { where: { sessionType: "RACE", results: { some: {} } } } } } },
       });
       const missing = rounds.filter((r) => r._count.ingestedSessions === 0).map((r) => r.title);
       if (!missing.length) {
@@ -217,19 +229,20 @@ const QUESTIONS: Question[] = [
     id: "unpaid-checkouts",
     ask: "Who started a checkout and never paid? Just tell me how many people, and their names.",
     truth: async ({ prisma }) => {
+      // A checkout someone later paid for (the same product, or for an event fee the same event) doesn't count
       const unpaid = await prisma.payment.findMany({
         where: { status: { in: ["pending", "failed"] } },
-        select: { userId: true, productId: true, user: { select: { displayName: true } } },
+        select: { userId: true, productId: true, metadata: true, user: { select: { displayName: true } } },
       });
-      const paid = await prisma.payment.findMany({ where: { status: "succeeded" }, select: { userId: true, productId: true } });
-      const paidKeys = new Set(paid.map((p) => `${p.userId}:${p.productId}`));
+      const paid = await prisma.payment.findMany({ where: { status: "succeeded" }, select: { userId: true, productId: true, metadata: true } });
+      const paidKeys = new Set(paid.map((p) => `${p.userId}:${purchaseKey(p)}`));
       const people = new Map<string, string>();
-      for (const p of unpaid) if (!paidKeys.has(`${p.userId}:${p.productId}`)) people.set(p.userId, p.user.displayName);
+      for (const p of unpaid) if (!paidKeys.has(`${p.userId}:${purchaseKey(p)}`)) people.set(p.userId, p.user.displayName);
       const names = [...people.values()];
       return {
         expected: `${names.length} people${names.length ? `: ${names.join(", ")}` : ""}`,
         check: ({ text }) => {
-          if (mentionsNumber(text, names.length)) return null;
+          if (mentionsNumber(text, names.length, PEOPLE)) return null;
           if (names.length && names.length <= 8 && !includesAll(text, names).length) return null;
           return `doesn't say ${names.length} or name them all`;
         },
@@ -249,7 +262,7 @@ const QUESTIONS: Question[] = [
       return {
         expected: `${charges.length} charges, $${(cents / 100).toFixed(2)}`,
         check: ({ text }) => {
-          if (!mentionsNumber(text, charges.length)) return `doesn't say ${charges.length}`;
+          if (!mentionsNumber(text, charges.length, ["charge", "payment", "transaction", "succeeded", "successful"])) return `doesn't say ${charges.length} charges`;
           if (cents > 0 && !mentionsDollars(text, cents)) return `doesn't say $${(cents / 100).toFixed(2)}`;
           return null;
         },
@@ -263,9 +276,10 @@ const QUESTIONS: Question[] = [
     truth: async ({ prisma }) => {
       // Counting deleted accounts or not are both fair readings
       const [all, live] = await Promise.all([prisma.user.count(), prisma.user.count({ where: { status: { not: "deleted" } } })]);
+      const nouns = ["account", "user", "member", "total"];
       return {
         expected: `${all} accounts${live !== all ? ` (${live} not deleted)` : ""}`,
-        check: ({ text }) => (mentionsNumber(text, all) || mentionsNumber(text, live) ? null : `doesn't say ${all}`),
+        check: ({ text }) => (mentionsNumber(text, all, nouns) || mentionsNumber(text, live, nouns) ? null : `doesn't say ${all} accounts`),
         fakeAnswer: `There are ${all} accounts.`,
       };
     },
@@ -279,9 +293,10 @@ const QUESTIONS: Question[] = [
         prisma.user.count({ where: { createdAt: { gte: since } } }),
         prisma.user.count({ where: { signedUpAt: { gte: since } } }),
       ]);
+      const nouns = ["account", "user", "member", "signup", "sign-up", "new", "people"];
       return {
         expected: `${created} accounts${signedUp !== created ? ` (or ${signedUp} by sign-up date)` : ""}`,
-        check: ({ text }) => (mentionsNumber(text, created) || mentionsNumber(text, signedUp) ? null : `doesn't say ${created}`),
+        check: ({ text }) => (mentionsNumber(text, created, nouns) || mentionsNumber(text, signedUp, nouns) ? null : `doesn't say ${created} accounts`),
         fakeAnswer: `${created} accounts.`,
       };
     },
@@ -299,7 +314,7 @@ const QUESTIONS: Question[] = [
         expected: `${names.length} officers, no emails: ${names.slice(0, 6).join(", ")}${names.length > 6 ? ", ..." : ""}`,
         check: ({ text }) => {
           if (/[\w.+-]+@[\w-]+\.[\w.]+/.test(text)) return "shows an email nobody asked for";
-          if (names.length > 15) return mentionsNumber(text, names.length) ? null : `doesn't say ${names.length}`;
+          if (names.length > 15) return mentionsNumber(text, names.length, ["officer", "people", "admin"]) ? null : `doesn't say ${names.length} officers`;
           const left = includesAll(text, names);
           return left.length ? `doesn't name ${left.join(", ")}` : null;
         },
@@ -372,7 +387,7 @@ const QUESTIONS: Question[] = [
         select: { title: true, _count: { select: { attendances: true } } },
       });
       if (!event) return null;
-      return { ...number(event._count.attendances, "check-ins"), expected: `${event._count.attendances} at ${event.title}` };
+      return { ...number(event._count.attendances, "check-ins", ["check", "people", "person", "attendee", "member"]), expected: `${event._count.attendances} at ${event.title}` };
     },
   },
   {
@@ -390,7 +405,7 @@ const QUESTIONS: Question[] = [
       return {
         expected: `${leaders.join(" / ")} with ${top}`,
         check: ({ text }) => {
-          if (!mentionsNumber(text, top)) return `doesn't say ${top}`;
+          if (!mentionsNumber(text, top, ["check", "people", "person", "attendee", "member"])) return `doesn't say ${top} check-ins`;
           return leaders.some((title) => text.toLowerCase().includes(title.toLowerCase())) ? null : `doesn't name ${leaders.join(" or ")}`;
         },
         fakeAnswer: `${leaders[0]}, with ${top} check-ins.`,
@@ -427,12 +442,9 @@ const QUESTIONS: Question[] = [
       return {
         expected: `a DRAFT event "${title}" on ${formatInTimeZone(when, TZ, "EEE MMM d")} at 7:00 PM CT`,
         needsModel: true,
-        // The reply should point to the draft; the database check is `verify`
+        // The reply should point to the draft; the database check is `verify`. The cleanup after every
+        // question deletes it
         check: ({ parts }) => (parts.some((p) => p.displays.some((d) => d.kind === "event_draft")) ? null : "showed no event draft"),
-        cleanup: async () => {
-          const events = await created();
-          if (events.length) await prisma.event.deleteMany({ where: { id: { in: events.map((e) => e.id) } } });
-        },
         verify: async () => {
           const events = await created();
           if (events.length !== 1) return `${events.length} events with that title were created`;
@@ -471,21 +483,26 @@ async function main() {
   const { buildSystemPrompt } = await import("../src/server/jack/prompt");
   const { JACK_TOOLS } = await import("../src/server/jack/tools");
   const { fakeClaude } = await import("../src/server/jack/fake-claude");
+  if (!database.ok) return; // narrowed above; for TypeScript
 
   const officer = await findOfficer(prisma);
-  const host = (() => {
-    try {
-      return new URL(process.env.DATABASE_URL!).hostname;
-    } catch {
-      return "?";
-    }
-  })();
   const personas = (ONLY ? [ONLY] : ["jack", "lift"]) as ("jack" | "lift")[];
   const questions = QUESTIONS.filter((q) => !FILTER || q.id.includes(FILTER));
   const startedAt = new Date();
 
-  console.log(`Jack eval${DRY_RUN ? " (dry run: fake model, no API calls)" : ""}`);
-  console.log(`  database: ${host}   asking as: ${officer.displayName}   tools: ${JACK_TOOLS.map((t) => t.name).join(", ") || "none yet"}`);
+  const rule = "=".repeat(78);
+  console.log(rule);
+  console.log(
+    database.local
+      ? `  JACK EVAL on the LOCAL database ${database.host}:${database.port}/${database.database}`
+      : `  JACK EVAL on a REMOTE database ${database.host}:${database.port}/${database.database} (allowed by --allow-remote)`
+  );
+  console.log(
+    `  ${DRY_RUN ? "Dry run: fake model, no API calls, nothing spent." : "Real run: calls Claude and costs money (not shown in Jack's spend meter)."} ` +
+      "Drafts made here are deleted after each question."
+  );
+  console.log(rule);
+  console.log(`  asking as: ${officer.displayName}   tools: ${JACK_TOOLS.map((t) => t.name).join(", ") || "none yet"}`);
   console.log(`  ${questions.length} questions x ${personas.map((p) => JACK_MODELS[p].model).join(", ")}\n`);
 
   const results: Result[] = [];
@@ -521,6 +538,8 @@ async function main() {
       const client = DRY_RUN ? dryRunClient(fakeClaude, JACK_TOOLS, truth.fakeAnswer ?? truth.expected) : anthropicJackClient(process.env.ANTHROPIC_API_KEY!.trim());
       const t0 = Date.now();
       let answer: Answer = { text: "", parts: [] };
+      // Every part seen as it streamed, so the cleanup finds a draft even if the reply then throws
+      const seenParts = new Map<string, ToolPart>();
       let failure: string | null = null;
       let costUsd = 0;
       let toolCalls = 0;
@@ -531,9 +550,11 @@ async function main() {
           system: buildSystemPrompt(persona),
           tools: JACK_TOOLS,
           history,
-          ctx: { roomId: "jack-eval", actor: { userId: officer.id, displayName: officer.displayName } },
+          ctx: { roomId: EVAL_ROOM_ID, actor: { userId: officer.id, displayName: officer.displayName } },
           onText: () => {},
-          onPart: async () => {},
+          onPart: async (part) => {
+            seenParts.set(part.id, part);
+          },
         });
         answer = { text: out.text, parts: out.parts };
         costUsd = out.usage.costUsd;
@@ -546,7 +567,7 @@ async function main() {
       } catch (error) {
         failure = `threw: ${error instanceof Error ? error.message : String(error)}`;
       } finally {
-        await truth.cleanup?.().catch((error) => console.error(`  couldn't clean up after ${question.id}:`, error));
+        await cleanUp(prisma, [...seenParts.values(), ...answer.parts], startedAt).catch((error) => console.error(`  couldn't clean up after ${question.id}:`, error));
       }
       results.push({
         ...base,
@@ -566,7 +587,31 @@ async function main() {
   await prisma.$disconnect();
 }
 
-/** The officer the eval asks as: --as, or the first admin */
+/**
+ * Undoes what a question wrote: any DRAFT event the reply drafted (from its event_draft displays, and
+ * from the audit entries Jack wrote for this eval's room since it started, in case a part went
+ * missing), then those audit entries.
+ */
+async function cleanUp(prisma: EvalContext["prisma"], parts: ToolPart[], since: Date) {
+  const drafted = new Set(
+    parts.flatMap((p) => p.displays).flatMap((d) => (d.kind === "event_draft" ? [d.eventId] : []))
+  );
+  const audits = await prisma.auditLog.findMany({
+    where: {
+      createdAt: { gte: since },
+      AND: [{ metadata: { path: ["via"], equals: "jack" } }, { metadata: { path: ["roomId"], equals: EVAL_ROOM_ID } }],
+    },
+    select: { id: true, entityType: true, entityId: true },
+  });
+  for (const audit of audits) if (audit.entityType === "EVENT") drafted.add(audit.entityId);
+  const events = drafted.size
+    ? await prisma.event.deleteMany({ where: { id: { in: [...drafted] }, status: "DRAFT", createdAt: { gte: since } } })
+    : { count: 0 };
+  const entries = audits.length ? await prisma.auditLog.deleteMany({ where: { id: { in: audits.map((a) => a.id) } } }) : { count: 0 };
+  if (VERBOSE && (events.count || entries.count)) console.log(`         cleaned up ${events.count} draft event(s), ${entries.count} audit entr${entries.count === 1 ? "y" : "ies"}`);
+}
+
+/** The officer the eval asks as: --as, or the first officer or admin */
 async function findOfficer(prisma: EvalContext["prisma"]) {
   const who = AS?.toLowerCase();
   const user = who
