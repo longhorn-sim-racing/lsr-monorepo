@@ -186,7 +186,8 @@ describe("runModelReply", () => {
     const result = await run()
 
     expect(toolResults(fake.calls[1].messages.at(-1)!)[0]).toMatchObject({ is_error: true, content: "No table named Usr" })
-    expect(result.parts[0]).toMatchObject({ status: "error", label: "Query failed: no table Usr" })
+    expect(result.parts[0]).toMatchObject({ status: "error", label: "Query failed: no table Usr", error: "No table named Usr" })
+    expect(typeof result.parts[0].ms).toBe("number")
   })
 
   it("answers an unknown tool with an error, and matches a name that's only off by case", async () => {
@@ -374,6 +375,33 @@ describe("runModelReply", () => {
     await run()
     expect(seen).toMatchObject({ roomId: "room-1", actor: { displayName: "Gray" } })
     expect(seen!.signal).toBeInstanceOf(AbortSignal)
+  })
+})
+
+describe("cancelling a reply", () => {
+  it("aborts a running tool through ctx.signal and the Claude call, and ends with a message", async () => {
+    const cancel = new AbortController()
+    let toolSignal: AbortSignal | undefined
+    const tool = countTool(
+      (_input, ctx) =>
+        new Promise((_resolve, reject) => {
+          toolSignal = ctx.signal
+          ctx.signal?.addEventListener("abort", () => reject(new Error("query canceled")))
+          cancel.abort()
+        })
+    )
+    const { run, fake } = setup([{ tools: [{ name: "count_rows", input: { table: "x" } }] }, { text: "unused", error: new Anthropic.APIUserAbortError() }], [tool], {
+      signal: cancel.signal,
+    })
+    const streamed = vi.spyOn(fake.client, "stream")
+
+    const result = await run()
+
+    expect(toolSignal?.aborted).toBe(true)
+    expect(result.parts[0]).toMatchObject({ status: "error", label: "count_rows failed" })
+    expect(streamed.mock.calls[0][1]).toEqual({ signal: cancel.signal })
+    expect(result).toMatchObject({ status: "error", outcome: "api_error" })
+    expect(result.text).toMatch(/stopped before it finished/)
   })
 })
 

@@ -47,12 +47,15 @@ export const defaultReplyDeps: ReplyLoopDeps = {
   },
 }
 
-// TODO(after the tools branch merges): pass JACK_SCHEMA_NOTES from "./tools/schema-notes" here, so
-// the notes on tricky tables sit in the cached system prompt
-const SCHEMA_NOTES: string | undefined = undefined
-
 /** How much of a room the history is built from (it keeps the last 40 exchanges of that) */
 const HISTORY_ROWS = 2_000
+
+/**
+ * A reply that's still going after this is cancelled (its Claude call and any running tool are
+ * aborted), so it ends with a message inside the function's 300 s maxDuration. Replies are told to
+ * wrap up well before (REPLY_LIMITS.maxElapsedMs).
+ */
+const REPLY_DEADLINE_MS = 240_000
 
 /** Officer messages nobody has answered yet, oldest first (system notes don't get answers) */
 function findUnanswered(roomId: string) {
@@ -275,7 +278,7 @@ async function produce(
   const out = await runModelReply({
     client: claude,
     config: JACK_MODELS[persona],
-    system: buildSystemPrompt(persona, { schemaNotes: SCHEMA_NOTES }),
+    system: buildSystemPrompt(persona),
     tools: deps.tools,
     history,
     // Tools run as the officer whose message is newest
@@ -294,6 +297,7 @@ async function produce(
     },
     usage,
     limits: deps.limits,
+    signal: AbortSignal.timeout(REPLY_DEADLINE_MS),
   })
   return { text: out.text, status: out.status, outcome: out.outcome, parts: out.parts, toolCalls: out.toolCalls }
 }

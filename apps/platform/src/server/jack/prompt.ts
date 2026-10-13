@@ -1,15 +1,20 @@
 import type { BetaTextBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages"
 import { JACK_PERSONA_NAME, type JackRoomPersonaKey } from "@/lib/jack/types"
+import { JACK_SCHEMA_NOTES } from "./tools/schema-notes"
 
 /**
  * Jack's system prompt. It's the cached prefix every reply in every room shares (after the tools),
  * so it's fixed text: no dates, names or counts in it. Anything that changes per turn (the time,
  * who's asking) goes in the messages instead. A persona gets its own copy, which is fine: each
  * persona is its own model, and prompt caches are per model anyway.
+ *
+ * After the core prompt come the notes on the club's tables (JACK_SCHEMA_NOTES, from the tools),
+ * also fixed text, so they're cached with it.
  */
 export function buildSystemPrompt(persona: JackRoomPersonaKey, options: { schemaNotes?: string } = {}): BetaTextBlockParam[] {
+  const notes = (options.schemaNotes ?? JACK_SCHEMA_NOTES).trim()
   const blocks: BetaTextBlockParam[] = [{ type: "text", text: corePrompt(persona) }]
-  if (options.schemaNotes?.trim()) blocks.push({ type: "text", text: `# Notes on the database\n\n${options.schemaNotes.trim()}` })
+  if (notes) blocks.push({ type: "text", text: `# Notes on the database\n\n${notes}` })
   // One breakpoint at the end of the system prompt caches the tools and the system prompt together
   blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], cache_control: { type: "ephemeral" } }
   return blocks

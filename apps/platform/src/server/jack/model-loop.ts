@@ -22,7 +22,7 @@ import type { AnyJackTool, JackToolContext } from "./tools/types"
 /** What the loop needs from the Anthropic SDK: a streamed call (replies) and a plain one (Stand). Tests pass a fake */
 export type JackModelStream = AsyncIterable<BetaRawMessageStreamEvent> & { finalMessage(): Promise<BetaMessage> }
 export type JackModelClient = {
-  stream(params: BetaMessageStreamParams): JackModelStream
+  stream(params: BetaMessageStreamParams, options?: { signal?: AbortSignal }): JackModelStream
   create(params: MessageCreateParamsNonStreaming): Promise<BetaMessage>
 }
 
@@ -30,7 +30,7 @@ export type JackModelClient = {
 export function anthropicJackClient(apiKey: string): JackModelClient {
   const client = new Anthropic({ apiKey })
   return {
-    stream: (params) => client.beta.messages.stream(params),
+    stream: (params, options) => client.beta.messages.stream(params, { signal: options?.signal }),
     create: (params) => client.beta.messages.create(params),
   }
 }
@@ -57,6 +57,8 @@ export const REPLY_LIMITS: ReplyLimits = {
 
 /** What the model reads back from one tool call, at most */
 const MAX_TOOL_RESULT_CHARS = 30_000
+/** A failed call's message as the room shows it, at most */
+const MAX_PART_ERROR_CHARS = 2_000
 
 export type ModelReplyOptions = {
   client: JackModelClient
@@ -71,6 +73,8 @@ export type ModelReplyOptions = {
   /** A tool call started or changed. Calls arrive in order; the caller saves and broadcasts the part */
   onPart: (part: JackToolPart, parts: JackToolPart[]) => Promise<void>
   limits?: Partial<ReplyLimits>
+  /** Cancels the reply: aborts the Claude call in flight and any tool that's running */
+  signal?: AbortSignal
   /** Where the calls' token usage adds up; pass one in to read it even if the reply throws */
   usage?: UsageTally
   now?: () => number
@@ -142,7 +146,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
     const textBefore = text.length
     let message: BetaMessage
     try {
-      const stream = client.stream(buildParams(config, system, toolDefs, messages, wrapUp))
+      const stream = client.stream(buildParams(config, system, toolDefs, messages, wrapUp), { signal: options.signal })
       for await (const event of stream) {
         if (event.type === "content_block_start") {
           const block = event.content_block
@@ -269,7 +273,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
 
     upsertPart({ ...base, name: tool.name, input: use.input, status: "running", displays: [] })
     try {
-      const out = await withTimeout((signal) => tool.run(parsed.data, { ...ctx, signal }), limits.toolTimeoutMs)
+      const out = await withTimeout((signal) => tool.run(parsed.data, { ...ctx, signal }), limits.toolTimeoutMs, options.signal)
       upsertPart({
         ...base,
         name: tool.name,
@@ -277,7 +281,8 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
         status: out.isError ? "error" : "done",
         label: out.label,
         displays: out.displays ?? [],
-        error: out.isError ? out.label : undefined,
+        // The room shows a failed call's own message (e.g. Postgres's error for a bad query)
+        error: out.isError ? clip(out.forModel, MAX_PART_ERROR_CHARS) : undefined,
         ms: now() - startedAt,
       })
       return { type: "tool_result", tool_use_id: use.id, content: clip(out.forModel, MAX_TOOL_RESULT_CHARS), ...(out.isError ? { is_error: true } : {}) }
@@ -360,19 +365,29 @@ function clip(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max)}\n[cut off at ${max} characters]` : text
 }
 
-async function withTimeout<T>(work: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
+/**
+ * Runs a tool with an AbortSignal (passed on as ctx.signal) that fires when the tool runs past `ms`
+ * or the reply is cancelled; either way the call fails rather than waiting on the tool.
+ */
+async function withTimeout<T>(work: (signal: AbortSignal) => Promise<T>, ms: number, cancel?: AbortSignal): Promise<T> {
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      controller.abort()
-      reject(new Error(`timed out after ${Math.round(ms / 1000)} s`))
-    }, ms)
+  let onCancel: (() => void) | undefined
+  const stopped = new Promise<never>((_, reject) => {
+    const stop = (reason: string) => {
+      controller.abort(new Error(reason))
+      reject(new Error(reason))
+    }
+    timer = setTimeout(() => stop(`timed out after ${Math.round(ms / 1000)} s`), ms)
+    onCancel = () => stop("the reply was cancelled")
+    if (cancel?.aborted) onCancel()
+    else cancel?.addEventListener("abort", onCancel, { once: true })
   })
   try {
-    return await Promise.race([work(controller.signal), timeout])
+    return await Promise.race([work(controller.signal), stopped])
   } finally {
     clearTimeout(timer)
+    if (onCancel) cancel?.removeEventListener("abort", onCancel)
   }
 }
 
