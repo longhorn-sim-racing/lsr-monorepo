@@ -111,3 +111,30 @@ export function EmptyState({ title, description, action, className }: { title: R
     </div>
   )
 }
+
+/* Pager: previous/next links for server-paginated lists. */
+
+export function Pager({
+  page,
+  pageCount,
+  hrefFor,
+  summary,
+}: {
+  page: number
+  pageCount: number
+  hrefFor: (page: number) => string
+  /** e.g. "51–100 of 312" */
+  summary?: React.ReactNode
+}) {
+  const link = "inline-flex h-7 items-center rounded-md border border-input bg-card px-2.5 text-xs font-medium hover:bg-accent"
+  const disabled = "inline-flex h-7 items-center rounded-md border border-input px-2.5 text-xs font-medium text-admin-subtle opacity-60"
+  return (
+    <nav aria-label="Pages" className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-xs text-admin-subtle">
+      <span>{summary ?? `Page ${page} of ${Math.max(pageCount, 1)}`}</span>
+      <span className="flex gap-1.5">
+        {page > 1 ? <Link className={link} href={hrefFor(page - 1)}>Previous</Link> : <span className={disabled}>Previous</span>}
+        {page < pageCount ? <Link className={link} href={hrefFor(page + 1)}>Next</Link> : <span className={disabled}>Next</span>}
+      </span>
+    </nav>
+  )
+}
