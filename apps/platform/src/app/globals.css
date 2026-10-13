@@ -144,6 +144,7 @@
  */
 html:has(.admin-light) {
   color-scheme: light !important; /* the root layout sets color-scheme: dark inline */
+  --radius: 0.5rem;
   --background: #F6F3EE;
   --foreground: #1C1917;
   --card: #FFFFFF;

@@ -8,6 +8,7 @@ import { Menu, Search, X } from "lucide-react"
 import { AdminSidebarContent, type ShellUser } from "./admin-sidebar"
 import { AdminCommandMenu } from "./admin-command-menu"
 import { findNavItem } from "./admin-nav"
+import { ConfirmProvider } from "../kit/dialog"
 
 /**
  * The admin console's frame: a dark sidebar (a drawer on phones), a slim top bar with breadcrumbs, and the
@@ -87,7 +88,9 @@ export function AdminShell({ user, children }: { user: ShellUser; children: Reac
           </div>
         </header>
 
-        <main className="min-w-0 flex-1 px-4 py-4 md:px-6 md:py-5">{children}</main>
+        <main className="min-w-0 flex-1 px-4 py-4 md:px-6 md:py-5">
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </main>
       </div>
 
       <AdminCommandMenu open={commandOpen} onOpenChange={setCommandOpen} />

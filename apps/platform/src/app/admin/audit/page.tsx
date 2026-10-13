@@ -3,7 +3,7 @@ import { AuditConsole } from "@/components/admin/audit-console"
 import { requireOfficerPage } from "@/server/auth/guards"
 
 export const metadata: Metadata = {
-  title: "Audit log | LSR Admin",
+  title: "Audit log",
 }
 
 export default async function AuditLogPage() {
