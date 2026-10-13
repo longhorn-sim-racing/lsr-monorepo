@@ -127,7 +127,7 @@ export async function judgeAnswer(client: Anthropic, input: JudgeInput, signal?:
   }
 }
 
-/** Both judges declined (their safety checks tripped on the question); the runner falls back to the script checks */
+/** Both judges declined (their safety checks tripped on the question); the runner saves the answer ungraded */
 export class JudgeDeclined extends Error {}
 
 async function judgeWith(model: string, client: Anthropic, input: JudgeInput, signal?: AbortSignal): Promise<JudgeResult> {
@@ -144,7 +144,7 @@ async function judgeWith(model: string, client: Anthropic, input: JudgeInput, si
       output_config: { effort: "medium", format: { type: "json_schema", schema: GRADE_SCHEMA as unknown as Record<string, unknown> } },
       messages: [{ role: "user", content: judgePrompt(input) }],
     },
-    { signal, maxRetries: 4 }
+    { signal, maxRetries: 4, timeout: 240_000 }
   );
   if (message.stop_reason === "refusal") throw new JudgeDeclined(`${model} declined to grade`);
   if (message.stop_reason === "max_tokens") throw new Error("the judge's grade was cut off");
