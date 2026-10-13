@@ -71,6 +71,8 @@ function setEntryParam(id: string | null) {
 export function AuditConsole({ actionTypes, entityTypes, initialEntry }: { actionTypes: Option[]; entityTypes: Option[]; initialEntry: AuditEntry | null }) {
   const [logs, setLogs] = useState<AuditEntry[]>([])
   const [total, setTotal] = useState(0)
+  // Whether the last page fetched was full; `total` can grow above the loaded window, so it can't tell
+  const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -117,6 +119,7 @@ export function AuditConsole({ actionTypes, entityTypes, initialEntry }: { actio
       if (ticket !== latestReset.current) return
       setLogs(data.items)
       setTotal(data.total)
+      setHasMore(data.items.length === PAGE_SIZE)
       nextPage.current = 2
     } catch (e) {
       if (ticket === latestReset.current) setError(e instanceof Error ? e.message : "The audit log didn't load.")
@@ -131,9 +134,13 @@ export function AuditConsole({ actionTypes, entityTypes, initialEntry }: { actio
   }, [reload])
 
   const loadMore = async () => {
+    const ticket = latestReset.current
     setLoadingMore(true)
     try {
       const data = await fetchPage(nextPage.current)
+      // The search or a filter changed while this was loading: these rows belong to the old list
+      if (ticket !== latestReset.current) return
+      setHasMore(data.items.length === PAGE_SIZE)
       setLogs((prev) => {
         // New entries at the top shift the pages down, so a page can repeat rows we already have
         const seen = new Set(prev.map((log) => log.id))
@@ -142,7 +149,7 @@ export function AuditConsole({ actionTypes, entityTypes, initialEntry }: { actio
       setTotal(data.total)
       nextPage.current += 1
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The audit log didn't load.")
+      if (ticket === latestReset.current) setError(e instanceof Error ? e.message : "The audit log didn't load.")
     } finally {
       setLoadingMore(false)
     }
@@ -158,11 +165,22 @@ export function AuditConsole({ actionTypes, entityTypes, initialEntry }: { actio
       try {
         const data = await fetchPage(1)
         if (ticket !== latestReset.current) return
+        let replaced = false
         setLogs((prev) => {
           const seen = new Set(prev.map((log) => log.id))
           const fresh = data.items.filter((log) => !seen.has(log.id))
+          // More than a page arrived since the last check (e.g. the tab was hidden): adding them on top would
+          // leave a gap below them, so start over from the newest page
+          if (prev.length && fresh.length === data.items.length && data.items.length === PAGE_SIZE) {
+            replaced = true
+            return data.items
+          }
           return fresh.length ? [...fresh, ...prev] : prev
         })
+        if (replaced) {
+          nextPage.current = 2
+          setHasMore(true)
+        }
         setTotal(data.total)
         setError(null)
       } catch (e) {
@@ -287,9 +305,9 @@ export function AuditConsole({ actionTypes, entityTypes, initialEntry }: { actio
               {loading && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
               Showing {logs.length} of {total} {total === 1 ? "entry" : "entries"}
             </span>
-            {logs.length < total && (
+            {hasMore && (
               <Button size="sm" onClick={loadMore} pending={loadingMore}>
-                Load {Math.min(PAGE_SIZE, total - logs.length)} more
+                Load more
               </Button>
             )}
           </TableFooter>

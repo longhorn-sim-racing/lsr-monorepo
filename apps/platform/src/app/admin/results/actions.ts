@@ -54,7 +54,15 @@ export async function uploadResult(formData: FormData) {
 
   revalidatePath("/admin/results");
 
-  return { ok: true as const, data: newResult };
+  // Only what the page needs: the row holds the whole file and the uploader's account
+  return { ok: true as const, data: { id: newResult.id, status: newResult.status } };
+}
+
+const ALREADY_INGESTED = "These results are already ingested. Delete them with their race records to parse the file again."
+
+/** Ingested means race sessions exist, whatever the status says (older uploads could be re-parsed after ingesting). */
+async function hasRaceSessions(uploadId: string) {
+  return (await prisma.raceSession.count({ where: { uploadId } })) > 0
 }
 
 export async function previewParseResult(uploadId: string) {
@@ -68,8 +76,8 @@ export async function previewParseResult(uploadId: string) {
     return { ok: false as const, error: "That upload no longer exists. Go back to the results list." };
   }
   // Re-parsing would reset the status and allow a second ingest of the same race
-  if (upload.status === "INGESTED") {
-    return { ok: false as const, error: "These results are already ingested. Delete them with their race records to parse the file again." };
+  if (upload.status === "INGESTED" || (await hasRaceSessions(uploadId))) {
+    return { ok: false as const, error: ALREADY_INGESTED };
   }
 
   const { rawJson } = upload;
@@ -167,7 +175,7 @@ export async function previewParseResult(uploadId: string) {
   revalidatePath(`/admin/results/${uploadId}`);
   revalidatePath(`/admin/results`);
 
-  return { ok: true as const, data: updatedUpload };
+  return { ok: true as const, data: { id: updatedUpload.id, status: updatedUpload.status } };
 }
 
 export async function bindEventToUpload(
@@ -180,6 +188,8 @@ export async function bindEventToUpload(
 
   const event = await prisma.event.findUnique({ where: { id: eventId } });
   if (!event) return { ok: false, error: "That event no longer exists. Refresh and pick another." };
+  // Its race records already belong to the linked event
+  if (await hasRaceSessions(uploadId)) return { ok: false, error: "These results are already ingested, so the event can't change." };
 
   // Practice and qualifying sessions never award points
   const effectivePoints = (sessionLabel === "PRACTICE" || sessionLabel === "QUALIFYING")
@@ -261,7 +271,7 @@ export async function ingestUpload(uploadId: string): Promise<ActionResult> {
 
   if (!upload) return { ok: false, error: "That upload no longer exists. Go back to the results list." };
   if (!upload.eventId) return { ok: false, error: "Link this upload to an event before ingesting it." };
-  if (upload.status === "INGESTED") return { ok: false, error: "These results are already ingested." };
+  if (upload.status === "INGESTED" || (await hasRaceSessions(uploadId))) return { ok: false, error: ALREADY_INGESTED };
 
   const data = upload.rawJson as AcResultFile;
   const pointsSystem = upload.pointsSystem || "F1"; // Default if not set, though we should set it.
@@ -269,7 +279,12 @@ export async function ingestUpload(uploadId: string): Promise<ActionResult> {
   // Basic validation
   if (!data.Result) return { ok: false, error: "This file has no Result list, so there's nothing to ingest." };
 
+  try {
   await prisma.$transaction(async (tx) => {
+    // Lock the upload and check again, so two ingests at once can't both create sessions
+    await tx.$queryRaw`SELECT id FROM "RawResultUpload" WHERE id = ${uploadId} FOR UPDATE`;
+    if ((await tx.raceSession.count({ where: { uploadId } })) > 0) throw new Error(ALREADY_INGESTED);
+
     // 1. Create RaceSession
     const sessionType = upload.sessionLabel || "RACE";
     const session = await tx.raceSession.create({
@@ -547,6 +562,10 @@ export async function ingestUpload(uploadId: string): Promise<ActionResult> {
     maxWait: 20000,
     timeout: 20000,
   });
+  } catch (error) {
+    if (error instanceof Error && error.message === ALREADY_INGESTED) return { ok: false, error: ALREADY_INGESTED };
+    throw error;
+  }
 
   // Look up the event slug so we can invalidate the right public pages.
   const eventMeta = await prisma.event.findUnique({

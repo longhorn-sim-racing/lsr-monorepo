@@ -93,7 +93,8 @@ export function ResultDetailClient({
   const [session, setSession] = useState(upload.sessionLabel ?? file.sessionType ?? "RACE")
   const [points, setPoints] = useState(upload.pointsSystem ?? "F1")
 
-  const ingested = upload.status === "INGESTED"
+  // Older uploads could be re-parsed after ingesting, which reset the status; their race sessions still count
+  const ingested = upload.status === "INGESTED" || upload.ingestedSessions > 0
   const parsed = !!upload.report
   const linked = !!upload.eventId
   const nonRace = session === "PRACTICE" || session === "QUALIFYING"

@@ -85,7 +85,13 @@ export function UploadDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       description="The .json files the race server saved. Upload a weekend's sessions together if you like; each becomes its own upload."
       footer={
         <>
-          <Button onClick={() => onOpenChange(false)} disabled={pending}>
+          <Button
+            onClick={() => {
+              reset()
+              onOpenChange(false)
+            }}
+            disabled={pending}
+          >
             Cancel
           </Button>
           <Button variant="primary" onClick={upload} pending={pending}>

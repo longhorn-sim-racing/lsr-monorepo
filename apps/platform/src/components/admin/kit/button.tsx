@@ -34,10 +34,12 @@ type ButtonProps = React.ComponentProps<"button"> &
   }
 
 /** The admin button. Primary is orange with dark text; use it once per view for the main action. */
-export function Button({ className, variant, size, asChild = false, pending = false, disabled, children, ...props }: ButtonProps) {
+export function Button({ className, variant, size, asChild = false, pending = false, disabled, type, children, ...props }: ButtonProps) {
   const Comp = asChild ? Slot : "button"
   return (
     <Comp
+      // A plain button unless it says otherwise, so Cancel and helper buttons inside forms never submit them
+      type={asChild ? type : (type ?? "button")}
       className={cn(buttonVariants({ variant, size }), className)}
       disabled={asChild ? undefined : disabled || pending}
       aria-busy={pending || undefined}

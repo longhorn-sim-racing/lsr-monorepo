@@ -57,7 +57,7 @@ Detail and edit pages pass `back={{ href: "/admin/events", label: "Events" }}` t
 
 - `Panel` holds the form, with `PanelHeader`, `PanelBody` and `PanelFooter`.
 - Inside it, `FormSection` groups fields. Each field is a `Field` (label, hint, error) around `Input`, `Textarea`, `Select`, `MoneyInput`, `SwitchField` or `CheckboxField`. `FieldGrid` puts two fields per row.
-- Buttons go in `FormActions` in the footer, with one primary button.
+- Buttons go in `FormActions` in the footer, with one primary button. The kit `Button` is a plain button by default; give the one that submits `type="submit"`.
 - For quick edits, put the form in a side panel with `SplitLayout`. Long forms (like the event form) get their own page.
 - Keep the existing server actions and their return shapes. Report success or failure with `toast`, and validation problems with `Field`'s `error`.
 - Member pickers: `UserPicker` and `UserMultiPicker`. They search by name, handle, email or EID through `searchUsersForAdmin`.
