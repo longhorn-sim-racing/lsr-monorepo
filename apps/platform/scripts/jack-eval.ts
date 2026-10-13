@@ -190,6 +190,13 @@ async function loadModules() {
   return { buildHistory, runModelReply, anthropicJackClient, JACK_MODELS, buildSystemPrompt, JACK_TOOLS, fakeClaude, UsageTally, costUsd };
 }
 
+/** What a model was told, for the judge: its system prompt, then every tool's name and description */
+function instructionsFor(mods: Ctx["mods"], persona: JackRoomPersonaKey): string {
+  const system = mods.buildSystemPrompt(persona).map((b) => b.text).join("\n\n");
+  const tools = mods.JACK_TOOLS.map((t) => `- ${t.name}: ${t.description}`).join("\n");
+  return `${system}\n\n# Tools\n${tools}`;
+}
+
 const TYPED_TOOLS = new Set(["club_members", "events_overview", "lsc_entries", "payments_summary", "standings", "audit_log"]);
 
 async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx): Promise<{ row: Row; trace: unknown[] } | { skip: string } | { error: string; usage?: unknown }> {
@@ -287,7 +294,17 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
     try {
       judged = await judgeAnswer(
         c.judge,
-        { question: ask, asker: c.officer.displayName, before, expect, facts, tools: traces, answer: out.text, ending: out.outcome === "answered" ? undefined : out.outcome },
+        {
+          question: ask,
+          asker: c.officer.displayName,
+          before,
+          expect,
+          facts,
+          tools: traces,
+          answer: out.text,
+          ending: out.outcome === "answered" ? undefined : out.outcome,
+          instructions: instructionsFor(mods, persona),
+        },
         AbortSignal.timeout(180_000)
       );
     } catch (error) {
@@ -465,7 +482,7 @@ async function regrade(c: Ctx, personas: JackRoomPersonaKey[]) {
       const judgeFailed = row.grade.meets === 0 || row.grade.facts === 0 || row.grade.honest === 0;
       let grade = row.grade;
       let extra: Partial<Row> = {};
-      if (c.judge && (judgeFailed || TEXT_RECHECK.has(row.prompt_id))) {
+      if (c.judge && judgeFailed) {
         const before = question.before ? ((await question.before(ctx)) ?? []) : [];
         const judged = await judgeAnswer(
           c.judge,
@@ -478,6 +495,7 @@ async function regrade(c: Ctx, personas: JackRoomPersonaKey[]) {
             tools,
             answer: row.meta.answer,
             ending: row.outcome === "answered" ? undefined : row.outcome,
+            instructions: instructionsFor(c.mods, persona),
           },
           AbortSignal.timeout(180_000)
         );
