@@ -97,7 +97,7 @@ export function CheckboxField({
 }: Omit<React.ComponentProps<"input">, "type"> & { label: React.ReactNode; description?: React.ReactNode }) {
   return (
     <label className={cn("flex cursor-pointer items-start gap-2 text-[13px]", props.disabled && "cursor-not-allowed opacity-60", className)}>
-      <input type="checkbox" className="mt-0.5 size-3.5 shrink-0 accent-[#FF8000]" {...props} />
+      <input type="checkbox" className="mt-0.5 size-3.5 shrink-0 accent-primary" {...props} />
       <span className="flex flex-col gap-0.5">
         <span className="font-medium">{label}</span>
         {description && <span className="text-xs text-admin-subtle">{description}</span>}
@@ -124,7 +124,7 @@ export function SwitchField({
       </label>
       <SwitchPrimitive.Root
         id={switchId}
-        className="relative mt-0.5 inline-flex h-[18px] w-8 shrink-0 cursor-pointer items-center rounded-full bg-[#D6CFC4] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary"
+        className="relative mt-0.5 inline-flex h-[18px] w-8 shrink-0 cursor-pointer items-center rounded-full bg-input outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary"
         {...props}
       >
         <SwitchPrimitive.Thumb className="block size-3.5 translate-x-0.5 rounded-full bg-white shadow transition-transform data-[state=checked]:translate-x-[16px]" />

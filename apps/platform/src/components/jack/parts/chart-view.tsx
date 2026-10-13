@@ -6,27 +6,28 @@ import type { JackCellValue, JackChartSpec } from "@/lib/jack/parts"
 
 /**
  * A chart Jack drew (#161). LSR orange for a single series; for several, a fixed order of six hues
- * checked for color-blind separation against the white panel (orange, blue, aqua, violet, pink,
- * green). Identity never rests on color alone: two or more series get a legend, and "Show data"
- * has every value as a table.
+ * checked for color-blind separation against the panel (orange, blue, aqua, violet, pink, green), with
+ * lighter versions in the dark theme. Identity never rests on color alone: two or more series get a
+ * legend, and "Show data" has every value as a table.
  */
 
-export const SERIES_COLORS = ["#FF8000", "#2A78D6", "#1BAF7A", "#6250D6", "#E87BA4", "#008300"]
-const OTHER_COLOR = "#A8A29E"
+/* The admin theme's variables (globals.css), so charts follow light and dark; SVG attributes take var() too */
+export const SERIES_COLORS = [1, 2, 3, 4, 5, 6].map((n) => `var(--series-${n})`)
+const OTHER_COLOR = "var(--series-other)"
 const MAX_SLICES = 6
 
-/* Theme values from the admin console (globals.css), for SVG where classes don't reach */
-const INK = "#1C1917"
-const SUBTLE = "#78716C"
-const GRID = "#F0EBE3"
-const BORDER = "#E7E1D8"
+const INK = "var(--foreground)"
+const SUBTLE = "var(--admin-subtle)"
+const GRID = "var(--admin-row)"
+const BORDER = "var(--border)"
+const PANEL = "var(--card)"
 
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 })
 const full = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 })
 const formatValue = (value: unknown) => (typeof value === "number" ? full.format(value) : String(value ?? "—"))
 
 const tooltipStyle = {
-  contentStyle: { background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 6, fontSize: 12, padding: "6px 10px", color: INK },
+  contentStyle: { background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 6, fontSize: 12, padding: "6px 10px", color: INK },
   labelStyle: { color: INK, fontWeight: 600, marginBottom: 2 },
   itemStyle: { padding: 0, color: INK },
 }
@@ -108,8 +109,8 @@ export function ChartView({ chart }: { chart: JackChartSpec }) {
                   name={s.label}
                   stroke={color(i)}
                   strokeWidth={2}
-                  dot={chart.rows.length <= 24 ? { r: 3.5, fill: color(i), stroke: "#FFFFFF", strokeWidth: 2 } : false}
-                  activeDot={{ r: 5, stroke: "#FFFFFF", strokeWidth: 2 }}
+                  dot={chart.rows.length <= 24 ? { r: 3.5, fill: color(i), stroke: PANEL, strokeWidth: 2 } : false}
+                  activeDot={{ r: 5, stroke: PANEL, strokeWidth: 2 }}
                   isAnimationActive={false}
                 />
               ))}
@@ -117,7 +118,7 @@ export function ChartView({ chart }: { chart: JackChartSpec }) {
           ) : (
             <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
               <Tooltip formatter={(value) => formatValue(value)} {...tooltipStyle} />
-              <Pie data={slices} dataKey="value" nameKey="name" startAngle={90} endAngle={-270} innerRadius="55%" outerRadius="85%" stroke="#FFFFFF" strokeWidth={2} isAnimationActive={false}>
+              <Pie data={slices} dataKey="value" nameKey="name" startAngle={90} endAngle={-270} innerRadius="55%" outerRadius="85%" stroke={PANEL} strokeWidth={2} isAnimationActive={false}>
                 {slices.map((slice) => (
                   <Cell key={slice.name} fill={slice.color} />
                 ))}
