@@ -104,6 +104,15 @@ describe("mentionsNumber", () => {
     expect(mentionsNumber("5 drivers have paid; no other drivers have.", 0, ["paid", "driver", "entr", "fee", "people"])).toBe(false)
     expect(mentionsNumber("12 people have paid. There's no fee waiver this season.", 0, ["paid", "driver", "entr", "fee", "people"])).toBe(false)
     expect(mentionsNumber("None of the applicants have paid yet; 14 forms are in.", 0, ["paid", "applicant"])).toBe(true)
+    expect(mentionsNumber("Nobody's paid yet.", 0, ["paid", "driver"])).toBe(true)
+    expect(mentionsNumber("There are no paid entries.", 0, ["paid", "entr"])).toBe(true)
+    // "no" about something else, near the noun, isn't the count
+    const lsc = ["paid", "driver", "entr", "fee", "people"]
+    expect(mentionsNumber("I have no data on drivers who paid.", 0, lsc)).toBe(false)
+    expect(mentionsNumber("There's no record of paid entries in what I can see.", 0, lsc)).toBe(false)
+    expect(mentionsNumber("No information about drivers is available.", 0, lsc)).toBe(false)
+    expect(mentionsNumber("There's no fee waiver this season, but I can't see who paid.", 0, lsc)).toBe(false)
+    expect(mentionsNumber("Three drivers have paid, and no other drivers have.", 0, lsc)).toBe(false)
     expect(mentionsNumber("There are 130 applications.", 13)).toBe(false)
     expect(mentionsNumber("It cost $13.50", 13)).toBe(false)
   })

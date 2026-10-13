@@ -202,10 +202,17 @@ export function mentionsNumber(text: string, n: number, nouns: string[] = []): b
   // of the nouns, and only when no other count sits next to those nouns ("5 drivers paid; no other drivers")
   if (n !== 0 || !nouns.length) return false
   const said = NONE_WORDS.some((word) =>
-    nouns.some((noun) => new RegExp(`(?<![\\w'’-])${word}(?:\\s+(?:of|the|our|other|one|more|new|any|${WORD}))?\\s+(?:${WORD}\\s+)?\\b${escapeRegExp(noun)}`, "i").test(clean)),
+    nouns.some((noun) =>
+      new RegExp(
+        `(?<![\\w'’-])${word}(?:['’]s)?(?:\\s+(?:of|the|our|other|new|more|lsc|club|current|this|season's|paid|unpaid|active|confirmed|completed))*\\s+(?:(?:has|have|had|is|are|was|were)\\s+)?\\b${escapeRegExp(noun)}[\\w'’-]*(?=\\s+(?:have|has|had|are|were|is|was|yet|so|paid|entered|signed|registered|applied|on|in|this|for|at)\\b|\\s*[.,;:!?)]|\\s*$)`,
+        "i",
+      ).test(clean),
+    ),
   )
   if (!said) return false
-  const others = [...new Set(otherNumbers(clean, 0))].map(String)
+  // Another count by the same nouns, in digits or words, means the "no" isn't the answer
+  const wordCounts = WORDS.slice(1).filter((w) => new RegExp(standalone(w), "i").test(clean))
+  const others = [...new Set([...otherNumbers(clean, 0).map(String), ...wordCounts])]
   return !(others.length && nextToNoun(clean, others, nouns))
 }
 

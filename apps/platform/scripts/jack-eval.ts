@@ -31,7 +31,7 @@
  * Reads apps/platform/.env.local and .env (found from this script, not the working directory), without
  * overriding the environment. Needs DATABASE_URL and JACK_DATABASE_URL on the same database, and
  * ANTHROPIC_API_KEY unless --dry-run. It refuses to run unless DATABASE_URL is this machine
- * (127.0.0.1 or localhost), or --allow-remote names its exact host. A real run costs money (see the
+ * (127.0.0.1 or localhost), or --allow-remote names its host (and Supabase project). A real run costs money (see the
  * pilot), and it doesn't show in Jack's spend meter (only in the Anthropic Console).
  *
  * What it writes to the database it runs on: drafts the replies make (DRAFT events, deleted again with
@@ -88,6 +88,8 @@ const CONCURRENCY = Math.max(1, Number(arg("concurrency") ?? 5) || 5);
 const EVAL_ROOM_ID = "jack-eval";
 /** A question that runs longer than this is stopped and recorded as a timeout (the reply's own limits are tighter) */
 const CASE_TIMEOUT_MS = 330_000;
+/** The whole judging of one answer: Opus, Fable if Opus declines, and their retries (each request has its own limit) */
+const JUDGE_TIMEOUT_MS = 600_000;
 const PILOT_IDS = ["lsc-paid", "analysis-august-cohort", "vague-most-active", "refuse-refund", "safety-injected-text"];
 const OUT_DIR = resolve(REPO_DIR, ".claude", "hillclimb");
 
@@ -312,7 +314,7 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
           instructions: instructionsFor(mods, persona),
           askedAt: c.now,
         },
-        AbortSignal.timeout(180_000)
+        AbortSignal.timeout(JUDGE_TIMEOUT_MS)
       );
     } catch (error) {
       // The answer is kept either way (it's paid for): a script failure still fails it, otherwise it's
@@ -367,7 +369,7 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
       sql_calls: out.parts.filter((p) => p.name === "run_sql").length,
       typed_calls: out.parts.filter((p) => TYPED_TOOLS.has(p.name)).length,
       describe_calls: out.parts.filter((p) => p.name === "describe_schema").length,
-      ...(g ? { tool_use: g.tool_use, tool_notes: g.tool_notes, tool_gap: g.tool_gap } : c.judge ? { tool_notes: "Both judges declined to grade this question; script checks only." } : {}),
+      ...(g ? { tool_use: g.tool_use, tool_notes: g.tool_notes, tool_gap: g.tool_gap } : {}),
       expected: truth.expected,
       answer: out.text,
       askedAt: c.now.toISOString(),
@@ -495,58 +497,68 @@ async function regrade(c: Ctx, personas: JackRoomPersonaKey[]) {
       }
       const scriptOk = failures.length === 0;
 
-      const judgeFailed = row.grade.meets === 0 || row.grade.facts === 0 || row.grade.honest === 0 || Boolean(row.meta.ungraded);
-      let grade = row.grade;
+      // Another look from the judge for every answer it failed or never graded (an error, a decline, or
+      // an older run's script-only grade)
+      const needsJudge = Boolean(c.judge) && (row.grade.meets === undefined || row.grade.meets === 0 || row.grade.facts === 0 || row.grade.honest === 0 || Boolean(row.meta.ungraded));
+      let grade: Grade = row.grade;
       let extra: Partial<Row> = {};
-      if (c.judge && judgeFailed) {
+      let judgeProblem = row.meta.ungraded;
+      if (c.judge && needsJudge) {
         const before = question.before ? ((await question.before(ctx)) ?? []) : [];
-        let judged: Awaited<ReturnType<typeof judgeAnswer>>;
+        let judged: Awaited<ReturnType<typeof judgeAnswer>> | null = null;
         try {
           judged = await judgeAnswer(
-          c.judge,
-          {
-            question: row.prompt,
-            asker: c.officer.displayName,
-            before,
-            expect: question.expect ?? GROUP_EXPECT[question.group ?? "everyday"],
-            facts: truth.facts ?? (truth.judgeOnly ? undefined : `The right answer: ${truth.expected}.`),
-            tools,
-            answer: row.meta.answer,
-            ending: row.outcome === "answered" ? undefined : row.outcome,
-            instructions: instructionsFor(c.mods, persona),
-            askedAt,
-          },
-          AbortSignal.timeout(180_000)
+            c.judge,
+            {
+              question: row.prompt,
+              asker: c.officer.displayName,
+              before,
+              expect: question.expect ?? GROUP_EXPECT[question.group ?? "everyday"],
+              facts: truth.facts ?? (truth.judgeOnly ? undefined : `The right answer: ${truth.expected}.`),
+              tools,
+              answer: row.meta.answer,
+              ending: row.outcome === "answered" ? undefined : row.outcome,
+              instructions: instructionsFor(c.mods, persona),
+              askedAt,
+            },
+            AbortSignal.timeout(JUDGE_TIMEOUT_MS)
           );
         } catch (error) {
-          console.log(`  ${persona.padEnd(5)} note  ${row.prompt_id}: the judge couldn't grade it again (${error instanceof Error ? error.message : String(error)}); kept as it was`);
-          continue;
+          judgeProblem = error instanceof JudgeDeclined ? "both judges declined to grade it" : `the judge failed: ${error instanceof Error ? error.message : String(error)}`;
+          console.log(`  ${persona.padEnd(5)} note  ${row.prompt_id}: ${judgeProblem}`);
         }
-        rejudged++;
-        const g = judged.grade;
-        grade = {
-          pass: 0,
-          check: 0,
-          meets: Number(g.meets_expectation),
-          facts: Number(g.facts_correct !== "no"),
-          honest: Number(g.no_invention),
-          clear: Number(g.clear),
-          tools_ok: Number(g.tool_use === "good" || g.tool_use === "none_needed"),
-        };
-        extra = {
-          explanation: { meets: g.explanation, tools_ok: g.tool_notes },
-          judge_model: judged.model,
-          judge_usage: judged.usage,
-          judge_cost_usd: (row.judge_cost_usd ?? 0) + judgeCostUsd(judged.model, judged.usage),
-          meta: { ...row.meta, tool_use: g.tool_use, tool_notes: g.tool_notes, tool_gap: g.tool_gap, ungraded: undefined },
-        };
+        if (judged) {
+          rejudged++;
+          judgeProblem = undefined;
+          const g = judged.grade;
+          grade = {
+            pass: 0,
+            check: 0,
+            meets: Number(g.meets_expectation),
+            facts: Number(g.facts_correct !== "no"),
+            honest: Number(g.no_invention),
+            clear: Number(g.clear),
+            tools_ok: Number(g.tool_use === "good" || g.tool_use === "none_needed"),
+          };
+          extra = {
+            explanation: { meets: g.explanation, tools_ok: g.tool_notes },
+            judge_model: judged.model,
+            judge_usage: judged.usage,
+            judge_cost_usd: (row.judge_cost_usd ?? 0) + judgeCostUsd(judged.model, judged.usage),
+            meta: { ...row.meta, tool_use: g.tool_use, tool_notes: g.tool_notes, tool_gap: g.tool_gap },
+          };
+        }
       }
-      const judgeOk = grade.meets === undefined || Boolean(grade.meets && grade.facts && grade.honest);
+      // With the judge on, an answer it never graded can't pass: it's ungraded if the script checks pass, a fail if not
+      const graded = grade.meets !== undefined;
+      const judgeOk = graded ? Boolean(grade.meets && grade.facts && grade.honest) : !c.judge;
+      const ungraded = c.judge && !graded && scriptOk ? (judgeProblem ?? "the judge never graded it") : undefined;
       const next: Row = { ...row, ...extra, grade: { ...grade, check: Number(scriptOk), pass: Number(scriptOk && judgeOk) } };
-      next.meta = { ...next.meta, failures };
-      if (next.grade.pass !== row.grade.pass || extra.judge_model) {
+      next.meta = { ...next.meta, failures, ungraded };
+      if (next.grade.pass !== row.grade.pass || extra.judge_model || next.meta.ungraded !== row.meta.ungraded) {
         appendFileSync(resolve(dir, "results.jsonl"), JSON.stringify(next) + "\n");
-        console.log(`  ${persona.padEnd(5)} ${row.grade.pass ? "PASS" : "FAIL"} -> ${next.grade.pass ? "PASS" : "FAIL"}  ${row.prompt_id}`);
+        const mark = (r: Row) => (r.meta.ungraded ? "UNGRADED" : r.grade.pass ? "PASS" : "FAIL");
+        console.log(`  ${persona.padEnd(5)} ${mark(row)} -> ${mark(next)}  ${row.prompt_id}`);
       }
     }
   }
@@ -651,7 +663,7 @@ async function main() {
     writeFileSync(path, summary);
     console.log(`  saved: ${path}`);
   }
-  if (rows.some((r) => !r.grade.pass) || errors > 0) process.exitCode = 1;
+  if (rows.some((r) => !r.grade.pass && !r.meta.ungraded) || errors > 0) process.exitCode = 1;
   await prisma.$disconnect();
 }
 
@@ -708,7 +720,7 @@ function dryRunClient(mods: Ctx["mods"], answer: string) {
 }
 
 function report(row: Row) {
-  const mark = row.grade.pass ? "PASS" : "FAIL";
+  const mark = row.meta.ungraded ? "UNGR" : row.grade.pass ? "PASS" : "FAIL";
   const judge = row.grade.meets !== undefined ? `  judge ${row.grade.meets ? "ok" : "no"}/${row.meta.tool_use}` : "";
   console.log(
     `  ${row.meta.persona.padEnd(5)} ${mark}  ${row.prompt_id.padEnd(30)}  $${row.cost_usd.toFixed(4)}  ${row.latency_s.toFixed(1)} s  ${row.tool_calls} tools${judge}` +
@@ -732,12 +744,13 @@ function summarize(all: Row[], personas: JackRoomPersonaKey[], models: Record<st
   const sum = (rs: Row[], f: (r: Row) => number) => rs.reduce((s, r) => s + f(r), 0);
 
   lines.push("## By model", "", "| model | pass | does the task | facts right | no invention | clear | tool use ok | cost | judge cost | avg time | avg tools |", "|---|---|---|---|---|---|---|---|---|---|---|");
+  const spent = (p: string) => all.filter((r) => r.meta.persona === p);
   for (const p of personas) {
     const rs = of(p);
     const judged = rs.filter((r) => r.grade.meets !== undefined);
     const rate = (k: keyof Grade) => (judged.length ? pct(sum(judged, (r) => r.grade[k] ?? 0), judged.length) : "-");
     lines.push(
-      `| ${p} (${models[p].model}) | ${pct(sum(rs, (r) => r.grade.pass), rs.length)} (${sum(rs, (r) => r.grade.pass)}/${rs.length}) | ${rate("meets")} | ${rate("facts")} | ${rate("honest")} | ${rate("clear")} | ${rate("tools_ok")} | $${sum(rs, (r) => r.cost_usd).toFixed(3)} | $${sum(rs, (r) => r.judge_cost_usd ?? 0).toFixed(3)} | ${rs.length ? (sum(rs, (r) => r.latency_s) / rs.length).toFixed(1) : "-"} s | ${rs.length ? (sum(rs, (r) => r.tool_calls) / rs.length).toFixed(1) : "-"} |`
+      `| ${p} (${models[p].model}) | ${pct(sum(rs, (r) => r.grade.pass), rs.length)} (${sum(rs, (r) => r.grade.pass)}/${rs.length}) | ${rate("meets")} | ${rate("facts")} | ${rate("honest")} | ${rate("clear")} | ${rate("tools_ok")} | $${sum(spent(p), (r) => r.cost_usd).toFixed(3)} | $${sum(spent(p), (r) => r.judge_cost_usd ?? 0).toFixed(3)} | ${rs.length ? (sum(rs, (r) => r.latency_s) / rs.length).toFixed(1) : "-"} s | ${rs.length ? (sum(rs, (r) => r.tool_calls) / rs.length).toFixed(1) : "-"} |`
     );
   }
 

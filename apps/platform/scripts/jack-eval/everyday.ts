@@ -4,7 +4,7 @@
  */
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { mentionsDollars, mentionsNumber } from "../../src/server/jack/eval-support";
-import { chicagoMonthStart, COUNTED_EVENT, includesAll, mentionsDate, namesEvent, nextFriday7pm, number, PEOPLE, purchaseKey, semesterStart, TZ, type Question, type ToolPart } from "./shared";
+import { chicagoMonthStart, COUNTED_EVENT, includesAll, lastAugust, mentionsDate, namesEvent, nextFriday7pm, number, PEOPLE, purchaseKey, semesterStart, TZ, type Question, type ToolPart } from "./shared";
 
 export const EVERYDAY: Question[] = [
   {
@@ -144,10 +144,12 @@ export const EVERYDAY: Question[] = [
       // Members only (club_members leaves deleted accounts out), over a rolling 30 days or 30 whole Central days
       const rolling = new Date(now.getTime() - 30 * 86_400_000);
       const days = fromZonedTime(`${formatInTimeZone(new Date(now.getTime() - 29 * 86_400_000), TZ, "yyyy-MM-dd")}T00:00:00`, TZ);
+      const days30 = fromZonedTime(`${formatInTimeZone(new Date(now.getTime() - 30 * 86_400_000), TZ, "yyyy-MM-dd")}T00:00:00`, TZ);
       const member = { status: { not: "deleted" as const } };
       const counts = await Promise.all([
         prisma.user.count({ where: { ...member, createdAt: { gte: rolling } } }),
         prisma.user.count({ where: { ...member, createdAt: { gte: days } } }),
+        prisma.user.count({ where: { ...member, createdAt: { gte: days30 } } }),
         prisma.user.count({ where: { ...member, signedUpAt: { gte: rolling } } }),
       ]);
       const created = counts[0];
@@ -219,12 +221,12 @@ export const EVERYDAY: Question[] = [
         where: {
           status: { notIn: ["DRAFT", "CANCELLED"] },
           startsAtUtc: { gte: semesterStart(now) },
-          OR: [{ title: { contains: "GM 1", mode: "insensitive" } }, { title: { contains: "General Meeting 1", mode: "insensitive" } }],
+          OR: [{ title: { contains: "GM", mode: "insensitive" } }, { title: { contains: "General Meeting", mode: "insensitive" } }],
         },
         orderBy: { startsAtUtc: "desc" },
         select: { title: true, startsAtUtc: true },
       });
-      const gm = candidates.find((e) => /\bGM ?1\b|general meeting 1\b/i.test(e.title)) ?? null;
+      const gm = candidates.find((e) => /\bGM\s*#?\s*1\b|general meeting\s*#?\s*1\b/i.test(e.title)) ?? null;
       if (!gm) {
         return {
           expected: "not on the calendar",
@@ -256,7 +258,7 @@ export const EVERYDAY: Question[] = [
     id: "top-attendance",
     ask: "Which event since August 1 had the most people check in, and how many?",
     truth: async ({ prisma, now }) => {
-      const since = fromZonedTime(`${formatInTimeZone(now, TZ, "yyyy")}-08-01T00:00:00`, TZ);
+      const since = lastAugust(now)[0];
       const events = await prisma.event.findMany({
         where: { startsAtUtc: { gte: since, lte: now }, attendances: { some: {} } },
         select: { title: true, _count: { select: { attendances: true } } },
