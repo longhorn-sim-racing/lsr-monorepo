@@ -92,6 +92,7 @@ describe("stripDatesAndTimes", () => {
   it("takes out both ends of a day range, and leaves a count after a spaced dash", () => {
     expect(stripDatesAndTimes("payments for Oct 1–13 CT, Sep 28-30 and 1–13 October")).not.toMatch(/\d/)
     expect(stripDatesAndTimes("Round 4, Sat Oct 10 – 0 registered")).toContain("0 registered")
+    expect(stripDatesAndTimes("GM 1 on Sep 3—45 people checked in")).toContain("45 people")
   })
 })
 

@@ -30,7 +30,7 @@
  *
  * Reads apps/platform/.env.local and .env (found from this script, not the working directory), without
  * overriding the environment. Needs DATABASE_URL and JACK_DATABASE_URL on the same database, and
- * ANTHROPIC_API_KEY unless --dry-run. It refuses to run unless DATABASE_URL is this machine
+ * ANTHROPIC_API_KEY unless --dry-run or --regrade --no-judge. It refuses to run unless DATABASE_URL is this machine
  * (127.0.0.1 or localhost), or --allow-remote names its host (and Supabase project). A real run costs money (see the
  * pilot), and it doesn't show in Jack's spend meter (only in the Anthropic Console).
  *
