@@ -40,7 +40,8 @@ export function JackRoomView({ roomId, title, persona, messages, present, connec
   return (
     // Fills the workspace below the top bar so the conversation scrolls and the composer stays put
     <div className="-mx-4 -my-4 flex h-[calc(100dvh-44px)] bg-card md:-mx-6 md:-my-5">
-      <JackRoomRail rooms={rooms} activeId={roomId} />
+      {/* The open room's persona is live; the rest of the rail is as of page load */}
+      <JackRoomRail rooms={rooms.map((r) => (r.id === roomId ? { ...r, persona } : r))} activeId={roomId} />
       <section aria-label={title} className="flex min-w-0 flex-1 flex-col">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-admin-row px-4 py-2.5 md:px-5">
           <div className="flex min-w-0 flex-col">
