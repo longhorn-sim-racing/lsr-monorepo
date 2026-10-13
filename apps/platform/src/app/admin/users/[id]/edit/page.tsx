@@ -1,97 +1,97 @@
-import { prisma } from "@/server/db";
-import { notFound } from "next/navigation";
-import { UserEditForm } from "@/components/admin/user-edit-form";
-import { requireOfficer } from "@/server/auth/guards";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { StatusBadges } from "@/components/status-indicators";
-import { getStatusIndicators, getActiveTierKey } from "@/lib/status-indicators";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import type { Metadata } from "next"
+import { notFound } from "next/navigation"
+import { formatInTimeZone } from "date-fns-tz"
+import { ExternalLink } from "lucide-react"
+import { prisma } from "@/server/db"
+import { requireOfficerPage } from "@/server/auth/guards"
+import { getCachedSessionUser } from "@/server/auth/cached-session"
+import { Button, DetailList, PageHeader, Panel, PanelBody } from "@/components/admin/kit"
+import { UserEditForm } from "@/components/admin/user-edit-form"
+import { MemberAvatar } from "@/app/admin/users/_components/member-avatar"
+import { MemberBadges } from "@/app/admin/users/_components/member-badges"
+import { getActiveTierKey } from "@/lib/status-indicators"
+import { DEFAULT_TIMEZONE } from "@/lib/dates"
 
-export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic"
 
-export default async function AdminUserEditPage({
-    params,
-}: {
-    params: Promise<{ id: string }>;
-}) {
-    const { id } = await params;
-    await requireOfficer();
+export const metadata: Metadata = { title: "Edit member" }
 
-    const user = await prisma.user.findUnique({
-        where: { id },
-        include: {
-            roles: { include: { role: true } },
-            memberships: { include: { tier: true } },
-        },
-    });
+const STATUS_LABEL: Record<string, string> = {
+  active: "Active",
+  pending_verification: "Not verified yet",
+  retired: "Retired",
+  deleted: "Deleted",
+}
 
-    if (!user) {
-        notFound();
-    }
+export default async function AdminUserEditPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireOfficerPage()
+  const { id } = await params
 
-    const [allRoles, allTiers] = await Promise.all([
-        prisma.role.findMany(),
-        prisma.membershipTier.findMany(),
-    ]);
+  const [user, allRoles, allTiers, session] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id },
+      include: {
+        roles: { include: { role: true } },
+        memberships: { include: { tier: true } },
+      },
+    }),
+    prisma.role.findMany(),
+    prisma.membershipTier.findMany(),
+    getCachedSessionUser(),
+  ])
 
-    const initials = user.displayName
-        .split(" ")
-        .map((n) => n[0])
-        .slice(0, 2)
-        .join("")
-        .toUpperCase();
+  if (!user) notFound()
 
-    const roleKeys = user.roles.map((r) => r.role.key);
-    const activeTierKey = getActiveTierKey(user.memberships);
+  const roleKeys = user.roles.map((r) => r.role.key)
+  const activeTierKey = getActiveTierKey(user.memberships)
+  const activeTier = user.memberships.find((m) => m.tier.key === activeTierKey)?.tier
 
-    return (
-        <div className="max-w-3xl mx-auto space-y-8">
-            {/* Back link */}
-            <Link
-                href="/admin/users"
-                className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-white/40 hover:text-lsr-orange transition-colors"
-            >
-                <ArrowLeft className="w-3 h-3" />
-                Back to Users
-            </Link>
+  return (
+    <>
+      <PageHeader
+        back={{ href: "/admin/users", label: "Members" }}
+        title={user.displayName}
+        description={`@${user.handle}`}
+        actions={
+          <Button asChild>
+            <a href={`/drivers/${user.handle}`} target="_blank" rel="noreferrer">
+              Public profile
+              <ExternalLink aria-hidden />
+            </a>
+          </Button>
+        }
+      />
 
-            {/* User header */}
-            <div className="border border-white/10 bg-lsr-charcoal p-6 flex items-start gap-5">
-                <Avatar className="h-16 w-16 rounded-none border border-white/20 flex-shrink-0">
-                    <AvatarImage src={user.avatarUrl ?? undefined} className="rounded-none object-cover" />
-                    <AvatarFallback className="rounded-none bg-white/5 text-lg font-black text-white/20">
-                        {initials}
-                    </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 space-y-2">
-                    <div>
-                        <h1 className="font-display font-black italic text-2xl text-white uppercase tracking-tight">
-                            {user.displayName}
-                        </h1>
-                        <p className="text-xs text-white/40 font-mono">
-                            @{user.handle}
-                            {user.email && (
-                                <span className="ml-3 text-white/25">{user.email}</span>
-                            )}
-                        </p>
-                    </div>
-                    <StatusBadges
-                        indicators={getStatusIndicators({
-                            roles: roleKeys,
-                            activeTierKey,
-                            officerTitle: user.officerTitle,
-                        })}
-                    />
-                </div>
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <Panel className="lg:sticky lg:top-[60px] lg:order-2">
+          <PanelBody className="flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <MemberAvatar name={user.displayName} src={user.avatarUrl} size="lg" />
+              <div className="flex min-w-0 flex-col gap-1">
+                <p className="truncate text-sm font-semibold">{user.displayName}</p>
+                <MemberBadges
+                  roles={roleKeys}
+                  activeTierKey={activeTierKey}
+                  officerTitle={user.officerTitle}
+                  empty={<span className="text-xs text-admin-subtle">No badges</span>}
+                />
+              </div>
             </div>
-
-            {/* Edit form */}
-            <UserEditForm
-                user={user}
-                allRoles={allRoles}
-                allTiers={allTiers}
+            <DetailList
+              items={[
+                { label: "Email", value: user.email },
+                { label: "UT EID", value: user.eid ? <span className="font-mono text-xs">{user.eid}</span> : <span className="text-admin-subtle">Not given</span> },
+                { label: "Account", value: STATUS_LABEL[user.status] ?? user.status },
+                { label: "Membership", value: activeTier?.label ?? <span className="text-admin-subtle">None</span> },
+                { label: "Joined", value: formatInTimeZone(user.createdAt, DEFAULT_TIMEZONE, "MMM d, yyyy") },
+                { label: "User ID", value: <span className="font-mono text-xs">{user.id}</span> },
+              ]}
             />
-        </div>
-    );
+          </PanelBody>
+        </Panel>
+
+        <UserEditForm user={user} allRoles={allRoles} allTiers={allTiers} viewerIsAdmin={session.roles.includes("admin")} />
+      </div>
+    </>
+  )
 }
