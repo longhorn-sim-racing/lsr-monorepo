@@ -9,7 +9,6 @@ import {
   JACK_PERSONA_NAME,
   jackRoomTitle,
   type JackMessageView,
-  type JackPersonaKey,
   type JackPresence,
   type JackRoomPersonaKey,
   type JackRoomSummary,
@@ -18,6 +17,7 @@ import {
 import { replyPieces } from "@/lib/jack/reply-pieces"
 import type { JackSpend } from "@/lib/jack/spend"
 import { JackToolPartView } from "./parts/tool-part"
+import { PersonaAvatar } from "./persona-avatar"
 import { JackRoomRail } from "./room-list"
 import { SpendMeter } from "./spend-meter"
 import type { JackConnection, JackStall } from "./use-jack-room"
@@ -149,6 +149,7 @@ function PersonaSwitch({ persona, onSwitch }: { persona: JackRoomPersonaKey; onS
       <label htmlFor="jack-persona" className="text-xs text-muted-foreground">
         Answered by
       </label>
+      <PersonaAvatar persona={pending ?? persona} className="size-7 md:size-6" />
       <Select
         id="jack-persona"
         value={pending ?? persona}
@@ -166,19 +167,6 @@ function PersonaSwitch({ persona, onSwitch }: { persona: JackRoomPersonaKey; onS
         </span>
       ) : null}
     </div>
-  )
-}
-
-function PersonaAvatar({ persona }: { persona: JackPersonaKey }) {
-  const styles: Record<JackPersonaKey, string> = {
-    jack: "bg-primary text-primary-foreground",
-    lift: "bg-admin-nav text-primary",
-    stand: "bg-muted text-tone-neutral-foreground",
-  }
-  return (
-    <span aria-hidden className={cn("flex size-7 shrink-0 items-center justify-center rounded-md font-display text-sm font-semibold", styles[persona])}>
-      {JACK_PERSONA_NAME[persona][0]}
-    </span>
   )
 }
 

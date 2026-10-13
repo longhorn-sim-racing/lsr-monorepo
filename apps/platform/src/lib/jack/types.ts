@@ -16,6 +16,13 @@ export const JACK_PERSONA_NAME: Record<JackPersonaKey, string> = {
   stand: "Stand",
 }
 
+/** Harbor Freight product photos: a floor jack, a lift (they don't sell two-post lifts) and jack stands */
+export const JACK_PERSONA_AVATAR: Record<JackPersonaKey, string> = {
+  jack: "/jack/jack.webp",
+  lift: "/jack/lift.webp",
+  stand: "/jack/stand.webp",
+}
+
 export const JACK_ROOM_PERSONAS: JackRoomPersonaKey[] = ["jack", "lift"]
 
 export function isJackRoomPersona(value: unknown): value is JackRoomPersonaKey {

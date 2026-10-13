@@ -6,6 +6,7 @@ import { Badge, Button, EmptyState, Input, PageHeader, Panel, PanelHeader } from
 import { cn } from "@/lib/utils"
 import type { JackSpend } from "@/lib/jack/spend"
 import { JACK_PERSONA_NAME, jackRoomTitle, type JackRoomSummary } from "@/lib/jack/types"
+import { PersonaAvatar } from "./persona-avatar"
 import { SpendMeter } from "./spend-meter"
 
 /*
@@ -43,9 +44,12 @@ export function JackRoomList({ rooms, spend, onCreate }: RoomListProps) {
             {rooms.map((room) => (
               <li key={room.id} className="border-b border-admin-row last:border-b-0">
                 <Link href={`/admin/jack/${room.id}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 hover:bg-admin-surface">
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate font-semibold">{jackRoomTitle(room)}</span>
-                    <span className="text-xs text-admin-subtle">{room.createdByName ? `Opened by ${room.createdByName}` : "Opened by a former officer"}</span>
+                  <span className="flex min-w-0 items-center gap-3">
+                    <PersonaAvatar persona={room.persona} className="size-8" />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate font-semibold">{jackRoomTitle(room)}</span>
+                      <span className="text-xs text-admin-subtle">{room.createdByName ? `Opened by ${room.createdByName}` : "Opened by a former officer"}</span>
+                    </span>
                   </span>
                   <span className="flex items-center gap-3 text-xs text-admin-subtle">
                     {room.persona === "lift" && <Badge tone="accent">{JACK_PERSONA_NAME.lift}</Badge>}
@@ -123,7 +127,10 @@ export function JackRoomRail({ rooms, activeId }: { rooms: JackRoomSummary[]; ac
                   <span className={cn("truncate text-[13px]", active ? "font-bold" : "font-medium")}>{jackRoomTitle(room)}</span>
                   <span className="shrink-0 text-[11px] text-admin-subtle">{formatRoomTime(room.updatedAt)}</span>
                 </span>
-                <span className="text-xs text-muted-foreground">{JACK_PERSONA_NAME[room.persona]} answers</span>
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <PersonaAvatar persona={room.persona} className="size-4 rounded-sm" />
+                  {JACK_PERSONA_NAME[room.persona]} answers
+                </span>
               </Link>
             </li>
           )
