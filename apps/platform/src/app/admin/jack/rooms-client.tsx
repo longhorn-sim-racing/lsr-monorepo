@@ -3,10 +3,11 @@
 import { useRouter } from "next/navigation"
 import { JackRoomList } from "@/components/jack/room-list"
 import { unexpectedError } from "@/lib/action-result"
+import type { JackSpend } from "@/lib/jack/spend"
 import type { JackRoomSummary } from "@/lib/jack/types"
 import { createJackRoom } from "./actions"
 
-export function JackRoomsClient({ rooms }: { rooms: JackRoomSummary[] }) {
+export function JackRoomsClient({ rooms, spend }: { rooms: JackRoomSummary[]; spend: JackSpend | null }) {
   const router = useRouter()
 
   async function create(title: string) {
@@ -22,5 +23,5 @@ export function JackRoomsClient({ rooms }: { rooms: JackRoomSummary[] }) {
     }
   }
 
-  return <JackRoomList rooms={rooms} onCreate={create} />
+  return <JackRoomList rooms={rooms} spend={spend} onCreate={create} />
 }

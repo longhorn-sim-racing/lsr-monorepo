@@ -73,6 +73,7 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
       ch.on("broadcast", { event: JACK_EVENT.created }, onEvent)
         .on("broadcast", { event: JACK_EVENT.delta }, onEvent)
         .on("broadcast", { event: JACK_EVENT.done }, onEvent)
+        .on("broadcast", { event: JACK_EVENT.tool }, onEvent)
         .on("broadcast", { event: JACK_EVENT.room }, onEvent)
         .on("presence", { event: "sync" }, () => setPresent(presentOfficers(ch.presenceState<JackPresence>())))
         .subscribe((status) => {

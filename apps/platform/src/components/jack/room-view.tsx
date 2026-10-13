@@ -13,7 +13,11 @@ import {
   type JackRoomPersonaKey,
   type JackRoomSummary,
 } from "@/lib/jack/types"
+import { replyPieces } from "@/lib/jack/reply-pieces"
+import type { JackSpend } from "@/lib/jack/spend"
+import { JackToolPartView } from "./parts/tool-part"
 import { JackRoomRail } from "./room-list"
+import { SpendMeter } from "./spend-meter"
 import type { JackConnection } from "./use-jack-room"
 
 /*
@@ -30,13 +34,15 @@ type RoomViewProps = {
   connection: JackConnection
   /** Every room, for the rail beside this one */
   rooms: JackRoomSummary[]
+  /** This month's spend, as of page load */
+  spend: JackSpend | null
   /** Resolves with an error to show, or null once the message is posted */
   onSend: (content: string) => Promise<string | null>
   /** Resolves with an error to show, or null once switched */
   onSwitchPersona: (persona: JackRoomPersonaKey) => Promise<string | null>
 }
 
-export function JackRoomView({ roomId, title, persona, messages, present, connection, rooms, onSend, onSwitchPersona }: RoomViewProps) {
+export function JackRoomView({ roomId, title, persona, messages, present, connection, rooms, spend, onSend, onSwitchPersona }: RoomViewProps) {
   return (
     // Fills the workspace below the top bar so the conversation scrolls and the composer stays put
     <div className="-mx-4 -my-4 flex h-[calc(100dvh-44px)] bg-card md:-mx-6 md:-my-5">
@@ -50,7 +56,10 @@ export function JackRoomView({ roomId, title, persona, messages, present, connec
               All rooms
             </Link>
             <h1 className="truncate font-display text-lg font-semibold leading-tight">{title}</h1>
-            <ConnectionLine connection={connection} />
+            <span className="flex flex-wrap items-center gap-x-3">
+              <ConnectionLine connection={connection} />
+              {spend ? <SpendMeter spend={spend} /> : null}
+            </span>
           </div>
           <div className="flex flex-wrap items-center gap-3.5">
             <PersonaSwitch persona={persona} onSwitch={onSwitchPersona} />
@@ -161,7 +170,7 @@ function MessageList({ messages }: { messages: JackMessageView[] }) {
   const last = messages.at(-1)
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" })
-  }, [messages.length, last?.content])
+  }, [messages.length, last?.content, last?.tools.length])
 
   if (!messages.length)
     return (
@@ -201,10 +210,11 @@ function MessageList({ messages }: { messages: JackMessageView[] }) {
                   <strong className="font-bold">{name}</strong>{" "}
                   <span className="text-xs text-admin-subtle">{message.status === "streaming" ? "answering" : timeOfDay.format(new Date(message.createdAt))}</span>
                 </span>
-                <p className={cn("max-w-3xl whitespace-pre-wrap break-words leading-relaxed", isModel && "text-foreground")}>
-                  {message.content}
-                  {message.status === "streaming" && <span aria-hidden className="ml-0.5 inline-block h-[15px] w-[7px] translate-y-0.5 bg-primary" />}
-                </p>
+                {isModel ? (
+                  <ReplyBody message={message} />
+                ) : (
+                  <p className="max-w-3xl whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>
+                )}
                 {message.status === "error" ? (
                   <Notice tone="warning" className="max-w-xl">
                     This answer stopped early. Ask again to retry.
@@ -216,6 +226,30 @@ function MessageList({ messages }: { messages: JackMessageView[] }) {
         })}
       </ol>
       <div ref={end} />
+    </div>
+  )
+}
+
+const streamingCursor = <span aria-hidden className="ml-0.5 inline-block h-[15px] w-[7px] translate-y-0.5 bg-primary" />
+
+/** A model reply: its text, with each tool call drawn where it happened */
+function ReplyBody({ message }: { message: JackMessageView }) {
+  const pieces = replyPieces(message.content, message.tools)
+  const streaming = message.status === "streaming"
+  const endsInText = pieces.at(-1)?.kind === "text"
+  return (
+    <div className="flex max-w-3xl flex-col gap-2">
+      {pieces.map((piece, i) =>
+        piece.kind === "part" ? (
+          <JackToolPartView key={piece.key} part={piece.part} />
+        ) : (
+          <p key={piece.key} className="whitespace-pre-wrap break-words leading-relaxed text-foreground">
+            {piece.text}
+            {streaming && i === pieces.length - 1 ? streamingCursor : null}
+          </p>
+        )
+      )}
+      {streaming && !endsInText ? <p className="leading-relaxed">{streamingCursor}</p> : null}
     </div>
   )
 }

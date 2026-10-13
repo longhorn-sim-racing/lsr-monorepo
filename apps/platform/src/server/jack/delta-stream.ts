@@ -52,6 +52,19 @@ export class DeltaStream {
     }, this.flushMs)
   }
 
+  /**
+   * Sends the text written so far, then runs `step` in line with the deltas: a tool part broadcast
+   * this way reaches viewers after the text that came before it. `step` should handle its own errors;
+   * one that throws fails the stream like a failed save.
+   */
+  sendInOrder(step: () => Promise<void>): Promise<void> {
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
+    this.enqueue(() => this.flush())
+    this.enqueue(step)
+    return this.queue
+  }
+
   /** Sends what's left. Returns the whole text with the last seq; the caller saves it with the final status */
   async end(): Promise<{ content: string; streamSeq: number }> {
     if (this.timer) clearTimeout(this.timer)

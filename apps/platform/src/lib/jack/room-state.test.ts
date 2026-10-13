@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { JackToolPart } from "./parts"
 import { initRoomState, roomReducer, type RoomAction, type RoomState } from "./room-state"
 import type { JackMessageView, JackRoomView } from "./types"
 
@@ -38,6 +39,18 @@ const delta = (seq: number, text: string, messageId = "reply-1"): RoomAction => 
 const created = (message: JackMessageView): RoomAction => ({ type: "message.created", message })
 const done = (message: JackMessageView): RoomAction => ({ type: "message.done", message })
 const snapshot = (messages: JackMessageView[], snapshotRoom = room()): RoomAction => ({ type: "snapshot", room: snapshotRoom, messages })
+
+const part = (id: string, fields: Partial<JackToolPart> = {}): JackToolPart => ({
+  id,
+  name: "run_sql",
+  label: "Using run_sql",
+  status: "running",
+  at: 0,
+  input: null,
+  displays: [],
+  ...fields,
+})
+const tool = (p: JackToolPart, messageId = "reply-1"): RoomAction => ({ type: "message.tool", messageId, part: p })
 
 const run = (state: RoomState, ...actions: RoomAction[]) => actions.reduce(roomReducer, state)
 const replyOf = (state: RoomState, id = "reply-1") => state.messages.find((m) => m.id === id)
@@ -190,5 +203,79 @@ describe("roomReducer", () => {
     }
     const state = run(start(), created(note), created(note))
     expect(state.messages).toEqual([note])
+  })
+
+  describe("tool parts", () => {
+    it("adds a part to a streaming reply and updates it in place", () => {
+      const state = run(
+        start(),
+        created(reply()),
+        delta(1, "Let me check."),
+        tool(part("t1", { at: 13 })),
+        tool(part("t1", { at: 13, input: { sql: "select 1" } })),
+        tool(part("t1", { at: 13, input: { sql: "select 1" }, status: "done", label: "Ran a query (1 row)" }))
+      )
+
+      expect(replyOf(state)?.tools).toEqual([part("t1", { at: 13, input: { sql: "select 1" }, status: "done", label: "Ran a query (1 row)" })])
+      expect(replyOf(state)?.content).toBe("Let me check.")
+    })
+
+    it("keeps parts in reply order however they arrive", () => {
+      const state = run(start(), created(reply()), tool(part("late", { at: 40 })), tool(part("early", { at: 10 })))
+
+      expect(replyOf(state)?.tools.map((p) => p.id)).toEqual(["early", "late"])
+    })
+
+    it("never takes a finished part back to running", () => {
+      const finished = part("t1", { status: "done", label: "Ran a query" })
+      const state = run(start(), created(reply()), tool(finished), tool(part("t1")))
+
+      expect(replyOf(state)?.tools).toEqual([finished])
+    })
+
+    it("holds a part for a reply it hasn't seen until the reply arrives", () => {
+      const early = run(start(), tool(part("t1")))
+      expect(early.messages).toHaveLength(0)
+      expect(early.needsResync).toBe(true)
+
+      const state = run(early, created(reply()))
+      expect(replyOf(state)?.tools.map((p) => p.id)).toEqual(["t1"])
+      expect(state.needsResync).toBe(false)
+      expect(state.pendingParts).toEqual({})
+    })
+
+    it("a snapshot adds the parts it has and finishes running ones, without dropping live ones", () => {
+      const live = run(start(), created(reply()), delta(1, "abc"), tool(part("t1", { at: 3 })), tool(part("t2", { at: 3 })))
+      const fromDb = reply({
+        content: "abcdef",
+        streamSeq: 2,
+        tools: [part("t1", { at: 3, status: "done", label: "Ran a query" }), part("t0", { at: 0, status: "done" })],
+      })
+
+      const state = run(live, snapshot([fromDb]))
+
+      expect(replyOf(state)?.content).toBe("abcdef")
+      expect(replyOf(state)?.tools.map((p) => [p.id, p.status])).toEqual([
+        ["t0", "done"],
+        ["t1", "done"],
+        ["t2", "running"],
+      ])
+    })
+
+    it("a snapshot that trails the live parts doesn't undo them", () => {
+      const live = run(start(), created(reply()), delta(1, "abc"), delta(2, "def"), tool(part("t1", { status: "done", label: "Ran a query" })))
+      const state = run(live, snapshot([reply({ content: "abc", streamSeq: 1, tools: [part("t1")] })]))
+
+      expect(replyOf(state)).toMatchObject({ content: "abcdef", streamSeq: 2 })
+      expect(replyOf(state)?.tools).toEqual([part("t1", { status: "done", label: "Ran a query" })])
+    })
+
+    it("takes the done event's parts as final, and ignores parts after it", () => {
+      const final = reply({ content: "abc", streamSeq: 1, status: "done", tools: [part("t1", { status: "done", label: "Ran a query" })] })
+      const state = run(start(), created(reply()), tool(part("t1")), tool(part("t9")), done(final), tool(part("t2")))
+
+      expect(replyOf(state)).toEqual(final)
+      expect(state.pendingParts).toEqual({})
+    })
   })
 })

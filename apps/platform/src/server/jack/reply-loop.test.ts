@@ -1,6 +1,12 @@
+import Anthropic from "@anthropic-ai/sdk"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { JackDeltaEvent, JackDoneEvent, JackRoomEvent } from "@/lib/jack/types"
+import type { BetaMessageStreamParams } from "@anthropic-ai/sdk/resources/beta/messages/messages"
+import { z } from "zod"
+import type { JackDeltaEvent, JackDoneEvent, JackRoomEvent, JackToolEvent } from "@/lib/jack/types"
+import { parseToolParts } from "@/lib/jack/parts"
+import { fakeClaude, lastUserText, type FakeTurn } from "./fake-claude"
 import type { FakeJackDb } from "./jack-test-db"
+import type { JackTool } from "./tools/types"
 
 vi.mock("@/server/db", async () => {
   const { createFakeJackDb } = await import("./jack-test-db")
@@ -8,7 +14,7 @@ vi.mock("@/server/db", async () => {
 })
 
 import { prisma } from "@/server/db"
-import { placeholderReply, runRoom, type ReplyLoopDeps } from "./reply-loop"
+import { runRoom, type ReplyLoopDeps } from "./reply-loop"
 import { setRoomPersona } from "./rooms"
 import { releaseRoomLock, renewRoomLock, ROOM_LOCK_STALE_MS, tryAcquireRoomLock } from "./room-lock"
 
@@ -26,7 +32,22 @@ function fakeBroadcaster() {
   return { broadcast, sent, of }
 }
 
-/** Runs the loop on fake timers, so the placeholder's pacing and the 150 ms batching happen instantly */
+/**
+ * A fake Claude that answers as the room's persona with the officer turn it was sent, streamed in
+ * small pieces about 100 ms apart (so a reply takes a few seconds, on fake timers)
+ */
+function echoClaude() {
+  return fakeClaude(
+    (params: BetaMessageStreamParams): FakeTurn => ({
+      text: `${params.model === "claude-opus-5-5" ? "Lift" : "Jack"} here. You asked:
+${lastUserText(params)}`,
+    }),
+    undefined,
+    { chunkSize: 2, chunkDelayMs: 100 }
+  )
+}
+
+/** Runs the loop on fake timers, so the stream's pacing and the 150 ms batching happen instantly */
 async function onFakeTimers<T>(work: () => Promise<T>): Promise<T> {
   const pending = work()
   await vi.runAllTimersAsync()
@@ -35,6 +56,7 @@ async function onFakeTimers<T>(work: () => Promise<T>): Promise<T> {
 
 let room: ReturnType<FakeJackDb["addRoom"]>
 let radio: ReturnType<typeof fakeBroadcaster>
+let claude: ReturnType<typeof fakeClaude>
 let deps: ReplyLoopDeps
 
 function ask(content: string, userId = "officer-gray") {
@@ -54,10 +76,18 @@ beforeEach(() => {
   db.reset()
   db.state.users.set("officer-gray", "Gray")
   db.state.users.set("officer-dylan", "Dylan")
-  room = db.addRoom()
+  room = db.addRoom({ title: "LSC questions" }) // titled, so Stand stays out of it unless a test wants him
   radio = fakeBroadcaster()
-  deps = { broadcast: radio.broadcast, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }
+  claude = echoClaude()
+  deps = {
+    broadcast: radio.broadcast,
+    getClient: () => claude.client,
+    tools: [],
+    budget: async () => ({ month: "October", spentUsd: 3.2, budgetUsd: 200 }),
+  }
   vi.spyOn(console, "error").mockImplementation(() => {})
+  vi.spyOn(console, "warn").mockImplementation(() => {})
+  vi.spyOn(console, "info").mockImplementation(() => {})
 })
 
 afterEach(() => {
@@ -108,17 +138,17 @@ describe("runRoom", () => {
 
     expect(replies()).toHaveLength(1)
     const [reply] = replies()
-    const expected = placeholderReply("jack", [{ content: question.content, author: { displayName: "Gray" } }])
+    const expected = reply.content
     expect(expected).toMatch(/^Jack here/)
     expect(expected).toContain("Gray: How many LSC applications are there?")
-    expect(reply).toMatchObject({ persona: "jack", status: "done", content: expected })
+    expect(reply).toMatchObject({ persona: "jack", status: "done", model: "claude-sonnet-5-5" })
     expect(db.state.messages.find((m) => m.id === question.id)?.answeredById).toBe(reply.id)
 
     const types = radio.sent.map((s) => s.event.type)
     expect(types[0]).toBe("message.created")
     expect(types.at(-1)).toBe("message.done")
     const deltas = radio.of("message.delta")
-    expect(deltas.length).toBeGreaterThan(5) // it streams, in ~150 ms batches over ~3 s
+    expect(deltas.length).toBeGreaterThan(5) // it streams, in ~150 ms batches over a few seconds
     expect(deltas.map((d) => d.seq)).toEqual(deltas.map((_, i) => i + 1))
     expect(textOf(deltas, reply.id)).toBe(expected)
 
@@ -352,5 +382,226 @@ describe("setRoomPersona", () => {
 
   it("is null for a room that doesn't exist", async () => {
     expect(await setRoomPersona("room-missing", gray, "lift", radio.broadcast)).toBeNull()
+  })
+})
+
+describe("replies from Claude", () => {
+  function lookupTool(seen: { actor?: unknown } = {}): JackTool<{ what: string }> {
+    return {
+      name: "lookup",
+      description: "Looks something up.",
+      input: z.object({ what: z.string() }),
+      run: async ({ what }, ctx) => {
+        seen.actor = ctx.actor
+        return { forModel: `${what}: 13`, label: `Looked up ${what} (13)`, displays: [{ kind: "note", text: "13" }] }
+      },
+    }
+  }
+
+  it("says the API key is missing instead of calling Claude", async () => {
+    deps.getClient = () => null
+    ask("How many members?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(replies()[0]).toMatchObject({
+      status: "done",
+      content: "Jack isn't connected yet: an admin needs to add the Anthropic API key.",
+      model: null,
+      costUsd: null,
+    })
+    expect(radio.of("message.done")[0].message.content).toMatch(/isn't connected yet/)
+    expect(unanswered()).toHaveLength(0)
+  })
+
+  it("says the monthly budget is used up instead of calling Claude", async () => {
+    deps.budget = async () => ({ month: "October", spentUsd: 200.4, budgetUsd: 200 })
+    db.room(room.id).persona = "lift"
+    ask("Hard question")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(claude.calls).toHaveLength(0)
+    expect(replies()[0]).toMatchObject({ status: "done", persona: "lift", costUsd: null })
+    expect(replies()[0].content).toBe(
+      "Lift's monthly budget is used up: $200.40 of $200 spent in October. Lift answers again next month, or an admin can raise JACK_MONTHLY_BUDGET_USD."
+    )
+  })
+
+  it("records the model, tokens and cost on the reply", async () => {
+    claude = fakeClaude([{ text: "42.", usage: { input: 1_000, output: 300, cacheRead: 8_000, cacheWrite: 2_000 } }])
+    ask("How many members?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const [reply] = replies()
+    expect(reply).toMatchObject({ model: "claude-sonnet-5-5", inputTokens: 3_000, outputTokens: 300, cacheReadTokens: 8_000 })
+    // $2/M uncached in, $2.50/M cache writes, $0.20/M cache reads, $10/M out
+    expect(reply.costUsd).toBeCloseTo((1_000 * 2 + 2_000 * 2.5 + 8_000 * 0.2 + 300 * 10) / 1e6, 6)
+  })
+
+  it("streams tool calls to the room in order, after the text before them, and saves them on the reply", async () => {
+    deps.tools = [lookupTool()]
+    claude = fakeClaude(
+      [{ text: "Let me check that.", tools: [{ id: "toolu_1", name: "lookup", input: { what: "applications" } }] }, { text: "There are 13 (lookup)." }],
+      undefined,
+      { chunkSize: 3, chunkDelayMs: 40 }
+    )
+    const saved: unknown[] = []
+    db.state.hook = (op, { data }) => {
+      if (op === "jackMessage.update" && data && "toolCalls" in data && !("status" in data)) saved.push(structuredClone(data.toolCalls))
+    }
+    ask("How many LSC applications?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const [reply] = replies()
+    expect(reply.content).toBe("Let me check that.\n\nThere are 13 (lookup).")
+    const parts = parseToolParts(reply.toolCalls)
+    expect(parts).toEqual([
+      expect.objectContaining({ id: "toolu_1", name: "lookup", status: "done", label: "Looked up applications (13)", at: "Let me check that.".length }),
+    ])
+
+    // live: running, running with input, done; each after the deltas carrying the text before it
+    const tools = radio.sent.map((s, index) => ({ event: s.event, index })).filter((s) => s.event.type === "message.tool")
+    expect(tools.map((t) => (t.event as JackToolEvent).part.status)).toEqual(["running", "running", "done"])
+    for (const { event, index } of tools) {
+      const before = radio.sent
+        .slice(0, index)
+        .map((s) => s.event)
+        .filter((e): e is JackDeltaEvent => e.type === "message.delta")
+        .map((d) => d.text)
+        .join("")
+      expect(before.length).toBeGreaterThanOrEqual((event as JackToolEvent).part.at)
+      expect((event as JackToolEvent).messageId).toBe(reply.id)
+    }
+    // saved mid-reply too, for viewers who open the room while it runs
+    expect(saved.length).toBeGreaterThanOrEqual(2)
+    expect(radio.of("message.done")[0].message.tools).toEqual(parts)
+    expect(radio.sent.at(-1)?.event.type).toBe("message.done")
+  })
+
+  it("runs tools as the officer whose message is newest", async () => {
+    const seen: { actor?: unknown } = {}
+    deps.tools = [lookupTool(seen)]
+    claude = fakeClaude([{ tools: [{ name: "lookup", input: { what: "events" } }] }, { text: "Done." }])
+    ask("Events?")
+    ask("And GM 1?", "officer-dylan")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(seen.actor).toEqual({ userId: "officer-dylan", displayName: "Dylan" })
+  })
+
+  it("sends the room's history: earlier exchanges, tool notes, a persona switch, and several officers in one turn", async () => {
+    const q1 = ask("How many members?")
+    const r1 = db.addMessage({
+      roomId: room.id,
+      persona: "jack",
+      model: "claude-sonnet-5-5",
+      content: "There are 42 members.",
+      toolCalls: [{ id: "t1", name: "run_sql", label: "Ran a query (1 row)", status: "done", at: 0, input: { sql: 'select count(*) from "User"' }, displays: [] }],
+    })
+    db.state.messages.find((m) => m.id === q1.id)!.answeredById = r1.id
+    db.addMessage({ roomId: room.id, kind: "system", authorUserId: "officer-gray", content: "Gray switched this room to Lift" })
+    db.room(room.id).persona = "lift"
+    ask("Which of them raced this season?", "officer-dylan")
+    ask("And how many are new?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const [params] = claude.calls
+    expect(params.model).toBe("claude-opus-5-5")
+    expect((params.system as { text: string }[])[0].text).toMatch(/^You are Lift/)
+    expect(params.messages.map((m) => m.role)).toEqual(["user", "assistant", "user"])
+    expect(params.messages[0].content).toMatch(/^\[.+ CT\]\nGray: How many members\?$/)
+    expect(params.messages[1].content).toBe('There are 42 members.\n\n[Tools used: run_sql {"sql":"select count(*) from \\"User\\""} → Ran a query (1 row)]')
+    expect(params.messages[2].content).toMatch(
+      /^\[.+ CT\]\n\(Room note: Gray switched this room to Lift\)\nDylan: Which of them raced this season\?\nGray: And how many are new\?$/
+    )
+    expect(replies().at(-1)).toMatchObject({ persona: "lift", model: "claude-opus-5-5" })
+  })
+
+  it("ends as an error, with a plain message, when Claude can't be reached", async () => {
+    claude = fakeClaude([{ text: "Partial", error: new Anthropic.RateLimitError(429, { type: "error" }, "rate limited", new Headers()) }])
+    ask("Charges this month?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(replies()[0].status).toBe("error")
+    expect(replies()[0].content).toMatch(/too many requests/)
+    expect(radio.of("message.done")[0].message.status).toBe("error")
+    expect(unanswered()).toHaveLength(0)
+  })
+})
+
+describe("Stand names untitled rooms", () => {
+  beforeEach(() => {
+    db.room(room.id).title = null
+  })
+
+  it("names the room after its first answer, saves Stand's cost on a note, and tells the room", async () => {
+    claude = fakeClaude([{ text: "There are 13 applications." }], [{ text: '"LSC Application Count."', usage: { input: 120, output: 40 } }])
+    ask("How many LSC applications are there?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(db.room(room.id).title).toBe("LSC Application Count")
+    const note = db.state.messages.find((m) => m.kind === "system")
+    expect(note).toMatchObject({ content: "Stand named this room “LSC Application Count”", model: "claude-haiku-5-5", persona: null, inputTokens: 120, outputTokens: 40 })
+    expect(note?.costUsd).toBeCloseTo((120 * 0.1 + 40 * 0.5) / 1e6, 9)
+
+    const [request] = claude.creates
+    expect(request).toMatchObject({ model: "claude-haiku-5-5", max_tokens: 1_024, output_config: { effort: "low" } })
+    expect(request).not.toHaveProperty("fallbacks") // Haiku 5.5 has no server-side fallback
+    expect(JSON.stringify(request.messages)).toContain("Gray: How many LSC applications are there?")
+    expect(JSON.stringify(request.messages)).toContain("There are 13 applications.")
+
+    const types = radio.sent.map((s) => s.event.type)
+    expect(types.slice(-3)).toEqual(["message.done", "room.updated", "message.created"])
+    expect(radio.of("room.updated")[0].room.title).toBe("LSC Application Count")
+  })
+
+  it("names a room once", async () => {
+    claude = fakeClaude(() => ({ text: "An answer." }))
+    ask("First question")
+    await onFakeTimers(() => runRoom(room.id, deps))
+    ask("Second question")
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(claude.creates).toHaveLength(1)
+    expect(db.state.messages.filter((m) => m.kind === "system")).toHaveLength(1)
+  })
+
+  it("leaves the room untitled, quietly, when Stand fails", async () => {
+    claude = fakeClaude([{ text: "An answer." }], [{ error: new Error("overloaded") }])
+    ask("A question")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(db.room(room.id).title).toBeNull()
+    expect(replies()[0].status).toBe("done")
+    expect(db.state.messages.filter((m) => m.kind === "system")).toHaveLength(0)
+    expect(console.error).toHaveBeenCalled()
+  })
+
+  it("doesn't run for a reply that wasn't an answer", async () => {
+    deps.getClient = () => null
+    ask("A question")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(db.room(room.id).title).toBeNull()
+  })
+
+  it("doesn't run when the budget is used up", async () => {
+    let calls = 0
+    deps.budget = async () => ({ month: "October", spentUsd: calls++ === 0 ? 199.99 : 200, budgetUsd: 200 })
+    ask("A question")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(replies()[0].content).toMatch(/^Jack here/)
+    expect(claude.creates).toHaveLength(0)
   })
 })
