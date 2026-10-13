@@ -1,64 +1,21 @@
-"use client";
+import type { Metadata } from "next"
+import { requireOfficerPage } from "@/server/auth/guards"
+import { PageHeader } from "@/components/admin/kit"
+import { ToolsConsole } from "@/components/admin/tools-console"
+import { getLeorgeGawrenceEnforcementUnitStatus } from "./actions"
 
-import { useEffect, useState } from "react";
-import { getLeorgeGawrenceEnforcementUnitStatus, setLeorgeGawrenceEnforcementUnitStatus } from "./actions";
-import { Switch } from "@/components/ui/switch";
-import { ToolsConsole, type Tool } from "@/components/admin/tools-console";
-import { Bot } from "lucide-react";
+export const dynamic = "force-dynamic"
 
-export default function AdminToolsPage() {
-  const [leorgeEnabled, setLeorgeEnabled] = useState(false);
-  const [loading, setLoading] = useState(true);
+export const metadata: Metadata = { title: "Tools" }
 
-  useEffect(() => {
-    getLeorgeGawrenceEnforcementUnitStatus().then((val) => {
-        setLeorgeEnabled(val);
-        setLoading(false);
-    });
-  }, []);
-
-  const handleToggle = async (checked: boolean) => {
-    setLeorgeEnabled(checked); // Optimistic
-    try {
-        await setLeorgeGawrenceEnforcementUnitStatus(checked);
-        
-        // The Leorge Gawrence Enforcement Unit cannot be stopped.
-        if (!checked) {
-            setTimeout(() => {
-                handleToggle(true);
-            }, 1000);
-        }
-    } catch (err) {
-        console.error(err);
-        setLeorgeEnabled(!checked); // Revert
-    }
-  };
-
-  const tools: Tool[] = [
-    {
-        id: "leorge-gawrence-enforcement-unit",
-        name: "Leorge Gawrence Enforcement Unit",
-        description: "Antagonize George",
-        icon: <Bot size={16} />,
-        component: (
-            <div className="flex items-center gap-3">
-                <span className="text-[10px] font-mono text-white/40 uppercase w-6 text-right">
-                    {loading ? "..." : (leorgeEnabled ? "ON" : "OFF")}
-                </span>
-                <Switch 
-                    checked={leorgeEnabled} 
-                    onCheckedChange={handleToggle} 
-                    disabled={loading}
-                    className="data-[state=checked]:bg-lsr-orange"
-                />
-            </div>
-        )
-    }
-  ];
+export default async function AdminToolsPage() {
+  await requireOfficerPage()
+  const leorgeEnabled = await getLeorgeGawrenceEnforcementUnitStatus()
 
   return (
-    <div className="h-full">
-      <ToolsConsole tools={tools} />
-    </div>
-  );
+    <>
+      <PageHeader title="Tools" description="Feature flags and odd jobs that don't have a page of their own." />
+      <ToolsConsole leorgeEnabled={leorgeEnabled} />
+    </>
+  )
 }
