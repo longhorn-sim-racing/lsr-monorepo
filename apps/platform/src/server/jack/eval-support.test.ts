@@ -93,6 +93,10 @@ describe("mentionsNumber", () => {
     expect(mentionsNumber("There are 13 applications.", 13)).toBe(true)
     expect(mentionsNumber("1,234 accounts", 1234)).toBe(true)
     expect(mentionsNumber("Seven people checked in.", 7)).toBe(true)
+    // None, said in words: still has to sit next to what it counts
+    expect(mentionsNumber("No drivers have paid the LSC entry fee yet.", 0, ["paid", "driver"])).toBe(true)
+    expect(mentionsNumber("Nobody has paid yet.", 0, ["paid", "driver"])).toBe(true)
+    expect(mentionsNumber("There's no rush; 3 drivers have paid.", 0, ["paid", "driver"])).toBe(false)
     expect(mentionsNumber("There are 130 applications.", 13)).toBe(false)
     expect(mentionsNumber("It cost $13.50", 13)).toBe(false)
   })

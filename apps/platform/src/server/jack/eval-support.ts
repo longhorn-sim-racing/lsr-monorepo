@@ -146,10 +146,11 @@ export function stripDatesAndTimes(text: string): string {
 
 const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"]
 
-/** How a count can be written: 13, 1,234, and the words for 0 to 12 */
+/** How a count can be written: 13, 1,234, the words for 0 to 12, and for none "no", "none" or "nobody" ("No drivers have paid") */
 function numberForms(n: number): string[] {
   const forms = new Set([String(n), n.toLocaleString("en-US")])
   if (n >= 0 && n <= 12) forms.add(WORDS[n])
+  if (n === 0) for (const word of ["no", "none", "nobody", "nothing"]) forms.add(word)
   return [...forms]
 }
 
