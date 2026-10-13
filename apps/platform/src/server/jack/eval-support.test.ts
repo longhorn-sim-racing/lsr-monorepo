@@ -88,6 +88,11 @@ describe("stripDatesAndTimes", () => {
     expect(text).toContain("26 applications")
     expect(text).toContain("GM 1")
   })
+
+  it("takes out both ends of a day range, and leaves a count after a spaced dash", () => {
+    expect(stripDatesAndTimes("payments for Oct 1–13 CT, Sep 28-30 and 1–13 October")).not.toMatch(/\d/)
+    expect(stripDatesAndTimes("Round 4, Sat Oct 10 – 0 registered")).toContain("0 registered")
+  })
 })
 
 describe("mentionsNumber", () => {
@@ -98,6 +103,8 @@ describe("mentionsNumber", () => {
     // None, said in words: still has to sit next to what it counts
     expect(mentionsNumber("No drivers have paid the LSC entry fee yet.", 0, ["paid", "driver"])).toBe(true)
     expect(mentionsNumber("Nobody has paid yet.", 0, ["paid", "driver"])).toBe(true)
+    const charges = ["charge", "payment", "transaction", "succeeded", "successful"]
+    expect(mentionsNumber("No charges have succeeded so far this month (Oct 1–13). This is from payments_summary for Oct 1–13 CT.", 0, charges)).toBe(true)
     expect(mentionsNumber("There's no rush; 3 drivers have paid.", 0, ["paid", "driver"])).toBe(false)
     // A "no" that isn't the count, or a real count next to it, isn't zero
     expect(mentionsNumber("I can't see payment data, so there's nothing I can check here.", 0, ["paid", "driver", "entr", "fee", "people"])).toBe(false)

@@ -122,12 +122,15 @@ export function plain(text: string): string {
 
 const MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
 const YEAR_AFTER = String.raw`(?:,?\s+\d{4}\b)?`
-/** "Oct 13", "October 13th, 2026": the month first */
-const MONTH_THEN_DAY = new RegExp(String.raw`\b(?:${MONTHS})\.?\s+\d{1,2}(?:st|nd|rd|th)?\b` + YEAR_AFTER, "gi")
-/** "13 October", "13th of Oct, 2026": the day first. May is matched apart (below) */
-const DAY_THEN_MONTH = new RegExp(String.raw`\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:${MONTHS.replace("|may|", "|")})\b\.?` + YEAR_AFTER, "gi")
+/** A day range's other end, written tight ("1–13", "1-13"); "Oct 10 – 0 registered" keeps its 0 */
+const RANGE_END = String.raw`(?:[–—-]\d{1,2}(?:st|nd|rd|th)?)?`
+const RANGE_START = String.raw`(?:\d{1,2}(?:st|nd|rd|th)?[–—-])?`
+/** "Oct 13", "October 13th, 2026", "Oct 1–13": the month first */
+const MONTH_THEN_DAY = new RegExp(String.raw`\b(?:${MONTHS})\.?\s+\d{1,2}(?:st|nd|rd|th)?${RANGE_END}\b` + YEAR_AFTER, "gi")
+/** "13 October", "13th of Oct, 2026", "1–13 Oct": the day first. May is matched apart (below) */
+const DAY_THEN_MONTH = new RegExp(String.raw`\b${RANGE_START}\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:${MONTHS.replace("|may|", "|")})\b\.?` + YEAR_AFTER, "gi")
 /** "13 May", only capitalized: "13 may have paid" isn't a date */
-const DAY_THEN_MAY = new RegExp(String.raw`\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?May\b` + YEAR_AFTER, "g")
+const DAY_THEN_MAY = new RegExp(String.raw`\b${RANGE_START}\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?May\b` + YEAR_AFTER, "g")
 
 /**
  * The answer without its dates, times, years and clock values, so "Mon, Oct 13, 7:00 PM CT" doesn't
