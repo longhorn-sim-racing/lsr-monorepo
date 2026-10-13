@@ -12,6 +12,7 @@
   --color-admin-surface: var(--admin-surface);
   --color-admin-row: var(--admin-row);
   --color-admin-selected: var(--admin-selected);
+  --color-admin-raised: var(--admin-raised);
   --color-admin-nav: var(--admin-nav);
   --color-admin-nav-foreground: var(--admin-nav-foreground);
   --color-admin-nav-muted: var(--admin-nav-muted);
@@ -189,6 +190,7 @@ html:has(.admin-light) {
   --tone-info-foreground: #1D4ED8;
   --tone-accent: #FFF1E3;
   --tone-accent-foreground: #9A3412;
+  --admin-raised: #FFFFFF;
   --primary-hover: #F27400;
   --danger-solid: #B91C1C;
   --danger-solid-hover: #991B1B;
@@ -245,6 +247,7 @@ html:has(.admin-dark) {
   --tone-info-foreground: #93C5FD;
   --tone-accent: #3A2413;
   --tone-accent-foreground: #FFB070;
+  --admin-raised: #3A342F;
   --primary-hover: #FF9426;
   --danger-solid: #DC2626;
   --danger-solid-hover: #B91C1C;

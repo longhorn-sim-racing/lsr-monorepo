@@ -12,6 +12,13 @@ import { findNavItem } from "./admin-nav"
 import { ConfirmProvider } from "../kit/dialog"
 
 /**
+ * The theme this tab last switched to. Back/Forward into the admin from the public site remounts the
+ * shell with the props it was first rendered with (Next reuses them however old), so a toggle made
+ * since then would be lost without this. Null until a toggle, so hydration always uses the prop.
+ */
+let chosenTheme: AdminTheme | null = null
+
+/**
  * The admin console's frame: a dark sidebar (a drawer on phones), a slim top bar with breadcrumbs, and the
  * workspace. `admin-light` or `admin-dark` switches the whole document to that admin theme (see globals.css).
  * The server picks the starting theme from a cookie, so the page never flashes the other one.
@@ -20,11 +27,12 @@ export function AdminShell({ user, theme: initialTheme, children }: { user: Shel
   const pathname = usePathname()
   const [commandOpen, setCommandOpen] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [theme, setTheme] = useState(initialTheme)
+  const [theme, setTheme] = useState(() => chosenTheme ?? initialTheme)
 
   const toggleTheme = () => {
     const next = theme === "dark" ? "light" : "dark"
     document.cookie = adminThemeCookie(next)
+    chosenTheme = next
     setTheme(next)
   }
 

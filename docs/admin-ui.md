@@ -12,7 +12,7 @@ How the admin console (`/admin`) is built, for anyone adding or changing an admi
 ## Look
 
 - Montserrat for text. Kanit (`font-display`) only for page titles, which `PageHeader` already does.
-- Warm off-white background, white panels, warm gray borders. Orange is for the one primary action per view, the active nav item and highlights. Don't use orange for decoration.
+- Warm neutrals in both themes: an off-white background with white panels in light, warm near-black with slightly lighter panels in dark, and warm gray borders. Orange is for the one primary action per view, the active nav item and highlights. Don't use orange for decoration.
 - Use theme classes, never raw colors or white/black opacity, so pages work in both themes:
   - surfaces: `bg-card`, `bg-background`, `bg-admin-surface`
   - borders: `border`, `border-admin-row`
