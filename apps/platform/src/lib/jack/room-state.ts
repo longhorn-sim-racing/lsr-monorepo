@@ -1,4 +1,5 @@
 import type { JackToolPart } from "./parts"
+import { ROOM_LOCK_STALE_MS } from "./timing"
 import type { JackMessageView, JackRoomEvent, JackRoomView } from "./types"
 
 /**
@@ -9,7 +10,10 @@ import type { JackMessageView, JackRoomEvent, JackRoomView } from "./types"
  * a snapshot can trail the live stream: a viewer who opens a room mid-answer starts from the
  * snapshot and applies only the deltas after its `streamSeq`. A delta that skips ahead is held
  * until the missing ones turn up or a newer snapshot covers them; meanwhile `needsResync` asks the
- * page for one. The done event carries the whole reply, so a reply always ends complete.
+ * page for one. A delta marked `replace` carries the whole text so far (the server took some back)
+ * and swaps it in, in seq order like any other. The done event carries the whole reply, so a reply
+ * always ends complete; when it was too big for Realtime it comes `trimmed` (no tool displays, maybe
+ * no text), the reply keeps what it has, and `needsResync` stays on until a snapshot brings the rest.
  *
  * Tool calls arrive as parts, each replacing the part with the same id. They aren't numbered, so a
  * part never goes back from finished (done or error) to running, and a snapshot's parts merge with
@@ -17,27 +21,33 @@ import type { JackMessageView, JackRoomEvent, JackRoomView } from "./types"
  *
  * The room's own settings (its persona) come the same two ways; the newer copy wins.
  */
+/** A delta held until it can be applied: its text, and whether it replaces the text so far */
+export type HeldDelta = { text: string; replace?: true }
+
 export type RoomState = {
   room: JackRoomView
   messages: JackMessageView[]
   /** Deltas that can't be applied yet (they came after a gap, or before their message), by message id then seq */
-  pending: Record<string, Record<number, string>>
+  pending: Record<string, Record<number, HeldDelta>>
   /** Tool parts for messages not seen yet, by message id */
   pendingParts: Record<string, JackToolPart[]>
+  /** Finished replies whose done event came trimmed, until a snapshot brings them whole */
+  incomplete: Record<string, true>
   /** Something is missing: fetch a fresh snapshot */
   needsResync: boolean
-  /** Snapshots in a row that didn't close the gap, so the page can back off and try again */
+  /** Snapshots in a row (or failed fetches) that didn't close the gap, so the page can back off and try again */
   resyncAttempts: number
 }
 
 export type RoomSnapshotData = { room: JackRoomView; messages: JackMessageView[] }
 
-export type RoomAction = JackRoomEvent | ({ type: "snapshot" } & RoomSnapshotData)
+/** Live events, a snapshot, or word that fetching a snapshot failed (so the page backs off and tries again) */
+export type RoomAction = JackRoomEvent | ({ type: "snapshot" } & RoomSnapshotData) | { type: "resync_failed" }
 
-type Held = Pick<RoomState, "pending" | "pendingParts">
+type Held = Pick<RoomState, "pending" | "pendingParts" | "incomplete">
 
 export function initRoomState({ room, messages }: RoomSnapshotData): RoomState {
-  return { room, messages: [...messages].sort(byTime), pending: {}, pendingParts: {}, needsResync: false, resyncAttempts: 0 }
+  return { room, messages: [...messages].sort(byTime), pending: {}, pendingParts: {}, incomplete: {}, needsResync: false, resyncAttempts: 0 }
 }
 
 export function roomReducer(state: RoomState, action: RoomAction): RoomState {
@@ -45,11 +55,22 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
     case "snapshot": {
       const room = newerRoom(state.room, action.room)
       let messages = state.messages
-      for (const message of action.messages) messages = upsert(messages, message)
-      let held: Held = { pending: state.pending, pendingParts: state.pendingParts }
+      let incomplete = state.incomplete
+      for (const message of action.messages) {
+        if (incomplete[message.id] && isFinal(message)) {
+          // The database has the whole reply the trimmed done event left out
+          incomplete = { ...incomplete }
+          delete incomplete[message.id]
+          messages = replace(messages, message)
+        } else messages = upsert(messages, message)
+      }
+      let held: Held = { pending: state.pending, pendingParts: state.pendingParts, incomplete }
       for (const id of new Set([...Object.keys(held.pending), ...Object.keys(held.pendingParts)])) ({ messages, held } = drain(messages, held, id))
       return settle({ ...state, room }, messages, held, true)
     }
+
+    case "resync_failed":
+      return state.needsResync ? { ...state, resyncAttempts: state.resyncAttempts + 1 } : state
 
     case "room.updated": {
       const room = newerRoom(state.room, action.room)
@@ -65,11 +86,12 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
       const message = state.messages.find((m) => m.id === action.messageId)
       if (message && (isFinal(message) || action.seq <= message.streamSeq)) return state // finished, or a repeat
       if (state.pending[action.messageId]?.[action.seq] !== undefined) return state // a repeat we're holding
+      const piece: HeldDelta = action.replace ? { text: action.text, replace: true } : { text: action.text }
       const pending = {
         ...state.pending,
-        [action.messageId]: { ...state.pending[action.messageId], [action.seq]: action.text },
+        [action.messageId]: { ...state.pending[action.messageId], [action.seq]: piece },
       }
-      const drained = drain(state.messages, { pending, pendingParts: state.pendingParts }, action.messageId)
+      const drained = drain(state.messages, { ...heldOf(state), pending }, action.messageId)
       return settle(state, drained.messages, drained.held, false)
     }
 
@@ -77,7 +99,7 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
       const index = state.messages.findIndex((m) => m.id === action.messageId)
       if (index === -1) {
         const pendingParts = { ...state.pendingParts, [action.messageId]: upsertPart(state.pendingParts[action.messageId] ?? [], action.part) }
-        return settle(state, state.messages, { pending: state.pending, pendingParts }, false)
+        return settle(state, state.messages, { ...heldOf(state), pendingParts }, false)
       }
       const message = state.messages[index]
       if (isFinal(message)) return state // the done event had every part
@@ -89,12 +111,25 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
     }
 
     case "message.done": {
-      const messages = upsert(state.messages, action.message)
+      const id = action.message.id
+      const current = state.messages.find((m) => m.id === id)
+      let incoming = action.message
+      let incomplete = state.incomplete
+      if (action.trimmed) {
+        // Too big for Realtime: keep the text and displays this viewer already has, and fetch the rest
+        if (current && isFinal(current) && !incomplete[id]) return state // already whole
+        incoming = current ? fillTrimmed(current, action.message) : action.message
+        incomplete = { ...incomplete, [id]: true }
+      } else if (incomplete[id]) {
+        incomplete = { ...incomplete }
+        delete incomplete[id]
+      }
+      const messages = current && isFinal(current) && action.trimmed ? replace(state.messages, incoming) : upsert(state.messages, incoming)
       const pending = { ...state.pending }
       const pendingParts = { ...state.pendingParts }
-      delete pending[action.message.id]
-      delete pendingParts[action.message.id]
-      return settle(state, messages, { pending, pendingParts }, false)
+      delete pending[id]
+      delete pendingParts[id]
+      return settle(state, messages, { pending, pendingParts, incomplete }, false)
     }
 
     default:
@@ -103,7 +138,27 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
 }
 
 function heldOf(state: RoomState): Held {
-  return { pending: state.pending, pendingParts: state.pendingParts }
+  return { pending: state.pending, pendingParts: state.pendingParts, incomplete: state.incomplete }
+}
+
+/** A trimmed done event, filled in from the copy this viewer has: its text if the event had to drop it, and its tools' displays */
+function fillTrimmed(current: JackMessageView, trimmed: JackMessageView): JackMessageView {
+  const tools = trimmed.tools.length
+    ? trimmed.tools.map((part) => {
+        const mine = current.tools.find((p) => p.id === part.id)
+        return mine && !part.displays.length ? { ...part, displays: mine.displays } : part
+      })
+    : current.tools
+  return { ...trimmed, content: trimmed.content || current.content, tools }
+}
+
+/** Puts `incoming` in place of the message with its id (or adds it), whichever copy is further along */
+function replace(messages: JackMessageView[], incoming: JackMessageView): JackMessageView[] {
+  const index = messages.findIndex((m) => m.id === incoming.id)
+  if (index === -1) return [...messages, incoming].sort(byTime)
+  const copy = messages.slice()
+  copy[index] = incoming
+  return copy
 }
 
 function newerRoom(current: JackRoomView, incoming: JackRoomView): JackRoomView {
@@ -175,7 +230,8 @@ function drain(messages: JackMessageView[], held: Held, id: string): Drained {
   let { content, streamSeq } = message
   if (!isFinal(message)) {
     while (rest[streamSeq + 1] !== undefined) {
-      content += rest[streamSeq + 1]
+      const piece = rest[streamSeq + 1]
+      content = piece.replace ? piece.text : content + piece.text
       delete rest[streamSeq + 1]
       streamSeq++
     }
@@ -191,14 +247,43 @@ function drain(messages: JackMessageView[], held: Held, id: string): Drained {
   const pendingParts = { ...held.pendingParts }
   delete pendingParts[id]
 
-  if (streamSeq === message.streamSeq && tools === message.tools) return { messages, held: { pending, pendingParts } }
+  if (streamSeq === message.streamSeq && tools === message.tools) return { messages, held: { ...held, pending, pendingParts } }
   const copy = messages.slice()
   copy[index] = { ...message, content, streamSeq, tools }
-  return { messages: copy, held: { pending, pendingParts } }
+  return { messages: copy, held: { ...held, pending, pendingParts } }
 }
 
 function settle(state: RoomState, messages: JackMessageView[], held: Held, fromSnapshot: boolean): RoomState {
-  const needsResync = Object.keys(held.pending).length > 0 || Object.keys(held.pendingParts).length > 0
+  const needsResync = [held.pending, held.pendingParts, held.incomplete].some((group) => Object.keys(group).length > 0)
   const resyncAttempts = !needsResync ? 0 : fromSnapshot ? state.resyncAttempts + 1 : state.resyncAttempts
-  return { room: state.room, messages, pending: held.pending, pendingParts: held.pendingParts, needsResync, resyncAttempts }
+  return { room: state.room, messages, pending: held.pending, pendingParts: held.pendingParts, incomplete: held.incomplete, needsResync, resyncAttempts }
+}
+
+/** Quiet this long with officer messages no reply has picked up (and nothing streaming), the run stopped short of them */
+export const STALL_QUIET_MS = 20_000
+/**
+ * Quiet this long with a reply still streaming, the run that was writing it died: no live run goes
+ * quiet longer than its function lives, and by then its room lock is stale, so asking Jack to continue
+ * takes over (closing the half-written reply) and answers what's waiting
+ */
+export const STUCK_QUIET_MS = ROOM_LOCK_STALE_MS + 15_000
+
+/**
+ * What the room may be stuck on, before counting how long it's been quiet: "unanswered" when the last
+ * officer messages come after the last reply and nothing is streaming; "stuck" when a reply is still
+ * streaming. Null when nothing is waiting
+ */
+export function stallCandidate(messages: JackMessageView[]): "unanswered" | "stuck" | null {
+  if (messages.some((m) => m.status === "streaming")) return "stuck"
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const kind = messages[i].author.kind
+    if (kind === "assistant") return null
+    if (kind === "user") return "unanswered"
+  }
+  return null
+}
+
+/** How long a stall candidate has to stay quiet before the room offers to ask Jack to continue */
+export function stallQuietMs(candidate: "unanswered" | "stuck"): number {
+  return candidate === "stuck" ? STUCK_QUIET_MS : STALL_QUIET_MS
 }

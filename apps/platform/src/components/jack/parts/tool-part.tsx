@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { memo, useState } from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
 import { ArrowRight, CalendarPlus, CheckCircle2, ChevronRight, Loader2, XCircle } from "lucide-react"
@@ -19,9 +19,10 @@ const PREVIEW_ROWS = 10
 
 /**
  * One tool call inside a reply: a header line with its status, label and time; collapsed details with
- * the input and any SQL; then what it shows (a table, a chart, an event draft, a note).
+ * the input and any SQL; then what it shows (a table, a chart, an event draft, a note). Memoized: a part
+ * keeps its object until it changes, so text streaming into the reply doesn't redraw its tables and charts.
  */
-export function JackToolPartView({ part }: { part: JackToolPart }) {
+export const JackToolPartView = memo(function JackToolPartView({ part }: { part: JackToolPart }) {
   const displays = Array.isArray(part.displays) ? part.displays : []
   const sql = displays.filter((d): d is Extract<JackToolDisplay, { kind: "sql" }> => d.kind === "sql")
   const shown = displays.filter((d) => d.kind !== "sql")
@@ -67,7 +68,7 @@ export function JackToolPartView({ part }: { part: JackToolPart }) {
       )}
     </div>
   )
-}
+})
 
 function StatusIcon({ status }: { status: JackToolPart["status"] }) {
   if (status === "running") return <Loader2 aria-label="Running" className="mt-0.5 size-3.5 shrink-0 animate-spin text-admin-subtle" />

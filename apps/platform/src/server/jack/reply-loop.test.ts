@@ -832,12 +832,12 @@ describe("resumeRoom", () => {
     db.room(room.id).runId = "live-run"
     db.room(room.id).runStartedAt = new Date()
 
-    expect(await onFakeTimers(() => resumeRoom(room.id, deps))).toBe(true)
+    expect(await onFakeTimers(() => resumeRoom(room.id, deps))).toBe("busy")
     expect(replies()).toHaveLength(0)
 
     db.room(room.id).runId = null
     db.room(room.id).runStartedAt = null
-    await onFakeTimers(() => resumeRoom(room.id, deps))
+    expect(await onFakeTimers(() => resumeRoom(room.id, deps))).toBe("started")
     expect(replies()).toHaveLength(1)
     expect(unanswered()).toHaveLength(0)
   })
@@ -849,7 +849,7 @@ describe("resumeRoom", () => {
     db.room(room.id).runId = "dead-run"
     db.room(room.id).runStartedAt = new Date(Date.now() - ROOM_LOCK_STALE_MS - MINUTE)
 
-    await onFakeTimers(() => resumeRoom(room.id, deps))
+    expect(await onFakeTimers(() => resumeRoom(room.id, deps))).toBe("started")
 
     expect(db.state.messages.find((m) => m.id === stuck.id)?.status).toBe("error")
     expect(unanswered()).toHaveLength(0)
@@ -857,6 +857,6 @@ describe("resumeRoom", () => {
 
   it("is false for a room that doesn't exist", async () => {
     const { resumeRoom } = await import("./rooms")
-    expect(await resumeRoom("room-missing", deps)).toBe(false)
+    expect(await resumeRoom("room-missing", deps)).toBeNull()
   })
 })

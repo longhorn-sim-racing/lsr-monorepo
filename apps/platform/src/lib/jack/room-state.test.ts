@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { JackToolPart } from "./parts"
-import { initRoomState, roomReducer, type RoomAction, type RoomState } from "./room-state"
+import { initRoomState, roomReducer, stallCandidate, stallQuietMs, STALL_QUIET_MS, STUCK_QUIET_MS, type RoomAction, type RoomState } from "./room-state"
+import { ROOM_LOCK_STALE_MS } from "./timing"
 import type { JackMessageView, JackRoomView } from "./types"
 
 const officerMessage = (id: string, createdAt: string, content = "How many LSC applications?"): JackMessageView => ({
@@ -36,6 +37,8 @@ const room = (fields: Partial<JackRoomView> = {}): JackRoomView => ({
 const start = (messages: JackMessageView[] = []) => initRoomState({ room: room(), messages })
 
 const delta = (seq: number, text: string, messageId = "reply-1"): RoomAction => ({ type: "message.delta", messageId, seq, text })
+const replaceWith = (seq: number, text: string, messageId = "reply-1"): RoomAction => ({ type: "message.delta", messageId, seq, text, replace: true })
+const trimmedDone = (message: JackMessageView): RoomAction => ({ type: "message.done", message, trimmed: true })
 const created = (message: JackMessageView): RoomAction => ({ type: "message.created", message })
 const done = (message: JackMessageView): RoomAction => ({ type: "message.done", message })
 const snapshot = (messages: JackMessageView[], snapshotRoom = room()): RoomAction => ({ type: "snapshot", room: snapshotRoom, messages })
@@ -277,5 +280,123 @@ describe("roomReducer", () => {
       expect(replyOf(state)).toEqual(final)
       expect(state.pendingParts).toEqual({})
     })
+  })
+
+  describe("text taken back mid-stream", () => {
+    it("swaps in a replacing delta's text instead of appending it", () => {
+      const state = run(start(), created(reply()), delta(1, "Sure, here is"), delta(2, " how"), replaceWith(3, "I can't help"), delta(4, " with that one."))
+
+      expect(replyOf(state)).toMatchObject({ content: "I can't help with that one.", streamSeq: 4 })
+      expect(state.needsResync).toBe(false)
+    })
+
+    it("applies a held replacing delta in seq order once the gap fills", () => {
+      const gapped = run(start(), created(reply()), delta(1, "Let me"), replaceWith(3, ""), delta(4, "Counting."))
+      expect(replyOf(gapped)?.content).toBe("Let me")
+      expect(gapped.needsResync).toBe(true)
+
+      const state = run(gapped, delta(2, " look"))
+      expect(replyOf(state)).toMatchObject({ content: "Counting.", streamSeq: 4 })
+      expect(state.needsResync).toBe(false)
+    })
+
+    it("a late joiner's snapshot before the replace still ends right", () => {
+      const joined = start([reply({ content: "Sure, here is how", streamSeq: 2 })])
+      const state = run(joined, replaceWith(3, "I can't help with that one."))
+
+      expect(replyOf(state)?.content).toBe("I can't help with that one.")
+    })
+  })
+
+  describe("a trimmed done event", () => {
+    const table = { kind: "table" as const, columns: ["n"], rows: [[13]], truncated: false }
+
+    it("keeps the text and displays it has, finishes the reply, and asks for a snapshot", () => {
+      const live = run(start(), created(reply()), delta(1, "Here."), tool(part("t1", { status: "done", label: "Ran a query", displays: [table] })))
+      const trimmed = reply({ content: "Here.", streamSeq: 1, status: "done", tools: [part("t1", { status: "done", label: "Ran a query" })] })
+
+      const state = run(live, trimmedDone(trimmed))
+
+      expect(replyOf(state)).toMatchObject({ status: "done", content: "Here." })
+      expect(replyOf(state)?.tools[0].displays).toEqual([table])
+      expect(state.needsResync).toBe(true)
+      expect(state.incomplete).toEqual({ "reply-1": true })
+    })
+
+    it("keeps the streamed text when the event had to leave the text out too", () => {
+      const live = run(start(), created(reply()), delta(1, "A long answer"))
+      const state = run(live, trimmedDone(reply({ content: "", tools: [], status: "done", streamSeq: 9 })))
+
+      expect(replyOf(state)).toMatchObject({ status: "done", content: "A long answer" })
+      expect(state.needsResync).toBe(true)
+    })
+
+    it("takes the snapshot's copy whole, then stops asking", () => {
+      const live = run(start(), created(reply()), trimmedDone(reply({ content: "Here.", status: "done", tools: [part("t1", { status: "done" })] })))
+      const whole = reply({ content: "Here.", status: "done", tools: [part("t1", { status: "done", displays: [table] })] })
+
+      const state = run(live, snapshot([whole]))
+
+      expect(replyOf(state)).toEqual(whole)
+      expect(state.needsResync).toBe(false)
+      expect(state.incomplete).toEqual({})
+    })
+
+    it("keeps asking while the snapshot still has the reply streaming", () => {
+      const live = run(start(), created(reply()), trimmedDone(reply({ content: "Here.", status: "done" })))
+      const state = run(live, snapshot([reply({ content: "He", streamSeq: 1 })]))
+
+      expect(replyOf(state)?.status).toBe("done")
+      expect(state.needsResync).toBe(true)
+      expect(state.resyncAttempts).toBe(1)
+    })
+
+    it("is ignored for a reply that's already whole", () => {
+      const final = reply({ content: "Here.", status: "done", tools: [part("t1", { status: "done", displays: [table] })] })
+      const whole = run(start(), done(final))
+      const state = run(whole, trimmedDone(reply({ content: "Here.", status: "done", tools: [part("t1", { status: "done" })] })))
+
+      expect(state).toBe(whole)
+    })
+  })
+
+  describe("resync_failed", () => {
+    it("counts a failed fetch as an attempt, so the page backs off and tries again", () => {
+      const gapped = run(start(), created(reply()), delta(1, "a"), delta(3, "c"))
+      const failed = run(gapped, { type: "resync_failed" }, { type: "resync_failed" })
+
+      expect(failed.needsResync).toBe(true)
+      expect(failed.resyncAttempts).toBe(2)
+      expect(replyOf(failed)?.content).toBe("a")
+    })
+
+    it("changes nothing when nothing is missing", () => {
+      const state = run(start(), created(reply()), delta(1, "a"))
+      expect(run(state, { type: "resync_failed" })).toBe(state)
+    })
+  })
+})
+
+describe("stallCandidate", () => {
+  const note: JackMessageView = { ...officerMessage("s1", "2026-10-12T20:00:05.000Z", "Gray switched this room to Lift"), author: { kind: "system" } }
+
+  it("is unanswered when officer messages come after the last reply and nothing streams", () => {
+    expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z")])).toBe("unanswered")
+    const answered = [officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" })]
+    expect(stallCandidate(answered)).toBeNull()
+    expect(stallCandidate([...answered, officerMessage("m2", "2026-10-12T20:00:09.000Z")])).toBe("unanswered")
+    expect(stallCandidate([...answered, officerMessage("m2", "2026-10-12T20:00:09.000Z"), note])).toBe("unanswered")
+  })
+
+  it("ignores system notes after the last reply", () => {
+    expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" }), note])).toBeNull()
+    expect(stallCandidate([])).toBeNull()
+  })
+
+  it("is stuck while a reply is streaming, which only counts after the room lock would be stale", () => {
+    expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply()])).toBe("stuck")
+    expect(stallQuietMs("stuck")).toBe(STUCK_QUIET_MS)
+    expect(STUCK_QUIET_MS).toBeGreaterThan(ROOM_LOCK_STALE_MS)
+    expect(stallQuietMs("unanswered")).toBe(STALL_QUIET_MS)
   })
 })

@@ -48,8 +48,8 @@ export async function postJackMessage(roomId: string, content: string): Promise<
 
 /**
  * Asks Jack to continue in a room where officer messages sit unanswered (a run ran out of time, or
- * died mid-reply). Starts a run after the response, like posting does; if one is already answering,
- * nothing changes. Not audited: it only answers messages officers already posted.
+ * died mid-reply). Starts a run after the response, like posting does. When a run still holds the
+ * room it says so instead. Not audited: it only answers messages officers already posted.
  */
 export async function resumeJackRoom(roomId: string): Promise<ActionResult> {
   await requireOfficer()
@@ -57,7 +57,11 @@ export async function resumeJackRoom(roomId: string): Promise<ActionResult> {
   const id = jackRoomIdSchema.safeParse(roomId)
   if (!id.success) return { ok: false, error: ROOM_GONE }
 
-  if (!(await resumeRoom(id.data))) return { ok: false, error: ROOM_GONE }
+  const resumed = await resumeRoom(id.data)
+  if (!resumed) return { ok: false, error: ROOM_GONE }
+  if (resumed === "busy") {
+    return { ok: false, error: "Jack is still working in this room. If nothing comes through, try again in a few minutes." }
+  }
   return { ok: true }
 }
 

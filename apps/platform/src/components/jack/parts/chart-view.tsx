@@ -44,6 +44,11 @@ export function pieSlices(chart: JackChartSpec) {
   return [...head, { name: "Other", value: rest, color: OTHER_COLOR }]
 }
 
+/** Whether every value a chart plots is a whole number (counts), so the value axis shouldn't show 0.5 steps */
+export function allWholeNumbers(chart: JackChartSpec): boolean {
+  return chart.rows.every((row) => chart.series.every((s) => typeof row[s.key] !== "number" || Number.isInteger(row[s.key])))
+}
+
 export function ChartView({ chart }: { chart: JackChartSpec }) {
   const series = chart.series.slice(0, SERIES_COLORS.length)
   const color = (i: number) => (series.length === 1 ? SERIES_COLORS[0] : SERIES_COLORS[i])
@@ -64,6 +69,7 @@ export function ChartView({ chart }: { chart: JackChartSpec }) {
         padding={chart.type === "line" ? { left: 12, right: 12 } : undefined}
       />
       <YAxis
+        allowDecimals={!allWholeNumbers(chart)}
         tick={{ fontSize: 11, fill: SUBTLE }}
         tickLine={false}
         axisLine={false}

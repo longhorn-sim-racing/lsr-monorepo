@@ -5,8 +5,8 @@ import { useJackRoom } from "@/components/jack/use-jack-room"
 import { unexpectedError } from "@/lib/action-result"
 import type { RoomSnapshotData } from "@/lib/jack/room-state"
 import type { JackSpend } from "@/lib/jack/spend"
-import { jackRoomTitle, type JackPresence, type JackRoomPersonaKey, type JackRoomSummary } from "@/lib/jack/types"
-import { loadJackRoomSnapshot, postJackMessage, setJackRoomPersona } from "../actions"
+import type { JackPresence, JackRoomPersonaKey, JackRoomSummary } from "@/lib/jack/types"
+import { loadJackRoomSnapshot, postJackMessage, resumeJackRoom, setJackRoomPersona } from "../actions"
 
 type JackRoomClientProps = {
   initial: RoomSnapshotData
@@ -23,6 +23,7 @@ export function JackRoomClient({ initial, rooms, me, spend }: JackRoomClientProp
     loadSnapshot: loadJackRoomSnapshot,
     postMessage: postJackMessage,
     setPersona: setJackRoomPersona,
+    resume: resumeJackRoom,
   })
 
   async function send(content: string) {
@@ -43,18 +44,27 @@ export function JackRoomClient({ initial, rooms, me, spend }: JackRoomClientProp
     }
   }
 
+  async function continueRoom() {
+    try {
+      const result = await room.continueRoom()
+      return result.ok ? null : result.error
+    } catch (error) {
+      return unexpectedError(error, "Couldn't ask Jack to continue")
+    }
+  }
+
   return (
     <JackRoomView
-      roomId={room.room.id}
+      room={room.room}
       rooms={rooms}
       spend={spend}
-      title={jackRoomTitle(room.room)}
-      persona={room.room.persona}
       messages={room.messages}
       present={room.present}
       connection={room.connection}
+      stall={room.stall}
       onSend={send}
       onSwitchPersona={switchPersona}
+      onContinue={continueRoom}
     />
   )
 }

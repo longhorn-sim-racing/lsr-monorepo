@@ -1,24 +1,26 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { ChevronLeft } from "lucide-react"
 import { Button, Notice, Select, Textarea } from "@/components/admin/kit"
 import { cn } from "@/lib/utils"
 import {
   JACK_PERSONA_NAME,
+  jackRoomTitle,
   type JackMessageView,
   type JackPersonaKey,
   type JackPresence,
   type JackRoomPersonaKey,
   type JackRoomSummary,
+  type JackRoomView as JackRoomSettings,
 } from "@/lib/jack/types"
 import { replyPieces } from "@/lib/jack/reply-pieces"
 import type { JackSpend } from "@/lib/jack/spend"
 import { JackToolPartView } from "./parts/tool-part"
 import { JackRoomRail } from "./room-list"
 import { SpendMeter } from "./spend-meter"
-import type { JackConnection } from "./use-jack-room"
+import type { JackConnection, JackStall } from "./use-jack-room"
 
 /*
  * Jack's room: these components only render what they're given and report what the officer does. The
@@ -26,12 +28,13 @@ import type { JackConnection } from "./use-jack-room"
  */
 
 type RoomViewProps = {
-  roomId: string
-  title: string
-  persona: JackRoomPersonaKey
+  /** The room's live settings (title, persona) */
+  room: JackRoomSettings
   messages: JackMessageView[]
   present: JackPresence[]
   connection: JackConnection
+  /** Whether to offer asking Jack to continue, and why */
+  stall: JackStall
   /** Every room, for the rail beside this one */
   rooms: JackRoomSummary[]
   /** This month's spend, as of page load */
@@ -40,14 +43,26 @@ type RoomViewProps = {
   onSend: (content: string) => Promise<string | null>
   /** Resolves with an error to show, or null once switched */
   onSwitchPersona: (persona: JackRoomPersonaKey) => Promise<string | null>
+  /** Resolves with an error to show, or null once a run is asked to start */
+  onContinue: () => Promise<string | null>
 }
 
-export function JackRoomView({ roomId, title, persona, messages, present, connection, rooms, spend, onSend, onSwitchPersona }: RoomViewProps) {
+export function JackRoomView({ room, messages, present, connection, stall, rooms, spend, onSend, onSwitchPersona, onContinue }: RoomViewProps) {
+  const title = jackRoomTitle(room)
+  // Bumped when this officer sends, so the list jumps to the end even if they'd scrolled up
+  const [sentCount, setSentCount] = useState(0)
+
+  async function send(content: string) {
+    const problem = await onSend(content)
+    if (!problem) setSentCount((n) => n + 1)
+    return problem
+  }
+
   return (
     // Fills the workspace below the top bar so the conversation scrolls and the composer stays put
     <div className="-mx-4 -my-4 flex h-[calc(100dvh-44px)] bg-card md:-mx-6 md:-my-5">
-      {/* The open room's persona is live; the rest of the rail is as of page load */}
-      <JackRoomRail rooms={rooms.map((r) => (r.id === roomId ? { ...r, persona } : r))} activeId={roomId} />
+      {/* The open room's title and persona are live; the rest of the rail is as of page load */}
+      <JackRoomRail rooms={rooms.map((r) => (r.id === room.id ? { ...r, title: room.title, persona: room.persona } : r))} activeId={room.id} />
       <section aria-label={title} className="flex min-w-0 flex-1 flex-col">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-admin-row px-4 py-2.5 md:px-5">
           <div className="flex min-w-0 flex-col">
@@ -62,12 +77,14 @@ export function JackRoomView({ roomId, title, persona, messages, present, connec
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-3.5">
-            <PersonaSwitch persona={persona} onSwitch={onSwitchPersona} />
+            <PersonaSwitch persona={room.persona} onSwitch={onSwitchPersona} />
             <PresenceStack present={present} />
           </div>
         </header>
-        <MessageList messages={messages} />
-        <Composer persona={persona} onSend={onSend} />
+        <MessageList messages={messages} followSignal={sentCount} />
+        <AnswerStatus messages={messages} />
+        {stall ? <ContinueBar stall={stall} persona={room.persona} onContinue={onContinue} /> : null}
+        <Composer persona={room.persona} onSend={send} />
       </section>
     </div>
   )
@@ -82,7 +99,7 @@ function ConnectionLine({ connection }: { connection: JackConnection }) {
       </span>
     )
   if (connection === "connecting") return <span className="text-xs text-admin-subtle">Connecting</span>
-  return <span className="text-xs font-medium text-tone-danger-foreground">Not connected. Reload the page to see new messages.</span>
+  return <span className="text-xs font-medium text-tone-danger-foreground">Not connected. Trying again; reload the page if this stays.</span>
 }
 
 function initials(name: string) {
@@ -115,14 +132,15 @@ function PresenceStack({ present }: { present: JackPresence[] }) {
 
 function PersonaSwitch({ persona, onSwitch }: { persona: JackRoomPersonaKey; onSwitch: RoomViewProps["onSwitchPersona"] }) {
   const [error, setError] = useState<string | null>(null)
-  const [switching, setSwitching] = useState(false)
+  // What the officer picked, shown while the switch goes through so the select doesn't flick back
+  const [pending, setPending] = useState<JackRoomPersonaKey | null>(null)
 
   async function pick(next: JackRoomPersonaKey) {
-    if (switching || next === persona) return
-    setSwitching(true)
+    if (pending || next === persona) return
+    setPending(next)
     setError(null)
     const problem = await onSwitch(next)
-    setSwitching(false)
+    setPending(null)
     if (problem) setError(problem)
   }
 
@@ -133,13 +151,14 @@ function PersonaSwitch({ persona, onSwitch }: { persona: JackRoomPersonaKey; onS
       </label>
       <Select
         id="jack-persona"
-        value={persona}
-        disabled={switching}
+        value={pending ?? persona}
+        disabled={pending !== null}
         onChange={(e) => void pick(e.target.value as JackRoomPersonaKey)}
-        className="h-7 w-auto text-xs font-semibold"
+        // 16px on phones so iOS doesn't zoom in on focus
+        className="h-8 w-auto text-base font-semibold md:h-7 md:text-sm"
       >
         <option value="jack">Jack</option>
-        <option value="lift">Lift (2× cost)</option>
+        <option value="lift">Lift (higher cost)</option>
       </Select>
       {error ? (
         <span role="alert" className="text-xs font-medium text-tone-danger-foreground">
@@ -165,70 +184,104 @@ function PersonaAvatar({ persona }: { persona: JackPersonaKey }) {
 
 const timeOfDay = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit" })
 
-function MessageList({ messages }: { messages: JackMessageView[] }) {
-  const end = useRef<HTMLDivElement>(null)
-  const last = messages.at(-1)
-  useEffect(() => {
-    end.current?.scrollIntoView({ block: "end" })
-  }, [messages.length, last?.content, last?.tools.length])
+/** Within this many pixels of the bottom, the list follows new text; further up, it leaves the reader where they are */
+const FOLLOW_PX = 80
 
-  if (!messages.length)
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center">
-        <p className="text-sm font-semibold">No messages yet</p>
-        <p className="max-w-sm text-[13px] text-muted-foreground">Ask Jack about events, members, LSC entries or payments. Everyone in the room sees the answer as it streams.</p>
-      </div>
-    )
+function MessageList({ messages, followSignal }: { messages: JackMessageView[]; followSignal: number }) {
+  const scroller = useRef<HTMLDivElement>(null)
+  const content = useRef<HTMLDivElement>(null)
+  const following = useRef(true)
+
+  // Whenever the conversation grows (text streaming in, a part, a chart loading), keep the end in view,
+  // but only for a reader who's at (or near) the bottom
+  useEffect(() => {
+    const box = scroller.current
+    const inner = content.current
+    if (!box || !inner) return
+    const stick = () => {
+      if (following.current) box.scrollTop = box.scrollHeight
+    }
+    stick()
+    const observer = new ResizeObserver(stick)
+    observer.observe(inner)
+    return () => observer.disconnect()
+  }, [])
+
+  // The officer just sent a message: show the end, wherever they were
+  useEffect(() => {
+    if (!followSignal || !scroller.current) return
+    following.current = true
+    scroller.current.scrollTop = scroller.current.scrollHeight
+  }, [followSignal])
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-5">
-      <ol className="flex flex-col gap-4">
-        {messages.map((message) => {
-          if (message.author.kind === "system")
-            return (
-              <li key={message.id} className="flex items-center gap-2.5 text-xs text-admin-subtle">
-                <span aria-hidden className="h-px flex-1 bg-admin-row" />
-                <span>
-                  {message.content} · {timeOfDay.format(new Date(message.createdAt))}
-                </span>
-                <span aria-hidden className="h-px flex-1 bg-admin-row" />
-              </li>
-            )
-          const isModel = message.author.kind === "assistant"
-          const name = message.author.kind === "assistant" ? JACK_PERSONA_NAME[message.author.persona] : message.author.displayName
-          return (
-            <li key={message.id} className="flex gap-3">
-              {message.author.kind === "assistant" ? (
-                <PersonaAvatar persona={message.author.persona} />
-              ) : (
-                <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-tone-neutral-foreground">
-                  {initials(name)}
-                </span>
-              )}
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <span className="text-[13px]">
-                  <strong className="font-bold">{name}</strong>{" "}
-                  <span className="text-xs text-admin-subtle">{message.status === "streaming" ? "answering" : timeOfDay.format(new Date(message.createdAt))}</span>
-                </span>
-                {isModel ? (
-                  <ReplyBody message={message} />
-                ) : (
-                  <p className="max-w-3xl whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>
-                )}
-                {message.status === "error" ? (
-                  <Notice tone="warning" className="max-w-xl">
-                    This answer stopped early. Ask again to retry.
-                  </Notice>
-                ) : null}
-              </div>
-            </li>
-          )
-        })}
-      </ol>
-      <div ref={end} />
+    <div
+      ref={scroller}
+      onScroll={(e) => {
+        const box = e.currentTarget
+        following.current = box.scrollHeight - box.scrollTop - box.clientHeight <= FOLLOW_PX
+      }}
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 md:px-5"
+    >
+      <div ref={content} className={cn(!messages.length && "flex flex-1 flex-col items-center justify-center")}>
+        {messages.length ? (
+          <ol className="flex flex-col gap-4">
+            {messages.map((message) => (
+              <MessageRow key={message.id} message={message} />
+            ))}
+          </ol>
+        ) : (
+          <div className="flex flex-col items-center gap-1 px-2 text-center">
+            <p className="text-sm font-semibold">No messages yet</p>
+            <p className="max-w-sm text-[13px] text-muted-foreground">Ask Jack about events, members, LSC entries or payments. Everyone in the room sees the answer as it streams.</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
+
+/**
+ * One message. Memoized: the reducer keeps a message's object as it is until that message changes, so
+ * while a reply streams only its row re-renders, not every table and chart above it.
+ */
+const MessageRow = memo(function MessageRow({ message }: { message: JackMessageView }) {
+  if (message.author.kind === "system")
+    return (
+      <li className="flex items-center gap-2.5 text-xs text-admin-subtle">
+        <span aria-hidden className="h-px flex-1 bg-admin-row" />
+        <span>
+          {message.content} · {timeOfDay.format(new Date(message.createdAt))}
+        </span>
+        <span aria-hidden className="h-px flex-1 bg-admin-row" />
+      </li>
+    )
+  const isModel = message.author.kind === "assistant"
+  const name = message.author.kind === "assistant" ? JACK_PERSONA_NAME[message.author.persona] : message.author.displayName
+  return (
+    <li className="flex gap-3">
+      {message.author.kind === "assistant" ? (
+        <PersonaAvatar persona={message.author.persona} />
+      ) : (
+        <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-tone-neutral-foreground">
+          {initials(name)}
+        </span>
+      )}
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="text-[13px]">
+          <strong className="font-bold">{name}</strong>{" "}
+          <span className="text-xs text-admin-subtle">{message.status === "streaming" ? "answering" : timeOfDay.format(new Date(message.createdAt))}</span>
+        </span>
+        {isModel ? <ReplyBody message={message} /> : <p className="max-w-3xl whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>}
+        {message.status === "error" ? (
+          <Notice tone="warning" className="max-w-xl">
+            This answer stopped early. Ask again to retry.
+          </Notice>
+        ) : null}
+      </div>
+    </li>
+  )
+})
 
 const streamingCursor = <span aria-hidden className="ml-0.5 inline-block h-[15px] w-[7px] translate-y-0.5 bg-primary" />
 
@@ -254,6 +307,64 @@ function ReplyBody({ message }: { message: JackMessageView }) {
   )
 }
 
+/**
+ * For screen readers: "Jack is answering" when a reply starts streaming and "Jack answered" when it
+ * ends, never the streamed text itself. Only says something about replies seen streaming here, so
+ * opening a room doesn't announce its last answer.
+ */
+function AnswerStatus({ messages }: { messages: JackMessageView[] }) {
+  const last = messages.findLast((m) => m.author.kind === "assistant")
+  const name = last?.author.kind === "assistant" ? JACK_PERSONA_NAME[last.author.persona] : ""
+  const [seen, setSeen] = useState<{ id: string; status: JackMessageView["status"] } | null>(null)
+  const [text, setText] = useState("")
+  // Adjusting state while rendering when the last reply changes (React's pattern for reacting to props)
+  if (last && (seen?.id !== last.id || seen.status !== last.status)) {
+    setSeen({ id: last.id, status: last.status })
+    if (last.status === "streaming") setText(`${name} is answering`)
+    else if (seen?.id === last.id && seen.status === "streaming") setText(last.status === "error" ? `${name} stopped before finishing` : `${name} answered`)
+  }
+  return (
+    <p role="status" aria-live="polite" className="sr-only">
+      {text}
+    </p>
+  )
+}
+
+/** Offers to ask Jack to continue when officer messages sit unanswered, or a reply stopped partway */
+function ContinueBar({ stall, persona, onContinue }: { stall: "unanswered" | "stuck"; persona: JackRoomPersonaKey; onContinue: RoomViewProps["onContinue"] }) {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const name = JACK_PERSONA_NAME[persona]
+
+  async function ask() {
+    setPending(true)
+    setError(null)
+    const problem = await onContinue()
+    setPending(false)
+    if (problem) setError(problem)
+  }
+
+  return (
+    <div className="px-4 pb-1 md:px-5">
+      <Notice
+        tone="warning"
+        action={
+          <Button size="sm" variant="primary" pending={pending} onClick={() => void ask()}>
+            Ask him to continue
+          </Button>
+        }
+      >
+        {stall === "stuck" ? `${name} stopped partway through an answer.` : `${name} stopped before answering.`}
+        {error ? (
+          <span role="alert" className="mt-0.5 block text-xs font-medium text-tone-danger-foreground">
+            {error}
+          </span>
+        ) : null}
+      </Notice>
+    </div>
+  )
+}
+
 function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: RoomViewProps["onSend"] }) {
   const [content, setContent] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -261,12 +372,17 @@ function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: Ro
 
   async function send() {
     if (sending || !content.trim()) return
+    // Cleared right away, so whatever's typed while it sends is kept; put back if the send fails
+    const sent = content
+    setContent("")
     setSending(true)
     setError(null)
-    const problem = await onSend(content)
+    const problem = await onSend(sent)
     setSending(false)
-    if (problem) setError(problem)
-    else setContent("")
+    if (problem) {
+      setError(problem)
+      setContent((typed) => (typed.trim() ? `${sent}\n${typed}` : sent))
+    }
   }
 
   return (
@@ -292,7 +408,8 @@ function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: Ro
             void send()
           }
         }}
-        className="min-h-14 text-sm"
+        // 16px on phones so iOS doesn't zoom in on focus
+        className="min-h-14 text-base md:text-sm"
       />
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         {error ? (
@@ -311,4 +428,3 @@ function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: Ro
     </form>
   )
 }
-

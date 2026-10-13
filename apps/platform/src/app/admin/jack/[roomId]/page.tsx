@@ -8,11 +8,12 @@ import { JackRoomClient } from "./room-client"
 export const metadata = { title: "Jack" }
 
 export const dynamic = "force-dynamic"
-// Posting a message answers it after the response, in this route's function (Server Actions run
-// with their page's config), so this covers the whole reply loop: a reply with tool calls can take a
-// minute or two (each one wraps up after 150 s), and messages posted meanwhile are answered in the
-// same run. 300 s is the Fluid compute default and the most the Hobby plan allows (Pro allows 800);
-// keep it under the room lock's 10-minute stale time (room-lock.ts).
+// Posting a message (or asking Jack to continue) answers after the response, in this route's function
+// (Server Actions run with their page's config), so this covers the whole reply loop. A run stops
+// itself 280 s in and starts no answer with less than 150 s left (RUN_TIMING in reply-loop.ts); what's
+// still waiting then gets a "continue" button. 300 s is the Fluid compute default and the most the
+// Hobby plan allows (Pro allows 800). If this changes, change RUN_TIMING with it, and keep it under the
+// room lock's 6-minute stale time (lib/jack/timing.ts).
 export const maxDuration = 300
 
 type JackRoomPageArgs = {

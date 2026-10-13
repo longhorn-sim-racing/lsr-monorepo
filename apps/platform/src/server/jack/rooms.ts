@@ -5,6 +5,7 @@ import { runAfterResponse } from "@/server/after-response"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
 import { jackMessageInclude, jackRoomViewSelect, toMessageView, toRoomView } from "./messages"
 import { defaultReplyDeps, runRoom, type ReplyLoopDeps } from "./reply-loop"
+import { isRoomLockHeld } from "./room-lock"
 
 /** How much of a room a snapshot loads: the latest messages */
 const SNAPSHOT_LIMIT = 500
@@ -85,15 +86,17 @@ export async function postOfficerMessage(
 
 /**
  * Starts a run in a room (after the response), for when messages sit unanswered: a run that ran out
- * of time and let go, or one that died. Runs as usual: if a live run holds the room it does nothing,
- * and a dead run's lock is taken over once it's stale, closing its half-written reply. False when the
- * room doesn't exist or is archived.
+ * of time and let go, or one that died (its lock is taken over once stale, which closes its
+ * half-written reply). "busy" when a run holds the room's lock and it isn't stale yet: nothing is
+ * started (that run answers, or its lock goes stale within ROOM_LOCK_STALE_MS). Null when the room
+ * doesn't exist or is archived.
  */
-export async function resumeRoom(roomId: string, replyDeps: ReplyLoopDeps = defaultReplyDeps): Promise<boolean> {
-  const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: { id: true } })
-  if (!room) return false
+export async function resumeRoom(roomId: string, replyDeps: ReplyLoopDeps = defaultReplyDeps): Promise<"started" | "busy" | null> {
+  const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: { id: true, runId: true, runStartedAt: true } })
+  if (!room) return null
+  if (isRoomLockHeld(room)) return "busy"
   await runAfterResponse(() => runRoom(roomId, replyDeps), `[jack] Continuing room ${roomId} failed:`)
-  return true
+  return "started"
 }
 
 export type PersonaSwitch =
