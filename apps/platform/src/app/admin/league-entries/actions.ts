@@ -23,24 +23,6 @@ function refresh() {
   revalidatePath("/lone-star-cup");
 }
 
-export async function searchEntrantUsers(query: string) {
-  await requireOfficer();
-  const q = query.trim();
-  if (q.length < 2) return [];
-  return prisma.user.findMany({
-    where: {
-      OR: [
-        { displayName: { contains: q, mode: "insensitive" } },
-        { email: { contains: q, mode: "insensitive" } },
-        { handle: { contains: q, mode: "insensitive" } },
-        { eid: { equals: q.toLowerCase() } },
-      ],
-    },
-    take: 10,
-    select: { id: true, displayName: true, email: true, handle: true, eid: true },
-  });
-}
-
 /** Adds or edits a driver's entry form on their behalf (backfill from the old Google Form, fixes). */
 export async function saveEntrantApplication(userId: string, seasonId: string, input: unknown): Promise<Result> {
   const admin = await requireOfficer();

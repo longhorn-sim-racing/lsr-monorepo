@@ -1,371 +1,259 @@
 "use client"
 
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { createEvent, updateEvent } from "@/app/admin/events/actions";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
+import { useState } from "react"
+import type { Event, EventSeries, Venue } from "@prisma/client"
+import {
+  Button,
+  Field,
+  FieldGrid,
+  FormSection,
+  Input,
+  MoneyInput,
+  Notice,
+  Panel,
+  PanelBody,
+  PanelFooter,
+  PanelHeader,
+  Select,
+  SwitchField,
+  Textarea,
+} from "@/components/admin/kit"
+import { ImageUploader } from "@/components/image-uploader"
+import { createEvent, updateEvent } from "@/app/admin/events/actions"
+import { getEffectiveEventStatus, isEventPublic } from "@/lib/events"
+import { DEFAULT_TIMEZONE, TIMEZONES, dateToZonedValue } from "@/lib/dates"
+import { centsToDollarInput } from "@/lib/money"
+import { EVENT_STATUS, EventStatusBadge } from "@/app/admin/events/_components/event-status"
+import { useFormAction } from "./use-form-action"
 
-import { ImageUploader } from "@/components/image-uploader";
-import { Event, EventSeries, Venue } from "@prisma/client";
-import { useState } from "react";
-import { DEFAULT_TIMEZONE, TIMEZONES, dateToZonedValue } from "@/lib/dates";
-import { Tag, Clock, Info, Users, QrCode, Megaphone } from "lucide-react";
-import { centsToDollarInput } from "@/lib/money";
-import { useFormAction } from "./use-form-action";
+const slugFrom = (title: string) =>
+  title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
 
-export function EventForm({ event, series, venues }: { event?: Event, series: EventSeries[], venues: Venue[] }) {
-  const [timezone, setTimezone] = useState<string>(event?.timezone || DEFAULT_TIMEZONE);
-  const [slug, setSlug] = useState(event?.slug ?? "");
-  const [slugTouched, setSlugTouched] = useState(!!event);
-  const { onSubmit, error, pending } = useFormAction((formData) => (event ? updateEvent(event.id, formData) : createEvent(formData)));
+/** A datetime-local input in the form's time zone. Re-keyed when the zone changes so it re-reads its value. */
+function ZonedInput({ name, label, value, timezone, required, hint }: { name: string; label: string; value: Date | null | undefined; timezone: string; required?: boolean; hint?: string }) {
+  return (
+    <Field label={label} htmlFor={name} required={required} hint={hint}>
+      <Input id={name} name={name} type="datetime-local" key={`${name}-${timezone}`} defaultValue={dateToZonedValue(value, timezone)} required={required} />
+    </Field>
+  )
+}
+
+export function EventForm({ event, series, venues }: { event?: Event; series: EventSeries[]; venues: Venue[] }) {
+  const [timezone, setTimezone] = useState<string>(event?.timezone || DEFAULT_TIMEZONE)
+  const [slug, setSlug] = useState(event?.slug ?? "")
+  const [slugTouched, setSlugTouched] = useState(!!event)
+  const { onSubmit, error, pending } = useFormAction((formData) => (event ? updateEvent(event.id, formData) : createEvent(formData)))
+
+  const zoneName = TIMEZONES.find((tz) => tz.value === timezone)?.label ?? timezone
+  const effective = event ? getEffectiveEventStatus(event) : null
+  const isPublic = event ? isEventPublic(event) : false
 
   return (
-    <div className="max-w-5xl mx-auto font-mono text-sm border border-white/10 bg-white/[0.02] p-8 md:p-12 rounded-xl shadow-2xl">
-      <form
-        onSubmit={onSubmit}
-        // Enter would submit with the first button, "Save as Draft", and un-publish the event; use the buttons
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && e.target instanceof HTMLInputElement) e.preventDefault();
-        }}
-        className="space-y-16"
-      >
-        <input type="hidden" name="timezone" value={timezone} />
-        
-        {/* Basic Info */}
-        <section className="space-y-8">
-          <div className="flex items-center gap-3 border-l-2 border-lsr-orange pl-4">
-            <Tag size={16} className="text-lsr-orange/60" />
-            <h3 className="text-xs font-bold uppercase tracking-widest text-white/40">Basic Information</h3>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
-            <div className="space-y-2">
-              <label htmlFor="title" className="text-[10px] uppercase tracking-wider text-white/60">Event Title</label>
-              <Input
-                id="title"
-                name="title"
-                defaultValue={event?.title}
-                required
-                onChange={(e) => {
-                  if (!slugTouched) {
-                    setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""));
-                  }
-                }}
-                className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors font-bold text-base"
-                placeholder="e.g. Grand Prix of Texas"
-              />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="slug" className="text-[10px] uppercase tracking-wider text-white/60">URL Slug</label>
-              <Input
-                id="slug"
-                name="slug"
-                value={slug}
-                onChange={(e) => { setSlugTouched(true); setSlug(e.target.value); }}
-                required
-                className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors"
-                placeholder="e.g. grand-prix-texas-2026"
-              />
-            </div>
+    <form
+      onSubmit={onSubmit}
+      // Enter would submit with the first button and could change the status; make people pick a button
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && e.target instanceof HTMLInputElement) e.preventDefault()
+      }}
+      className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]"
+    >
+      <input type="hidden" name="timezone" value={timezone} />
 
-            <div className="space-y-2">
-              <label htmlFor="seriesId" className="text-[10px] uppercase tracking-wider text-white/60">Series</label>
-              <select
-                id="seriesId"
-                name="seriesId"
-                defaultValue={event?.seriesId ?? ""}
-                className="w-full h-8 bg-transparent border-b border-white/20 focus:border-lsr-orange text-white outline-none rounded-none cursor-pointer"
-              >
-                <option value="" className="bg-lsr-charcoal text-white/50">(None)</option>
-                {series.map((s) => (
-                  <option key={s.id} value={s.id} className="bg-lsr-charcoal">
-                    {s.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="venueId" className="text-[10px] uppercase tracking-wider text-white/60">Venue</label>
-              <select
-                id="venueId"
-                name="venueId"
-                defaultValue={event?.venueId ?? ""}
-                className="w-full h-8 bg-transparent border-b border-white/20 focus:border-lsr-orange text-white outline-none rounded-none cursor-pointer"
-              >
-                <option value="" className="bg-lsr-charcoal text-white/50">(None)</option>
-                {venues.map((v) => (
-                  <option key={v.id} value={v.id} className="bg-lsr-charcoal">
-                    {v.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </section>
-
-        {/* Time & Location */}
-        <section className="space-y-8">
-          <div className="flex items-center gap-3 border-l-2 border-lsr-orange pl-4">
-            <Clock size={16} className="text-lsr-orange/60" />
-            <h3 className="text-xs font-bold uppercase tracking-widest text-white/40">Schedule</h3>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
-            <div className="space-y-2">
-              <label htmlFor="timezone-select" className="text-[10px] uppercase tracking-wider text-white/60">Timezone</label>
-              <select
-                id="timezone-select"
-                value={timezone}
-                onChange={(e) => setTimezone(e.target.value)}
-                className="w-full h-8 bg-transparent border-b border-white/20 focus:border-lsr-orange text-white outline-none rounded-none cursor-pointer"
-              >
-                {TIMEZONES.map((tz) => (
-                  <option key={tz.value} value={tz.value} className="bg-lsr-charcoal">
-                    {tz.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="hidden md:block"></div> {/* Spacer */}
-
-            <div className="space-y-2">
-              <label htmlFor="startsAtUtc" className="text-[10px] uppercase tracking-wider text-white/60">Starts At</label>
-              <Input 
-                id="startsAtUtc" 
-                name="startsAtUtc" 
-                type="datetime-local" 
-                key={`start-${timezone}`} 
-                defaultValue={dateToZonedValue(event?.startsAtUtc, timezone)} 
-                required 
-                className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors"
-              />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="endsAtUtc" className="text-[10px] uppercase tracking-wider text-white/60">Ends At</label>
-              <Input 
-                id="endsAtUtc" 
-                name="endsAtUtc" 
-                type="datetime-local" 
-                key={`end-${timezone}`}
-                defaultValue={dateToZonedValue(event?.endsAtUtc, timezone)} 
-                required 
-                className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors"
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* Content */}
-        <section className="space-y-8">
-          <div className="flex items-center gap-3 border-l-2 border-lsr-orange pl-4">
-            <Info size={16} className="text-lsr-orange/60" />
-            <h3 className="text-xs font-bold uppercase tracking-widest text-white/40">Content</h3>
-          </div>
-
-          <div className="grid grid-cols-1 gap-8">
-            <div className="space-y-2">
-              <label htmlFor="summary" className="text-[10px] uppercase tracking-wider text-white/60">Short Summary</label>
-              <Input 
-                id="summary" 
-                name="summary" 
-                defaultValue={event?.summary ?? ""} 
-                className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors"
-              />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="description" className="text-[10px] uppercase tracking-wider text-white/60">Internal Description</label>
-              <Input 
-                id="description" 
-                name="description" 
-                defaultValue={event?.description ?? ""} 
-                className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors"
-              />
-            </div>
-            <div className="space-y-4 pt-2">
-              <label className="text-[10px] uppercase tracking-wider text-white/60 block">Hero Image</label>
-              <div className="border border-white/5 bg-black/40 p-6">
-                <ImageUploader name="heroImageUrl" defaultValue={event?.heroImageUrl} />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label htmlFor="streamUrl" className="text-[10px] uppercase tracking-wider text-white/60">Stream URL</label>
-              <Input
-                id="streamUrl"
-                name="streamUrl"
-                defaultValue={event?.streamUrl ?? ""}
-                className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors"
-                placeholder="https://twitch.tv/..."
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* Registration */}
-        <section className="space-y-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 border-l-2 border-lsr-orange pl-4">
-              <Users size={16} className="text-lsr-orange/60" />
-              <h3 className="text-xs font-bold uppercase tracking-widest text-white/40">Registration</h3>
-            </div>
-            <div className="flex items-center gap-6">
-                <div className="flex items-center gap-2">
-                    <Label htmlFor="registrationEnabled" className="uppercase tracking-widest text-[10px] text-white/60 cursor-pointer">Enabled</Label>
-                    <Switch id="registrationEnabled" name="registrationEnabled" defaultChecked={event?.registrationEnabled ?? false} className="data-[state=checked]:bg-lsr-orange" />
-                </div>
-                <div className="flex items-center gap-2">
-                    <Label htmlFor="registrationWaitlistEnabled" className="uppercase tracking-widest text-[10px] text-white/60 cursor-pointer">Waitlist</Label>
-                    <Switch id="registrationWaitlistEnabled" name="registrationWaitlistEnabled" defaultChecked={event?.registrationWaitlistEnabled ?? false} className="data-[state=checked]:bg-lsr-orange" />
-                </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
-            <div className="space-y-2">
-              <label htmlFor="registrationOpensAt" className="text-[10px] uppercase tracking-wider text-white/60">Opens At</label>
-              <Input 
-                id="registrationOpensAt" 
-                name="registrationOpensAt" 
-                type="datetime-local" 
-                key={`reg-open-${timezone}`}
-                defaultValue={dateToZonedValue(event?.registrationOpensAt, timezone)} 
-                className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors"
-              />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="registrationClosesAt" className="text-[10px] uppercase tracking-wider text-white/60">Closes At</label>
-              <Input 
-                id="registrationClosesAt" 
-                name="registrationClosesAt" 
-                type="datetime-local" 
-                key={`reg-close-${timezone}`}
-                defaultValue={dateToZonedValue(event?.registrationClosesAt, timezone)} 
-                className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors"
-              />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="registrationMax" className="text-[10px] uppercase tracking-wider text-white/60">Capacity Limit</label>
-              <Input
-                id="registrationMax"
-                name="registrationMax"
-                type="number"
-                defaultValue={event?.registrationMax ?? ""}
-                placeholder="Unlimited"
-                className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors w-1/2"
-              />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="registrationFeeCents" className="text-[10px] uppercase tracking-wider text-white/60">Registration Fee (USD)</label>
-              <div className="flex items-center gap-2">
-                <span className="text-white/40 text-sm">$</span>
+      <div className="flex min-w-0 flex-col gap-4">
+        <Panel>
+          <PanelHeader title="Details" />
+          <PanelBody>
+            <FieldGrid>
+              <Field label="Title" htmlFor="title" required>
                 <Input
-                  id="registrationFeeCents"
-                  name="registrationFeeCents"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  defaultValue={centsToDollarInput(event?.registrationFeeCents || null)}
-                  placeholder="0.00 (Free)"
-                  className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors w-1/3"
+                  id="title"
+                  name="title"
+                  defaultValue={event?.title}
+                  required
+                  maxLength={200}
+                  placeholder="General Meeting 1"
+                  onChange={(e) => {
+                    if (!slugTouched) setSlug(slugFrom(e.target.value))
+                  }}
                 />
-              </div>
-              <p className="text-[10px] text-white/30">Leave blank for free events. Setting a fee requires Stripe payment before registration.</p>
-            </div>
-          </div>
-        </section>
+              </Field>
+              <Field label="URL slug" htmlFor="slug" required hint={`The public page is /events/${slug || "…"}`}>
+                <Input
+                  id="slug"
+                  name="slug"
+                  value={slug}
+                  required
+                  placeholder="general-meeting-1"
+                  onChange={(e) => {
+                    setSlugTouched(true)
+                    setSlug(e.target.value)
+                  }}
+                />
+              </Field>
+              <Field label="Series" htmlFor="seriesId">
+                <Select id="seriesId" name="seriesId" defaultValue={event?.seriesId ?? ""}>
+                  <option value="">None</option>
+                  {series.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Venue" htmlFor="venueId">
+                <Select id="venueId" name="venueId" defaultValue={event?.venueId ?? ""}>
+                  <option value="">None</option>
+                  {venues.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </FieldGrid>
+          </PanelBody>
+        </Panel>
 
-        {/* Check-in */}
-        <section className="space-y-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 border-l-2 border-lsr-orange pl-4">
-              <QrCode size={16} className="text-lsr-orange/60" />
-              <h3 className="text-xs font-bold uppercase tracking-widest text-white/40">Check-in</h3>
-            </div>
-            <div className="flex items-center gap-2">
-                <Label htmlFor="attendanceEnabled" className="uppercase tracking-widest text-[10px] text-white/60 cursor-pointer">Enabled</Label>
-                <Switch id="attendanceEnabled" name="attendanceEnabled" defaultChecked={event?.attendanceEnabled ?? false} className="data-[state=checked]:bg-lsr-orange" />
-            </div>
-          </div>
+        <Panel>
+          <PanelHeader title="When" description={`Every time on this page is in ${zoneName}.`} />
+          <PanelBody>
+            <FieldGrid>
+              <Field label="Time zone" htmlFor="timezone-select" className="sm:col-span-2" hint="Changing it shows the saved times in the new zone.">
+                <Select id="timezone-select" value={timezone} onChange={(e) => setTimezone(e.target.value)} className="sm:max-w-sm">
+                  {TIMEZONES.map((tz) => (
+                    <option key={tz.value} value={tz.value}>
+                      {tz.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <ZonedInput name="startsAtUtc" label="Starts" value={event?.startsAtUtc} timezone={timezone} required />
+              <ZonedInput name="endsAtUtc" label="Ends" value={event?.endsAtUtc} timezone={timezone} required />
+            </FieldGrid>
+          </PanelBody>
+        </Panel>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
-            <div className="space-y-2">
-              <label htmlFor="attendanceOpensAt" className="text-[10px] uppercase tracking-wider text-white/60">Check-in Opens</label>
-              <Input 
-                id="attendanceOpensAt" 
-                name="attendanceOpensAt" 
-                type="datetime-local" 
-                key={`att-open-${timezone}`}
-                defaultValue={dateToZonedValue(event?.attendanceOpensAt, timezone)} 
-                className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors"
+        <Panel>
+          <PanelHeader title="Content" />
+          <PanelBody className="flex flex-col gap-3">
+            <Field label="Summary" htmlFor="summary" hint="One or two sentences. Shown on the event page and in link previews.">
+              <Textarea id="summary" name="summary" rows={2} defaultValue={event?.summary ?? ""} />
+            </Field>
+            <Field label="Internal notes" htmlFor="description" hint="Only officers see this.">
+              <Textarea id="description" name="description" rows={3} defaultValue={event?.description ?? ""} />
+            </Field>
+            <Field label="Hero image" htmlFor="heroImageUrl" hint="Shown at the top of the event page.">
+              <ImageUploader id="heroImageUrl" name="heroImageUrl" defaultValue={event?.heroImageUrl} />
+            </Field>
+            <Field label="Stream link" htmlFor="streamUrl" hint="Plays on the event page while it's live.">
+              <Input id="streamUrl" name="streamUrl" type="url" defaultValue={event?.streamUrl ?? ""} placeholder="https://twitch.tv/…" />
+            </Field>
+          </PanelBody>
+        </Panel>
+
+        <Panel>
+          <PanelHeader title="Registration" description="Fine-tune it later from the event's registration tab." />
+          <PanelBody className="flex flex-col gap-4">
+            <FormSection title="Sign-ups">
+              <SwitchField name="registrationEnabled" defaultChecked={event?.registrationEnabled ?? false} label="Take registrations" description="Members sign up on the event page." />
+              <SwitchField
+                name="registrationWaitlistEnabled"
+                defaultChecked={event?.registrationWaitlistEnabled ?? false}
+                label="Waitlist when full"
+                description="People join a waitlist once the capacity is reached."
               />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="attendanceClosesAt" className="text-[10px] uppercase tracking-wider text-white/60">Check-in Closes</label>
-              <Input 
-                id="attendanceClosesAt" 
-                name="attendanceClosesAt" 
-                type="datetime-local" 
-                key={`att-close-${timezone}`}
-                defaultValue={dateToZonedValue(event?.attendanceClosesAt, timezone)} 
-                className="bg-transparent border-b border-white/20 border-t-0 border-x-0 rounded-none px-0 h-8 focus-visible:ring-0 focus:border-lsr-orange transition-colors"
-              />
-            </div>
-          </div>
-        </section>
+            </FormSection>
+            <FieldGrid>
+              <ZonedInput name="registrationOpensAt" label="Opens" value={event?.registrationOpensAt} timezone={timezone} hint="Blank opens it right away" />
+              <ZonedInput name="registrationClosesAt" label="Closes" value={event?.registrationClosesAt} timezone={timezone} hint="Blank keeps it open" />
+              <Field label="Capacity" htmlFor="registrationMax" hint="Blank means no limit">
+                <Input id="registrationMax" name="registrationMax" type="number" min={1} step={1} defaultValue={event?.registrationMax ?? ""} placeholder="No limit" />
+              </Field>
+              <Field label="Fee" htmlFor="registrationFeeCents" hint="Blank means free. A fee makes people pay with Stripe to register.">
+                <MoneyInput id="registrationFeeCents" name="registrationFeeCents" defaultValue={centsToDollarInput(event?.registrationFeeCents || null)} placeholder="0.00" />
+              </Field>
+            </FieldGrid>
+          </PanelBody>
+        </Panel>
 
-        {/* Publication */}
-        <section className="space-y-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 border-l-2 border-lsr-orange pl-4">
-              <Megaphone size={16} className="text-lsr-orange/60" />
-              <h3 className="text-xs font-bold uppercase tracking-widest text-white/40">Publication</h3>
-            </div>
-            {event && (
-                <div className="flex items-center gap-3">
-                    <span className="uppercase tracking-widest text-[10px] text-white/40">Current Status</span>
-                    <span className="font-mono text-xs font-bold text-lsr-orange border border-lsr-orange/20 px-2 py-1 bg-lsr-orange/5">{event.status}</span>
-                </div>
-            )}
-          </div>
+        <Panel>
+          <PanelHeader title="Check-in" />
+          <PanelBody className="flex flex-col gap-4">
+            <SwitchField
+              name="attendanceEnabled"
+              defaultChecked={event?.attendanceEnabled ?? false}
+              label="Check people in"
+              description="Members scan a QR code at the event. Off: everyone registered counts as attended."
+            />
+            <FieldGrid>
+              <ZonedInput name="attendanceOpensAt" label="Check-in opens" value={event?.attendanceOpensAt} timezone={timezone} />
+              <ZonedInput name="attendanceClosesAt" label="Check-in closes" value={event?.attendanceClosesAt} timezone={timezone} />
+            </FieldGrid>
+          </PanelBody>
+        </Panel>
+      </div>
 
-          <div className="bg-white/[0.02] border border-white/5 p-6 md:p-8 space-y-6">
-            {error && <p role="alert" className="border border-red-400/30 bg-red-500/10 px-4 py-3 font-sans text-xs leading-relaxed text-red-200">{error}</p>}
-            <div className="flex flex-col lg:flex-row items-end gap-8">
-                 <div className="flex flex-col gap-2 w-full lg:w-auto lg:flex-grow">
-                    <Label htmlFor="scheduleDate" className="uppercase tracking-widest text-[10px] text-white/40">
-                        Schedule Auto-Publish
-                    </Label>
-                    <div className="flex flex-col gap-1">
-                        <Input 
-                            type="datetime-local" 
-                            name="scheduleDate" 
-                            id="scheduleDate" 
-                            key={`pub-date-${timezone}`}
-                            defaultValue={event?.publishedAt ? dateToZonedValue(event.publishedAt, timezone) : ""}
-                            className="bg-black/20 border-white/10 h-10 text-xs focus:border-lsr-orange w-full md:w-64"
-                        />
-                        <span className="text-[10px] text-white/20">Set a future date to automatically publish.</span>
-                    </div>
-                 </div>
-
-                 <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-end">
-                    <Button type="submit" name="submitAction" value="draft" disabled={pending} variant="ghost" className="text-white/40 hover:text-white font-bold uppercase tracking-widest text-[10px] h-10 px-4">
-                        Save as Draft
-                    </Button>
-                    
-                    <Button type="submit" name="submitAction" value="schedule" disabled={pending} variant="outline" className="border-white/20 text-white hover:bg-white/5 hover:border-lsr-orange hover:text-lsr-orange font-bold uppercase tracking-widest text-[10px] h-10 px-6">
-                        Schedule
-                    </Button>
-
-                    <Button type="submit" name="submitAction" value="publish" disabled={pending} className="bg-lsr-orange hover:bg-lsr-orange/90 text-white font-bold uppercase tracking-widest text-[10px] h-10 px-8 shadow-lg">
-                        {event ? "Publish / Save" : "Publish Now"}
-                    </Button>
-                 </div>
-            </div>
-          </div>
-        </section>
-      </form>
-    </div>
-  );
+      <Panel className="xl:sticky xl:top-[60px]">
+        <PanelHeader
+          title="Publish"
+          description={
+            event && effective ? (
+              <span className="flex flex-wrap items-center gap-1.5">
+                Now <EventStatusBadge status={effective} />
+              </span>
+            ) : (
+              "New events stay hidden until you publish them."
+            )
+          }
+        />
+        <PanelBody className="flex flex-col gap-3">
+          {event && effective && (
+            <p className="text-xs text-muted-foreground">
+              {EVENT_STATUS[effective].meaning} Save changes keeps this status; the other buttons change it.
+            </p>
+          )}
+          <Field label="Publish at" htmlFor="scheduleDate" hint="For Schedule: the event goes public at this time.">
+            <Input
+              type="datetime-local"
+              name="scheduleDate"
+              id="scheduleDate"
+              key={`scheduleDate-${timezone}`}
+              defaultValue={event?.publishedAt ? dateToZonedValue(event.publishedAt, timezone) : ""}
+            />
+          </Field>
+          {error && (
+            <Notice tone="danger" title="Not saved">
+              {error}
+            </Notice>
+          )}
+        </PanelBody>
+        <PanelFooter className="flex-col items-stretch">
+          {event &&
+            (event.status === "SCHEDULED" && event.publishedAt ? (
+              // A scheduled event saves through Schedule, so a changed "Publish at" takes effect
+              <Button type="submit" name="submitAction" value="schedule" variant="primary" pending={pending}>
+                Save changes
+              </Button>
+            ) : (
+              // No submitAction: the action leaves the status (and publish time) as they are
+              <Button type="submit" variant="primary" pending={pending}>
+                Save changes
+              </Button>
+            ))}
+          <Button type="submit" name="submitAction" value="publish" variant={event ? "secondary" : "primary"} pending={!event && pending} disabled={pending}>
+            Publish now
+          </Button>
+          <Button type="submit" name="submitAction" value="schedule" disabled={pending}>
+            Schedule
+          </Button>
+          <Button type="submit" name="submitAction" value="draft" disabled={pending}>
+            {isPublic ? "Unpublish to a draft" : "Save as draft"}
+          </Button>
+        </PanelFooter>
+      </Panel>
+    </form>
+  )
 }

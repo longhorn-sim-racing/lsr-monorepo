@@ -1,19 +1,23 @@
-import { getAllSeries } from "@/server/queries/series";
-import { SeasonForm } from "../form";
-import { prisma } from "@/server/db";
-import { requireOfficerPage } from "@/server/auth/guards";
+import type { Metadata } from "next"
+import { prisma } from "@/server/db"
+import { getAllSeries } from "@/server/queries/series"
+import { requireOfficerPage } from "@/server/auth/guards"
+import { PageHeader } from "@/components/admin/kit"
+import { SeasonForm } from "../form"
+
+export const metadata: Metadata = { title: "New season" }
 
 export default async function NewSeasonPage() {
-  await requireOfficerPage();
+  await requireOfficerPage()
   const [series, leagues] = await Promise.all([
     getAllSeries(),
     prisma.league.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
-  ]);
+  ])
 
   return (
-    <div className="mx-auto max-w-4xl p-8">
-      <h1 className="text-3xl font-bold mb-6">Create New Season</h1>
+    <div className="max-w-3xl">
+      <PageHeader title="New season" description="A season groups a series' events into one set of standings." back={{ href: "/admin/seasons", label: "Seasons" }} />
       <SeasonForm seriesList={series} leagues={leagues} />
     </div>
-  );
+  )
 }

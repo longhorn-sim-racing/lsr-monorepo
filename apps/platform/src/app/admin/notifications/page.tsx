@@ -1,137 +1,61 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  getNotificationStats,
-  getRecentNotifications,
-  getScheduledNotifications,
-  getEmailSettings,
-} from "./actions";
-import { NotificationActivity } from "./_components/notification-activity";
-import { NotificationScheduled } from "./_components/notification-scheduled";
-import { NotificationComposer } from "./_components/notification-composer";
-import { NotificationSettings } from "./_components/notification-settings";
-import { NotificationCleanup } from "./_components/notification-cleanup";
-import { Bell, Send, Clock, Settings } from "lucide-react";
-import { requireOfficerPage } from "@/server/auth/guards";
-import { getEmailUsage, TRANSACTIONAL_HEADROOM } from "@/server/services/notification.service";
+import type { Metadata } from "next"
+import { PageHeader, Stat, StatRow } from "@/components/admin/kit"
+import { requireOfficerPage } from "@/server/auth/guards"
+import { getEmailUsage, TRANSACTIONAL_HEADROOM } from "@/server/services/notification.service"
+import { getNotificationStats, getRecentNotifications, getScheduledNotifications, getEmailSettings } from "./actions"
+import { NotificationActivity } from "./_components/notification-activity"
+import { NotificationScheduled } from "./_components/notification-scheduled"
+import { NotificationComposer } from "./_components/notification-composer"
+import { NotificationSettings } from "./_components/notification-settings"
+import { NotificationCleanup } from "./_components/notification-cleanup"
+import { NotificationTabs } from "./_components/notification-tabs"
+import { NOTIFICATION_TABS, scheduledSendKey, type NotificationTab } from "./_components/format"
 
-export const dynamic = "force-dynamic";
+export const metadata: Metadata = { title: "Notifications" }
+
+export const dynamic = "force-dynamic"
 // Sending to every member takes several batch calls; leave room beyond the default time limit
-export const maxDuration = 60;
+export const maxDuration = 60
 
-export default async function AdminNotificationsPage() {
-  await requireOfficerPage();
-  const [stats, recentNotifications, scheduledNotifications, emailSettings, emailUsage] =
-    await Promise.all([
-      getNotificationStats(),
-      getRecentNotifications(),
-      getScheduledNotifications(),
-      getEmailSettings(),
-      getEmailUsage(),
-    ]);
+export default async function AdminNotificationsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  await requireOfficerPage()
+  const [{ tab }, stats, recentNotifications, scheduledNotifications, emailSettings, emailUsage] = await Promise.all([
+    searchParams,
+    getNotificationStats(),
+    getRecentNotifications(),
+    getScheduledNotifications(),
+    getEmailSettings(),
+    getEmailUsage(),
+  ])
+
+  const initialTab: NotificationTab = NOTIFICATION_TABS.includes(tab as NotificationTab) ? (tab as NotificationTab) : "activity"
+  const scheduledSends = new Set(scheduledNotifications.map(scheduledSendKey)).size
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Notifications</h1>
-        <p className="text-white/60 mt-1">
-          Manage notification delivery and send custom messages
-        </p>
-      </div>
+    <>
+      <PageHeader
+        title="Notifications"
+        description={emailSettings.enabled ? "Delivery activity, scheduled sends and announcements to members." : "Email is turned off. Only in-app notifications go out."}
+      />
 
-      {/* Stats cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard
-          label="Total"
-          value={stats.total}
-          color="bg-white/10"
-        />
-        <StatCard
-          label="Pending"
-          value={stats.pending}
-          color="bg-yellow-500/20"
-        />
-        <StatCard
-          label="Sent"
-          value={stats.sent}
-          color="bg-green-500/20"
-        />
-        <StatCard
-          label="Failed"
-          value={stats.failed}
-          color="bg-red-500/20"
-        />
-      </div>
+      <StatRow>
+        <Stat label="Total" value={stats.total.toLocaleString()} />
+        <Stat label="Pending" value={stats.pending.toLocaleString()} hint={scheduledNotifications.length ? `${scheduledNotifications.length.toLocaleString()} scheduled` : undefined} />
+        <Stat label="Sent" value={stats.sent.toLocaleString()} />
+        <Stat label="Failed" value={stats.failed.toLocaleString()} hint={stats.failed ? "Retry them from Activity" : undefined} />
+      </StatRow>
 
-      <Tabs defaultValue="activity" className="w-full">
-        <TabsList className="bg-white/5 border border-white/10 rounded-none p-1 w-full md:w-auto">
-          <TabsTrigger
-            value="activity"
-            className="rounded-none data-[state=active]:bg-lsr-orange data-[state=active]:text-white gap-2"
-          >
-            <Bell className="h-4 w-4" />
-            Activity
-          </TabsTrigger>
-          <TabsTrigger
-            value="scheduled"
-            className="rounded-none data-[state=active]:bg-lsr-orange data-[state=active]:text-white gap-2"
-          >
-            <Clock className="h-4 w-4" />
-            Scheduled
-          </TabsTrigger>
-          <TabsTrigger
-            value="compose"
-            className="rounded-none data-[state=active]:bg-lsr-orange data-[state=active]:text-white gap-2"
-          >
-            <Send className="h-4 w-4" />
-            Compose
-          </TabsTrigger>
-          <TabsTrigger
-            value="settings"
-            className="rounded-none data-[state=active]:bg-lsr-orange data-[state=active]:text-white gap-2"
-          >
-            <Settings className="h-4 w-4" />
-            Settings
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="activity" className="mt-6">
-          <NotificationActivity notifications={recentNotifications} />
-        </TabsContent>
-
-        <TabsContent value="scheduled" className="mt-6">
-          <NotificationScheduled notifications={scheduledNotifications} />
-        </TabsContent>
-
-        <TabsContent value="compose" className="mt-6">
-          <NotificationComposer emailUsage={emailUsage} keptForReceipts={TRANSACTIONAL_HEADROOM} />
-        </TabsContent>
-
-        <TabsContent value="settings" className="mt-6 space-y-6">
-          <NotificationSettings settings={emailSettings} resendKeyConfigured={!!process.env.RESEND_API_KEY} />
-          <NotificationCleanup />
-        </TabsContent>
-      </Tabs>
-    </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color: string;
-}) {
-  return (
-    <div className={`${color} border border-white/10 p-4`}>
-      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60">
-        {label}
-      </p>
-      <p className="text-3xl font-bold text-white mt-1">
-        {value.toLocaleString()}
-      </p>
-    </div>
-  );
+      <NotificationTabs
+        initialTab={initialTab}
+        counts={{ scheduled: scheduledSends }}
+        panels={{
+          activity: <NotificationActivity notifications={recentNotifications} total={stats.total} />,
+          scheduled: <NotificationScheduled notifications={scheduledNotifications} />,
+          compose: <NotificationComposer emailUsage={emailUsage} keptForReceipts={TRANSACTIONAL_HEADROOM} />,
+          settings: <NotificationSettings settings={emailSettings} resendKeyConfigured={!!process.env.RESEND_API_KEY} />,
+          cleanup: <NotificationCleanup />,
+        }}
+      />
+    </>
+  )
 }

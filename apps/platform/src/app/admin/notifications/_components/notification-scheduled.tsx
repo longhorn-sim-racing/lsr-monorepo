@@ -1,109 +1,210 @@
-"use client";
+"use client"
 
-import { useState } from "react";
-import { format } from "date-fns";
-import { Notification } from "@prisma/client";
-import { Button } from "@/components/ui/button";
-import { Clock, Mail, Bell, X } from "lucide-react";
-import { cancelScheduledNotification } from "../actions";
+import { Fragment, useMemo, useState } from "react"
+import { Bell, ChevronDown, ChevronRight, Mail } from "lucide-react"
+import { toast } from "sonner"
+import { Button, CellStack, EmptyState, Panel, Table, TableFooter, TD, TH, THead, TR, useConfirm } from "@/components/admin/kit"
+import { unexpectedError } from "@/lib/action-result"
+import { cn } from "@/lib/utils"
+import { cancelScheduledNotifications } from "../actions"
+import { centralTime, plural, scheduledSendKey, type NotificationRow } from "./format"
 
-type NotificationWithUser = Notification & {
-  user: { id: string; displayName: string; email: string };
-};
+/** One scheduled send: the same message at the same time, to one or more members, on one or both channels. */
+type ScheduledSend = {
+  key: string
+  title: string
+  body: string
+  actionUrl: string | null
+  scheduledFor: Date
+  rows: NotificationRow[]
+  members: { id: string; displayName: string; email: string }[]
+  channels: { email: boolean; inApp: boolean }
+}
 
-export function NotificationScheduled({
-  notifications,
-}: {
-  notifications: NotificationWithUser[];
-}) {
-  const [cancelling, setCancelling] = useState<string | null>(null);
-
-  const handleCancel = async (id: string) => {
-    setCancelling(id);
-    try {
-      await cancelScheduledNotification(id);
-    } finally {
-      setCancelling(null);
+function groupSends(notifications: NotificationRow[]): ScheduledSend[] {
+  const groups = new Map<string, ScheduledSend>()
+  for (const n of notifications) {
+    if (!n.scheduledFor) continue
+    const scheduledFor = new Date(n.scheduledFor)
+    const key = scheduledSendKey(n)
+    let group = groups.get(key)
+    if (!group) {
+      group = { key, title: n.title, body: n.body, actionUrl: n.actionUrl, scheduledFor, rows: [], members: [], channels: { email: false, inApp: false } }
+      groups.set(key, group)
     }
-  };
+    group.rows.push(n)
+    if (!group.members.some((m) => m.id === n.user.id)) group.members.push(n.user)
+    if (n.channel === "EMAIL") group.channels.email = true
+    else group.channels.inApp = true
+  }
+  return [...groups.values()].sort((a, b) => a.scheduledFor.getTime() - b.scheduledFor.getTime())
+}
 
-  if (notifications.length === 0) {
+function Channels({ channels }: { channels: ScheduledSend["channels"] }) {
+  return (
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {channels.inApp && (
+        <span className="flex items-center gap-1.5">
+          <Bell className="size-3.5 text-admin-subtle" aria-hidden />
+          In-app
+        </span>
+      )}
+      {channels.email && (
+        <span className="flex items-center gap-1.5">
+          <Mail className="size-3.5 text-admin-subtle" aria-hidden />
+          Email
+        </span>
+      )}
+    </span>
+  )
+}
+
+export function NotificationScheduled({ notifications }: { notifications: NotificationRow[] }) {
+  const confirm = useConfirm()
+  const [cancelled, setCancelled] = useState<Set<string>>(new Set())
+  // The send being cancelled, if any
+  const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  const sends = useMemo(() => groupSends(notifications.filter((n) => !cancelled.has(n.id))), [notifications, cancelled])
+
+  /** Cancels the rows (one per member and channel) in a single request, then reports how it went. */
+  const cancelRows = async (key: string, rows: NotificationRow[]) => {
+    setBusyKey(key)
+    try {
+      const result = await cancelScheduledNotifications(rows.map((row) => row.id))
+      if (!result.ok) {
+        toast.error(result.error)
+        return
+      }
+      setCancelled((prev) => new Set([...prev, ...rows.map((row) => row.id)]))
+      const { cancelled: done, skipped } = result.data
+      if (done === 0) toast.info("Nothing to cancel", { description: "These had already gone out or been cancelled." })
+      else if (skipped === 0) toast.success(done === 1 ? "Cancelled" : `Cancelled ${plural(done, "notification")}`)
+      else toast.warning(`Cancelled ${plural(done, "notification")}`, { description: `${plural(skipped, "notification")} had already gone out or been cancelled.` })
+    } catch (error) {
+      toast.error(unexpectedError(error, "Couldn't cancel"))
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  const cancelSend = async (send: ScheduledSend) => {
+    const ok = await confirm({
+      tone: "danger",
+      title: `Cancel "${send.title}"?`,
+      description: `It won't go to ${send.members.length === 1 ? send.members[0].displayName : plural(send.members.length, "member")} on ${centralTime(send.scheduledFor, "MMM d 'at' h:mm a")}. To send it later, compose it again.`,
+      confirmLabel: "Cancel send",
+      cancelLabel: "Keep it",
+    })
+    if (ok) await cancelRows(send.key, send.rows)
+  }
+
+  const cancelMember = async (send: ScheduledSend, member: ScheduledSend["members"][number]) => {
+    const ok = await confirm({
+      tone: "danger",
+      title: `Cancel it for ${member.displayName}?`,
+      description: `"${send.title}" still goes to everyone else.`,
+      confirmLabel: "Cancel for them",
+      cancelLabel: "Keep it",
+    })
+    if (ok) await cancelRows(send.key, send.rows.filter((row) => row.user.id === member.id))
+  }
+
+  if (sends.length === 0) {
     return (
-      <div className="border border-white/10 bg-white/[0.02] p-8 text-center">
-        <Clock className="h-12 w-12 mx-auto text-white/20 mb-4" />
-        <p className="text-white/60">No scheduled notifications</p>
-        <p className="text-sm text-white/40 mt-2">
-          Schedule notifications in the Compose tab
-        </p>
-      </div>
-    );
+      <Panel>
+        <EmptyState title="Nothing scheduled" description="Schedule a notification from the Compose tab and it waits here until it goes out." />
+      </Panel>
+    )
   }
 
   return (
-    <div className="border border-white/10 bg-white/[0.02]">
-      {/* Header */}
-      <div className="grid grid-cols-12 gap-4 px-4 py-3 border-b border-white/10 text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
-        <div className="col-span-3">User</div>
-        <div className="col-span-3">Title</div>
-        <div className="col-span-2">Channel</div>
-        <div className="col-span-3">Scheduled For</div>
-        <div className="col-span-1"></div>
-      </div>
-
-      {/* Rows */}
-      {notifications.map((notification) => (
-        <div
-          key={notification.id}
-          className="grid grid-cols-12 gap-4 px-4 py-3 items-center border-b border-white/5 last:border-b-0 hover:bg-white/[0.02]"
-        >
-          <div className="col-span-3">
-            <p className="text-sm font-medium text-white truncate">
-              {notification.user.displayName}
-            </p>
-            <p className="text-xs text-white/40 truncate">
-              {notification.user.email}
-            </p>
-          </div>
-          <div className="col-span-3">
-            <p className="text-sm text-white truncate">{notification.title}</p>
-            <p className="text-xs text-white/40 truncate">{notification.body}</p>
-          </div>
-          <div className="col-span-2">
-            {notification.channel === "EMAIL" ? (
-              <div className="flex items-center gap-1 text-white/60">
-                <Mail className="h-3 w-3" />
-                <span className="text-xs">Email</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1 text-white/60">
-                <Bell className="h-3 w-3" />
-                <span className="text-xs">In-App</span>
-              </div>
-            )}
-          </div>
-          <div className="col-span-3">
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-yellow-500" />
-              <span className="text-sm text-white">
-                {notification.scheduledFor
-                  ? format(new Date(notification.scheduledFor), "MMM d, h:mm a")
-                  : "-"}
-              </span>
-            </div>
-          </div>
-          <div className="col-span-1 flex justify-end">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => handleCancel(notification.id)}
-              disabled={cancelling === notification.id}
-              className="rounded-none hover:bg-red-500/20 hover:text-red-500 p-2"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+    <Panel className="overflow-hidden">
+      <Table minWidth={720} className="rounded-none border-0">
+        <THead>
+          <TH className="w-8">
+            <span className="sr-only">Recipients</span>
+          </TH>
+          <TH>Notification</TH>
+          <TH>Recipients</TH>
+          <TH>Channels</TH>
+          <TH>Goes out</TH>
+          <TH className="w-px">
+            <span className="sr-only">Actions</span>
+          </TH>
+        </THead>
+        <tbody>
+          {sends.map((send) => {
+            const open = expanded === send.key
+            const busy = busyKey === send.key
+            return (
+              <Fragment key={send.key}>
+                <TR selected={open} className={cn(open && "border-b-0")}>
+                  <TD className="pr-0">
+                    <button
+                      type="button"
+                      onClick={() => setExpanded(open ? null : send.key)}
+                      aria-expanded={open}
+                      aria-label={open ? "Hide recipients" : "Show recipients"}
+                      className="flex size-6 items-center justify-center rounded text-admin-subtle hover:bg-accent hover:text-foreground"
+                    >
+                      {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                    </button>
+                  </TD>
+                  <TD className="max-w-[320px]">
+                    <CellStack primary={send.title} secondary={send.body} />
+                  </TD>
+                  <TD className="max-w-[200px]">
+                    {send.members.length === 1 ? (
+                      <CellStack primary={send.members[0].displayName} secondary={send.members[0].email} />
+                    ) : (
+                      <span className="font-medium">{plural(send.members.length, "member")}</span>
+                    )}
+                  </TD>
+                  <TD>
+                    <Channels channels={send.channels} />
+                  </TD>
+                  <TD className="whitespace-nowrap">{centralTime(send.scheduledFor, "EEE, MMM d, h:mm a")}</TD>
+                  <TD className="px-2 py-1 text-right">
+                    <Button size="sm" variant="danger" onClick={() => cancelSend(send)} pending={busy} disabled={!!busyKey && !busy}>
+                      {busy ? "Cancelling" : "Cancel"}
+                    </Button>
+                  </TD>
+                </TR>
+                {open && (
+                  <tr className="border-b border-admin-row bg-admin-selected last:border-b-0">
+                    <td colSpan={6} className="px-4 pb-4 pt-1">
+                      <div className="rounded-md border bg-card sm:ml-8">
+                        {send.actionUrl && (
+                          <p className="border-b border-admin-row px-3 py-2 text-xs text-admin-subtle">
+                            Links to <span className="break-all text-foreground">{send.actionUrl}</span>
+                          </p>
+                        )}
+                        <ul className="max-h-72 overflow-y-auto">
+                          {send.members.map((member) => (
+                            <li key={member.id} className="flex items-center justify-between gap-3 border-b border-admin-row px-3 py-1.5 last:border-b-0">
+                              <CellStack primary={member.displayName} secondary={member.email} />
+                              <Button size="sm" variant="ghost" onClick={() => cancelMember(send, member)} disabled={!!busyKey}>
+                                Cancel for them
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            )
+          })}
+        </tbody>
+      </Table>
+      <TableFooter>
+        <span>
+          {plural(sends.length, "scheduled send")} · {plural(sends.reduce((sum, send) => sum + send.rows.length, 0), "notification")} in all
+        </span>
+      </TableFooter>
+    </Panel>
+  )
 }

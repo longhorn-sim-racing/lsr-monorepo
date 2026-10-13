@@ -1,112 +1,137 @@
-"use client";
+"use client"
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { savePage, type PageInput } from "@/app/admin/pages/actions";
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { ExternalLink } from "lucide-react"
+import { toast } from "sonner"
+import {
+  Badge,
+  Button,
+  Field,
+  FieldGrid,
+  FormActions,
+  Input,
+  PageHeader,
+  Panel,
+  PanelBody,
+  PanelFooter,
+  Textarea,
+  useConfirm,
+} from "@/components/admin/kit"
+import { savePage, type PageInput } from "@/app/admin/pages/actions"
+import { PAGE_PUBLIC_PATHS } from "@/app/admin/pages/_components/public-paths"
 
-// Where each known page shows up on the site.
-const PUBLIC_PATHS: Record<string, string> = {
-  "lone-star-cup-rules": "/lone-star-cup/rules",
-};
-
-const fieldClass =
-  "w-full bg-black/50 border border-white/10 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-lsr-orange transition-colors";
-const labelClass = "text-[10px] uppercase tracking-wider text-white/40";
+const MARKDOWN_HINT = "Markdown: # Heading, ## Section, - bullet, 1. numbered, **bold**, _italic_, [link](https://…), > callout. Plain Markdown only."
 
 export function PageForm({ id, initial }: { id: string | null; initial: PageInput }) {
-  const router = useRouter();
-  const [form, setForm] = useState(initial);
-  const [saving, setSaving] = useState(false);
-  const publicPath = PUBLIC_PATHS[form.slug];
+  const router = useRouter()
+  const confirm = useConfirm()
+  const [form, setForm] = useState(initial)
+  const [saving, setSaving] = useState(false)
+  const publicPath = PAGE_PUBLIC_PATHS[form.slug]
+  // The site links to these by slug, so the slug stays put (savePage refuses a change too).
+  const slugLocked = !!id && !!PAGE_PUBLIC_PATHS[initial.slug]
+  const isPublic = form.visibility === "public"
 
   async function save(visibility = form.visibility) {
-    setSaving(true);
-    let result: Awaited<ReturnType<typeof savePage>>;
+    setSaving(true)
+    let result: Awaited<ReturnType<typeof savePage>>
     try {
-      result = await savePage(id, { ...form, visibility });
+      result = await savePage(id, { ...form, visibility })
     } catch {
-      result = { ok: false, error: "Couldn't reach the server. Your text is still here; try again." };
+      result = { ok: false, error: "Couldn't reach the server. Your text is still here; try again." }
     } finally {
-      setSaving(false);
+      setSaving(false)
     }
-    if (!result.ok) return toast.error(result.error);
-    setForm((f) => ({ ...f, visibility }));
-    toast.success(visibility === "public" && form.visibility !== "public" ? "Published" : "Saved");
-    if (!id) router.replace(`/admin/pages/${result.id}`);
-    else router.refresh();
+    if (!result.ok) return toast.error(result.error)
+    setForm((f) => ({ ...f, visibility }))
+    toast.success(visibility === "public" && form.visibility !== "public" ? "Published" : visibility !== "public" && form.visibility === "public" ? "Unpublished" : "Saved")
+    if (!id) router.replace(`/admin/pages/${result.id}`)
+    else router.refresh()
+  }
+
+  async function unpublish() {
+    const ok = await confirm({
+      title: `Unpublish ${form.title || "this page"}?`,
+      description: "It disappears from the site until you publish it again. Officers can still see it.",
+      confirmLabel: "Unpublish",
+      tone: "danger",
+    })
+    if (ok) await save("officers")
   }
 
   return (
-    <div className="max-w-4xl space-y-5 font-mono text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link href="/admin/pages" className="text-xs text-white/40 hover:text-white">← Pages</Link>
-        <div className="flex items-center gap-2">
-          <span
-            className={
-              form.visibility === "public"
-                ? "rounded border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-green-400"
-                : "rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-amber-300"
-            }
-          >
-            {form.visibility === "public" ? "Public" : "Draft (officers only)"}
+    <>
+      <PageHeader
+        back={{ href: "/admin/pages", label: "Pages" }}
+        title={id ? initial.title || "Untitled page" : "New page"}
+        description={
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {isPublic ? <Badge tone="success">Public</Badge> : <Badge>Draft, officers only</Badge>}
+            {publicPath ? `Shown at ${publicPath}` : "Not shown anywhere on the site yet"}
           </span>
-          {publicPath && id && (
-            <Button asChild variant="outline" size="sm" className="h-8 border-white/10 text-xs">
-              <a href={publicPath} target="_blank" rel="noreferrer">View page</a>
+        }
+        actions={
+          publicPath && id ? (
+            <Button asChild>
+              <a href={publicPath} target="_blank" rel="noreferrer">
+                View page
+                <ExternalLink aria-hidden />
+              </a>
             </Button>
-          )}
-        </div>
-      </div>
+          ) : undefined
+        }
+      />
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label className={labelClass} htmlFor="page-title">Title</label>
-          <input id="page-title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className={fieldClass} />
-        </div>
-        <div className="space-y-1">
-          <label className={labelClass} htmlFor="page-slug">Slug</label>
-          <input
-            id="page-slug"
-            value={form.slug}
-            onChange={(e) => setForm({ ...form, slug: e.target.value })}
-            readOnly={!!id && !!PUBLIC_PATHS[initial.slug]}
-            className={`${fieldClass} read-only:opacity-60`}
-          />
-          <p className="text-[11px] text-white/30">{publicPath ? `Shown at ${publicPath}` : "Not shown anywhere on the site yet."}</p>
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <label className={labelClass} htmlFor="page-body">Content (Markdown)</label>
-        <textarea
-          id="page-body"
-          value={form.bodyMd}
-          onChange={(e) => setForm({ ...form, bodyMd: e.target.value })}
-          rows={28}
-          className={`${fieldClass} font-mono text-xs leading-relaxed`}
-        />
-        <p className="text-[11px] text-white/30">
-          # Heading, ## Section, - bullet, 1. numbered, **bold**, _italic_, [link](https://…), &gt; callout. Plain Markdown only.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap justify-end gap-2">
-        {form.visibility === "public" ? (
-          <Button variant="ghost" size="sm" disabled={saving} onClick={() => save("officers")} className="text-white/60">
-            Unpublish
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm" disabled={saving || !id} onClick={() => save("public")} className="border-green-500/30 text-green-400" title={id ? undefined : "Save it first"}>
-            Publish
-          </Button>
-        )}
-        <Button size="sm" disabled={saving} onClick={() => save()} className="bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal">
-          {saving ? "Saving..." : "Save"}
-        </Button>
-      </div>
-    </div>
-  );
+      <form
+        className="max-w-4xl"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void save()
+        }}
+      >
+        <Panel>
+          <PanelBody className="flex flex-col gap-4">
+            <FieldGrid>
+              <Field label="Title" htmlFor="page-title" required>
+                <Input id="page-title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+              </Field>
+              <Field
+                label="Slug"
+                htmlFor="page-slug"
+                hint={slugLocked ? "The site links to this page by its slug, so it can't change." : "Lowercase letters, numbers and dashes."}
+              >
+                <Input id="page-slug" value={form.slug} disabled={slugLocked} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
+              </Field>
+            </FieldGrid>
+            <Field label="Content" htmlFor="page-body" hint={MARKDOWN_HINT}>
+              <Textarea
+                id="page-body"
+                rows={28}
+                value={form.bodyMd}
+                onChange={(e) => setForm({ ...form, bodyMd: e.target.value })}
+                className="font-mono text-xs"
+              />
+            </Field>
+          </PanelBody>
+          <PanelFooter>
+            <FormActions note={isPublic ? "Saving updates the live page." : "Drafts are only visible to officers."} className="w-full">
+              {isPublic ? (
+                <Button type="button" disabled={saving} onClick={unpublish}>
+                  Unpublish
+                </Button>
+              ) : (
+                <Button type="button" disabled={saving || !id} onClick={() => save("public")} title={id ? undefined : "Save it first"}>
+                  Publish
+                </Button>
+              )}
+              <Button type="submit" variant="primary" pending={saving}>
+                Save
+              </Button>
+            </FormActions>
+          </PanelFooter>
+        </Panel>
+      </form>
+    </>
+  )
 }

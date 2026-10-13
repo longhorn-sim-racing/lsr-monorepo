@@ -1,341 +1,283 @@
-"use client";
+"use client"
 
-import { useState } from "react";
-import { format } from "date-fns";
-import { Notification } from "@prisma/client";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Fragment, useState } from "react"
+import { Bell, ChevronDown, ChevronRight, Mail, RefreshCw } from "lucide-react"
+import { toast } from "sonner"
 import {
-  ChevronDown,
-  ChevronUp,
-  Mail,
-  Bell,
-  RefreshCw,
-  Trash2,
-  Eye,
-  EyeOff,
-  Loader2,
-} from "lucide-react";
-import { retryFailedNotification, deleteNotificationAdmin, getRecentNotifications } from "../actions";
+  Badge,
+  Button,
+  CellStack,
+  DetailList,
+  EmptyState,
+  Panel,
+  RowActions,
+  RowMenu,
+  Table,
+  TableFooter,
+  TD,
+  TH,
+  THead,
+  ToneText,
+  TR,
+  useConfirm,
+} from "@/components/admin/kit"
+import { unexpectedError } from "@/lib/action-result"
+import { cn } from "@/lib/utils"
+import { retryFailedNotification, deleteNotificationAdmin, getRecentNotifications } from "../actions"
+import { centralTime, STATUS, typeLabel, type NotificationRow } from "./format"
 
-type NotificationWithUser = Notification & {
-  user: { id: string; displayName: string; email: string };
-};
+const PAGE_SIZE = 20
 
-export function NotificationActivity({
-  notifications: initialNotifications,
-}: {
-  notifications: NotificationWithUser[];
-}) {
-  const [items, setItems] = useState<NotificationWithUser[]>(initialNotifications);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [retrying, setRetrying] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(initialNotifications.length >= 20);
+function StatusBadge({ notification }: { notification: NotificationRow }) {
+  if (notification.status === "PENDING" && notification.scheduledFor && new Date(notification.scheduledFor) > new Date()) {
+    return <Badge tone="info">Scheduled</Badge>
+  }
+  const { label, tone } = STATUS[notification.status]
+  return <Badge tone={tone}>{label}</Badge>
+}
+
+function Channel({ notification }: { notification: NotificationRow }) {
+  if (notification.channel === "EMAIL") {
+    return (
+      <span className="flex items-center gap-1.5">
+        <Mail className="size-3.5 text-admin-subtle" aria-hidden />
+        Email
+      </span>
+    )
+  }
+  return (
+    <span className="flex flex-col">
+      <span className="flex items-center gap-1.5">
+        <Bell className="size-3.5 text-admin-subtle" aria-hidden />
+        In-app
+      </span>
+      <ToneText tone={notification.dismissedAt ? "warning" : notification.readAt ? "success" : "neutral"} className="font-medium">
+        {notification.dismissedAt ? "Dismissed" : notification.readAt ? "Read" : "Unread"}
+      </ToneText>
+    </span>
+  )
+}
+
+function Details({ notification }: { notification: NotificationRow }) {
+  const items: { label: React.ReactNode; value: React.ReactNode }[] = [
+    { label: "Title", value: <span className="font-medium">{notification.title}</span> },
+    { label: "Message", value: <span className="whitespace-pre-wrap">{notification.body}</span> },
+  ]
+  if (notification.actionUrl) {
+    items.push({
+      label: "Link",
+      value: (
+        <a href={notification.actionUrl} target="_blank" rel="noreferrer" className="break-all text-tone-info-foreground hover:underline">
+          {notification.actionUrl}
+        </a>
+      ),
+    })
+  }
+  items.push({ label: "Type", value: typeLabel(notification.type) })
+  items.push({ label: "Member", value: `${notification.user.displayName} · ${notification.user.email}` })
+  items.push({ label: "Created", value: centralTime(notification.createdAt, "MMM d, yyyy, h:mm a") })
+  if (notification.scheduledFor) items.push({ label: "Scheduled for", value: centralTime(notification.scheduledFor, "MMM d, yyyy, h:mm a") })
+  if (notification.sentAt) items.push({ label: "Sent", value: centralTime(notification.sentAt, "MMM d, yyyy, h:mm a") })
+  if (notification.channel === "IN_APP") {
+    items.push({ label: "Read", value: notification.readAt ? centralTime(notification.readAt, "MMM d, yyyy, h:mm a") : "Not yet" })
+    items.push({ label: "Dismissed", value: notification.dismissedAt ? centralTime(notification.dismissedAt, "MMM d, yyyy, h:mm a") : "No" })
+  }
+  if (notification.emailError) {
+    items.push({ label: "Error", value: <span className="break-words text-tone-danger-foreground">{notification.emailError}</span> })
+  }
+  return <DetailList items={items} />
+}
+
+export function NotificationActivity({ notifications: initial, total }: { notifications: NotificationRow[]; total: number }) {
+  const confirm = useConfirm()
+  // The list starts from the server's first page; it's replaced when the page re-renders after an action
+  const [source, setSource] = useState(initial)
+  const [items, setItems] = useState(initial)
+  const [hasMore, setHasMore] = useState(initial.length >= PAGE_SIZE)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+
+  if (source !== initial) {
+    setSource(initial)
+    setItems(initial)
+    setHasMore(initial.length >= PAGE_SIZE)
+  }
 
   const loadMore = async () => {
-    setIsLoadingMore(true);
+    setIsLoadingMore(true)
     try {
-      const newItems = await getRecentNotifications(20, items.length);
-      if (newItems.length < 20) {
-        setHasMore(false);
-      }
-      setItems((prev) => [...prev, ...newItems]);
+      const newItems = await getRecentNotifications(PAGE_SIZE, items.length)
+      if (newItems.length < PAGE_SIZE) setHasMore(false)
+      setItems((prev) => [...prev, ...newItems.filter((n) => !prev.some((p) => p.id === n.id))])
     } catch (error) {
-      console.error("Failed to load more notifications", error);
+      toast.error(unexpectedError(error, "Couldn't load more notifications"))
     } finally {
-      setIsLoadingMore(false);
+      setIsLoadingMore(false)
     }
-  };
+  }
 
-  const handleRetry = async (id: string) => {
-    setRetrying(id);
+  const retry = async (notification: NotificationRow) => {
+    setBusyId(notification.id)
     try {
-      await retryFailedNotification(id);
+      await retryFailedNotification(notification.id)
+      // Reload what's on screen so the new status shows
+      const fresh = await getRecentNotifications(Math.max(items.length, PAGE_SIZE), 0)
+      setItems(fresh)
+      const after = fresh.find((n) => n.id === notification.id)
+      if (after?.status === "FAILED") toast.error("It failed again. Check the error below.")
+      else toast.success("Retried")
+    } catch (error) {
+      toast.error(unexpectedError(error, "Couldn't retry the notification"))
     } finally {
-      setRetrying(null);
+      setBusyId(null)
     }
-  };
+  }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this notification?")) return;
-    setDeleting(id);
+  const remove = async (notification: NotificationRow) => {
+    setBusyId(notification.id)
     try {
-      await deleteNotificationAdmin(id);
-      setItems((prev) => prev.filter((n) => n.id !== id));
+      await deleteNotificationAdmin(notification.id)
+      setItems((prev) => prev.filter((n) => n.id !== notification.id))
+      toast.success("Notification deleted")
+    } catch (error) {
+      toast.error(unexpectedError(error, "Couldn't delete the notification"))
     } finally {
-      setDeleting(null);
+      setBusyId(null)
     }
-  };
+  }
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "SENT":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-green-500/10 text-green-500 border-green-500/30 rounded-none"
-          >
-            Sent
-          </Badge>
-        );
-      case "FAILED":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-red-500/10 text-red-500 border-red-500/30 rounded-none"
-          >
-            Failed
-          </Badge>
-        );
-      case "PENDING":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-yellow-500/10 text-yellow-500 border-yellow-500/30 rounded-none"
-          >
-            Pending
-          </Badge>
-        );
-      case "CANCELLED":
-        return (
-          <Badge
-            variant="outline"
-            className="bg-white/10 text-white/50 border-white/20 rounded-none"
-          >
-            Cancelled
-          </Badge>
-        );
-      default:
-        return null;
-    }
-  };
+  const confirmRemove = async (notification: NotificationRow) => {
+    const ok = await confirm({
+      tone: "danger",
+      title: "Delete this notification?",
+      description: `It's removed for ${notification.user.displayName} too, if it's an in-app one. This can't be undone.`,
+    })
+    if (ok) await remove(notification)
+  }
 
   if (items.length === 0) {
     return (
-      <div className="border border-white/10 bg-white/[0.02] p-8 text-center">
-        <Bell className="h-12 w-12 mx-auto text-white/20 mb-4" />
-        <p className="text-white/60">No notifications yet</p>
-      </div>
-    );
+      <Panel>
+        <EmptyState title="No notifications yet" description="Registrations, results and announcements you send from Compose show up here." />
+      </Panel>
+    )
   }
 
   return (
-    <div className="space-y-4">
-      <div className="border border-white/10 bg-white/[0.02]">
-        {/* Header */}
-        <div className="grid grid-cols-12 gap-4 px-4 py-3 border-b border-white/10 text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
-          <div className="col-span-3">User</div>
-          <div className="col-span-2">Type</div>
-          <div className="col-span-2">Channel</div>
-          <div className="col-span-2">Status</div>
-          <div className="col-span-2">Time</div>
-          <div className="col-span-1"></div>
-        </div>
-
-        {/* Rows */}
-        {items.map((notification) => (
-          <div key={notification.id} className="border-b border-white/5 last:border-b-0">
-            <div
-              className="grid grid-cols-12 gap-4 px-4 py-3 items-center hover:bg-white/[0.02] cursor-pointer"
-              onClick={() =>
-                setExpandedId(expandedId === notification.id ? null : notification.id)
-              }
-            >
-              <div className="col-span-3">
-                <p className="text-sm font-medium text-white truncate">
-                  {notification.user.displayName}
-                </p>
-                <p className="text-xs text-white/40 truncate">
-                  {notification.user.email}
-                </p>
-              </div>
-              <div className="col-span-2">
-                <span className="text-xs font-mono text-white/60">
-                  {notification.type}
-                </span>
-              </div>
-              <div className="col-span-2">
-                {notification.channel === "EMAIL" ? (
-                  <div className="flex items-center gap-1 text-white/60">
-                    <Mail className="h-3 w-3" />
-                    <span className="text-xs">Email</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1 text-white/60">
-                      <Bell className="h-3 w-3" />
-                      <span className="text-xs">In-App</span>
-                    </div>
-                    <span title={notification.readAt ? "Read" : "Unread"}>
-                      {notification.readAt ? (
-                        <Eye className="h-3 w-3 text-green-500" />
-                      ) : (
-                        <EyeOff className="h-3 w-3 text-white/30" />
-                      )}
-                    </span>
-                    {notification.dismissedAt && (
-                      <span title="Dismissed by user">
-                        <Trash2 className="h-3 w-3 text-yellow-500" />
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-              <div className="col-span-2">{getStatusBadge(notification.status)}</div>
-              <div className="col-span-2">
-                <span className="text-xs text-white/40">
-                  {format(new Date(notification.createdAt), "MMM d, h:mm a")}
-                </span>
-              </div>
-              <div className="col-span-1 flex justify-end">
-                {expandedId === notification.id ? (
-                  <ChevronUp className="h-4 w-4 text-white/40" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-white/40" />
-                )}
-              </div>
-            </div>
-
-            {/* Expanded content */}
-            {expandedId === notification.id && (
-              <div className="px-4 py-4 bg-white/[0.02] border-t border-white/5">
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 mb-1">
-                      Title
-                    </p>
-                    <p className="text-sm text-white">{notification.title}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 mb-1">
-                      Body
-                    </p>
-                    <p className="text-sm text-white/70">{notification.body}</p>
-                  </div>
-                  {notification.actionUrl && (
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 mb-1">
-                        Action URL
-                      </p>
-                      <p className="text-sm text-lsr-orange">{notification.actionUrl}</p>
-                    </div>
-                  )}
-                  {notification.emailError && (
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-red-500 mb-1">
-                        Error
-                      </p>
-                      <p className="text-sm text-red-400 font-mono">
-                        {notification.emailError}
-                      </p>
-                    </div>
-                  )}
-                  {notification.channel === "IN_APP" && (
-                    <div className="grid grid-cols-2 gap-4 p-3 bg-white/[0.02] border border-white/5">
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 mb-1">
-                          Read Status
-                        </p>
-                        <div className="flex items-center gap-2">
-                          {notification.readAt ? (
-                            <>
-                              <Eye className="h-4 w-4 text-green-500" />
-                              <span className="text-sm text-green-500">
-                                Read {format(new Date(notification.readAt), "MMM d, h:mm a")}
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <EyeOff className="h-4 w-4 text-white/40" />
-                              <span className="text-sm text-white/40">Unread</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 mb-1">
-                          Dismissed
-                        </p>
-                        <div className="flex items-center gap-2">
-                          {notification.dismissedAt ? (
-                            <>
-                              <Trash2 className="h-4 w-4 text-yellow-500" />
-                              <span className="text-sm text-yellow-500">
-                                Dismissed {format(new Date(notification.dismissedAt), "MMM d, h:mm a")}
-                              </span>
-                            </>
-                          ) : (
-                            <span className="text-sm text-white/40">Not dismissed</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2">
-                    {notification.status === "FAILED" && (
-                      <Button
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRetry(notification.id);
-                        }}
-                        disabled={retrying === notification.id}
-                        className="rounded-none bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal text-[10px] uppercase tracking-widest"
-                      >
-                        {retrying === notification.id ? (
-                          <RefreshCw className="h-3 w-3 animate-spin mr-2" />
-                        ) : (
-                          <RefreshCw className="h-3 w-3 mr-2" />
-                        )}
-                        Retry
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(notification.id);
-                      }}
-                      disabled={deleting === notification.id}
-                      className="rounded-none text-white/50 hover:text-red-500 hover:bg-red-500/10 text-[10px] uppercase tracking-widest"
+    <Panel className="overflow-hidden">
+      <Table minWidth={760} className="rounded-none border-0">
+        <THead>
+          <TH className="w-8">
+            <span className="sr-only">Details</span>
+          </TH>
+          <TH>Member</TH>
+          <TH>Notification</TH>
+          <TH>Channel</TH>
+          <TH>Status</TH>
+          <TH>Created</TH>
+          <TH className="w-px">
+            <span className="sr-only">Actions</span>
+          </TH>
+        </THead>
+        <tbody>
+          {items.map((notification) => {
+            const expanded = expandedId === notification.id
+            const toggle = () => setExpandedId(expanded ? null : notification.id)
+            return (
+              <Fragment key={notification.id}>
+                <TR
+                  selected={expanded}
+                  className={cn("cursor-pointer hover:bg-admin-surface", expanded && "border-b-0")}
+                  onClick={(event) => {
+                    if ((event.target as HTMLElement).closest("a, button, [role=menuitem]")) return
+                    toggle()
+                  }}
+                >
+                  <TD className="pr-0">
+                    <button
+                      type="button"
+                      onClick={toggle}
+                      aria-expanded={expanded}
+                      aria-label={expanded ? "Hide details" : "Show details"}
+                      className="flex size-6 items-center justify-center rounded text-admin-subtle hover:bg-accent hover:text-foreground"
                     >
-                      {deleting === notification.id ? (
-                        <Trash2 className="h-3 w-3 animate-pulse mr-2" />
-                      ) : (
-                        <Trash2 className="h-3 w-3 mr-2" />
-                      )}
-                      Delete
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {hasMore && (
-        <div className="flex justify-center">
-          <Button
-            variant="outline"
-            onClick={loadMore}
-            disabled={isLoadingMore}
-            className="rounded-none border-white/10 text-white hover:bg-white hover:text-lsr-charcoal uppercase tracking-widest text-xs"
-          >
-            {isLoadingMore ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Loading...
-              </>
-            ) : (
-              "Load More"
-            )}
+                      {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                    </button>
+                  </TD>
+                  <TD className="max-w-[220px]">
+                    <CellStack primary={notification.user.displayName} secondary={notification.user.email} />
+                  </TD>
+                  <TD className="max-w-[280px]">
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate">{notification.title}</span>
+                      <span className="truncate text-xs text-admin-subtle">{typeLabel(notification.type)}</span>
+                    </span>
+                  </TD>
+                  <TD>
+                    <Channel notification={notification} />
+                  </TD>
+                  <TD>
+                    <StatusBadge notification={notification} />
+                  </TD>
+                  <TD className="whitespace-nowrap text-muted-foreground">{centralTime(notification.createdAt)}</TD>
+                  <TD className="px-2 py-1">
+                    <RowActions>
+                      <RowMenu
+                        label={`Actions for the notification to ${notification.user.displayName}`}
+                        items={[
+                          ...(notification.status === "FAILED"
+                            ? [{ label: "Retry", onSelect: () => retry(notification), disabled: busyId === notification.id }, "separator" as const]
+                            : []),
+                          {
+                            label: "Delete",
+                            disabled: busyId === notification.id,
+                            destructive: {
+                              title: "Delete this notification?",
+                              description: `It's removed for ${notification.user.displayName} too, if it's an in-app one. This can't be undone.`,
+                            },
+                            onSelect: () => remove(notification),
+                          },
+                        ]}
+                      />
+                    </RowActions>
+                  </TD>
+                </TR>
+                {expanded && (
+                  <tr className="border-b border-admin-row bg-admin-selected last:border-b-0">
+                    <td colSpan={7} className="px-4 pb-4 pt-1">
+                      <div className="flex flex-col gap-3 rounded-md border bg-card p-3.5 sm:ml-8">
+                        <Details notification={notification} />
+                        <div className="flex flex-wrap gap-2">
+                          {notification.status === "FAILED" && (
+                            <Button size="sm" onClick={() => retry(notification)} pending={busyId === notification.id}>
+                              {busyId !== notification.id && <RefreshCw aria-hidden />}
+                              Retry
+                            </Button>
+                          )}
+                          <Button size="sm" variant="danger" onClick={() => confirmRemove(notification)} disabled={busyId === notification.id}>
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            )
+          })}
+        </tbody>
+      </Table>
+      <TableFooter>
+        <span>
+          Showing {items.length.toLocaleString()} of {Math.max(total, items.length).toLocaleString()}, newest first
+        </span>
+        {hasMore && (
+          <Button size="sm" onClick={loadMore} pending={isLoadingMore}>
+            Load more
           </Button>
-        </div>
-      )}
-    </div>
-  );
+        )}
+      </TableFooter>
+    </Panel>
+  )
 }

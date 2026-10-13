@@ -31,21 +31,3 @@ export async function updateDriverMapping(id: string, userId: string | null) {
 
   revalidatePath("/admin/drivers");
 }
-
-export async function searchUsers(query: string) {
-    await requireOfficer();
-
-    if (!query || query.length < 2) return [];
-
-    return prisma.user.findMany({
-        where: {
-            OR: [
-                { displayName: { contains: query, mode: "insensitive" } },
-                { email: { contains: query, mode: "insensitive" } },
-                { handle: { contains: query, mode: "insensitive" } }
-            ]
-        },
-        take: 10,
-        select: { id: true, displayName: true, email: true, handle: true, avatarUrl: true }
-    });
-}

@@ -2,11 +2,34 @@
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
-@custom-variant dark (&:is(.dark *));
+/* The public site is always dark; the admin console (.admin-light) is light, so dark: styles stop at it. */
+@custom-variant dark (&:is(.dark *):not(html:has(.admin-light) *));
 
 @theme inline {
   --color-lsr-orange: #FF8000;
   --color-lsr-charcoal: #1B1B1B;
+  --color-admin-subtle: var(--admin-subtle);
+  --color-admin-surface: var(--admin-surface);
+  --color-admin-row: var(--admin-row);
+  --color-admin-selected: var(--admin-selected);
+  --color-admin-nav: var(--admin-nav);
+  --color-admin-nav-foreground: var(--admin-nav-foreground);
+  --color-admin-nav-muted: var(--admin-nav-muted);
+  --color-admin-nav-active: var(--admin-nav-active);
+  --color-admin-nav-border: var(--admin-nav-border);
+  --color-admin-nav-input: var(--admin-nav-input);
+  --color-tone-neutral: var(--tone-neutral);
+  --color-tone-neutral-foreground: var(--tone-neutral-foreground);
+  --color-tone-success: var(--tone-success);
+  --color-tone-success-foreground: var(--tone-success-foreground);
+  --color-tone-warning: var(--tone-warning);
+  --color-tone-warning-foreground: var(--tone-warning-foreground);
+  --color-tone-danger: var(--tone-danger);
+  --color-tone-danger-foreground: var(--tone-danger-foreground);
+  --color-tone-info: var(--tone-info);
+  --color-tone-info-foreground: var(--tone-info-foreground);
+  --color-tone-accent: var(--tone-accent);
+  --color-tone-accent-foreground: var(--tone-accent-foreground);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
@@ -115,6 +138,55 @@
   --sidebar-ring: #FF8000;
 }
 
+/*
+ * Admin console theme. It applies to the whole document while an admin page is mounted, so dialogs and
+ * menus that portal to <body> match. A dark admin theme can later be a second block like this one.
+ */
+html:has(.admin-light) {
+  color-scheme: light !important; /* the root layout sets color-scheme: dark inline */
+  --radius: 0.5rem;
+  --background: #F6F3EE;
+  --foreground: #1C1917;
+  --card: #FFFFFF;
+  --card-foreground: #1C1917;
+  --popover: #FFFFFF;
+  --popover-foreground: #1C1917;
+  --primary: #FF8000;
+  --primary-foreground: #1C1917;
+  --secondary: #F5F5F4;
+  --secondary-foreground: #1C1917;
+  --muted: #F0EBE3;
+  --muted-foreground: #57534E;
+  --accent: #F5F1EB;
+  --accent-foreground: #1C1917;
+  --destructive: #B91C1C;
+  --border: #E7E1D8;
+  --input: #D6CFC4;
+  --ring: #FF8000;
+  --admin-subtle: #78716C;
+  --admin-surface: #FAF8F5;
+  --admin-row: #F0EBE3;
+  --admin-selected: #FFF8F0;
+  --admin-nav: #1C1917;
+  --admin-nav-foreground: #D6D3D1;
+  --admin-nav-muted: #A8A29E;
+  --admin-nav-active: #2C2724;
+  --admin-nav-border: #34302D;
+  --admin-nav-input: #26221F;
+  --tone-neutral: #F5F5F4;
+  --tone-neutral-foreground: #44403C;
+  --tone-success: #ECFDF5;
+  --tone-success-foreground: #047857;
+  --tone-warning: #FFF7ED;
+  --tone-warning-foreground: #C2410C;
+  --tone-danger: #FEF2F2;
+  --tone-danger-foreground: #B91C1C;
+  --tone-info: #EFF6FF;
+  --tone-info-foreground: #1D4ED8;
+  --tone-accent: #FFF1E3;
+  --tone-accent-foreground: #9A3412;
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;
@@ -185,5 +257,28 @@
   * {
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.1) rgba(255, 255, 255, 0.02);
+  }
+
+  /* The light admin console needs a dark thumb, or its scrollbars disappear */
+  html:has(.admin-light) ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  html:has(.admin-light) ::-webkit-scrollbar-thumb {
+    background: #D6CFC4;
+    border-radius: 4px !important;
+  }
+  html:has(.admin-light) ::-webkit-scrollbar-thumb:hover {
+    background: #A8A29E;
+  }
+  html:has(.admin-light),
+  html:has(.admin-light) * {
+    scrollbar-color: #D6CFC4 transparent;
+  }
+  html:has(.admin-light) .admin-nav-scroll,
+  html:has(.admin-light) .admin-nav-scroll * {
+    scrollbar-color: #3D3835 transparent;
+  }
+  html:has(.admin-light) .admin-nav-scroll::-webkit-scrollbar-thumb {
+    background: #3D3835;
   }
 }
