@@ -264,6 +264,9 @@ const CENTRAL_ZONE = String.raw`(?:America\/Chicago|US\/Central|CST6CDT|CST|CDT)
  * format string comes next) comes out as something else, so it doesn't count. timezone('America/Chicago', x)
  * is the same conversion as a function
  */
+/** Any conversion to Central at all, used or not */
+const MENTIONS_CENTRAL = new RegExp(String.raw`AT\s+TIME\s+ZONE\s+'${CENTRAL_ZONE}'|\btimezone\s*\(\s*'${CENTRAL_ZONE}'`, "i")
+
 const CONVERTS_TO_CENTRAL = new RegExp(
   String.raw`AT\s+TIME\s+ZONE\s+'${CENTRAL_ZONE}'(?!\s*\)*\s*(?:::\s*(?:date|text)|,\s*'|[<>=!]|BETWEEN\b|IN\b))|\btimezone\s*\(\s*'${CENTRAL_ZONE}'`,
   "i",
@@ -342,6 +345,13 @@ export function shapeSqlResult(sql: string, raw: Record<string, unknown>[], ms: 
 
   const notes: string[] = []
   if (truncated) notes.push(`More than ${MAX_SQL_ROWS} rows matched; only the first ${MAX_SQL_ROWS} came back. Aggregate, or ORDER BY and LIMIT.`)
+  // Every stored time is a UTC timestamp, so a date or a time of day comes from a cast: in UTC unless the
+  // query converted to Central first
+  if (columnKinds.some((k) => k === "date" || k === "time") && !MENTIONS_CENTRAL.test(sql)) {
+    notes.push(
+      "The dates or times of day here were cut from stored UTC times without converting to Central, so they're UTC (an evening event can land on the next day). Convert first: (col AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::date or ::time.",
+    )
+  }
   if (columnKinds.some((k) => k === "timestamp" || k === "timestamptz")) {
     notes.push(
       CONVERTS_TO_CENTRAL.test(sql)
@@ -399,7 +409,7 @@ export const runSqlTool: JackTool<z.infer<typeof input>> = {
     "Run one read-only SQL query (PostgreSQL) on the club database and get the rows back as JSON.",
     "Use it for questions the typed tools don't answer, or to dig deeper. Call describe_schema first if you haven't seen the tables.",
     'Rules: a single SELECT or WITH … SELECT; tables and columns are case-sensitive and must be double-quoted ("User"."displayName").',
-    "Times are stored in UTC. run_sql shows each column that is a time in Central time with the weekday (and dates with their weekday), so select times as their own columns, as stored, and don't convert them in SELECT. Times inside text, JSON or arrays come back as stored (UTC). To group or filter by Central day, week or month, convert inside the expression and cast the bucket to date: date_trunc('week', col AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::date.",
+    "Times are stored in UTC. run_sql shows each timestamp column in Central time with the weekday, so select timestamps as their own columns, as stored, and don't convert them in SELECT. Times inside text, JSON or arrays come back as stored (UTC). A ::date or ::time of a stored column is its UTC date or time: to group or filter by Central day, week or month, or to show a time of day, convert first and cast: (col AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::date (or ::time, or date_trunc('week', …)::date). Dates come back with their weekday.",
     `At most ${MAX_SQL_ROWS} rows come back, and long results are trimmed: aggregate (COUNT, SUM, GROUP BY) rather than listing when you can.`,
     `Queries stop after ${STATEMENT_TIMEOUT}. Duplicate column names collapse, so alias them. Cast unusual types (interval, regclass, point) to text.`,
     "Money is stored in cents (amountCents): divide by 100 for dollars. The room sees the SQL and a table of the rows.",

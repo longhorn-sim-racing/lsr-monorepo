@@ -70,7 +70,7 @@ export function rankActivity<T extends ActivityCounts & { name: string }>(rows: 
 
 const input = z.object({
   from: centralDateInput.optional().describe("First Central date counted (default: all time)"),
-  to: centralDateInput.optional().describe("Last Central date counted (default: today)"),
+  to: centralDateInput.optional().describe("Last Central date counted (default: no end, so registrations for upcoming events count)"),
   sortBy: z.enum(["total", "registrations", "checkIns", "races"]).default("total").describe("What to rank by; total adds the three counts"),
   limit: z.number().int().min(1).max(200).default(15).describe("How many members to list"),
 })
@@ -123,7 +123,7 @@ export const memberActivityTool: JackTool<z.infer<typeof input>> = {
                 { header: "Races", value: (r) => r.races },
                 { header: "Total", value: (r) => r.total },
               ],
-              `Ranked by ${sortBy === "checkIns" ? "check-ins" : sortBy}${from || to ? `, ${from ?? "start"} to ${to ?? "today"}` : ", all time"}`,
+              `Ranked by ${sortBy === "checkIns" ? "check-ins" : sortBy}${from || to ? `, ${from ?? "the start"} to ${to ?? "no end"}` : ", all time"}`,
             ),
           ]
         : [{ kind: "note", text: "No registrations, check-ins or races in that window." }],

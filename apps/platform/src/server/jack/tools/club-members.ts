@@ -129,16 +129,23 @@ export const clubMembersTool: JackTool<z.infer<typeof input>> = {
     const newestList = newestRows.map((u) => ({ name: u.displayName, handle: u.handle, email: u.email, eid: u.eid, status: u.status, joined: ct(u.createdAt) }))
     const people = roster === "none" ? null : await buildRoster(roster, { joinedFrom, joinedTo, now })
     if (people && "error" in people) return { isError: true, forModel: people.error, label: "Members lookup failed", displays: [] }
-    // A roster goes first and takes the room it needs; the newest-members list would only repeat it
+    // A roster goes first and takes the room it needs. An unfiltered member roster already holds the
+    // newest members, so that list is left out then (and the result says so)
+    const wholeClub = roster === "members" && !joinedFrom && !joinedTo
     const lists: ModelList[] = [
-      ...(people ? [{ key: "roster", items: people.rows, whenTrimmed: "Ask again with joinedFrom and joinedTo to get the rest, a few months at a time." }] : []),
-      ...(people ? [] : [{ key: "newest", items: newestList }]),
+      ...(people
+        ? [{ key: "roster", items: people.rows, ...(roster === "members" ? { whenTrimmed: "Ask again with joinedFrom and joinedTo to get the rest, a few months at a time." } : {}) }]
+        : []),
+      ...(wholeClub ? [] : [{ key: "newest", items: newestList }]),
       { key: "signupPeriods", items: signups, keep: "last" as const },
     ]
 
     return {
       // A roster first, then the newest members (at most 50); a long signup range keeps its most recent periods
-      forModel: forModelWithLists(people ? { ...result, rosterDefinitions: people.note } : result, lists),
+      forModel: forModelWithLists(
+        people ? { ...result, rosterDefinitions: people.note, ...(wholeClub ? { newest: "left out: the roster has everyone, oldest first" } : {}) } : result,
+        lists,
+      ),
       label: people
         ? `Listed ${roster === "officers" ? plural(people.rows.length, "officer") : plural(people.rows.length, "member")}`
         : `Looked up members (${plural(members.length, "member")}, ${joined.length} joined since ${start})`,
@@ -157,7 +164,7 @@ export const clubMembersTool: JackTool<z.infer<typeof input>> = {
 type Roster = { rows: Record<string, unknown>[]; note: string; display: JackToolDisplay }
 
 /** Said with every roster: the room has the table, the reply has the point */
-const SUMMARIZE = "The room shows the whole list as a table, so don't repeat its rows in your reply: summarize, and name people only when asked who (up to about 20)."
+const SUMMARIZE = "The room shows the whole list as a table, so don't repeat its rows in your reply: summarize, and name people when asked which people or who (up to about 20)."
 
 /** A roster row without its empty fields: null, an empty list, zero */
 export function compactRow(row: Record<string, unknown>): Record<string, unknown> {
@@ -227,7 +234,7 @@ async function buildRoster(
     rows: rows.map(compactRow),
     note:
       `Every member${joinedFrom || joinedTo ? ` who joined ${joinedFrom ?? "any time"} to ${joinedTo ?? "now"} (Central)` : ""}, oldest account first. ` +
-      `A field that's left out is empty or zero. joined = Central date the account was made; eventsRegistered = REGISTERED seats (all time); checkIns = event check-ins; racesDriven = race sessions with a linked result; ` +
+      `A field that's left out is empty or zero. joined = Central date the account was made; eventsRegistered = REGISTERED seats on events that weren't cancelled (all time); checkIns = event check-ins; racesDriven = race sessions with a linked result; ` +
       `lsc = entry status for ${season.ok ? season.season.name : "the open LSC season"} (paid, manual, ended, form only; left out = no form); paidDollars = succeeded payments, all time. ${SUMMARIZE}`,
     display: tableDisplay(rows, [
       { header: "Member", value: (r) => r.name },

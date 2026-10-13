@@ -236,7 +236,7 @@ async function runUnpaidCheckouts({ from, to, now }: { from?: string; to?: strin
   }))
   const people = new Set(open.map((p) => p.userId)).size
   const result = {
-    window: range?.ok ? { from: range.from, to: range.to, timeZone: "America/Chicago" } : "all time",
+    window: range?.ok ? { from: from ?? "the start", to: range.to, timeZone: "America/Chicago" } : "all time",
     definition: "Started a checkout (pending or failed) for an item and has no successful payment for that same item, at any time. One row per person and item.",
     people,
     checkouts: rows,

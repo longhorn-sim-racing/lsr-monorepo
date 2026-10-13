@@ -174,7 +174,7 @@ describe("times in run_sql results", () => {
   it("gives the model Central times with the weekday and dates as dates, and the room UTC ISO", () => {
     // A 7 PM CDT event starts at midnight UTC: it must not be mistaken for a date
     const result = shapeSqlResult(
-      'SELECT "startsAtUtc", day FROM x',
+      "SELECT \"startsAtUtc\", (\"startsAtUtc\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::date AS day FROM x",
       [row({ startsAtUtc: new Date("2026-10-10T00:00:00Z"), day: new Date("2026-10-09T00:00:00Z") }, { startsAtUtc: "2026-10-10T00:00:00", day: "2026-10-09" })],
       4,
     )
@@ -221,6 +221,17 @@ describe("times in run_sql results", () => {
       const result = shapeSqlResult(sql, [row({ at: new Date("2026-10-09T16:49:00Z") }, { at: "2026-10-09T16:49:00" })], 4)
       expect(JSON.parse(result.forModel).note, sql).toContain("This query converts times with AT TIME ZONE")
     }
+  })
+
+  it("says a date or time of day cut from a stored time without converting is UTC", () => {
+    const stored = shapeSqlResult('SELECT "startsAtUtc"::time AS starts FROM x', [row({ starts: new Date("1970-01-01T15:00:00Z") }, { starts: "15:00:00" })], 2)
+    expect(JSON.parse(stored.forModel).note).toContain("so they're UTC")
+    const converted = shapeSqlResult(
+      "SELECT (\"startsAtUtc\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::time AS starts FROM x",
+      [row({ starts: new Date("1970-01-01T10:00:00Z") }, { starts: "10:00:00" })],
+      2,
+    )
+    expect(JSON.parse(converted.forModel).note).toBeUndefined()
   })
 
   it("treats a Date as a stored UTC time when the row's JSON isn't there", () => {
