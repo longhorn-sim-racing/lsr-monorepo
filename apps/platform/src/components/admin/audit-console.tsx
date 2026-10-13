@@ -88,6 +88,11 @@ export function AuditConsole({ actionTypes, entityTypes, initialEntry }: { actio
   const nextPage = useRef(2)
   // Ignores answers to requests that a newer search or filter replaced
   const latestReset = useRef(0)
+  // The loaded rows as of the last render, for the live tail to compare against outside a state updater
+  const logsRef = useRef<AuditEntry[]>([])
+  useEffect(() => {
+    logsRef.current = logs
+  }, [logs])
 
   const query = useCallback(
     (page: number) => {
@@ -165,21 +170,22 @@ export function AuditConsole({ actionTypes, entityTypes, initialEntry }: { actio
       try {
         const data = await fetchPage(1)
         if (ticket !== latestReset.current) return
-        let replaced = false
-        setLogs((prev) => {
-          const seen = new Set(prev.map((log) => log.id))
-          const fresh = data.items.filter((log) => !seen.has(log.id))
+        const loaded = logsRef.current
+        const seen = new Set(loaded.map((log) => log.id))
+        const fresh = data.items.filter((log) => !seen.has(log.id))
+        if (loaded.length && fresh.length === data.items.length && data.items.length === PAGE_SIZE) {
           // More than a page arrived since the last check (e.g. the tab was hidden): adding them on top would
-          // leave a gap below them, so start over from the newest page
-          if (prev.length && fresh.length === data.items.length && data.items.length === PAGE_SIZE) {
-            replaced = true
-            return data.items
-          }
-          return fresh.length ? [...fresh, ...prev] : prev
-        })
-        if (replaced) {
+          // leave a gap below them, so start over from the newest page, and drop any load-more in flight
+          ++latestReset.current
           nextPage.current = 2
+          setLogs(data.items)
           setHasMore(true)
+          setLoading(false)
+        } else if (fresh.length) {
+          setLogs((prev) => {
+            const have = new Set(prev.map((log) => log.id))
+            return [...fresh.filter((log) => !have.has(log.id)), ...prev]
+          })
         }
         setTotal(data.total)
         setError(null)

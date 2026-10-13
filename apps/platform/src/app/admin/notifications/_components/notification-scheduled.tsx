@@ -62,14 +62,15 @@ function Channels({ channels }: { channels: ScheduledSend["channels"] }) {
 export function NotificationScheduled({ notifications }: { notifications: NotificationRow[] }) {
   const confirm = useConfirm()
   const [cancelled, setCancelled] = useState<Set<string>>(new Set())
-  const [progress, setProgress] = useState<{ key: string; done: number; total: number } | null>(null)
+  // The send being cancelled, if any
+  const [busyKey, setBusyKey] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
 
   const sends = useMemo(() => groupSends(notifications.filter((n) => !cancelled.has(n.id))), [notifications, cancelled])
 
   /** Cancels the rows (one per member and channel) in a single request, then reports how it went. */
   const cancelRows = async (key: string, rows: NotificationRow[]) => {
-    setProgress({ key, done: 0, total: rows.length })
+    setBusyKey(key)
     try {
       const result = await cancelScheduledNotifications(rows.map((row) => row.id))
       if (!result.ok) {
@@ -77,13 +78,14 @@ export function NotificationScheduled({ notifications }: { notifications: Notifi
         return
       }
       setCancelled((prev) => new Set([...prev, ...rows.map((row) => row.id)]))
-      const { cancelled, skipped } = result.data
-      if (skipped === 0) toast.success(cancelled === 1 ? "Cancelled" : `Cancelled ${plural(cancelled, "notification")}`)
-      else toast.warning(`Cancelled ${plural(cancelled, "notification")}`, { description: `${plural(skipped, "notification")} had already gone out or been cancelled.` })
+      const { cancelled: done, skipped } = result.data
+      if (done === 0) toast.info("Nothing to cancel", { description: "These had already gone out or been cancelled." })
+      else if (skipped === 0) toast.success(done === 1 ? "Cancelled" : `Cancelled ${plural(done, "notification")}`)
+      else toast.warning(`Cancelled ${plural(done, "notification")}`, { description: `${plural(skipped, "notification")} had already gone out or been cancelled.` })
     } catch (error) {
       toast.error(unexpectedError(error, "Couldn't cancel"))
     } finally {
-      setProgress(null)
+      setBusyKey(null)
     }
   }
 
@@ -135,7 +137,7 @@ export function NotificationScheduled({ notifications }: { notifications: Notifi
         <tbody>
           {sends.map((send) => {
             const open = expanded === send.key
-            const busy = progress?.key === send.key
+            const busy = busyKey === send.key
             return (
               <Fragment key={send.key}>
                 <TR selected={open} className={cn(open && "border-b-0")}>
@@ -165,7 +167,7 @@ export function NotificationScheduled({ notifications }: { notifications: Notifi
                   </TD>
                   <TD className="whitespace-nowrap">{centralTime(send.scheduledFor, "EEE, MMM d, h:mm a")}</TD>
                   <TD className="px-2 py-1 text-right">
-                    <Button size="sm" variant="danger" onClick={() => cancelSend(send)} pending={busy} disabled={!!progress && !busy}>
+                    <Button size="sm" variant="danger" onClick={() => cancelSend(send)} pending={busy} disabled={!!busyKey && !busy}>
                       {busy ? "Cancelling" : "Cancel"}
                     </Button>
                   </TD>
@@ -183,7 +185,7 @@ export function NotificationScheduled({ notifications }: { notifications: Notifi
                           {send.members.map((member) => (
                             <li key={member.id} className="flex items-center justify-between gap-3 border-b border-admin-row px-3 py-1.5 last:border-b-0">
                               <CellStack primary={member.displayName} secondary={member.email} />
-                              <Button size="sm" variant="ghost" onClick={() => cancelMember(send, member)} disabled={!!progress}>
+                              <Button size="sm" variant="ghost" onClick={() => cancelMember(send, member)} disabled={!!busyKey}>
                                 Cancel for them
                               </Button>
                             </li>

@@ -59,6 +59,10 @@ export async function uploadResult(formData: FormData) {
 }
 
 const ALREADY_INGESTED = "These results are already ingested. Delete them with their race records to parse the file again."
+const LINK_CHANGED = "Someone changed this upload's event link while it was ingesting. Reload the page and try again."
+
+/** Thrown inside a transaction to roll it back and report `message` to the officer */
+class IngestStopped extends Error {}
 
 /** Ingested means race sessions exist, whatever the status says (older uploads could be re-parsed after ingesting). */
 async function hasRaceSessions(uploadId: string) {
@@ -188,18 +192,23 @@ export async function bindEventToUpload(
 
   const event = await prisma.event.findUnique({ where: { id: eventId } });
   if (!event) return { ok: false, error: "That event no longer exists. Refresh and pick another." };
-  // Its race records already belong to the linked event
-  if (await hasRaceSessions(uploadId)) return { ok: false, error: "These results are already ingested, so the event can't change." };
-
   // Practice and qualifying sessions never award points
   const effectivePoints = (sessionLabel === "PRACTICE" || sessionLabel === "QUALIFYING")
     ? "NONE"
     : pointsSystem;
 
-  await prisma.rawResultUpload.update({
-    where: { id: uploadId },
-    data: { eventId, pointsSystem: effectivePoints, sessionLabel },
+  // Locked like ingest, so the link can't change under an ingest that's running. Once ingested, the race
+  // records belong to the linked event, so it can't change at all.
+  const linked = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "RawResultUpload" WHERE id = ${uploadId} FOR UPDATE`;
+    if ((await tx.raceSession.count({ where: { uploadId } })) > 0) return false;
+    await tx.rawResultUpload.update({
+      where: { id: uploadId },
+      data: { eventId, pointsSystem: effectivePoints, sessionLabel },
+    });
+    return true;
   });
+  if (!linked) return { ok: false, error: "These results are already ingested, so the event can't change." };
 
   await createAuditLog({
     actorUserId: user.id,
@@ -283,7 +292,20 @@ export async function ingestUpload(uploadId: string): Promise<ActionResult> {
   await prisma.$transaction(async (tx) => {
     // Lock the upload and check again, so two ingests at once can't both create sessions
     await tx.$queryRaw`SELECT id FROM "RawResultUpload" WHERE id = ${uploadId} FOR UPDATE`;
-    if ((await tx.raceSession.count({ where: { uploadId } })) > 0) throw new Error(ALREADY_INGESTED);
+    if ((await tx.raceSession.count({ where: { uploadId } })) > 0) throw new IngestStopped(ALREADY_INGESTED);
+    // The event link and points were read before the lock; stop if they changed since
+    const current = await tx.rawResultUpload.findUnique({
+      where: { id: uploadId },
+      select: { eventId: true, pointsSystem: true, sessionLabel: true },
+    });
+    if (
+      !current ||
+      current.eventId !== upload.eventId ||
+      current.pointsSystem !== upload.pointsSystem ||
+      current.sessionLabel !== upload.sessionLabel
+    ) {
+      throw new IngestStopped(LINK_CHANGED);
+    }
 
     // 1. Create RaceSession
     const sessionType = upload.sessionLabel || "RACE";
@@ -563,7 +585,7 @@ export async function ingestUpload(uploadId: string): Promise<ActionResult> {
     timeout: 20000,
   });
   } catch (error) {
-    if (error instanceof Error && error.message === ALREADY_INGESTED) return { ok: false, error: ALREADY_INGESTED };
+    if (error instanceof IngestStopped) return { ok: false, error: error.message };
     throw error;
   }
 

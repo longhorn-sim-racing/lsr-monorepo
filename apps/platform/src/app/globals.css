@@ -270,6 +270,7 @@ html:has(.admin-light) {
   html:has(.admin-light) ::-webkit-scrollbar-thumb:hover {
     background: #A8A29E;
   }
+  html:has(.admin-light),
   html:has(.admin-light) * {
     scrollbar-color: #D6CFC4 transparent;
   }

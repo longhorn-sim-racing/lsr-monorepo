@@ -5,7 +5,6 @@ import { requireOfficer } from "@/server/auth/guards";
 import { revalidatePath } from "next/cache";
 import {
   sendBulkNotification,
-  cancelNotification,
   retryNotification,
   countEmailRecipients,
   getEmailUsage,
@@ -63,33 +62,6 @@ export async function getScheduledNotifications() {
   });
 }
 
-export async function cancelScheduledNotification(notificationId: string) {
-  const user = await requireOfficer();
-
-  const notification = await prisma.notification.findUnique({
-    where: { id: notificationId },
-    include: { user: { select: { id: true, displayName: true } } },
-  });
-
-  await cancelNotification(notificationId);
-
-  if (notification) {
-    await createAuditLog({
-      actorUserId: user.id,
-      actionType: "CANCEL",
-      entityType: "NOTIFICATION",
-      entityId: notificationId,
-      targetUserId: notification.userId,
-      summary: `Cancelled scheduled notification "${notification.title}" for ${notification.user.displayName}`,
-      before: { status: notification.status },
-      after: { status: "CANCELLED" },
-      metadata: { type: notification.type, channel: notification.channel },
-    });
-  }
-
-  revalidatePath("/admin/notifications");
-}
-
 /**
  * Cancels the given scheduled notifications in one go (an announcement is one row per member and channel).
  * Rows that already went out or were cancelled are left as they are.
@@ -100,25 +72,27 @@ export async function cancelScheduledNotifications(notificationIds: string[]): P
   if (ids.length === 0) return { ok: false, error: "Nothing to cancel." };
   if (ids.length > 10000) return { ok: false, error: "That's too many notifications to cancel at once." };
 
-  const pending = await prisma.notification.findMany({
+  // Only rows still waiting; anything the sender already claimed is left alone
+  const cancelled = await prisma.notification.updateManyAndReturn({
     where: { id: { in: ids }, status: "PENDING" },
-    select: { id: true, title: true },
-  });
-  const { count } = await prisma.notification.updateMany({
-    where: { id: { in: pending.map((n) => n.id) }, status: "PENDING" },
     data: { status: "CANCELLED" },
+    select: { id: true, title: true, userId: true, user: { select: { displayName: true } } },
   });
+  const count = cancelled.length;
 
   if (count > 0) {
-    const titles = [...new Set(pending.map((n) => n.title))];
+    const titles = [...new Set(cancelled.map((n) => n.title))];
+    const members = [...new Set(cancelled.map((n) => n.userId))];
+    const forOne = members.length === 1 ? ` for ${cancelled[0].user.displayName}` : ` for ${members.length} members`;
     await createAuditLog({
       actorUserId: user.id,
       actionType: "CANCEL",
       entityType: "NOTIFICATION",
-      entityId: pending[0].id,
-      summary: `Cancelled ${count} scheduled notification${count === 1 ? "" : "s"}: "${titles.join('", "')}"`,
+      entityId: cancelled[0].id,
+      targetUserId: members.length === 1 ? members[0] : undefined,
+      summary: `Cancelled ${count} scheduled notification${count === 1 ? "" : "s"}${forOne}: "${titles.join('", "')}"`,
       after: { status: "CANCELLED" },
-      metadata: { count, notificationIds: pending.slice(0, 500).map((n) => n.id) },
+      metadata: { count, notificationIds: cancelled.slice(0, 500).map((n) => n.id) },
     });
   }
 

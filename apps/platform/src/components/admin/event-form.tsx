@@ -232,7 +232,7 @@ export function EventForm({ event, series, venues }: { event?: Event; series: Ev
         </PanelBody>
         <PanelFooter className="flex-col items-stretch">
           {event &&
-            (event.status === "SCHEDULED" ? (
+            (event.status === "SCHEDULED" && event.publishedAt ? (
               // A scheduled event saves through Schedule, so a changed "Publish at" takes effect
               <Button type="submit" name="submitAction" value="schedule" variant="primary" pending={pending}>
                 Save changes
