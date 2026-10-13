@@ -7,10 +7,10 @@ const INDICATOR_TONE: Record<string, Tone> = {
   partner: "info",
 }
 
-const ACCOUNT_STATUS_LABEL: Record<string, string> = {
-  pending_verification: "Unverified",
-  retired: "Retired",
-  deleted: "Deleted",
+const ACCOUNT_STATUS: Record<string, { label: string; tone: Tone }> = {
+  pending_verification: { label: "Unverified", tone: "warning" },
+  retired: { label: "Retired", tone: "neutral" },
+  deleted: { label: "Deleted", tone: "danger" },
 }
 
 /**
@@ -34,12 +34,12 @@ export function MemberBadges({
   className?: string
 }) {
   const indicators = getStatusIndicators({ roles, activeTierKey, officerTitle })
-  const statusLabel = status ? ACCOUNT_STATUS_LABEL[status] : undefined
-  if (indicators.length === 0 && !statusLabel) return <>{empty}</>
+  const accountStatus = status ? ACCOUNT_STATUS[status] : undefined
+  if (indicators.length === 0 && !accountStatus) return <>{empty}</>
 
   return (
     <span className={cn("flex flex-wrap items-center gap-1", className)}>
-      {statusLabel && <Badge tone="warning">{statusLabel}</Badge>}
+      {accountStatus && <Badge tone={accountStatus.tone}>{accountStatus.label}</Badge>}
       {indicators.map(({ key, icon: Icon, label }) => (
         <Badge key={key} tone={INDICATOR_TONE[key] ?? "neutral"}>
           <Icon className="size-3" aria-hidden />
