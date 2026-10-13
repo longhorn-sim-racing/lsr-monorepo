@@ -1,329 +1,368 @@
-"use client";
+"use client"
 
-import { useEffect, useState, useRef, useCallback } from "react";
-import { useDebounce } from "use-debounce";
-import { Loader2, RefreshCw, Search, Terminal, X } from "lucide-react";
-import { cn } from "@/lib/utils";
-import type { AuditLog } from "@prisma/client";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCallback, useEffect, useRef, useState } from "react"
+import Link from "next/link"
+import { useDebounce } from "use-debounce"
+import { formatInTimeZone } from "date-fns-tz"
+import { Loader2 } from "lucide-react"
+import type { Prisma } from "@prisma/client"
+import { DEFAULT_TIMEZONE } from "@/lib/dates"
+import {
+  Button,
+  DetailList,
+  EmptyState,
+  JsonView,
+  Notice,
+  SearchInput,
+  Select,
+  Sheet,
+  Table,
+  TableFooter,
+  TD,
+  TH,
+  THead,
+  ToneText,
+  Toolbar,
+  TR,
+  type Tone,
+} from "@/components/admin/kit"
+import { entityHref, humanizeCode } from "@/app/admin/audit/_components/audit-format"
+import { LiveTailToggle } from "@/app/admin/audit/_components/live-tail-toggle"
 
-type AuditLogWithActor = AuditLog & {
-  actor: {
-    id: string;
-    displayName: string;
-    handle: string;
-    avatarUrl: string | null;
-  } | null;
-  targetUser: {
-    id: string;
-    displayName: string;
-    handle: string;
-    avatarUrl: string | null;
-  } | null;
-};
+type AuditUser = { id: string; displayName: string; handle: string; avatarUrl: string | null }
 
-export function AuditConsole() {
-  const [logs, setLogs] = useState<AuditLogWithActor[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  // The next page to load; a ref so fetchLogs keeps one identity while paging
-  const pageRef = useRef(1);
-  const [hasMore, setHasMore] = useState(false);
-  const [search, setSearch] = useState("");
-  const [debouncedSearch] = useDebounce(search, 500);
-  
-  // Filters
-  const [actionType, setActionType] = useState<string>("");
-  const [entityType, setEntityType] = useState<string>("");
-  
-  // Live Tail
-  const [liveTail, setLiveTail] = useState(false);
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+/** One audit row as /api/admin/audit-logs returns it (dates arrive as strings over JSON) */
+export type AuditEntry = {
+  id: string
+  createdAt: Date | string
+  actionType: string
+  entityType: string
+  entityId: string
+  summary: string
+  before: Prisma.JsonValue | null
+  after: Prisma.JsonValue | null
+  metadata: Prisma.JsonValue | null
+  actor: AuditUser | null
+  targetUser: AuditUser | null
+}
 
-  // Detail View
-  const [selectedLog, setSelectedLog] = useState<AuditLogWithActor | null>(null);
+type Option = { value: string; count: number }
 
-  const fetchLogs = useCallback(async (reset = false) => {
-    if (reset) {
-      setLoading(true);
-    } else {
-      setLoadingMore(true);
-    }
+const PAGE_SIZE = 50
+const LIVE_INTERVAL_MS = 3000
 
+const central = (date: Date | string, pattern: string) => formatInTimeZone(new Date(date), DEFAULT_TIMEZONE, pattern)
+
+function actionTone(actionType: string): Tone {
+  const action = actionType.toUpperCase()
+  if (action.includes("DELETE") || action.includes("REVOKE") || action.includes("REFUND")) return "danger"
+  if (action.includes("CREATE") || action.includes("GRANT")) return "success"
+  return "neutral"
+}
+
+/** Keeps a link to the open entry in the address bar, without a navigation */
+function setEntryParam(id: string | null) {
+  const url = new URL(window.location.href)
+  if (id) url.searchParams.set("entry", id)
+  else url.searchParams.delete("entry")
+  window.history.replaceState(window.history.state, "", url)
+}
+
+export function AuditConsole({ actionTypes, entityTypes, initialEntry }: { actionTypes: Option[]; entityTypes: Option[]; initialEntry: AuditEntry | null }) {
+  const [logs, setLogs] = useState<AuditEntry[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const [search, setSearch] = useState("")
+  const [debouncedSearch] = useDebounce(search.trim(), 400)
+  const [actionType, setActionType] = useState("")
+  const [entityType, setEntityType] = useState("")
+  const [live, setLive] = useState(false)
+  const [selected, setSelected] = useState<AuditEntry | null>(initialEntry)
+
+  // The next page "Load more" asks for; a ref so the fetchers keep one identity while paging
+  const nextPage = useRef(2)
+  // Ignores answers to requests that a newer search or filter replaced
+  const latestReset = useRef(0)
+
+  const query = useCallback(
+    (page: number) => {
+      const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) })
+      if (debouncedSearch) params.set("search", debouncedSearch)
+      if (actionType) params.set("actionType", actionType)
+      if (entityType) params.set("entityType", entityType)
+      return `/api/admin/audit-logs?${params}`
+    },
+    [debouncedSearch, actionType, entityType],
+  )
+
+  const fetchPage = useCallback(
+    async (page: number): Promise<{ items: AuditEntry[]; total: number }> => {
+      const res = await fetch(query(page), { cache: "no-store" })
+      if (!res.ok) throw new Error(res.status === 403 ? "You no longer have access to the audit log." : "The audit log didn't load.")
+      const data = await res.json()
+      return { items: data.items, total: data.pagination.total }
+    },
+    [query],
+  )
+
+  const reload = useCallback(async () => {
+    const ticket = ++latestReset.current
+    setLoading(true)
+    setError(null)
     try {
-      const query = new URLSearchParams({
-        page: reset ? "1" : pageRef.current.toString(),
-        limit: "50",
-      });
-      if (debouncedSearch) query.set("search", debouncedSearch);
-      if (actionType) query.set("actionType", actionType);
-      if (entityType) query.set("entityType", entityType);
-
-      const res = await fetch(`/api/admin/audit-logs?${query.toString()}`);
-      if (!res.ok) throw new Error("Failed to fetch");
-      const data = await res.json();
-
-      if (reset) {
-        setLogs(data.items);
-        pageRef.current = 2;
-      } else {
-        setLogs((prev) => {
-           // Dedup in case of overlap
-           const ids = new Set(prev.map(l => l.id));
-           const newItems = data.items.filter((l: AuditLogWithActor) => !ids.has(l.id));
-           return [...prev, ...newItems];
-        });
-        pageRef.current += 1;
-      }
-      setHasMore(pageRef.current <= data.pagination.totalPages);
-    } catch (err) {
-      console.error(err);
+      const data = await fetchPage(1)
+      if (ticket !== latestReset.current) return
+      setLogs(data.items)
+      setTotal(data.total)
+      nextPage.current = 2
+    } catch (e) {
+      if (ticket === latestReset.current) setError(e instanceof Error ? e.message : "The audit log didn't load.")
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (ticket === latestReset.current) setLoading(false)
     }
-  }, [debouncedSearch, actionType, entityType]);
+  }, [fetchPage])
 
-  // Initial fetch, and again when the search or filters change
+  // First load, and again whenever the search or a filter changes
   useEffect(() => {
-    fetchLogs(true);
-  }, [fetchLogs]);
+    reload()
+  }, [reload])
 
-  // Polling for live tail
-  useEffect(() => {
-    if (liveTail) {
-      pollIntervalRef.current = setInterval(() => {
-        // Simple strategy: just fetch page 1 and prepend new items?
-        // Or just re-fetch everything? 
-        // For simple console, let's just re-fetch page 1 silently.
-        fetchLogs(true); 
-      }, 3000);
-    } else if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
+  const loadMore = async () => {
+    setLoadingMore(true)
+    try {
+      const data = await fetchPage(nextPage.current)
+      setLogs((prev) => {
+        // New entries at the top shift the pages down, so a page can repeat rows we already have
+        const seen = new Set(prev.map((log) => log.id))
+        return [...prev, ...data.items.filter((log) => !seen.has(log.id))]
+      })
+      setTotal(data.total)
+      nextPage.current += 1
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The audit log didn't load.")
+    } finally {
+      setLoadingMore(false)
     }
-    return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    };
-  }, [liveTail, fetchLogs]);
+  }
 
+  // Live tail: every few seconds, add any new entries to the top (keeping what's already loaded).
+  // Skips while the tab is hidden.
+  useEffect(() => {
+    if (!live) return
+    const timer = setInterval(async () => {
+      if (document.hidden) return
+      const ticket = latestReset.current
+      try {
+        const data = await fetchPage(1)
+        if (ticket !== latestReset.current) return
+        setLogs((prev) => {
+          const seen = new Set(prev.map((log) => log.id))
+          const fresh = data.items.filter((log) => !seen.has(log.id))
+          return fresh.length ? [...fresh, ...prev] : prev
+        })
+        setTotal(data.total)
+        setError(null)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "The audit log didn't load.")
+      }
+    }, LIVE_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [live, fetchPage])
+
+  const open = (entry: AuditEntry) => {
+    setSelected(entry)
+    setEntryParam(entry.id)
+  }
+  const close = () => {
+    setSelected(null)
+    setEntryParam(null)
+  }
+
+  const filtered = !!(debouncedSearch || actionType || entityType)
+  const clearFilters = () => {
+    setSearch("")
+    setActionType("")
+    setEntityType("")
+  }
 
   return (
-    <div className="flex h-[calc(100vh-6rem)] gap-4">
-      {/* Console Area */}
-      <div className="flex-1 flex flex-col border border-white/10 bg-black/40 rounded-lg overflow-hidden font-mono text-sm">
-        {/* Toolbar */}
-        <div className="bg-white/5 p-2 border-b border-white/10 flex items-center gap-2 flex-wrap">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger>
-                <div className="flex items-center gap-2 bg-black/50 px-2 py-1 rounded border border-white/10 cursor-help">
-                  <Terminal size={14} className="text-lsr-orange" />
-                  <span className="font-bold text-white/80">AUDIT CONSOLE</span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-xs bg-black/90 border-white/10 text-white p-3">
-                <p className="font-bold mb-1 text-lsr-orange">Audit Console</p>
-                <p className="text-xs text-white/80">
-                  A comprehensive log of all administrative actions. This ensures accountability and transparency for changes made by officers and admins.
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          
-          <div className="h-4 w-px bg-white/10 mx-2" />
+    <div className="min-w-0">
+      <Toolbar actions={<LiveTailToggle on={live} onChange={setLive} />}>
+        <SearchInput value={search} onChange={setSearch} placeholder="Search summaries" />
+        <Select value={actionType} onChange={(e) => setActionType(e.target.value)} aria-label="Action" className="w-full sm:w-44">
+          <option value="">All actions</option>
+          {actionTypes.map((option) => (
+            <option key={option.value} value={option.value}>
+              {humanizeCode(option.value)} ({option.count})
+            </option>
+          ))}
+        </Select>
+        <Select value={entityType} onChange={(e) => setEntityType(e.target.value)} aria-label="Record type" className="w-full sm:w-44">
+          <option value="">All records</option>
+          {entityTypes.map((option) => (
+            <option key={option.value} value={option.value}>
+              {humanizeCode(option.value)} ({option.count})
+            </option>
+          ))}
+        </Select>
+        {filtered && (
+          <Button variant="ghost" onClick={clearFilters}>
+            Clear
+          </Button>
+        )}
+      </Toolbar>
 
-          <div className="flex items-center gap-2 relative">
-             <Search size={14} className="absolute left-2 text-white/40" />
-             <input 
-               value={search}
-               onChange={(e) => setSearch(e.target.value)}
-               placeholder="Search logs..." 
-               className="bg-black/50 border border-white/10 rounded pl-8 pr-2 py-1 text-xs text-white focus:outline-none focus:border-lsr-orange w-48"
-             />
-          </div>
+      {error && (
+        <Notice
+          tone="danger"
+          title="Couldn't load the audit log"
+          className="mb-3"
+          action={
+            <Button size="sm" onClick={reload}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Notice>
+      )}
 
-          <div className="flex items-center gap-2">
-            <input 
-               value={actionType}
-               onChange={(e) => setActionType(e.target.value)}
-               placeholder="Action Type..." 
-               className="bg-black/50 border border-white/10 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-lsr-orange w-32"
-             />
-             <input 
-               value={entityType}
-               onChange={(e) => setEntityType(e.target.value)}
-               placeholder="Entity Type..." 
-               className="bg-black/50 border border-white/10 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-lsr-orange w-32"
-             />
-          </div>
+      <div className="min-w-0 overflow-hidden rounded-lg border bg-card">
+        <Table minWidth={760} className="rounded-none border-0">
+          <THead>
+            <TH className="w-36">When</TH>
+            <TH>What happened</TH>
+            <TH className="w-40">Who</TH>
+            <TH className="w-32">Action</TH>
+            <TH className="w-36">Record</TH>
+          </THead>
+          <tbody>
+            {logs.map((log) => (
+              <TR key={log.id} selected={selected?.id === log.id} onClick={() => open(log)} className="cursor-pointer hover:bg-admin-surface">
+                <TD className="whitespace-nowrap text-muted-foreground">{central(log.createdAt, "MMM d, h:mm a")}</TD>
+                <TD className="max-w-0">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      open(log)
+                    }}
+                    className="block w-full truncate text-left font-medium hover:underline" title={log.summary}>
+                    {log.summary}
+                  </button>
+                </TD>
+                <TD className="max-w-0">
+                  <span className="block truncate">
+                    {log.actor?.displayName ?? "System"}
+                    {log.targetUser && <span className="text-admin-subtle"> → {log.targetUser.displayName}</span>}
+                  </span>
+                </TD>
+                <TD>
+                  <ToneText tone={actionTone(log.actionType)}>{humanizeCode(log.actionType)}</ToneText>
+                </TD>
+                <TD className="whitespace-nowrap text-muted-foreground">{humanizeCode(log.entityType)}</TD>
+              </TR>
+            ))}
+          </tbody>
+        </Table>
 
-          <div className="flex-1" />
-
-          <button 
-            onClick={() => setLiveTail(!liveTail)}
-            className={cn(
-              "flex items-center gap-2 px-2 py-1 rounded text-xs border border-transparent transition-colors",
-              liveTail ? "bg-lsr-orange/20 text-lsr-orange border-lsr-orange/50" : "text-white/60 hover:text-white"
+        {loading && logs.length === 0 && (
+          <p className="flex items-center justify-center gap-2 px-6 py-10 text-[13px] text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" aria-hidden /> Loading the audit log
+          </p>
+        )}
+        {!loading && !error && logs.length === 0 && (
+          <EmptyState
+            title={filtered ? "No entries match" : "Nothing in the audit log yet"}
+            description={filtered ? "Try a different search, or clear the filters." : "Changes officers make show up here."}
+            action={filtered && <Button onClick={clearFilters}>Clear filters</Button>}
+          />
+        )}
+        {logs.length > 0 && (
+          <TableFooter>
+            <span className="flex items-center gap-2">
+              {loading && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+              Showing {logs.length} of {total} {total === 1 ? "entry" : "entries"}
+            </span>
+            {logs.length < total && (
+              <Button size="sm" onClick={loadMore} pending={loadingMore}>
+                Load {Math.min(PAGE_SIZE, total - logs.length)} more
+              </Button>
             )}
-          >
-            <RefreshCw size={12} className={cn(liveTail && "animate-spin")} />
-            Live Tail {liveTail ? "ON" : "OFF"}
-          </button>
-        </div>
-
-        {/* Logs List */}
-        <div className="flex-1 overflow-auto p-4 space-y-1">
-          {loading ? (
-             <div className="flex items-center justify-center h-full text-white/40 gap-2">
-                <Loader2 className="animate-spin" /> Loading logs...
-             </div>
-          ) : logs.length === 0 ? (
-             <div className="flex items-center justify-center h-full text-white/40">
-                No logs found.
-             </div>
-          ) : (
-            <>
-              {logs.map((log) => (
-                <div 
-                  key={log.id} 
-                  onClick={() => setSelectedLog(log)}
-                  className={cn(
-                    "flex items-start gap-3 p-1 hover:bg-white/5 cursor-pointer rounded select-none group border-l-2 border-transparent",
-                    selectedLog?.id === log.id ? "bg-white/10 border-lsr-orange" : "border-transparent"
-                  )}
-                >
-                  <span className="text-white/40 text-[10px] whitespace-nowrap pt-0.5 w-32">
-                    {new Date(log.createdAt).toLocaleString()}
-                  </span>
-                  
-                  <span className="text-lsr-orange text-xs font-bold whitespace-nowrap w-24 truncate flex items-center gap-1">
-                     {log.actor?.handle || "System"}
-                     {log.targetUser && (
-                        <span className="text-white/40 font-normal">→ {log.targetUser.handle}</span>
-                     )}
-                  </span>
-                  
-                  <span className="text-blue-400 text-xs font-bold whitespace-nowrap w-32 truncate">
-                    {log.actionType}
-                  </span>
-
-                  <span className="text-white/80 text-xs truncate flex-1">
-                     <span className="text-white/40 mr-2">[{log.entityType}:{log.entityId}]</span>
-                     {log.summary}
-                  </span>
-                </div>
-              ))}
-              
-              {/* Load More Trigger */}
-              {!liveTail && hasMore && (
-                 <div className="pt-4 text-center">
-                    <button 
-                       onClick={() => fetchLogs()} 
-                       disabled={loadingMore || logs.length === 0}
-                       className="text-xs text-white/40 hover:text-white disabled:opacity-50"
-                    >
-                       {loadingMore ? "Loading..." : "Load More"}
-                    </button>
-                 </div>
-              )}
-            </>
-          )}
-        </div>
+          </TableFooter>
+        )}
       </div>
 
-      {/* Details Drawer */}
-      {selectedLog && (
-        <div className="w-96 border-l border-white/10 bg-black/90 p-4 overflow-auto flex flex-col gap-4">
-           <div className="flex justify-between items-start">
-             <h3 className="text-lg font-bold text-white">Log Details</h3>
-             <button onClick={() => setSelectedLog(null)} className="text-white/40 hover:text-white">
-               <X size={16} />
-             </button>
-           </div>
+      <AuditEntrySheet entry={selected} onClose={close} />
+    </div>
+  )
+}
 
-           <div className="space-y-4 text-sm">
-             <div>
-               <label className="text-xs text-white/40 uppercase font-bold block mb-1">ID</label>
-               <div className="font-mono text-white/80 text-xs break-all">{selectedLog.id}</div>
-             </div>
+function UserLink({ user }: { user: AuditUser }) {
+  return (
+    <Link href={`/admin/users/${user.id}/edit`} className="font-medium hover:underline">
+      {user.displayName} <span className="font-normal text-admin-subtle">@{user.handle}</span>
+    </Link>
+  )
+}
 
-             <div className="grid grid-cols-2 gap-4">
-                <div>
-                   <label className="text-xs text-white/40 uppercase font-bold block mb-1">Actor</label>
-                   <div className="text-white flex items-center gap-2">
-                      {selectedLog.actor?.avatarUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element -- avatar URLs can come from any host, which next/image would reject
-                        <img src={selectedLog.actor.avatarUrl} alt="" className="w-5 h-5 rounded-full" />
-                      )}
-                      {selectedLog.actor?.displayName || "System"}
-                   </div>
-                </div>
-                <div>
-                   <label className="text-xs text-white/40 uppercase font-bold block mb-1">Target User</label>
-                   <div className="text-white flex items-center gap-2">
-                      {selectedLog.targetUser ? (
-                        <>
-                          {selectedLog.targetUser.avatarUrl && (
-                            // eslint-disable-next-line @next/next/no-img-element -- avatar URLs can come from any host, which next/image would reject
-                            <img src={selectedLog.targetUser.avatarUrl} alt="" className="w-5 h-5 rounded-full" />
-                          )}
-                          <span className="font-mono">{selectedLog.targetUser.displayName} (@{selectedLog.targetUser.handle})</span>
-                        </>
-                      ) : (
-                         <span className="font-mono text-white/40">-</span>
-                      )}
-                   </div>
-                </div>
-             </div>
+function AuditEntrySheet({ entry, onClose }: { entry: AuditEntry | null; onClose: () => void }) {
+  const href = entry && !entry.actionType.toUpperCase().includes("DELETE") ? entityHref(entry.entityType, entry.entityId) : null
+  const blocks = entry
+    ? ([
+        ["Before", entry.before],
+        ["After", entry.after],
+        ["Metadata", entry.metadata],
+      ] as const).filter(([, value]) => value !== null && value !== undefined)
+    : []
 
-             <div>
-               <label className="text-xs text-white/40 uppercase font-bold block mb-1">Action</label>
-               <div className="bg-white/5 p-2 rounded border border-white/10 font-mono text-xs text-lsr-orange">
-                 {selectedLog.actionType}
-               </div>
-             </div>
-             
-             <div>
-               <label className="text-xs text-white/40 uppercase font-bold block mb-1">Entity</label>
-               <div className="bg-white/5 p-2 rounded border border-white/10 font-mono text-xs">
-                 {selectedLog.entityType} : {selectedLog.entityId}
-               </div>
-             </div>
-
-             <div>
-               <label className="text-xs text-white/40 uppercase font-bold block mb-1">Summary</label>
-               <p className="text-white/80">{selectedLog.summary}</p>
-             </div>
-
-             {selectedLog.before && (
-                <div>
-                   <label className="text-xs text-white/40 uppercase font-bold block mb-1">Before</label>
-                   <pre className="bg-black p-2 rounded border border-white/10 text-[10px] text-red-300 overflow-auto max-h-40">
-                      {JSON.stringify(selectedLog.before, null, 2)}
-                   </pre>
-                </div>
-             )}
-
-             {selectedLog.after && (
-                <div>
-                   <label className="text-xs text-white/40 uppercase font-bold block mb-1">After</label>
-                   <pre className="bg-black p-2 rounded border border-white/10 text-[10px] text-green-300 overflow-auto max-h-40">
-                      {JSON.stringify(selectedLog.after, null, 2)}
-                   </pre>
-                </div>
-             )}
-             
-              {selectedLog.metadata && (
-                <div>
-                   <label className="text-xs text-white/40 uppercase font-bold block mb-1">Metadata</label>
-                   <pre className="bg-black p-2 rounded border border-white/10 text-[10px] text-blue-300 overflow-auto max-h-40">
-                      {JSON.stringify(selectedLog.metadata, null, 2)}
-                   </pre>
-                </div>
-             )}
-           </div>
+  return (
+    <Sheet
+      open={!!entry}
+      onOpenChange={(open) => !open && onClose()}
+      title={entry ? `${humanizeCode(entry.actionType)} · ${humanizeCode(entry.entityType)}` : "Audit entry"}
+      description={entry ? `${central(entry.createdAt, "EEE, MMM d, yyyy, h:mm:ss a")} CT` : undefined}
+    >
+      {entry && (
+        <div className="flex flex-col gap-5">
+          <p className="text-[13px] font-medium">{entry.summary}</p>
+          <DetailList
+            items={[
+              { label: "Done by", value: entry.actor ? <UserLink user={entry.actor} /> : "System" },
+              ...(entry.targetUser ? [{ label: "Member", value: <UserLink user={entry.targetUser} /> }] : []),
+              { label: "Action", value: <span className="font-mono text-xs">{entry.actionType}</span> },
+              {
+                label: "Record",
+                value: (
+                  <span className="flex flex-col gap-0.5">
+                    <span className="font-mono text-xs">{entry.entityType}</span>
+                    <span className="break-all font-mono text-xs text-admin-subtle">{entry.entityId}</span>
+                    {href && (
+                      <Link href={href} className="w-fit text-xs font-medium hover:underline">
+                        Open in admin
+                      </Link>
+                    )}
+                  </span>
+                ),
+              },
+              { label: "Entry ID", value: <span className="break-all font-mono text-xs text-admin-subtle">{entry.id}</span> },
+            ]}
+          />
+          {blocks.length === 0 ? (
+            <p className="text-xs text-admin-subtle">No before, after or metadata recorded for this change.</p>
+          ) : (
+            blocks.map(([label, value]) => (
+              <section key={label} className="flex flex-col gap-1.5">
+                <h3 className="text-xs font-semibold text-muted-foreground">{label}</h3>
+                <JsonView value={value} />
+              </section>
+            ))
+          )}
         </div>
       )}
-    </div>
-  );
+    </Sheet>
+  )
 }
