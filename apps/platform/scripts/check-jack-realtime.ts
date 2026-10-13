@@ -13,6 +13,9 @@
  *
  * Refuses to run unless NEXT_PUBLIC_SUPABASE_URL and DATABASE_URL point at 127.0.0.1/localhost.
  * Creates throwaway users (random passwords, never printed) and a room, and deletes them at the end.
+ * The reply comes from the scripted fake Claude (src/server/jack/fake-claude.ts), passed in through the
+ * reply loop's deps, so it never calls the Anthropic API (with or without ANTHROPIC_API_KEY) and
+ * always streams a few seconds of text in many deltas.
  */
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -91,6 +94,8 @@ async function main() {
   const { createClient } = await import("@supabase/supabase-js");
   const { prisma } = await import("../src/server/db");
   const { postOfficerMessage } = await import("../src/server/jack/rooms");
+  const { defaultReplyDeps } = await import("../src/server/jack/reply-loop");
+  const { fakeClaude } = await import("../src/server/jack/fake-claude");
   const { JACK_EVENT, jackRoomTopic } = await import("../src/lib/jack/types");
 
   const noSession = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
@@ -207,13 +212,26 @@ async function main() {
     });
 
     // ---- (d): a reply streamed by the server reaches both officers ---------------
+    // A scripted reply, streamed in small pieces about 40 ms apart (~2 s, so ~13 deltas of ~150 ms each).
+    // Never the real API: no key needed, nothing spent
+    const fake = fakeClaude(
+      [{ text: `Check reply: there are 13 LSC applications this season, 9 of them paid. ${"This sentence is here so the reply streams for a while. ".repeat(4)}` }],
+      undefined,
+      { chunkSize: 6, chunkDelayMs: 40 }
+    );
+    const replyDeps = {
+      ...defaultReplyDeps,
+      getClient: () => fake.client,
+      budget: async () => ({ month: "check", spentUsd: 0, budgetUsd: 1 }),
+    };
     // Outside a request, the after-response work runs inline: this returns once the reply is done
-    const question = await postOfficerMessage(room.id, officerA.id!, "Check: how many LSC applications are there?");
+    const question = await postOfficerMessage(room.id, officerA.id!, "Check: how many LSC applications are there?", replyDeps);
     if (!question) throw new Error("Posting the question failed");
     await wait(SETTLE_MS);
 
     const saved = await prisma.jackMessage.findFirst({ where: { roomId: room.id, kind: "assistant" } });
     check("(d) the server saved a finished reply", saved?.status === "done", saved?.status ?? "no reply");
+    check("(d) the reply came from the fake Claude, not the API", fake.calls.length === 1 && Boolean(saved?.content.startsWith("Check reply:")), `${fake.calls.length} fake call(s)`);
 
     for (const [name, listener] of [["officer A", a], ["officer B", b]] as const) {
       const created = listener.events.filter((e) => e.type === JACK_EVENT.created);
