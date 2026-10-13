@@ -1,5 +1,6 @@
 import type { JackRoom, Prisma } from "@prisma/client"
 import type { JackAuthor, JackMessageView, JackRoomView } from "@/lib/jack/types"
+import { parseToolParts } from "@/lib/jack/parts"
 
 /** Officer messages carry their author's name, so everyone in the room (and later the model) knows who said what */
 export const jackMessageInclude = {
@@ -23,6 +24,7 @@ export function toMessageView(row: JackMessageRow): JackMessageView {
     roomId: row.roomId,
     author: authorOf(row),
     content: row.content,
+    tools: parseToolParts(row.toolCalls),
     status: row.status,
     streamSeq: row.streamSeq,
     createdAt: row.createdAt.toISOString(),

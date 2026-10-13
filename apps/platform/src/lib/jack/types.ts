@@ -1,3 +1,5 @@
+import type { JackToolPart } from "./parts"
+
 /**
  * What Jack's rooms send and show (#161). Plain JSON only: these go over Realtime Broadcast
  * and into client components, so no Prisma types, Dates or Decimals.
@@ -32,6 +34,8 @@ export type JackMessageView = {
   roomId: string
   author: JackAuthor
   content: string
+  /** Tools the reply used, in order; each sits at its `at` position in `content` */
+  tools: JackToolPart[]
   status: JackMessageStatusKey
   /** The last streamed delta included in `content` */
   streamSeq: number
@@ -70,6 +74,7 @@ export const JACK_EVENT = {
   created: "message.created",
   delta: "message.delta",
   done: "message.done",
+  tool: "message.tool",
   room: "room.updated",
 } as const
 
@@ -79,10 +84,12 @@ export type JackCreatedEvent = { type: typeof JACK_EVENT.created; message: JackM
 export type JackDeltaEvent = { type: typeof JACK_EVENT.delta; messageId: string; seq: number; text: string }
 /** A reply finished (status done or error), with its full text */
 export type JackDoneEvent = { type: typeof JACK_EVENT.done; message: JackMessageView }
+/** A tool call in a streaming reply started or finished; replaces the part with the same id */
+export type JackToolEvent = { type: typeof JACK_EVENT.tool; messageId: string; part: JackToolPart }
 /** The room's settings changed (e.g. its persona) */
 export type JackRoomUpdatedEvent = { type: typeof JACK_EVENT.room; room: JackRoomView }
 
-export type JackRoomEvent = JackCreatedEvent | JackDeltaEvent | JackDoneEvent | JackRoomUpdatedEvent
+export type JackRoomEvent = JackCreatedEvent | JackDeltaEvent | JackDoneEvent | JackToolEvent | JackRoomUpdatedEvent
 
 /** Who's in a room right now, as each officer's tab tracks it on the channel */
 export type JackPresence = { userId: string; displayName: string }
