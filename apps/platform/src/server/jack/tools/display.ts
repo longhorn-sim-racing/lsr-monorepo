@@ -44,6 +44,36 @@ export function forModelWithList<T>(base: Record<string, unknown>, key: string, 
   ).text
 }
 
+/** One list in a result for forModelWithLists. `keep: "last"` trims from the start (e.g. older periods) */
+export type ModelList = { key: string; items: unknown[]; keep?: "first" | "last" }
+
+/**
+ * Like forModelWithList for a result with several lists: each is trimmed to fit in `max` characters
+ * along with the lists before it, so earlier lists get the room first. Each trimmed list gets a note.
+ */
+export function forModelWithLists(base: Record<string, unknown>, lists: ModelList[], max = MAX_MODEL_CHARS): string {
+  let fixed: Record<string, unknown> = { ...base }
+  for (const { key } of lists) delete fixed[key]
+  let text = jsonText(fixed)
+  for (const { key, items, keep = "first" } of lists) {
+    const ordered = keep === "last" ? [...items].reverse() : items
+    const shape = (kept: unknown[]) => {
+      const inOrder = keep === "last" ? [...kept].reverse() : kept
+      return {
+        ...fixed,
+        [key]: inOrder,
+        ...(kept.length < items.length
+          ? { [`${key}Note`]: `Only the ${keep} ${kept.length} of ${items.length} ${key} fit in this reply. Narrow the request to see the rest.` }
+          : {}),
+      }
+    }
+    const fitted = fitRows(ordered, shape, max)
+    fixed = shape(ordered.slice(0, fitted.kept))
+    text = fitted.text
+  }
+  return text
+}
+
 export function plural(n: number, one: string, many = `${one}s`) {
   return `${n} ${n === 1 ? one : many}`
 }

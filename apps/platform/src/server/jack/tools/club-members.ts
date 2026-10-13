@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { prisma } from "@/server/db"
-import { forModel, plural, tableDisplay } from "./display"
+import { forModelWithLists, plural, tableDisplay } from "./display"
 import { addDays, centralDate, centralDateInput, ct, periodKey, periodsBetween, startOfCentralDay, endOfCentralDay, type Period } from "./time"
 import type { JackTool } from "./types"
 
@@ -112,12 +112,16 @@ export const clubMembersTool: JackTool<z.infer<typeof input>> = {
         paid: duesEntitlements.filter((e) => e.sourcePaymentId).length,
         grantedByOfficer: duesEntitlements.filter((e) => !e.sourcePaymentId).length,
       },
-      signups: { by: groupBy, from: start, to: end, total: joined.length, periods: signups },
-      newest: newestRows.map((u) => ({ name: u.displayName, handle: u.handle, email: u.email, eid: u.eid, status: u.status, joined: ct(u.createdAt) })),
+      signups: { by: groupBy, from: start, to: end, total: joined.length },
     }
+    const newestList = newestRows.map((u) => ({ name: u.displayName, handle: u.handle, email: u.email, eid: u.eid, status: u.status, joined: ct(u.createdAt) }))
 
     return {
-      forModel: forModel(result),
+      // The newest members (at most 50) first; a long signup range keeps its most recent periods
+      forModel: forModelWithLists(result, [
+        { key: "newest", items: newestList },
+        { key: "signupPeriods", items: signups, keep: "last" },
+      ]),
       label: `Looked up members (${plural(members.length, "member")}, ${joined.length} joined since ${start})`,
       displays: [
         tableDisplay(signups, [

@@ -3,6 +3,7 @@ import { z } from "zod"
 import { getEffectiveEventStatus, isEventPublic } from "@/lib/events"
 import { prisma } from "@/server/db"
 import { forModelWithList, plural, tableDisplay } from "./display"
+import { raceSessionsCount } from "./standings"
 import { centralDateInput, centralRange, ct, ctShort, dollars } from "./time"
 import type { JackTool } from "./types"
 
@@ -29,6 +30,7 @@ export type EventRow = {
   attendanceReportingMode: AttendanceReportingMode
   series: { title: string } | null
   venue: { name: string } | null
+  /** ingestedSessions: race sessions with results only (raceSessionsCount), as the standings count them */
   _count: { rawResultUploads: number; ingestedSessions: number }
 }
 
@@ -68,7 +70,7 @@ export function summarizeEvent(event: EventRow, counts: Counts, now = new Date()
       event._count.ingestedSessions > 0
         ? "results in"
         : event._count.rawResultUploads > 0
-          ? "uploaded, not processed"
+          ? "uploaded, no race results"
           : null,
     manageUrl: `/admin/events/${event.id}/manage`,
   }
@@ -133,7 +135,7 @@ export const eventsOverviewTool: JackTool<z.infer<typeof input>> = {
         attendanceReportingMode: true,
         series: { select: { title: true } },
         venue: { select: { name: true } },
-        _count: { select: { rawResultUploads: true, ingestedSessions: true } },
+        _count: { select: { rawResultUploads: true, ingestedSessions: raceSessionsCount } },
       },
     })
     const more = events.length > limit

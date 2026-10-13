@@ -4,7 +4,10 @@ import type { JackToolDisplay } from "@/lib/jack/parts"
 /** Who a tool call runs for, and where */
 export type JackToolContext = {
   roomId: string
-  /** The officer whose message Jack is answering (the latest one when a reply answers several) */
+  /**
+   * The officer whose message started this reply: the newest message it answers. When one reply
+   * answers several officers, tools run (and draft_event credits) only this one
+   */
   actor: { userId: string | null; displayName: string }
   signal?: AbortSignal
 }

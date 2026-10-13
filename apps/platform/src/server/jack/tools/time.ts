@@ -5,10 +5,20 @@ import { DEFAULT_TIMEZONE } from "@/lib/dates"
 /** The club runs on Central time; tools take and give Central dates and times */
 export const CLUB_TZ = DEFAULT_TIMEZONE
 
+/** A YYYY-MM-DD that's on the calendar. Date.parse alone takes 2026-02-30 (and rolls it into March) */
+export function isCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return false
+  const [year, month, day] = match.slice(1).map(Number)
+  const date = new Date(0)
+  date.setUTCFullYear(year, month - 1, day)
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
 export const centralDateInput = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Use a date like 2026-10-19")
-  .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)), "That isn't a real date")
+  .refine(isCalendarDate, { error: (issue) => `${String(issue.input)} isn't a date on the calendar; check the month's last day` })
 
 /** "2026-10-19" in Central time for an instant */
 export function centralDate(date: Date): string {

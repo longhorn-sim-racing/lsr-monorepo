@@ -69,7 +69,7 @@ describe("draft_event", () => {
         actionType: "CREATE",
         entityType: "EVENT",
         entityId: "event-1",
-        summary: "Jack drafted event: General Meeting 2 (asked by Alex Officer)",
+        summary: "Jack drafted event: General Meeting 2 (credited to Alex Officer, whose message started this reply)",
         metadata: { via: "jack", roomId: "room-1", status: "DRAFT" },
       }),
     )

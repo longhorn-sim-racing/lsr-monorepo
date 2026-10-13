@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client"
 import { z } from "zod"
 import { prisma } from "@/server/db"
 import { getStandings } from "@/server/repos/standings.repo"
@@ -12,12 +13,19 @@ import type { JackTool } from "./types"
  * between its start and end, the same set the recompute reads.
  */
 
+/**
+ * Counts an event's race results the way "Recompute standings" does: only RACE sessions with results
+ * count (practice and qualifying alone don't put a round's results in). For a Prisma `_count` select.
+ */
+export const raceSessionsCount = { where: { sessionType: "RACE", results: { some: {} } } } satisfies { where: Prisma.RaceSessionWhereInput }
+
+/** `ingestedSessions` here is the race sessions with results (raceSessionsCount), not every session */
 export function roundResults(
   round: { startsAtUtc: Date; _count: { rawResultUploads: number; ingestedSessions: number } },
   now = new Date(),
-): "results in" | "uploaded, not processed" | "no results yet" | "upcoming" {
+): "results in" | "uploaded, no race results" | "no results yet" | "upcoming" {
   if (round._count.ingestedSessions > 0) return "results in"
-  if (round._count.rawResultUploads > 0) return "uploaded, not processed"
+  if (round._count.rawResultUploads > 0) return "uploaded, no race results"
   return round.startsAtUtc < now ? "no results yet" : "upcoming"
 }
 
@@ -30,7 +38,7 @@ const input = z.object({
 export const standingsTool: JackTool<z.infer<typeof input>> = {
   name: "standings",
   description:
-    "A league season's driver standings (rank, points, wins, podiums, starts, best finish, incidents, car) as the site shows them, plus the season's rounds with their dates and whether results are in, uploaded but not processed, or missing. Standings only change when an officer clicks Recompute standings; the result says when that last happened.",
+    "A league season's driver standings (rank, points, wins, podiums, starts, best finish, incidents, car) as the site shows them, plus the season's rounds with their dates and whether race results are in (as the standings count them), uploaded without race results yet, or missing. Standings only change when an officer clicks Recompute standings; the result says when that last happened.",
   input,
   async run({ season: seasonSlug, league: leagueSlug, limit }) {
     const now = new Date()
@@ -44,7 +52,7 @@ export const standingsTool: JackTool<z.infer<typeof input>> = {
         ? prisma.event.findMany({
             where: { seriesId: season.seriesId, startsAtUtc: { gte: season.startAt ?? undefined, lte: season.endAt ?? undefined } },
             orderBy: { startsAtUtc: "asc" },
-            select: { title: true, startsAtUtc: true, status: true, _count: { select: { rawResultUploads: true, ingestedSessions: true } } },
+            select: { title: true, startsAtUtc: true, status: true, _count: { select: { rawResultUploads: true, ingestedSessions: raceSessionsCount } } },
           })
         : Promise.resolve([]),
       prisma.auditLog.findFirst({

@@ -8,14 +8,14 @@ vi.mock("@/server/jack/sql-client", () => ({ getJackSqlClient: () => null, JACK_
 import type { SeasonEntrant } from "@/server/services/league-entry.service"
 import { auditWhere } from "./audit-log"
 import { bucketSignups, monthsBefore, tierCounts } from "./club-members"
-import { forModelWithList } from "./display"
+import { forModelWithList, forModelWithLists, MAX_MODEL_CHARS } from "./display"
 import { formatSchema, parseConstraints, typeName } from "./describe-schema"
 import { summarizeEvent, searchWhere, type EventRow } from "./events-overview"
 import { JACK_TOOLS, findJackTool } from "./index"
 import { checkoutOutcome, driverRow, entrantSummary } from "./lsc-entries"
 import { itemName, summarizePayments, type PaymentRow } from "./payments-summary"
-import { roundResults } from "./standings"
-import { addDays, centralRange, ct, endOfCentralDay, periodKey, periodsBetween, startOfCentralDay, weekStart } from "./time"
+import { raceSessionsCount, roundResults } from "./standings"
+import { addDays, centralDateInput, centralRange, ct, endOfCentralDay, isCalendarDate, periodKey, periodsBetween, startOfCentralDay, weekStart } from "./time"
 
 describe("Central time helpers", () => {
   it("formats instants in Central time, across daylight saving", () => {
@@ -130,7 +130,7 @@ describe("events_overview shaping", () => {
 
   it("shows drafts as hidden, and fees and results", () => {
     const row = summarizeEvent(event({ status: "DRAFT", registrationFeeCents: 1250, _count: { rawResultUploads: 1, ingestedSessions: 0 } }), {}, now)
-    expect(row).toMatchObject({ effectiveStatus: "DRAFT", public: false, registration: { feeDollars: 12.5 }, results: "uploaded, not processed" })
+    expect(row).toMatchObject({ effectiveStatus: "DRAFT", public: false, registration: { feeDollars: 12.5 }, results: "uploaded, no race results" })
   })
 
   it("matches every search word in the title, slug or series", () => {
@@ -241,7 +241,7 @@ describe("standings shaping", () => {
   const round = (date: string, uploads: number, sessions: number) => ({ startsAtUtc: new Date(date), _count: { rawResultUploads: uploads, ingestedSessions: sessions } })
   it("says which rounds have results", () => {
     expect(roundResults(round("2026-10-03T15:00:00Z", 1, 3), now)).toBe("results in")
-    expect(roundResults(round("2026-10-10T15:00:00Z", 1, 0), now)).toBe("uploaded, not processed")
+    expect(roundResults(round("2026-10-10T15:00:00Z", 1, 0), now)).toBe("uploaded, no race results")
     expect(roundResults(round("2026-10-10T15:00:00Z", 0, 0), now)).toBe("no results yet")
     expect(roundResults(round("2026-10-17T15:00:00Z", 0, 0), now)).toBe("upcoming")
   })
@@ -322,6 +322,51 @@ describe("forModelWithList", () => {
     expect(body.count).toBe(50)
     expect(body.events.length).toBeLessThan(50)
     expect(body.eventsNote).toBe(`Only the first ${body.events.length} of 50 events fit in this reply. Narrow the request to see the rest.`)
+  })
+})
+
+describe("forModelWithLists", () => {
+  it("fits several lists under the cap, earlier lists first, keeping the newest end of a 'last' list", () => {
+    const newest = Array.from({ length: 50 }, (_, i) => ({ name: `Member ${i}`, email: `m${i}@example.com`, joined: "2026-10-01 18:00 CT" }))
+    const periods = periodsBetween("2016-01-04", "2026-10-12", "week").map((period) => ({ period, signups: 1 }))
+    const text = forModelWithLists({ accounts: { members: 500 }, newest: "ignored", signupPeriods: "ignored" }, [
+      { key: "newest", items: newest },
+      { key: "signupPeriods", items: periods, keep: "last" },
+    ])
+    const body = JSON.parse(text)
+
+    expect(text.length).toBeLessThanOrEqual(MAX_MODEL_CHARS)
+    expect(body.accounts).toEqual({ members: 500 })
+    expect(body.newest).toHaveLength(50)
+    expect(body.newestNote).toBeUndefined()
+    expect(body.signupPeriods.length).toBeGreaterThan(0)
+    expect(body.signupPeriods.length).toBeLessThan(periods.length)
+    expect(body.signupPeriods.at(-1)).toEqual(periods.at(-1)) // the latest weeks stay
+    expect(body.signupPeriodsNote).toBe(`Only the last ${body.signupPeriods.length} of ${periods.length} signupPeriods fit in this reply. Narrow the request to see the rest.`)
+  })
+
+  it("leaves short lists whole, in order", () => {
+    const body = JSON.parse(forModelWithLists({ total: 2 }, [{ key: "a", items: [1, 2] }, { key: "b", items: [3], keep: "last" }]))
+    expect(body).toEqual({ total: 2, a: [1, 2], b: [3] })
+  })
+})
+
+describe("centralDateInput", () => {
+  it("takes real calendar dates only, with a message the model can act on", () => {
+    expect(isCalendarDate("2026-10-19")).toBe(true)
+    expect(isCalendarDate("2028-02-29")).toBe(true) // leap year
+    for (const bad of ["2026-02-30", "2026-02-29", "2026-04-31", "2026-13-01", "2026-00-10", "2026-10-00"]) expect(isCalendarDate(bad), bad).toBe(false)
+
+    const parsed = centralDateInput.safeParse("2026-02-30")
+    expect(parsed.success).toBe(false)
+    expect(parsed.error?.issues[0].message).toBe("2026-02-30 isn't a date on the calendar; check the month's last day")
+    expect(centralDateInput.safeParse("Oct 19").error?.issues[0].message).toBe("Use a date like 2026-10-19")
+  })
+})
+
+describe("raceSessionsCount", () => {
+  it("counts only race sessions with results, as Recompute standings does", () => {
+    expect(raceSessionsCount).toEqual({ where: { sessionType: "RACE", results: { some: {} } } })
   })
 })
 

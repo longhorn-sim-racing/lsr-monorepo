@@ -11,7 +11,8 @@ import type { JackTool, JackToolContext } from "./types"
 /**
  * draft_event: the only tool that writes (#161). It creates an Event as a DRAFT through the same
  * validation as the admin event form (parseEventForm) and the same create as createEvent, credits
- * the officer who asked in the audit log, and links to the edit page. It never publishes: an
+ * the officer whose message started this reply (the newest one it answers) in the audit log, and links
+ * to the edit page. It never publishes: an
  * officer does that from the form. No fees either; money stays out of Jack's hands.
  */
 
@@ -161,7 +162,9 @@ export async function draftEvent(input: DraftEventInput, ctx: JackToolContext) {
     actionType: "CREATE",
     entityType: "EVENT",
     entityId: event.id,
-    summary: `Jack drafted event: ${event.title} (asked by ${ctx.actor.displayName})`,
+    // The actor is the officer whose message started this reply (the newest message it answers); when
+    // one reply answers several officers, the others aren't named
+    summary: `Jack drafted event: ${event.title} (credited to ${ctx.actor.displayName}, whose message started this reply)`,
     after: event,
     metadata: { via: "jack", roomId: ctx.roomId, status: "DRAFT" },
   })
