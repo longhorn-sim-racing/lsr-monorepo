@@ -93,6 +93,7 @@ export function TagPicker({
                   </Command.Item>
                 ))}
                 {matches.length === 0 && !typed && <p className="px-2 py-3 text-xs text-admin-subtle">No other tags yet. Type to create one.</p>}
+                {matches.length === 0 && typed && exists && <p className="px-2 py-3 text-xs text-admin-subtle">Already added.</p>}
               </Command.List>
             </Command>
           </Popover.Content>

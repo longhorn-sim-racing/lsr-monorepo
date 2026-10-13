@@ -59,18 +59,19 @@ export function PostForm({ post, author: initialAuthor, availableTags }: PostFor
   // New posts take their slug from the title until the slug is edited by hand
   const [slugEdited, setSlugEdited] = useState(!!post)
 
+  const defaults: NewsPostSchema = {
+    title: post?.title ?? "",
+    slug: post?.slug ?? "",
+    excerpt: post?.excerpt ?? "",
+    coverImageUrl: post?.coverImageUrl ?? null,
+    bodyMd: post?.bodyMd ?? "",
+    authorId: post?.authorId ?? initialAuthor?.id ?? "",
+    publishedAt: post?.publishedAt ?? null,
+    tags: post?.tags ?? [],
+  }
   const form = useForm<NewsPostSchema>({
     resolver: zodResolver(newsPostSchema),
-    defaultValues: {
-      title: post?.title ?? "",
-      slug: post?.slug ?? "",
-      excerpt: post?.excerpt ?? "",
-      coverImageUrl: post?.coverImageUrl ?? null,
-      bodyMd: post?.bodyMd ?? "",
-      authorId: post?.authorId ?? initialAuthor?.id ?? "",
-      publishedAt: post?.publishedAt ?? null,
-      tags: post?.tags ?? [],
-    },
+    defaultValues: defaults,
   })
   const { errors, isSubmitted } = form.formState
 
@@ -133,6 +134,7 @@ export function PostForm({ post, author: initialAuthor, availableTags }: PostFor
                   id="post-title"
                   placeholder="LSC Season 3 kicks off"
                   aria-invalid={!!errors.title}
+                  defaultValue={defaults.title}
                   {...form.register("title", {
                     onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
                       if (!slugEdited) form.setValue("slug", slugify(event.target.value), { shouldValidate: isSubmitted })
@@ -156,12 +158,13 @@ export function PostForm({ post, author: initialAuthor, availableTags }: PostFor
                     placeholder="lsc-season-3-kicks-off"
                     className="rounded-l-none"
                     aria-invalid={!!errors.slug}
+                    defaultValue={defaults.slug}
                     {...form.register("slug", { onChange: () => setSlugEdited(true) })}
                   />
                 </div>
               </Field>
               <Field label="Excerpt" htmlFor="post-excerpt" hint="One or two sentences for the news page and link previews." error={errors.excerpt?.message}>
-                <Textarea id="post-excerpt" rows={2} placeholder="A short summary" {...form.register("excerpt")} />
+                <Textarea id="post-excerpt" rows={2} placeholder="A short summary" defaultValue={defaults.excerpt} {...form.register("excerpt")} />
               </Field>
               <Field
                 label="Body"
@@ -176,6 +179,7 @@ export function PostForm({ post, author: initialAuthor, availableTags }: PostFor
                   className="min-h-[420px]"
                   placeholder="Write the post here."
                   aria-invalid={!!errors.bodyMd}
+                  defaultValue={defaults.bodyMd}
                   {...form.register("bodyMd")}
                 />
               </Field>
