@@ -42,6 +42,10 @@ describe("buildSystemPrompt", () => {
       /Say only what the tools returned/,
       /Give links exactly as a tool returns them/,
       /name them in your reply/,
+      // Added after the second eval: name the page that does a change, instead of guessing another way
+      /name the admin console page that does it/,
+      /Products: prices, including the LSC entry fee/,
+      /Members and roles: member profiles and roles/,
     ]) {
       expect(text).toMatch(rule)
     }

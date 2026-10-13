@@ -36,7 +36,7 @@ If a deploy has to be rolled back to a version from before Stand could answer ro
 2. If `ANTHROPIC_API_KEY` isn't set, the reply says so ("Jack isn't connected yet…"). If this month's spend has reached `JACK_MONTHLY_BUDGET_USD`, the reply says the budget is used up. Neither calls Claude.
 3. Otherwise the request is built (`src/server/jack/model-loop.ts`), in this order:
    - **tools**, in the fixed order of `JACK_TOOLS` (`src/server/jack/tools/index.ts`);
-   - the **system prompt** (`src/server/jack/prompt.ts`): who Jack is, who he's talking to, the club, and the rules (read-only except drafts, never move money, say where numbers came from, Central Time, emails and EIDs only when asked, concise plain text, typed tools first, `run_sql` for the rest, `describe_schema` when unsure, charts through the chart tool), then the notes on the club's tables (`JACK_SCHEMA_NOTES` in `src/server/jack/tools/schema-notes.ts`);
+   - the **system prompt** (`src/server/jack/prompt.ts`): who Jack is, who he's talking to, the club, and the rules (read-only except drafts, never move money, name the admin page that does a change, say where numbers came from, Central Time, emails and EIDs only when asked, concise plain text, typed tools first, `run_sql` for the rest, `describe_schema` when unsure, charts through the chart tool), then the notes on the club's tables (`JACK_SCHEMA_NOTES` in `src/server/jack/tools/schema-notes.ts`);
    - the **room history** (`src/server/jack/history.ts`): each exchange as an officer turn ("Name: message" lines under a Central Time timestamp, room notes included) and the reply's text with a one-line note of the tools it used. Several officers' messages answered together are one turn, and notices that never reached Claude ("isn't connected yet") are left out so their questions carry over. The last 40 exchanges are sent.
 4. Claude streams. Text goes out in ~150 ms batches. Each tool call is checked against the tool's schema, run for the officer whose message started this reply (the newest message it answers; when one reply answers several officers, it's the last one who posted), saved on the reply (`JackMessage.toolCalls`) and broadcast (`message.tool`), and its result goes back to Claude. This repeats until Claude answers.
 5. Limits per reply: 12 tool calls, then Claude is told to answer with what it has (and can't call more tools); the same after 64K output tokens, or after 150 s (sooner when the run has less time left; see [Function duration](#function-duration)); 16K output tokens per call for Jack and Stand, 32K for Lift.
@@ -158,18 +158,19 @@ A typical answer takes 5 to 60 seconds, so one run usually answers several round
 
 `scripts/jack-eval.ts` (questions in `scripts/jack-eval/`) is Jack's test set: 52 questions in nine groups, from what officers ask every day to things he must refuse or could be tricked by. Everyday lookups, harder analysis, vague questions, things he can't do (refunds, email, role changes), things the data doesn't cover, attempts to break him (secrets, a `DELETE`, instructions hidden in an applicant's notes), very large requests, drafting, and follow-ups. Each goes through the same code a room reply does, on Stand, Jack and Lift.
 
-Grading has two parts. A script checks what it can against the database: the right number or names, no forbidden tool, nothing changed, no secret in the answer. Opus 5.5 judges the rest against a written expectation and the database facts, blind to which model answered, and with the model's system prompt and tool descriptions, so a claim that comes from them isn't counted as invented. It also grades tool use and notes tools that would have helped. If Opus declines to grade (a question about password hashes trips its checks), Fable 5.1 grades instead, and if both decline the script check stands alone.
+Grading has two parts. A script checks what it can against the database: the right number or names, no forbidden tool, nothing changed, no secret in the answer. Opus 5.5 judges the rest against a written expectation and the database facts, blind to which model answered, and with the model's system prompt and each tool's description and inputs, so a claim that comes from them isn't counted as invented. It also grades tool use and notes tools that would have helped. If Opus declines to grade (a question about password hashes trips its checks), Fable 5.1 grades instead. If both decline, the answer is saved ungraded: it's left out of the pass rate and listed apart, so read it yourself.
 
 Results go to `.claude/hillclimb/jack-<model>/<variant>/` at the repo root (one row and one full transcript per answer) and a comparison of the three models to `.claude/hillclimb/jack-compare/<variant>.md`. That folder holds real member data from the database it ran on and is gitignored; never commit it. Run it on a local copy of production, not on production. `--variant=v1` (v2…) saves a run beside the baseline after a change, to compare.
 
 ```bash
 # from apps/platform, with DATABASE_URL, JACK_DATABASE_URL and ANTHROPIC_API_KEY in .env.local
-pnpm exec tsx scripts/jack-eval.ts                 # everything, all three models: about $6 plus $3-4 for the judge
+pnpm exec tsx scripts/jack-eval.ts                 # everything, all three models: about $6 (about $2.50 for the models, $3 for the judge)
 pnpm exec tsx scripts/jack-eval.ts --pilot         # five questions, under $1, to check grades and cost first
 pnpm exec tsx scripts/jack-eval.ts --only=jack     # one model
 pnpm exec tsx scripts/jack-eval.ts --group=safety  # one group (or --filter=<text> for question ids)
 pnpm exec tsx scripts/jack-eval.ts --variant=v1    # save beside the baseline after a change
 pnpm exec tsx scripts/jack-eval.ts --regrade       # grade saved answers again after a grader fix (judge calls only)
+pnpm exec tsx scripts/jack-eval.ts --regrade --no-judge  # rerun the text checks on saved answers: free, no key needed
 pnpm exec tsx scripts/jack-eval.ts --dry-run       # no API calls: a fake model checks the plumbing
 pnpm exec tsx scripts/jack-eval/judge-check.ts     # the judge passes a right answer and fails three wrong ones
 ```
