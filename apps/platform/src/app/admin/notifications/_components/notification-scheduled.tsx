@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { Button, CellStack, EmptyState, Panel, Table, TableFooter, TD, TH, THead, TR, useConfirm } from "@/components/admin/kit"
 import { unexpectedError } from "@/lib/action-result"
 import { cn } from "@/lib/utils"
-import { cancelScheduledNotification } from "../actions"
+import { cancelScheduledNotifications } from "../actions"
 import { centralTime, plural, scheduledSendKey, type NotificationRow } from "./format"
 
 /** One scheduled send: the same message at the same time, to one or more members, on one or both channels. */
@@ -67,24 +67,24 @@ export function NotificationScheduled({ notifications }: { notifications: Notifi
 
   const sends = useMemo(() => groupSends(notifications.filter((n) => !cancelled.has(n.id))), [notifications, cancelled])
 
-  /** Cancels each notification in turn (one per member and channel), then reports how it went. */
+  /** Cancels the rows (one per member and channel) in a single request, then reports how it went. */
   const cancelRows = async (key: string, rows: NotificationRow[]) => {
     setProgress({ key, done: 0, total: rows.length })
-    let failed = 0
-    let lastError: unknown
-    for (const row of rows) {
-      try {
-        await cancelScheduledNotification(row.id)
-        setCancelled((prev) => new Set(prev).add(row.id))
-      } catch (error) {
-        failed++
-        lastError = error
+    try {
+      const result = await cancelScheduledNotifications(rows.map((row) => row.id))
+      if (!result.ok) {
+        toast.error(result.error)
+        return
       }
-      setProgress((p) => (p ? { ...p, done: p.done + 1 } : p))
+      setCancelled((prev) => new Set([...prev, ...rows.map((row) => row.id)]))
+      const { cancelled, skipped } = result.data
+      if (skipped === 0) toast.success(cancelled === 1 ? "Cancelled" : `Cancelled ${plural(cancelled, "notification")}`)
+      else toast.warning(`Cancelled ${plural(cancelled, "notification")}`, { description: `${plural(skipped, "notification")} had already gone out or been cancelled.` })
+    } catch (error) {
+      toast.error(unexpectedError(error, "Couldn't cancel"))
+    } finally {
+      setProgress(null)
     }
-    setProgress(null)
-    if (failed === 0) toast.success(rows.length === 1 ? "Cancelled" : `Cancelled ${plural(rows.length, "notification")}`)
-    else toast.error(unexpectedError(lastError, `Couldn't cancel ${plural(failed, "notification")}`))
   }
 
   const cancelSend = async (send: ScheduledSend) => {
@@ -166,7 +166,7 @@ export function NotificationScheduled({ notifications }: { notifications: Notifi
                   <TD className="whitespace-nowrap">{centralTime(send.scheduledFor, "EEE, MMM d, h:mm a")}</TD>
                   <TD className="px-2 py-1 text-right">
                     <Button size="sm" variant="danger" onClick={() => cancelSend(send)} pending={busy} disabled={!!progress && !busy}>
-                      {busy && progress ? `Cancelling ${progress.done + 1}/${progress.total}` : "Cancel"}
+                      {busy ? "Cancelling" : "Cancel"}
                     </Button>
                   </TD>
                 </TR>

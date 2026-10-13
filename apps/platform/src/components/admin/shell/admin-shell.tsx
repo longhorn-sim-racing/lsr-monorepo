@@ -30,6 +30,16 @@ export function AdminShell({ user, children }: { user: ShellUser; children: Reac
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [])
 
+  // The drawer is for phones; if the screen widens past it while open, close it so it can't block the page
+  useEffect(() => {
+    const wide = window.matchMedia("(min-width: 768px)")
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setDrawerOpen(false)
+    }
+    wide.addEventListener("change", onChange)
+    return () => wide.removeEventListener("change", onChange)
+  }, [])
+
   const openSearch = () => {
     setDrawerOpen(false)
     setCommandOpen(true)
@@ -38,7 +48,7 @@ export function AdminShell({ user, children }: { user: ShellUser; children: Reac
 
   return (
     <div className="admin-light flex min-h-dvh bg-background font-sans text-sm text-foreground">
-      <aside className="sticky top-0 hidden h-dvh w-[236px] shrink-0 overflow-y-auto bg-admin-nav text-admin-nav-foreground md:block">
+      <aside className="admin-nav-scroll sticky top-0 hidden h-dvh w-[236px] shrink-0 overflow-y-auto bg-admin-nav text-admin-nav-foreground md:block">
         <AdminSidebarContent user={user} onSearch={openSearch} />
       </aside>
 
@@ -53,7 +63,7 @@ export function AdminShell({ user, children }: { user: ShellUser; children: Reac
             </Dialog.Trigger>
             <Dialog.Portal>
               <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40 md:hidden" />
-              <Dialog.Content className="fixed inset-y-0 left-0 z-50 w-[272px] max-w-[85vw] overflow-y-auto bg-admin-nav text-admin-nav-foreground shadow-xl md:hidden">
+              <Dialog.Content className="admin-nav-scroll fixed inset-y-0 left-0 z-50 w-[272px] max-w-[85vw] overflow-y-auto bg-admin-nav text-admin-nav-foreground shadow-xl md:hidden">
                 <Dialog.Title className="sr-only">Admin menu</Dialog.Title>
                 <Dialog.Description className="sr-only">Pages in the admin console</Dialog.Description>
                 <Dialog.Close className="absolute right-2 top-3 flex size-8 items-center justify-center rounded-md text-admin-nav-muted hover:text-white" aria-label="Close menu">
@@ -88,9 +98,10 @@ export function AdminShell({ user, children }: { user: ShellUser; children: Reac
           </div>
         </header>
 
-        <main className="min-w-0 flex-1 px-4 py-4 md:px-6 md:py-5">
+        {/* A div, not <main>: the root layout already wraps every page in <main> */}
+        <div id="admin-content" className="min-w-0 flex-1 px-4 py-4 md:px-6 md:py-5">
           <ConfirmProvider>{children}</ConfirmProvider>
-        </main>
+        </div>
       </div>
 
       <AdminCommandMenu open={commandOpen} onOpenChange={setCommandOpen} />

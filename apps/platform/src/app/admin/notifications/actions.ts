@@ -90,6 +90,42 @@ export async function cancelScheduledNotification(notificationId: string) {
   revalidatePath("/admin/notifications");
 }
 
+/**
+ * Cancels the given scheduled notifications in one go (an announcement is one row per member and channel).
+ * Rows that already went out or were cancelled are left as they are.
+ */
+export async function cancelScheduledNotifications(notificationIds: string[]): Promise<ActionResult<{ cancelled: number; skipped: number }>> {
+  const user = await requireOfficer();
+  const ids = [...new Set(notificationIds.filter((id) => typeof id === "string" && id.length > 0))];
+  if (ids.length === 0) return { ok: false, error: "Nothing to cancel." };
+  if (ids.length > 10000) return { ok: false, error: "That's too many notifications to cancel at once." };
+
+  const pending = await prisma.notification.findMany({
+    where: { id: { in: ids }, status: "PENDING" },
+    select: { id: true, title: true },
+  });
+  const { count } = await prisma.notification.updateMany({
+    where: { id: { in: pending.map((n) => n.id) }, status: "PENDING" },
+    data: { status: "CANCELLED" },
+  });
+
+  if (count > 0) {
+    const titles = [...new Set(pending.map((n) => n.title))];
+    await createAuditLog({
+      actorUserId: user.id,
+      actionType: "CANCEL",
+      entityType: "NOTIFICATION",
+      entityId: pending[0].id,
+      summary: `Cancelled ${count} scheduled notification${count === 1 ? "" : "s"}: "${titles.join('", "')}"`,
+      after: { status: "CANCELLED" },
+      metadata: { count, notificationIds: pending.slice(0, 500).map((n) => n.id) },
+    });
+  }
+
+  revalidatePath("/admin/notifications");
+  return { ok: true, data: { cancelled: count, skipped: ids.length - count } };
+}
+
 export async function retryFailedNotification(notificationId: string) {
   const user = await requireOfficer();
 

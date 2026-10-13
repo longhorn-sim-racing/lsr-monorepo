@@ -89,16 +89,25 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const [pending, setPending] = React.useState<Pending | null>(null)
   const [text, setText] = React.useState("")
 
+  // A new question while one is open answers the open one with "no", so its caller doesn't hang
+  const replace = React.useCallback((next: Pending) => {
+    setPending((current) => {
+      if (current?.kind === "confirm") current.resolve(false)
+      else if (current?.kind === "prompt") current.resolve(null)
+      return next
+    })
+  }, [])
+
   const api = React.useMemo(
     () => ({
-      confirm: (options: ConfirmOptions) => new Promise<boolean>((resolve) => setPending({ kind: "confirm", options, resolve })),
+      confirm: (options: ConfirmOptions) => new Promise<boolean>((resolve) => replace({ kind: "confirm", options, resolve })),
       prompt: (options: PromptOptions) =>
         new Promise<string | null>((resolve) => {
           setText(options.defaultValue ?? "")
-          setPending({ kind: "prompt", options, resolve })
+          replace({ kind: "prompt", options, resolve })
         }),
     }),
-    [],
+    [replace],
   )
 
   const close = (accepted: boolean) => {
@@ -122,10 +131,16 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
         description={options?.description}
         footer={
           <>
-            <Button variant="secondary" onClick={() => close(false)}>
+            {/* Destructive confirms start on Cancel, so a stray Enter can't delete */}
+            <Button variant="secondary" onClick={() => close(false)} autoFocus={pending?.kind === "confirm" && options?.tone === "danger"}>
               {options?.cancelLabel ?? "Cancel"}
             </Button>
-            <Button variant={options?.tone === "danger" ? "danger-solid" : "primary"} disabled={blocked} onClick={() => close(true)} autoFocus={pending?.kind === "confirm"}>
+            <Button
+              variant={options?.tone === "danger" ? "danger-solid" : "primary"}
+              disabled={blocked}
+              onClick={() => close(true)}
+              autoFocus={pending?.kind === "confirm" && options?.tone !== "danger"}
+            >
               {options?.confirmLabel ?? (options?.tone === "danger" ? "Delete" : "Confirm")}
             </Button>
           </>

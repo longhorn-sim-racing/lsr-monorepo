@@ -28,13 +28,19 @@ function UserSearchList({ search, onPick, excludeIds = [] }: { search: Search; o
   const [query, setQuery] = React.useState("")
   const [results, setResults] = React.useState<AdminUserOption[]>([])
   const [loading, setLoading] = React.useState(false)
+  const [failed, setFailed] = React.useState(false)
+  // Each keystroke takes a ticket; only the newest keystroke's search may update the list
   const latest = React.useRef(0)
 
-  const run = useDebouncedCallback(async (q: string) => {
-    const ticket = ++latest.current
+  const run = useDebouncedCallback(async (q: string, ticket: number) => {
     try {
       const found = await search(q)
       if (ticket === latest.current) setResults(found)
+    } catch {
+      if (ticket === latest.current) {
+        setResults([])
+        setFailed(true)
+      }
     } finally {
       if (ticket === latest.current) setLoading(false)
     }
@@ -42,17 +48,20 @@ function UserSearchList({ search, onPick, excludeIds = [] }: { search: Search; o
 
   const onQuery = (q: string) => {
     setQuery(q)
+    const ticket = ++latest.current
+    setFailed(false)
     if (q.trim().length < 2) {
-      latest.current++
+      run.cancel()
       setResults([])
       setLoading(false)
       return
     }
     setLoading(true)
-    run(q)
+    run(q, ticket)
   }
 
-  const shown = results.filter((user) => !excludeIds.includes(user.id))
+  const tooShort = query.trim().length < 2
+  const shown = tooShort ? [] : results.filter((user) => !excludeIds.includes(user.id))
 
   return (
     <Command shouldFilter={false} label="Find a member" className="text-[13px]">
@@ -67,8 +76,10 @@ function UserSearchList({ search, onPick, excludeIds = [] }: { search: Search; o
         {loading && <Loader2 className="size-3.5 animate-spin text-admin-subtle" aria-hidden />}
       </div>
       <Command.List className="max-h-64 overflow-y-auto p-1">
-        {query.trim().length < 2 ? (
+        {tooShort ? (
           <p className="px-2 py-3 text-xs text-admin-subtle">Type at least 2 characters.</p>
+        ) : failed ? (
+          <p className="px-2 py-3 text-xs font-medium text-tone-danger-foreground">Search failed. Reload the page if this keeps happening.</p>
         ) : (
           !loading && shown.length === 0 && <p className="px-2 py-3 text-xs text-admin-subtle">No members match.</p>
         )}

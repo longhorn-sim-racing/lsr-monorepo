@@ -258,4 +258,26 @@ html:has(.admin-light) {
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.1) rgba(255, 255, 255, 0.02);
   }
+
+  /* The light admin console needs a dark thumb, or its scrollbars disappear */
+  html:has(.admin-light) ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  html:has(.admin-light) ::-webkit-scrollbar-thumb {
+    background: #D6CFC4;
+    border-radius: 4px !important;
+  }
+  html:has(.admin-light) ::-webkit-scrollbar-thumb:hover {
+    background: #A8A29E;
+  }
+  html:has(.admin-light) * {
+    scrollbar-color: #D6CFC4 transparent;
+  }
+  html:has(.admin-light) .admin-nav-scroll,
+  html:has(.admin-light) .admin-nav-scroll * {
+    scrollbar-color: #3D3835 transparent;
+  }
+  html:has(.admin-light) .admin-nav-scroll::-webkit-scrollbar-thumb {
+    background: #3D3835;
+  }
 }

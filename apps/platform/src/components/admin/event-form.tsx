@@ -231,12 +231,18 @@ export function EventForm({ event, series, venues }: { event?: Event; series: Ev
           )}
         </PanelBody>
         <PanelFooter className="flex-col items-stretch">
-          {event && (
-            // No submitAction: the action leaves the status (and publish time) as they are
-            <Button type="submit" variant="primary" pending={pending}>
-              Save changes
-            </Button>
-          )}
+          {event &&
+            (event.status === "SCHEDULED" ? (
+              // A scheduled event saves through Schedule, so a changed "Publish at" takes effect
+              <Button type="submit" name="submitAction" value="schedule" variant="primary" pending={pending}>
+                Save changes
+              </Button>
+            ) : (
+              // No submitAction: the action leaves the status (and publish time) as they are
+              <Button type="submit" variant="primary" pending={pending}>
+                Save changes
+              </Button>
+            ))}
           <Button type="submit" name="submitAction" value="publish" variant={event ? "secondary" : "primary"} pending={!event && pending} disabled={pending}>
             Publish now
           </Button>

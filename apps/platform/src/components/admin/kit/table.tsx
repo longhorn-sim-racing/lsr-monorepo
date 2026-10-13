@@ -87,14 +87,16 @@ const HIDE: Record<NonNullable<Column<unknown>["hideBelow"]>, string> = {
   lg: "hidden lg:table-cell",
 }
 
-function compare(a: SortValue, b: SortValue) {
-  if (a == null && b == null) return 0
-  if (a == null) return 1
-  if (b == null) return -1
+/** Sort order for two values; empty values always go last, whichever way the column is sorted. */
+function compare(a: SortValue, b: SortValue, desc: boolean) {
+  const empty = (v: SortValue) => v == null || v === ""
+  if (empty(a) && empty(b)) return 0
+  if (empty(a)) return 1
+  if (empty(b)) return -1
   const x = a instanceof Date ? a.getTime() : a
   const y = b instanceof Date ? b.getTime() : b
-  if (typeof x === "string" && typeof y === "string") return x.localeCompare(y, undefined, { sensitivity: "base", numeric: true })
-  return x < y ? -1 : x > y ? 1 : 0
+  const order = typeof x === "string" && typeof y === "string" ? x.localeCompare(y, undefined, { sensitivity: "base", numeric: true }) : x! < y! ? -1 : x! > y! ? 1 : 0
+  return desc ? -order : order
 }
 
 /** True when a click started on something interactive inside the row (so the row shouldn't navigate). */
@@ -149,7 +151,8 @@ export function DataTable<T>({
     const column = sort && columns.find((c) => c.id === sort.id)
     if (column?.sortValue) {
       const value = column.sortValue
-      list = [...list].sort((a, b) => compare(value(a), value(b)) * (sort?.desc ? -1 : 1))
+      const desc = !!sort?.desc
+      list = [...list].sort((a, b) => compare(value(a), value(b), desc))
     }
     return list
   }, [rows, columns, query, search, sort])
