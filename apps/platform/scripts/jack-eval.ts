@@ -184,7 +184,7 @@ type Ctx = {
 };
 
 async function loadModules() {
-  const [{ buildHistory }, { runModelReply, anthropicJackClient }, { JACK_MODELS }, { buildSystemPrompt }, { JACK_TOOLS }, { fakeClaude }, { UsageTally, costUsd }] =
+  const [{ buildHistory }, { runModelReply, anthropicJackClient, toolDefinitions }, { JACK_MODELS }, { buildSystemPrompt }, { JACK_TOOLS }, { fakeClaude }, { UsageTally, costUsd }] =
     await Promise.all([
       import("../src/server/jack/history"),
       import("../src/server/jack/model-loop"),
@@ -194,13 +194,19 @@ async function loadModules() {
       import("../src/server/jack/fake-claude"),
       import("../src/server/jack/cost"),
     ]);
-  return { buildHistory, runModelReply, anthropicJackClient, JACK_MODELS, buildSystemPrompt, JACK_TOOLS, fakeClaude, UsageTally, costUsd };
+  return { buildHistory, runModelReply, anthropicJackClient, toolDefinitions, JACK_MODELS, buildSystemPrompt, JACK_TOOLS, fakeClaude, UsageTally, costUsd };
 }
 
-/** What a model was told, for the judge: its system prompt, then every tool's name and description */
+/**
+ * What a model was told, for the judge: its system prompt, then every tool as the API sends it (name,
+ * description and inputs), so an ability that only an input names ("takeRegistrations") isn't invented
+ */
 function instructionsFor(mods: Ctx["mods"], persona: JackRoomPersonaKey): string {
   const system = mods.buildSystemPrompt(persona).map((b) => b.text).join("\n\n");
-  const tools = mods.JACK_TOOLS.map((t) => `- ${t.name}: ${t.description}`).join("\n");
+  const tools = mods
+    .toolDefinitions(mods.JACK_TOOLS)
+    .map((t) => `- ${t.name}: ${t.description}\n  Inputs: ${JSON.stringify(t.input_schema)}`)
+    .join("\n");
   return `${system}\n\n# Tools\n${tools}`;
 }
 
