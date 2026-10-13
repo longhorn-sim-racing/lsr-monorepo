@@ -29,6 +29,8 @@ export type JudgeInput = {
   question: string;
   /** The officer who asked; the assistant sees their name before the message */
   asker?: string;
+  /** When it was asked (the assistant sees the time too), e.g. for "last week" or "this month" */
+  askedAt?: Date;
   /** Earlier exchanges in the room, for follow-ups */
   before?: { ask: string; answer: string }[];
   expect: string;
@@ -96,7 +98,8 @@ function clip(text: string, max: number): string {
 }
 
 export function judgePrompt(input: JudgeInput): string {
-  const parts = [`<question${input.asker ? ` asked_by="${input.asker}"` : ""}>\n${input.question}\n</question>`];
+  const when = input.askedAt ? ` asked_at="${input.askedAt.toLocaleString("en-US", { timeZone: "America/Chicago", weekday: "short", year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} CT"` : "";
+  const parts = [`<question${input.asker ? ` asked_by="${input.asker}"` : ""}${when}>\n${input.question}\n</question>`];
   if (input.before?.length) parts.unshift(`<earlier_in_the_room>\n${input.before.map((b) => `Officer: ${b.ask}\nAssistant: ${b.answer}`).join("\n\n")}\n</earlier_in_the_room>`);
   parts.push(`<expectation>\n${input.expect}\n</expectation>`);
   parts.push(`<facts_from_the_database>\n${input.facts ?? "(none for this question)"}\n</facts_from_the_database>`);
@@ -104,7 +107,7 @@ export function judgePrompt(input: JudgeInput): string {
     `<tool_calls count="${input.tools.length}">\n${
       input.tools.length
         ? input.tools
-            .map((t, i) => `${i + 1}. ${t.name}${t.ms !== undefined ? ` (${Math.round(t.ms)} ms)` : ""}\ninput: ${clip(JSON.stringify(t.input), 1_500)}\n${t.error ? `error: ${t.error}` : `result: ${clip(t.result, 3_000)}`}`)
+            .map((t, i) => `${i + 1}. ${t.name}${t.ms !== undefined ? ` (${Math.round(t.ms)} ms)` : ""}\ninput: ${clip(JSON.stringify(t.input), 1_500)}\n${t.error ? `error: ${t.error}` : `result: ${clip(t.result, 20_000)}`}`)
             .join("\n\n")
         : "(none)"
     }\n</tool_calls>`
@@ -131,7 +134,7 @@ async function judgeWith(model: string, client: Anthropic, input: JudgeInput, si
   const message = await client.messages.create(
     {
       model,
-      max_tokens: 4_000,
+      max_tokens: 16_000,
       system: input.instructions
         ? [
             { type: "text", text: SYSTEM },

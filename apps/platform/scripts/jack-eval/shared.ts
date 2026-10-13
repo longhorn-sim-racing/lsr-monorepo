@@ -100,6 +100,22 @@ export function namesEvent(text: string, title: string): boolean {
   return Boolean(round && new RegExp(`\\bround\\s*${round}\\b|\\br${round}\\b`, "i").test(text));
 }
 
+/** The semester as this test set reads it, in Central time: spring from January 1, fall from August 1 */
+export function semesterStart(now: Date): Date {
+  const [year, month] = formatInTimeZone(now, TZ, "yyyy-MM").split("-").map(Number);
+  return fromZonedTime(`${year}-${month >= 8 ? "08" : "01"}-01T00:00:00`, TZ);
+}
+
+/** The most recent August, as [start, end) in Central time ("people who made an account in August") */
+export function lastAugust(now: Date): [Date, Date] {
+  const [year, month] = formatInTimeZone(now, TZ, "yyyy-MM").split("-").map(Number);
+  const y = month >= 8 ? year : year - 1;
+  return [fromZonedTime(`${y}-08-01T00:00:00`, TZ), fromZonedTime(`${y}-09-01T00:00:00`, TZ)];
+}
+
+/** Events that count, as Jack's tools count them: not drafts, not cancelled or postponed */
+export const COUNTED_EVENT = { status: { notIn: ["DRAFT" as const, "CANCELLED" as const, "POSTPONED" as const] } };
+
 export const PEOPLE = ["people", "person", "member", "officer", "user", "driver", "account", "checkout", "attendee"];
 
 // ---------------------------------------------------------------------------

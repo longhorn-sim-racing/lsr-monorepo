@@ -5,8 +5,25 @@
  *
  *   pnpm --filter @lsr/platform exec tsx scripts/jack-eval/judge-check.ts
  */
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { judgeAnswer, type JudgeInput } from "./judge";
+
+// apps/platform's env files, like the eval itself (without overriding the environment)
+for (const file of [".env.local", ".env"]) {
+  const path = resolve(__dirname, "..", "..", file);
+  if (!existsSync(path)) continue;
+  for (const raw of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    const eq = line.indexOf("=");
+    if (!line || line.startsWith("#") || eq < 0) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
 
 const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
 if (!apiKey) {
