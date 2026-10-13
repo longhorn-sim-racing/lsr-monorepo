@@ -18,15 +18,17 @@ describe("checkEvalDatabase", () => {
     expect(checkEvalDatabase({ DATABASE_URL: LOCAL.replace("127.0.0.1", "localhost"), JACK_DATABASE_URL: LOCAL_JACK.replace("127.0.0.1", "localhost") }).ok).toBe(true)
   })
 
-  it("refuses a remote database unless --allow-remote names its exact host", () => {
+  it("refuses a remote database unless --allow-remote names its exact host and Supabase project", () => {
     const remote = checkEvalDatabase({ DATABASE_URL: POOLER, JACK_DATABASE_URL: POOLER_JACK })
     expect(remote.ok).toBe(false)
-    expect(!remote.ok && remote.error).toContain("--allow-remote=aws-0-us-east-1.pooler.supabase.com")
+    expect(!remote.ok && remote.error).toContain("--allow-remote=aws-0-us-east-1.pooler.supabase.com/abcdefgh")
     expect(!remote.ok && remote.error).not.toContain("secret")
 
     expect(checkEvalDatabase({ DATABASE_URL: POOLER, JACK_DATABASE_URL: POOLER_JACK }, "pooler.supabase.com").ok).toBe(false)
     expect(checkEvalDatabase({ DATABASE_URL: POOLER, JACK_DATABASE_URL: POOLER_JACK }, "")).toMatchObject({ ok: false })
-    expect(checkEvalDatabase({ DATABASE_URL: POOLER, JACK_DATABASE_URL: POOLER_JACK }, "aws-0-us-east-1.pooler.supabase.com")).toMatchObject({
+    // The pooler host alone is shared by every project in the region, so it isn't enough
+    expect(checkEvalDatabase({ DATABASE_URL: POOLER, JACK_DATABASE_URL: POOLER_JACK }, "aws-0-us-east-1.pooler.supabase.com").ok).toBe(false)
+    expect(checkEvalDatabase({ DATABASE_URL: POOLER, JACK_DATABASE_URL: POOLER_JACK }, "aws-0-us-east-1.pooler.supabase.com/abcdefgh")).toMatchObject({
       ok: true,
       local: false,
       host: "aws-0-us-east-1.pooler.supabase.com",
@@ -42,7 +44,7 @@ describe("checkEvalDatabase", () => {
     })
     // Same regional pooler and database name, different Supabase project
     const otherProject = POOLER_JACK.replace("jack_readonly.abcdefgh", "jack_readonly.zyxwvuts")
-    expect(checkEvalDatabase({ DATABASE_URL: POOLER, JACK_DATABASE_URL: otherProject }, "aws-0-us-east-1.pooler.supabase.com")).toMatchObject({
+    expect(checkEvalDatabase({ DATABASE_URL: POOLER, JACK_DATABASE_URL: otherProject }, "aws-0-us-east-1.pooler.supabase.com/abcdefgh")).toMatchObject({
       ok: false,
       error: expect.stringContaining("project zyxwvuts"),
     })
@@ -97,6 +99,11 @@ describe("mentionsNumber", () => {
     expect(mentionsNumber("No drivers have paid the LSC entry fee yet.", 0, ["paid", "driver"])).toBe(true)
     expect(mentionsNumber("Nobody has paid yet.", 0, ["paid", "driver"])).toBe(true)
     expect(mentionsNumber("There's no rush; 3 drivers have paid.", 0, ["paid", "driver"])).toBe(false)
+    // A "no" that isn't the count, or a real count next to it, isn't zero
+    expect(mentionsNumber("I can't see payment data, so there's nothing I can check here.", 0, ["paid", "driver", "entr", "fee", "people"])).toBe(false)
+    expect(mentionsNumber("5 drivers have paid; no other drivers have.", 0, ["paid", "driver", "entr", "fee", "people"])).toBe(false)
+    expect(mentionsNumber("12 people have paid. There's no fee waiver this season.", 0, ["paid", "driver", "entr", "fee", "people"])).toBe(false)
+    expect(mentionsNumber("None of the applicants have paid yet; 14 forms are in.", 0, ["paid", "applicant"])).toBe(true)
     expect(mentionsNumber("There are 130 applications.", 13)).toBe(false)
     expect(mentionsNumber("It cost $13.50", 13)).toBe(false)
   })

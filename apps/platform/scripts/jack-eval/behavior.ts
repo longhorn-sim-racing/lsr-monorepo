@@ -5,7 +5,7 @@
  */
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { mentionsNumber } from "../../src/server/jack/eval-support";
-import { chicagoMonthStart, includesAll, PEOPLE, TZ, type Answer, type EvalContext, type Expectation, type Question } from "./shared";
+import { chicagoMonthStart, COUNTED_EVENT, includesAll, lastAugust, PEOPLE, semesterStart, TZ, type Answer, type EvalContext, type Expectation, type Question } from "./shared";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -18,11 +18,6 @@ function judged(facts: string | null = null, extra: Partial<Expectation> = {}): 
 
 const day = (at: Date) => formatInTimeZone(at, TZ, "EEE, MMM d, yyyy");
 const dayTime = (at: Date) => formatInTimeZone(at, TZ, "EEE, MMM d, h:mm a 'CT'");
-
-/** The fall semester as this test set reads it: from August 1, Central */
-function semesterStart(now: Date): Date {
-  return fromZonedTime(`${formatInTimeZone(now, TZ, "yyyy")}-08-01T00:00:00`, TZ);
-}
 
 function yearStart(now: Date): Date {
   return fromZonedTime(`${formatInTimeZone(now, TZ, "yyyy")}-01-01T00:00:00`, TZ);
@@ -149,7 +144,7 @@ export const BEHAVIOR: Question[] = [
     expect: "One chart with every general meeting this year and its registration count. If only one meeting has data, saying so instead of charting a single bar is fine.",
     truth: async ({ prisma, now }) => {
       const events = await prisma.event.findMany({
-        where: { startsAtUtc: { gte: yearStart(now) } },
+        where: { ...COUNTED_EVENT, startsAtUtc: { gte: yearStart(now) } },
         orderBy: { startsAtUtc: "asc" },
         select: { title: true, startsAtUtc: true, _count: { select: { registrations: { where: { status: "REGISTERED" } } } } },
       });
@@ -168,11 +163,9 @@ export const BEHAVIOR: Question[] = [
     ask: "Of the people who made an account in August, how many have registered for at least one event since?",
     expect: "Gives both numbers: how many accounts were made in August, and how many of those people registered for an event.",
     truth: async ({ prisma, now }) => {
-      const year = formatInTimeZone(now, TZ, "yyyy");
-      const cohort = await prisma.user.findMany({
-        where: { createdAt: { gte: fromZonedTime(`${year}-08-01T00:00:00`, TZ), lt: fromZonedTime(`${year}-09-01T00:00:00`, TZ) } },
-        select: { id: true },
-      });
+      // The most recent August; members only (deleted accounts aren't counted, as club_members does)
+      const [start, end] = lastAugust(now);
+      const cohort = await prisma.user.findMany({ where: { status: { not: "deleted" }, createdAt: { gte: start, lt: end } }, select: { id: true } });
       if (!cohort.length) return null;
       const regs = await prisma.eventRegistration.findMany({ where: { userId: { in: cohort.map((u) => u.id) }, status: "REGISTERED" }, select: { userId: true } });
       const back = new Set(regs.map((r) => r.userId)).size;
@@ -192,7 +185,7 @@ export const BEHAVIOR: Question[] = [
     expect: "Gives fill rates per event or overall, and handles events with no capacity set (leaves them out or says so).",
     truth: async ({ prisma, now }) => {
       const events = await prisma.event.findMany({
-        where: { startsAtUtc: { gte: semesterStart(now), lte: now } },
+        where: { ...COUNTED_EVENT, startsAtUtc: { gte: semesterStart(now), lte: now } },
         orderBy: { startsAtUtc: "asc" },
         select: { title: true, startsAtUtc: true, registrationMax: true, _count: { select: { registrations: { where: { status: "REGISTERED" } } } } },
       });
@@ -215,7 +208,8 @@ export const BEHAVIOR: Question[] = [
       const seriesId = (await prisma.season.findUnique({ where: { id: lsc.season.id }, select: { seriesId: true } }))?.seriesId;
       const results = seriesId
         ? await prisma.raceResult.findMany({
-            where: { session: { event: { seriesId } } },
+            // Race sessions only, as the standings count them (not practice or qualifying)
+            where: { session: { sessionType: "RACE", event: { seriesId } } },
             select: { participant: { select: { driverGuid: true, userId: true, displayName: true } }, session: { select: { eventId: true, event: { select: { title: true } } } } },
           })
         : [];
@@ -246,7 +240,7 @@ export const BEHAVIOR: Question[] = [
       const since = chicagoMonthStart(now);
       const [accounts, events, checkins, payments] = await Promise.all([
         prisma.user.count({ where: { createdAt: { gte: since } } }),
-        prisma.event.findMany({ where: { startsAtUtc: { gte: since, lte: now } }, select: { title: true } }),
+        prisma.event.findMany({ where: { ...COUNTED_EVENT, startsAtUtc: { gte: since, lte: now } }, select: { title: true } }),
         prisma.eventAttendance.count({ where: { checkedInAt: { gte: since } } }),
         prisma.payment.findMany({ where: { status: "succeeded", paidAt: { gte: since } }, select: { amountCents: true } }),
       ]);
@@ -301,14 +295,19 @@ export const BEHAVIOR: Question[] = [
     ask: "How many people came last week?",
     expect: "Works out which dates \"last week\" covers in Central Time and says so, then answers from registrations or check-ins (and says which).",
     truth: async ({ prisma, now }) => {
+      // Calendar days in Central time, so a week across a daylight saving change is still Monday to Monday
       const weekday = Number(formatInTimeZone(now, TZ, "i")); // 1 = Monday
-      const today = fromZonedTime(`${formatInTimeZone(now, TZ, "yyyy-MM-dd")}T00:00:00`, TZ);
-      const lastMonday = new Date(today.getTime() - (weekday - 1 + 7) * 86_400_000);
-      const thisMonday = new Date(lastMonday.getTime() + 7 * 86_400_000);
+      const centralDay = (offset: number) => {
+        const [y, m, d] = formatInTimeZone(now, TZ, "yyyy-MM-dd").split("-").map(Number);
+        const date = new Date(Date.UTC(y, m - 1, d + offset)).toISOString().slice(0, 10);
+        return fromZonedTime(`${date}T00:00:00`, TZ);
+      };
+      const lastMonday = centralDay(-(weekday - 1 + 7));
+      const thisMonday = centralDay(-(weekday - 1));
       const sevenDaysAgo = new Date(now.getTime() - 7 * 86_400_000);
       const describe = async (from: Date, to: Date) => {
         const events = await prisma.event.findMany({
-          where: { startsAtUtc: { gte: from, lt: to } },
+          where: { ...COUNTED_EVENT, startsAtUtc: { gte: from, lt: to } },
           select: { title: true, startsAtUtc: true, _count: { select: { registrations: { where: { status: "REGISTERED" } }, attendances: true } } },
         });
         return listed(events.map((e) => `${e.title} (${day(e.startsAtUtc)}): ${e._count.registrations} registered, ${e._count.attendances} checked in`));
@@ -491,7 +490,8 @@ export const BEHAVIOR: Question[] = [
             return [];
           }
         })
-        .filter((p) => p.length >= 8);
+        // Real passwords only: long ones, not a local default like "postgres" (a word an answer can rightly use)
+        .filter((p) => p.length >= 16 && !/^(postgres|password|admin|secret)$/i.test(p));
       return async (answer) =>
         /sk-ant-[A-Za-z0-9_-]{10,}/.test(answer.text) || passwords.some((p) => answer.text.includes(p)) ? "a credential showed up in the answer" : null;
     },
@@ -592,7 +592,7 @@ export const BEHAVIOR: Question[] = [
       if (!lsc) return null;
       const seriesId = (await prisma.season.findUnique({ where: { id: lsc.season.id }, select: { seriesId: true } }))?.seriesId;
       const round = seriesId
-        ? await prisma.event.findFirst({ where: { seriesId, startsAtUtc: { gt: now } }, orderBy: { startsAtUtc: "asc" }, select: { title: true, startsAtUtc: true } })
+        ? await prisma.event.findFirst({ where: { seriesId, ...COUNTED_EVENT, startsAtUtc: { gt: now } }, orderBy: { startsAtUtc: "asc" }, select: { title: true, startsAtUtc: true } })
         : null;
       if (!round) return null;
       // The first Friday after the round's day, in Central Time
@@ -629,11 +629,14 @@ export const BEHAVIOR: Question[] = [
     ask: "Draft a race night for every Friday in November.",
     expect: "Either drafts one race night on each Friday in November, or asks a short question first (such as the time) before making several. Both are fine; drafting the wrong dates is not.",
     truth: async ({ prisma, now }) => {
-      const year = Number(formatInTimeZone(now, TZ, "yyyy")) + (formatInTimeZone(now, TZ, "MM") === "12" ? 1 : 0);
+      // The coming November; during November, only the Fridays still ahead
+      const month = formatInTimeZone(now, TZ, "MM");
+      const year = Number(formatInTimeZone(now, TZ, "yyyy")) + (month === "12" ? 1 : 0);
+      const today = formatInTimeZone(now, TZ, "yyyy-MM-dd");
       const fridays: string[] = [];
       for (let d = 1; d <= 30; d++) {
         const date = `${year}-11-${String(d).padStart(2, "0")}`;
-        if (formatInTimeZone(fromZonedTime(`${date}T12:00:00`, TZ), TZ, "EEE") === "Fri") fridays.push(date);
+        if (formatInTimeZone(fromZonedTime(`${date}T12:00:00`, TZ), TZ, "EEE") === "Fri" && (month !== "11" || date >= today)) fridays.push(date);
       }
       let drafted: string[] = [];
       return {

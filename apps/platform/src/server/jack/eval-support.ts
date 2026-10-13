@@ -75,13 +75,15 @@ export function checkEvalDatabase(env: { DATABASE_URL?: string; JACK_DATABASE_UR
   if (!main) return { ok: false, error: "DATABASE_URL isn't set (or isn't a postgres:// URL) in the environment or apps/platform/.env.local / .env." }
   if (main.hostOverride) return { ok: false, error: `Refusing to run: ${overrideProblem("DATABASE_URL", main.hostOverride)}` }
   const local = LOCAL_HOSTS.includes(main.host)
-  if (!local && allowRemote?.toLowerCase() !== main.host) {
+  // A Supabase pooler host is shared by every project in its region, so the flag names the project too
+  const remoteName = main.projectRef ? `${main.host}/${main.projectRef}` : main.host
+  if (!local && allowRemote?.toLowerCase() !== remoteName.toLowerCase()) {
     return {
       ok: false,
       error:
         `Refusing to run: DATABASE_URL points at ${main.host}, not this machine (127.0.0.1 or localhost). ` +
         `The eval writes to the database it runs on (a draft event and an audit entry, then deletes them). ` +
-        `To run it on a copy of the data anyway, pass --allow-remote=${main.host}. Never point it at production.`,
+        `To run it on a copy of the data anyway, pass --allow-remote=${remoteName}. Never point it at production.`,
     }
   }
   const jack = parseDatabaseUrl(env.JACK_DATABASE_URL)
@@ -146,13 +148,15 @@ export function stripDatesAndTimes(text: string): string {
 
 const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"]
 
-/** How a count can be written: 13, 1,234, the words for 0 to 12, and for none "no", "none" or "nobody" ("No drivers have paid") */
+/** How a count can be written: 13, 1,234, and the words for 0 to 12 */
 function numberForms(n: number): string[] {
   const forms = new Set([String(n), n.toLocaleString("en-US")])
   if (n >= 0 && n <= 12) forms.add(WORDS[n])
-  if (n === 0) for (const word of ["no", "none", "nobody", "nothing"]) forms.add(word)
   return [...forms]
 }
+
+/** Ways of saying none, which count as zero only right before what they count ("No drivers have paid") */
+const NONE_WORDS = ["no", "none", "nobody", "nothing"]
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
@@ -190,9 +194,19 @@ function otherNumbers(text: string, n: number): number[] {
 export function mentionsNumber(text: string, n: number, nouns: string[] = []): boolean {
   const clean = stripDatesAndTimes(text)
   const forms = numberForms(n)
-  if (!forms.some((form) => new RegExp(standalone(form), "i").test(clean))) return false
-  if (!nouns.length) return true
-  return nextToNoun(clean, forms, nouns) || otherNumbers(clean, n).length === 0
+  if (forms.some((form) => new RegExp(standalone(form), "i").test(clean))) {
+    if (!nouns.length) return true
+    if (nextToNoun(clean, forms, nouns) || otherNumbers(clean, n).length === 0) return true
+  }
+  // Zero said in words: "no drivers", "none of the applicants", "nobody has paid". Only right before one
+  // of the nouns, and only when no other count sits next to those nouns ("5 drivers paid; no other drivers")
+  if (n !== 0 || !nouns.length) return false
+  const said = NONE_WORDS.some((word) =>
+    nouns.some((noun) => new RegExp(`(?<![\\w'’-])${word}(?:\\s+(?:of|the|our|other|one|more|new|any|${WORD}))?\\s+(?:${WORD}\\s+)?\\b${escapeRegExp(noun)}`, "i").test(clean)),
+  )
+  if (!said) return false
+  const others = [...new Set(otherNumbers(clean, 0))].map(String)
+  return !(others.length && nextToNoun(clean, others, nouns))
 }
 
 /** "$45", "$45.00" or "45.00" for 4,500 cents */

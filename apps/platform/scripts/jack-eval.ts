@@ -21,7 +21,7 @@
  *   --concurrency=<n>     questions in flight at once (default 5)
  *   --as=<email|handle>   the officer asking (default the first officer or admin)
  *   --verbose             print every answer
- *   --allow-remote=<host> run on a remote copy of the data (never production)
+ *   --allow-remote=<host>[/<project>]  run on a remote copy of the data (never production); a Supabase pooler URL needs the project ref too
  *
  * Results go to .claude/hillclimb/jack-<model>/<variant>/ at the repo root: results.jsonl (one row per
  * question), traces/<id>_rep0.json (the whole exchange) and errors.jsonl, plus a comparison of the three
@@ -163,6 +163,11 @@ type Row = {
     tool_gap?: string;
     expected: string;
     answer: string;
+    /** When it was asked and when its run started, so --regrade works out the same right answers */
+    askedAt?: string;
+    runStartedAt?: string;
+    /** Set when the script checks passed but the judge couldn't grade it (declined or failed): not counted as a pass or a fail */
+    ungraded?: string;
   };
 };
 
@@ -290,6 +295,7 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
   const facts = truth.facts ?? (truth.judgeOnly ? undefined : `The right answer: ${truth.expected}.`);
   const traces: ToolTrace[] = seen.map((s, i) => ({ ...s, ms: out.parts[i]?.ms }));
   let judged: Awaited<ReturnType<typeof judgeAnswer>> | null = null;
+  let judgeProblem: string | null = null;
   if (c.judge) {
     try {
       judged = await judgeAnswer(
@@ -304,13 +310,16 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
           answer: out.text,
           ending: out.outcome === "answered" ? undefined : out.outcome,
           instructions: instructionsFor(mods, persona),
+          askedAt: c.now,
         },
         AbortSignal.timeout(180_000)
       );
     } catch (error) {
-      // Both judges' safety checks can trip on a question about secrets; the script checks still grade it
-      if (error instanceof JudgeDeclined) console.log(`  ${persona.padEnd(5)} note  ${question.id}: both judges declined; graded by the script checks only`);
-      else return { error: `judge failed: ${error instanceof Error ? error.message : String(error)}`, usage: usage.tokens };
+      // The answer is kept either way (it's paid for): a script failure still fails it, otherwise it's
+      // saved ungraded, and --regrade asks the judge again
+      judgeProblem =
+        error instanceof JudgeDeclined ? "both judges declined to grade it" : `the judge failed: ${error instanceof Error ? error.message : String(error)}`;
+      console.log(`  ${persona.padEnd(5)} note  ${question.id}: ${judgeProblem}`);
     }
   }
   const g = judged?.grade;
@@ -324,7 +333,8 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
         clear: Number(g.clear),
         tools_ok: Number(g.tool_use === "good" || g.tool_use === "none_needed"),
       }
-    : { pass: Number(scriptOk), check: Number(scriptOk) };
+    : { pass: c.judge && scriptOk ? 0 : Number(scriptOk), check: Number(scriptOk) };
+  const ungraded = c.judge && !g && scriptOk ? (judgeProblem ?? "not judged") : undefined;
 
   const tokens = usage.tokens;
   const row: Row = {
@@ -360,6 +370,9 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
       ...(g ? { tool_use: g.tool_use, tool_notes: g.tool_notes, tool_gap: g.tool_gap } : c.judge ? { tool_notes: "Both judges declined to grade this question; script checks only." } : {}),
       expected: truth.expected,
       answer: out.text,
+      askedAt: c.now.toISOString(),
+      runStartedAt: c.startedAt.toISOString(),
+      ...(ungraded ? { ungraded } : {}),
     },
   };
 
@@ -446,7 +459,10 @@ async function regrade(c: Ctx, personas: JackRoomPersonaKey[]) {
     for (const row of readRows(persona)) {
       const question = QUESTIONS.find((q) => q.id === row.prompt_id);
       if (!question || (FILTER && !row.prompt_id.includes(FILTER)) || (GROUP && row.meta.group !== GROUP)) continue;
-      const ctx: EvalContext = { prisma: c.prisma, now: c.now, persona, officer: c.officer, startedAt: c.startedAt, lsc: c.lsc };
+      // The right answers as of when it was asked
+      const askedAt = row.meta.askedAt ? new Date(row.meta.askedAt) : c.now;
+      const runStartedAt = row.meta.runStartedAt ? new Date(row.meta.runStartedAt) : c.startedAt;
+      const ctx: EvalContext = { prisma: c.prisma, now: askedAt, persona, officer: c.officer, startedAt: runStartedAt, lsc: await loadLsc(c.prisma, askedAt) };
       const truth = await question.truth(ctx);
       if (!truth) continue;
       const tracePath = resolve(dir, "traces", `${row.prompt_id}_rep0.json`);
@@ -479,12 +495,14 @@ async function regrade(c: Ctx, personas: JackRoomPersonaKey[]) {
       }
       const scriptOk = failures.length === 0;
 
-      const judgeFailed = row.grade.meets === 0 || row.grade.facts === 0 || row.grade.honest === 0;
+      const judgeFailed = row.grade.meets === 0 || row.grade.facts === 0 || row.grade.honest === 0 || Boolean(row.meta.ungraded);
       let grade = row.grade;
       let extra: Partial<Row> = {};
       if (c.judge && judgeFailed) {
         const before = question.before ? ((await question.before(ctx)) ?? []) : [];
-        const judged = await judgeAnswer(
+        let judged: Awaited<ReturnType<typeof judgeAnswer>>;
+        try {
+          judged = await judgeAnswer(
           c.judge,
           {
             question: row.prompt,
@@ -496,9 +514,14 @@ async function regrade(c: Ctx, personas: JackRoomPersonaKey[]) {
             answer: row.meta.answer,
             ending: row.outcome === "answered" ? undefined : row.outcome,
             instructions: instructionsFor(c.mods, persona),
+            askedAt,
           },
           AbortSignal.timeout(180_000)
-        );
+          );
+        } catch (error) {
+          console.log(`  ${persona.padEnd(5)} note  ${row.prompt_id}: the judge couldn't grade it again (${error instanceof Error ? error.message : String(error)}); kept as it was`);
+          continue;
+        }
         rejudged++;
         const g = judged.grade;
         grade = {
@@ -515,7 +538,7 @@ async function regrade(c: Ctx, personas: JackRoomPersonaKey[]) {
           judge_model: judged.model,
           judge_usage: judged.usage,
           judge_cost_usd: (row.judge_cost_usd ?? 0) + judgeCostUsd(judged.model, judged.usage),
-          meta: { ...row.meta, tool_use: g.tool_use, tool_notes: g.tool_notes, tool_gap: g.tool_gap },
+          meta: { ...row.meta, tool_use: g.tool_use, tool_notes: g.tool_notes, tool_gap: g.tool_gap, ungraded: undefined },
         };
       }
       const judgeOk = grade.meets === undefined || Boolean(grade.meets && grade.facts && grade.honest);
@@ -557,6 +580,7 @@ async function main() {
     await regrade(c, personas);
     const summary = summarize(personas.flatMap((p) => readRows(p)), personas, mods.JACK_MODELS);
     const path = resolve(OUT_DIR, "jack-compare", `${VARIANT}.md`);
+    mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, summary);
     console.log(`\n${summary}\n  saved: ${path}`);
     await prisma.$disconnect();
@@ -582,6 +606,7 @@ async function main() {
   if (already) console.log(`  ${already} already saved for ${VARIANT}; skipping them (--fresh to redo)\n`);
 
   const rows: Row[] = [];
+  let errors = 0;
   const record = async (task: (typeof tasks)[number]) => {
     const dir = resolve(flowDir(task.persona), VARIANT);
     let result: Awaited<ReturnType<typeof runCase>>;
@@ -595,6 +620,7 @@ async function main() {
       return;
     }
     if ("error" in result) {
+      errors++;
       if (!DRY_RUN) appendFileSync(resolve(dir, "errors.jsonl"), JSON.stringify({ prompt_id: task.q.id, rep: 0, failure: "harness", error: result.error, usage: result.usage }) + "\n");
       console.log(`  ${task.persona.padEnd(5)} ERR   ${task.q.id.padEnd(30)}  ${result.error.slice(0, 160)}`);
       return;
@@ -612,9 +638,9 @@ async function main() {
   await pool(tasks.filter((t) => !drafts(t.q)), CONCURRENCY, record);
   for (const task of tasks.filter((t) => drafts(t.q))) {
     await record(task);
-    await cleanUp(prisma, startedAt).catch((error) => console.error(`  couldn't clean up after ${task.q.id}:`, error));
+    await cleanUp(prisma).catch((error) => console.error(`  couldn't clean up after ${task.q.id}:`, error));
   }
-  await cleanUp(prisma, startedAt).catch((error) => console.error("  couldn't clean up:", error));
+  await cleanUp(prisma).catch((error) => console.error("  couldn't clean up:", error));
 
   const all = DRY_RUN ? rows : personas.flatMap((p) => readRows(p));
   const summary = summarize(all, personas, mods.JACK_MODELS);
@@ -625,7 +651,7 @@ async function main() {
     writeFileSync(path, summary);
     console.log(`  saved: ${path}`);
   }
-  if (rows.some((r) => !r.grade.pass)) process.exitCode = 1;
+  if (rows.some((r) => !r.grade.pass) || errors > 0) process.exitCode = 1;
   await prisma.$disconnect();
 }
 
@@ -639,19 +665,17 @@ async function pool<T>(items: T[], size: number, work: (item: T) => Promise<void
 }
 
 /**
- * Undoes what the eval's replies wrote: DRAFT events Jack drafted in the eval room since the run
- * started (found through his audit entries), then those audit entries.
+ * Undoes what the eval's replies wrote: DRAFT events Jack drafted in the eval room (found through his
+ * audit entries), then those audit entries.
  */
-async function cleanUp(prisma: EvalContext["prisma"], since: Date) {
+async function cleanUp(prisma: EvalContext["prisma"]) {
+  // The eval's room id is its own, so every draft Jack made there is the eval's, from this run or one that was killed
   const audits = await prisma.auditLog.findMany({
-    where: {
-      createdAt: { gte: since },
-      AND: [{ metadata: { path: ["via"], equals: "jack" } }, { metadata: { path: ["roomId"], equals: EVAL_ROOM_ID } }],
-    },
+    where: { AND: [{ metadata: { path: ["via"], equals: "jack" } }, { metadata: { path: ["roomId"], equals: EVAL_ROOM_ID } }] },
     select: { id: true, entityType: true, entityId: true },
   });
   const drafted = audits.filter((a) => a.entityType === "EVENT").map((a) => a.entityId);
-  const events = drafted.length ? await prisma.event.deleteMany({ where: { id: { in: drafted }, status: "DRAFT", createdAt: { gte: since } } }) : { count: 0 };
+  const events = drafted.length ? await prisma.event.deleteMany({ where: { id: { in: drafted }, status: "DRAFT" } }) : { count: 0 };
   const entries = audits.length ? await prisma.auditLog.deleteMany({ where: { id: { in: audits.map((a) => a.id) } } }) : { count: 0 };
   if (VERBOSE && (events.count || entries.count)) console.log(`         cleaned up ${events.count} draft event(s), ${entries.count} audit entr${entries.count === 1 ? "y" : "ies"}`);
 }
@@ -699,7 +723,9 @@ function report(row: Row) {
 const pct = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : "-");
 
 /** The comparison: per model overall and per group, then how each used its tools, then tool gaps the judge saw */
-function summarize(rows: Row[], personas: JackRoomPersonaKey[], models: Record<string, { model: string }>): string {
+function summarize(all: Row[], personas: JackRoomPersonaKey[], models: Record<string, { model: string }>): string {
+  const ungraded = all.filter((r) => r.meta.ungraded);
+  const rows = all.filter((r) => !r.meta.ungraded);
   const lines: string[] = [`# Jack eval: ${VARIANT}`, "", `${new Date().toISOString()}. Pass = script checks pass and the judge says it does the task, with facts right and nothing invented.`, ""];
   const groups = [...new Set(rows.map((r) => r.meta.group))];
   const of = (p: string, g?: string) => rows.filter((r) => r.meta.persona === p && (!g || r.meta.group === g));
@@ -734,6 +760,11 @@ function summarize(rows: Row[], personas: JackRoomPersonaKey[], models: Record<s
   if (gaps.length) {
     lines.push("", "## Tool gaps the judge noted", "");
     for (const r of gaps) lines.push(`- **${r.prompt_id}** (${r.meta.persona}): ${r.meta.tool_gap}`);
+  }
+
+  if (ungraded.length) {
+    lines.push("", "## Not graded (the judge couldn't; not counted above)", "");
+    for (const r of ungraded) lines.push(`- **${r.prompt_id}** (${r.meta.persona}): ${r.meta.ungraded}`);
   }
 
   const failed = rows.filter((r) => !r.grade.pass);

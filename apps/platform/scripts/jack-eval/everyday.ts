@@ -4,7 +4,7 @@
  */
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { mentionsDollars, mentionsNumber } from "../../src/server/jack/eval-support";
-import { chicagoMonthStart, includesAll, mentionsDate, namesEvent, nextFriday7pm, number, PEOPLE, purchaseKey, TZ, type Question, type ToolPart } from "./shared";
+import { chicagoMonthStart, COUNTED_EVENT, includesAll, mentionsDate, namesEvent, nextFriday7pm, number, PEOPLE, purchaseKey, semesterStart, TZ, type Question, type ToolPart } from "./shared";
 
 export const EVERYDAY: Question[] = [
   {
@@ -55,6 +55,7 @@ export const EVERYDAY: Question[] = [
       const rounds = await prisma.event.findMany({
         where: {
           seriesId: lsc.season.seriesId,
+          ...COUNTED_EVENT,
           startsAtUtc: { gte: lsc.season.startAt ?? undefined, lte: lsc.season.endAt ?? undefined, lt: now },
         },
         select: { title: true, _count: { select: { ingestedSessions: { where: { sessionType: "RACE", results: { some: {} } } } } } },
@@ -140,15 +141,21 @@ export const EVERYDAY: Question[] = [
     id: "new-accounts",
     ask: "How many accounts were created in the last 30 days?",
     truth: async ({ prisma, now }) => {
-      const since = new Date(now.getTime() - 30 * 86_400_000);
-      const [created, signedUp] = await Promise.all([
-        prisma.user.count({ where: { createdAt: { gte: since } } }),
-        prisma.user.count({ where: { signedUpAt: { gte: since } } }),
+      // Members only (club_members leaves deleted accounts out), over a rolling 30 days or 30 whole Central days
+      const rolling = new Date(now.getTime() - 30 * 86_400_000);
+      const days = fromZonedTime(`${formatInTimeZone(new Date(now.getTime() - 29 * 86_400_000), TZ, "yyyy-MM-dd")}T00:00:00`, TZ);
+      const member = { status: { not: "deleted" as const } };
+      const counts = await Promise.all([
+        prisma.user.count({ where: { ...member, createdAt: { gte: rolling } } }),
+        prisma.user.count({ where: { ...member, createdAt: { gte: days } } }),
+        prisma.user.count({ where: { ...member, signedUpAt: { gte: rolling } } }),
       ]);
+      const created = counts[0];
+      const ok = [...new Set(counts)];
       const nouns = ["account", "user", "member", "signup", "sign-up", "new", "people"];
       return {
-        expected: `${created} accounts${signedUp !== created ? ` (or ${signedUp} by sign-up date)` : ""}`,
-        check: ({ text }) => (mentionsNumber(text, created, nouns) || mentionsNumber(text, signedUp, nouns) ? null : `doesn't say ${created} accounts`),
+        expected: `${created} accounts${ok.length > 1 ? ` (or ${ok.filter((n) => n !== created).join(" or ")}, by whole days or sign-up date)` : ""}`,
+        check: ({ text }) => (ok.some((n) => mentionsNumber(text, n, nouns)) ? null : `doesn't say ${created} accounts`),
         fakeAnswer: `${created} accounts.`,
       };
     },
@@ -206,15 +213,18 @@ export const EVERYDAY: Question[] = [
   {
     id: "gm-1",
     ask: "Is GM 1 on the calendar? When is it?",
-    truth: async ({ prisma }) => {
-      const gm = await prisma.event.findFirst({
+    truth: async ({ prisma, now }) => {
+      // This semester's GM 1, as a whole word ("GM 10" isn't it)
+      const candidates = await prisma.event.findMany({
         where: {
           status: { notIn: ["DRAFT", "CANCELLED"] },
+          startsAtUtc: { gte: semesterStart(now) },
           OR: [{ title: { contains: "GM 1", mode: "insensitive" } }, { title: { contains: "General Meeting 1", mode: "insensitive" } }],
         },
         orderBy: { startsAtUtc: "desc" },
         select: { title: true, startsAtUtc: true },
       });
+      const gm = candidates.find((e) => /\bGM ?1\b|general meeting 1\b/i.test(e.title)) ?? null;
       if (!gm) {
         return {
           expected: "not on the calendar",
@@ -258,7 +268,7 @@ export const EVERYDAY: Question[] = [
         expected: `${leaders.join(" / ")} with ${top}`,
         check: ({ text }) => {
           if (!mentionsNumber(text, top, ["check", "people", "person", "attendee", "member"])) return `doesn't say ${top} check-ins`;
-          return leaders.some((title) => text.toLowerCase().includes(title.toLowerCase())) ? null : `doesn't name ${leaders.join(" or ")}`;
+          return leaders.some((title) => namesEvent(text, title)) ? null : `doesn't name ${leaders.join(" or ")}`;
         },
         fakeAnswer: `${leaders[0]}, with ${top} check-ins.`,
       };
@@ -302,7 +312,7 @@ export const EVERYDAY: Question[] = [
           if (events.length !== 1) return `${events.length} events with that title were created`;
           const [event] = events;
           if (event.status !== "DRAFT") return `it was created as ${event.status}, not DRAFT`;
-          if (formatInTimeZone(event.startsAtUtc, TZ, "EEE HH:mm") !== "Fri 19:00") return `it starts ${formatInTimeZone(event.startsAtUtc, TZ, "EEE MMM d h:mm a")} CT`;
+          if (event.startsAtUtc.getTime() !== when.getTime()) return `it starts ${formatInTimeZone(event.startsAtUtc, TZ, "EEE MMM d h:mm a")} CT, not ${formatInTimeZone(when, TZ, "EEE MMM d h:mm a")} CT`;
           if (event.endsAtUtc.getTime() - event.startsAtUtc.getTime() !== 2 * 3_600_000) return "it isn't two hours long";
           return null;
         },
