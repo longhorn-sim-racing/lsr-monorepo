@@ -1,273 +1,141 @@
-"use client";
+"use client"
 
-import { useState, useMemo } from "react";
-import { Season, EventSeries } from "@prisma/client";
-import { Search, Plus, ArrowUpDown, MoreVertical, Edit, Trash2, RefreshCw, Trophy } from "lucide-react";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { deleteSeason, recomputeStandings } from "@/app/admin/seasons/actions";
-import { cn } from "@/lib/utils";
-import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
-import { toast } from "sonner";
-import { unexpectedError } from "@/lib/action-result";
+import Link from "next/link"
+import { toast } from "sonner"
+import { formatInTimeZone } from "date-fns-tz"
+import { Pencil, RefreshCw } from "lucide-react"
+import { DEFAULT_TIMEZONE } from "@/lib/dates"
+import { unexpectedError } from "@/lib/action-result"
+import { Badge, Button, CellStack, DataTable, EmptyState, IconButton, RowActions, RowMenu, type Column, type RowMenuItem } from "@/components/admin/kit"
+import { deleteSeason } from "@/app/admin/seasons/actions"
+import { PHASE_LABEL, PHASE_TONE, type SeasonPhase } from "@/app/admin/seasons/_components/season-status"
+import { useRecomputeStandings } from "@/app/admin/seasons/_components/use-recompute-standings"
+import { cn } from "@/lib/utils"
 
-type SeasonWithSeries = Season & {
-  series: EventSeries | null;
-};
+export type SeasonRow = {
+  id: string
+  name: string
+  slug: string
+  year: number
+  startAt: Date | null
+  endAt: Date | null
+  seriesTitle: string | null
+  hasSeries: boolean
+  leagueName: string | null
+  /** Drivers in the standings */
+  entries: number
+  applications: number
+  phase: SeasonPhase
+}
 
-type SeasonsConsoleProps = {
-  initialSeasons: SeasonWithSeries[];
-};
+const central = (date: Date, pattern: string) => formatInTimeZone(date, DEFAULT_TIMEZONE, pattern)
 
-type SortField = "startAt" | "name" | "year";
-type SortDirection = "asc" | "desc";
+function dateRange(start: Date | null, end: Date | null) {
+  if (!start && !end) return "No dates"
+  if (start && end) {
+    const sameYear = central(start, "yyyy") === central(end, "yyyy")
+    return `${central(start, sameYear ? "MMM d" : "MMM d, yyyy")} – ${central(end, "MMM d, yyyy")}`
+  }
+  return start ? `From ${central(start, "MMM d, yyyy")}` : `Until ${central(end!, "MMM d, yyyy")}`
+}
 
-export function SeasonsConsole({ initialSeasons }: SeasonsConsoleProps) {
-  const [recomputingId, setRecomputingId] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [sortField, setSortField] = useState<SortField>("startAt");
-  const [sortDir, setSortDir] = useState<SortDirection>("desc");
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
-  const SortIndicator = ({ field }: { field: SortField }) => {
-    if (sortField !== field) return <ArrowUpDown size={10} className="ml-1.5 opacity-20" />;
-    return sortDir === "asc" ? <ChevronUp size={10} className="ml-1.5 text-lsr-orange" /> : <ChevronDown size={10} className="ml-1.5 text-lsr-orange" />;
-  };
+export function SeasonsConsole({ seasons }: { seasons: SeasonRow[] }) {
+  const { recompute, pendingId } = useRecomputeStandings()
 
-  // Helper for SortIndicator since I didn't import ChevronUp/Down
-  const ChevronUp = ({ size, className }: { size: number, className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m18 15-6-6-6 6"/></svg>
-  );
-  const ChevronDown = ({ size, className }: { size: number, className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m6 9 6 6 6-6"/></svg>
-  );
-
-
-  const filteredAndSortedSeasons = useMemo(() => {
-    let result = [...initialSeasons];
-
-    // Filter
-    if (search) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (s) =>
-          s.name.toLowerCase().includes(q) ||
-          s.slug.toLowerCase().includes(q) ||
-          (s.series?.title || "").toLowerCase().includes(q)
-      );
+  async function remove(season: SeasonRow) {
+    try {
+      await deleteSeason(season.id)
+      toast.success(`Deleted ${season.name}`)
+    } catch (error) {
+      console.error(error)
+      toast.error(unexpectedError(error, "Couldn't delete the season"))
     }
+  }
 
-    // Sort
-    result.sort((a, b) => {
-      // Dates compare by time (missing ones first); everything else as numbers or text
-      const sortKey = (value: string | number | Date | null) =>
-        sortField === "startAt" ? (value ? new Date(value).getTime() : 0) : (value ?? "");
-      const keyA = sortKey(a[sortField]);
-      const keyB = sortKey(b[sortField]);
-      if (keyA === keyB) return 0;
-      const comparison =
-        typeof keyA === "number" && typeof keyB === "number" ? keyA - keyB : String(keyA).localeCompare(String(keyB));
-      return sortDir === "asc" ? comparison : -comparison;
-    });
-
-    return result;
-  }, [initialSeasons, search, sortField, sortDir]);
-
-  const toggleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDir(sortDir === "asc" ? "desc" : "asc");
-    } else {
-      setSortField(field);
-      setSortDir("asc");
-      if (field === "startAt") setSortDir("desc");
-    }
-  };
+  const columns: Column<SeasonRow>[] = [
+    {
+      id: "name",
+      header: "Season",
+      sortValue: (s) => s.name,
+      cell: (s) => (
+        <CellStack
+          primary={
+            <Link href={`/admin/seasons/${s.id}/edit`} className="hover:underline">
+              {s.name}
+            </Link>
+          }
+          secondary={`/${s.slug}`}
+        />
+      ),
+    },
+    {
+      id: "series",
+      header: "Series",
+      sortValue: (s) => s.seriesTitle,
+      cell: (s) => (s.seriesTitle ? <span className="text-muted-foreground">{s.seriesTitle}</span> : <span className="text-admin-subtle">None</span>),
+    },
+    { id: "league", header: "League", hideBelow: "lg", sortValue: (s) => s.leagueName, cell: (s) => <span className="text-muted-foreground">{s.leagueName ?? "None"}</span> },
+    { id: "year", header: "Year", hideBelow: "md", sortValue: (s) => s.year, cell: (s) => s.year },
+    { id: "dates", header: "Dates", sortValue: (s) => s.startAt, className: "whitespace-nowrap", cell: (s) => dateRange(s.startAt, s.endAt) },
+    { id: "phase", header: "Status", sortValue: (s) => s.phase, cell: (s) => <Badge tone={PHASE_TONE[s.phase]}>{PHASE_LABEL[s.phase]}</Badge> },
+    { id: "entries", header: "Standings", align: "right", hideBelow: "sm", sortValue: (s) => s.entries, cell: (s) => plural(s.entries, "driver") },
+  ]
 
   return (
-    <div className="flex flex-col h-[calc(100vh-6rem)] border border-white/10 bg-black/40 rounded-lg overflow-hidden font-mono text-sm">
-      {/* Toolbar */}
-      <div className="bg-white/5 p-3 border-b border-white/10 flex items-center gap-4 flex-wrap">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger>
-              <div className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded border border-white/10 cursor-help">
-                <Trophy size={14} className="text-lsr-orange" />
-                <span className="font-bold text-white/80 tracking-wider uppercase">Seasons</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-xs bg-black/90 border-white/10 text-white p-3">
-              <p className="font-bold mb-1 text-lsr-orange">Seasons Console</p>
-              <p className="text-xs text-white/80">
-                Manage championship seasons, points tracking, and series associations.
-              </p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-
-        <div className="h-6 w-px bg-white/10 mx-2" />
-
-        <div className="flex items-center gap-2 relative flex-1 max-w-md">
-          <Search size={14} className="absolute left-3 text-white/40" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search seasons..."
-            className="w-full bg-black/50 border border-white/10 rounded pl-9 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-lsr-orange transition-colors"
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-            <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => toggleSort("startAt")}
-                className={cn("text-xs uppercase tracking-wider h-8", sortField === "startAt" ? "text-lsr-orange bg-lsr-orange/10" : "text-white/60")}
-            >
-                Date <SortIndicator field="startAt" />
+    <DataTable
+      rows={seasons}
+      columns={columns}
+      getRowId={(s) => s.id}
+      search={{ placeholder: "Search seasons", text: (s) => `${s.name} ${s.slug} ${s.seriesTitle ?? ""} ${s.leagueName ?? ""} ${s.year}` }}
+      initialSort={{ id: "dates", desc: true }}
+      rowHref={(s) => `/admin/seasons/${s.id}/edit`}
+      noun={{ one: "season", many: "seasons" }}
+      minWidth={720}
+      empty={
+        <EmptyState
+          title="No seasons yet"
+          description="Create a season to start tracking standings for a series."
+          action={
+            <Button variant="primary" asChild>
+              <Link href="/admin/seasons/new">New season</Link>
             </Button>
-            <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => toggleSort("name")}
-                className={cn("text-xs uppercase tracking-wider h-8", sortField === "name" ? "text-lsr-orange bg-lsr-orange/10" : "text-white/60")}
+          }
+        />
+      }
+      rowActions={(s) => {
+        const items: RowMenuItem[] = [{ label: "Edit", href: `/admin/seasons/${s.id}/edit` }]
+        if (s.applications > 0) items.push({ label: "LSC applications", href: `/admin/league-entries?season=${encodeURIComponent(s.slug)}` })
+        items.push("separator", {
+          label: "Delete",
+          destructive: {
+            title: `Delete ${s.name}?`,
+            description:
+              s.entries || s.applications
+                ? `This also deletes its ${plural(s.entries, "standings row")} and ${plural(s.applications, "LSC application")}. Race results stay. This can't be undone.`
+                : "Race results stay. This can't be undone.",
+          },
+          onSelect: () => remove(s),
+        })
+        return (
+          <RowActions>
+            <IconButton
+              label={s.hasSeries ? `Recompute standings for ${s.name}` : "Assign a series to recompute standings"}
+              disabled={!s.hasSeries || pendingId !== null}
+              onClick={() => recompute(s)}
             >
-                Name <SortIndicator field="name" />
-            </Button>
-             <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => toggleSort("year")}
-                className={cn("text-xs uppercase tracking-wider h-8", sortField === "year" ? "text-lsr-orange bg-lsr-orange/10" : "text-white/60")}
-            >
-                Year <SortIndicator field="year" />
-            </Button>
-        </div>
-
-        <div className="flex-1" />
-
-        <Button asChild size="sm" className="bg-lsr-orange hover:bg-lsr-orange/90 text-white border-0 font-bold uppercase tracking-wider text-xs h-8">
-          <Link href="/admin/seasons/new">
-            <Plus size={14} className="mr-2" /> New Season
-          </Link>
-        </Button>
-      </div>
-
-      {/* Header Labels */}
-      <div className="bg-white/5 border-b border-white/10 px-5 py-2 flex items-center gap-4 text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">
-        <div className="flex-1 min-w-[150px]">Name</div>
-        <div className="w-40 shrink-0">Slug</div>
-        <div className="w-32 shrink-0">Series</div>
-        <div className="w-16 shrink-0 text-center">Year</div>
-        <div className="w-48 shrink-0">Dates</div>
-        <div className="w-32 shrink-0 text-right">Actions</div>
-      </div>
-
-      {/* List */}
-      <div className="flex-1 overflow-auto p-2 space-y-1">
-        {filteredAndSortedSeasons.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-white/40">
-                No seasons found matching your search.
-            </div>
-        ) : (
-            filteredAndSortedSeasons.map((season) => {
-                const start = season.startAt ? new Date(season.startAt) : null;
-                const end = season.endAt ? new Date(season.endAt) : null;
-                
-                return (
-                <div
-                    key={season.id}
-                    className="flex items-center gap-4 p-3 hover:bg-white/5 rounded border border-transparent hover:border-white/10 transition-all group"
-                >
-                    {/* Name */}
-                    <div className="flex-1 min-w-[150px]">
-                        <span className="font-bold text-white text-sm truncate tracking-tight block">{season.name}</span>
-                    </div>
-
-                    {/* Slug */}
-                    <div className="w-40 shrink-0">
-                        <span className="text-[10px] text-white/20 font-mono truncate block">/{season.slug}</span>
-                    </div>
-
-                    {/* Series */}
-                    <div className="w-32 shrink-0 text-xs text-white/60 truncate">
-                        {season.series?.title || "-"}
-                    </div>
-                    
-                    {/* Year */}
-                    <div className="w-16 shrink-0 text-center text-xs text-white/60 font-mono">
-                        {season.year}
-                    </div>
-
-                    {/* Dates */}
-                    <div className="w-48 shrink-0 text-[10px] text-white/40 font-mono">
-                         {start ? start.toLocaleDateString() : "?"} - {end ? end.toLocaleDateString() : "?"}
-                    </div>
-
-                    {/* Actions */}
-                    <div className="w-32 shrink-0 flex items-center justify-end gap-1">
-                        
-                        <form
-                            onSubmit={async (e) => {
-                                e.preventDefault();
-                                setRecomputingId(season.id);
-                                try {
-                                    const result = await recomputeStandings(season.id);
-                                    if (result.ok) toast.success(`Standings recomputed for ${season.name}`);
-                                    else toast.error(result.error);
-                                } catch (error) {
-                                    console.error(error);
-                                    toast.error(unexpectedError(error, "Couldn't recompute the standings"));
-                                } finally {
-                                    setRecomputingId(null);
-                                }
-                            }}
-                        >
-                            <ConfirmSubmitButton
-                                disabled={recomputingId !== null}
-                                size="icon"
-                                variant="ghost"
-                                className="h-7 w-7 text-white/20 group-hover:text-white/70 hover:!text-blue-400 hover:bg-white/10 transition-colors"
-                                title="Recompute Standings"
-                                message="Are you sure you want to recompute standings for this season? This will recalculate all driver points based on race results."
-                            >
-                                <RefreshCw size={14} className={recomputingId === season.id ? "animate-spin" : undefined} />
-                            </ConfirmSubmitButton>
-                        </form>
-
-                        <Button asChild size="icon" variant="ghost" className="h-7 w-7 text-white/20 group-hover:text-white/70 hover:!text-lsr-orange hover:bg-white/10 transition-colors">
-                            <Link href={`/admin/seasons/${season.id}/edit`} title="Edit Details">
-                                <Edit size={14} />
-                            </Link>
-                        </Button>
-
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button size="icon" variant="ghost" className="h-7 w-7 text-white/20 group-hover:text-white/70 hover:bg-white/10 transition-colors">
-                                    <MoreVertical size={14} />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="bg-black border-white/10 text-white rounded-none p-1">
-                                <form action={deleteSeason.bind(null, season.id)}>
-                                    <DropdownMenuItem asChild className="text-red-400 focus:text-red-400 focus:bg-red-400/10 cursor-pointer rounded-none text-[10px] uppercase font-bold tracking-widest">
-                                        <button type="submit" className="w-full flex items-center p-2">
-                                            <Trash2 size={12} className="mr-2" /> Delete Season
-                                        </button>
-                                    </DropdownMenuItem>
-                                </form>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    </div>
-                </div>
-                );
-            })
-        )}
-      </div>
-    </div>
-  );
+              <RefreshCw className={cn(pendingId === s.id && "animate-spin")} />
+            </IconButton>
+            <IconButton label={`Edit ${s.name}`} asChild>
+              <Link href={`/admin/seasons/${s.id}/edit`}>
+                <Pencil />
+              </Link>
+            </IconButton>
+            <RowMenu label={`More actions for ${s.name}`} items={items} />
+          </RowActions>
+        )
+      }}
+    />
+  )
 }
