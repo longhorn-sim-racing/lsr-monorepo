@@ -222,8 +222,8 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   }
   await deps.broadcast(roomId, { type: JACK_EVENT.done, message: toMessageView(final) })
 
-  // Stand names an untitled room after its first real answer, in the background
-  if (status === "done" && produced?.outcome === "answered" && !sideJobs.length) {
+  // Stand names an untitled room after its first real answer (one Claude wrote, not a notice or a refusal), in the background
+  if (status === "done" && usage.calls > 0 && produced?.outcome !== "refusal" && !sideJobs.length) {
     const room = await prisma.jackRoom.findUnique({ where: { id: roomId }, select: { title: true } })
     const claude = deps.getClient()
     if (room?.title === null && claude) {
