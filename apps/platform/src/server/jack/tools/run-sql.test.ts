@@ -219,6 +219,9 @@ describe("times in run_sql results", () => {
       "SELECT \"createdAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago', \"displayName\" FROM x",
       "SELECT max(\"createdAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago'), count(*) FROM x",
       "SELECT timezone('America/Chicago', \"createdAt\" AT TIME ZONE 'UTC') AS at FROM x",
+      // Cast back to a timestamp, it's still a converted time
+      "SELECT (\"createdAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::timestamp AS at FROM x",
+      "SELECT (\"createdAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::timestamptz AS at FROM x",
     ]) {
       const result = shapeSqlResult(sql, [row({ at: new Date("2026-10-09T16:49:00Z") }, { at: "2026-10-09T16:49:00" })], 4)
       expect(JSON.parse(result.forModel).note, sql).toContain("This query converts times with AT TIME ZONE")

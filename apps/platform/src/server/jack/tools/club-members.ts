@@ -137,7 +137,7 @@ export const clubMembersTool: JackTool<z.infer<typeof input>> = {
     })
 
     return {
-      // A roster first, then the newest members (at most 50); a long signup range keeps its most recent periods
+      // See membersForModel for how a roster and the newest members share the room
       forModel: forModelText,
       label: people
         ? `Listed ${roster === "officers" ? plural(people.rows.length, "officer") : plural(people.rows.length, "member")}`

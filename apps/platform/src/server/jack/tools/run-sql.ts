@@ -268,7 +268,7 @@ const MENTIONS_CENTRAL = new RegExp(String.raw`AT\s+TIME\s+ZONE\s+'${CENTRAL_ZON
  * does). timezone('America/Chicago', x) is the same conversion as a function
  */
 const CONVERTS_TO_CENTRAL = new RegExp(
-  String.raw`AT\s+TIME\s+ZONE\s+'${CENTRAL_ZONE}'(?!\s*\)*\s*(?:::\s*(?:date|text|time\b)|,\s*'|[<>=!]|BETWEEN\b|IN\b))|\btimezone\s*\(\s*'${CENTRAL_ZONE}'`,
+  String.raw`AT\s+TIME\s+ZONE\s+'${CENTRAL_ZONE}'(?!\s*\)*\s*(?:::\s*(?:date|text|time(?:tz)?\b)|,\s*'|[<>=!]|BETWEEN\b|IN\b))|\btimezone\s*\(\s*'${CENTRAL_ZONE}'`,
   "i",
 )
 
@@ -355,7 +355,7 @@ export function shapeSqlResult(sql: string, raw: Record<string, unknown>[], ms: 
   if (columnKinds.some((k) => k === "timestamp" || k === "timestamptz")) {
     notes.push(
       CONVERTS_TO_CENTRAL.test(sql)
-        ? "Times are shown in Central time, read as stored (UTC). This query converts times with AT TIME ZONE: a column already converted to Central shows shifted here. Select times as stored, or cast a converted bucket to date (date_trunc(...)::date)."
+        ? "Times are shown in Central time, read as stored (UTC). This query converts times with AT TIME ZONE: a column already converted to Central shows shifted here. Select times as stored, or cast a converted value to date or time ((... AT TIME ZONE 'America/Chicago')::date or ::time)."
         : "Times are shown in Central time (CT) with the weekday."
     )
   }
