@@ -122,9 +122,12 @@ export function plain(text: string): string {
 
 const MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
 const YEAR_AFTER = String.raw`(?:,?\s+\d{4}\b)?`
-/** A day range's other end, written tight ("1–13", "1-13"); "Oct 10 – 0 registered" keeps its 0 */
-const RANGE_END = String.raw`(?:[–—-]\d{1,2}(?:st|nd|rd|th)?)?`
-const RANGE_START = String.raw`(?:\d{1,2}(?:st|nd|rd|th)?[–—-])?`
+/**
+ * A day range's other end, written tight with an en dash or hyphen ("1–13", "1-13"). A spaced dash or
+ * an em dash starts something else, so "Oct 10 – 0 registered" and "Sep 3—45 people" keep their counts
+ */
+const RANGE_END = String.raw`(?:[–-]\d{1,2}(?:st|nd|rd|th)?)?`
+const RANGE_START = String.raw`(?:\d{1,2}(?:st|nd|rd|th)?[–-])?`
 /** "Oct 13", "October 13th, 2026", "Oct 1–13": the month first */
 const MONTH_THEN_DAY = new RegExp(String.raw`\b(?:${MONTHS})\.?\s+\d{1,2}(?:st|nd|rd|th)?${RANGE_END}\b` + YEAR_AFTER, "gi")
 /** "13 October", "13th of Oct, 2026", "1–13 Oct": the day first. May is matched apart (below) */
