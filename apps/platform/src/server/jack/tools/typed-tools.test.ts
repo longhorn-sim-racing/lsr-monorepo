@@ -8,6 +8,7 @@ vi.mock("@/server/jack/sql-client", () => ({ getJackSqlClient: () => null, JACK_
 import type { SeasonEntrant } from "@/server/services/league-entry.service"
 import { auditWhere } from "./audit-log"
 import { bucketSignups, monthsBefore, tierCounts } from "./club-members"
+import { forModelWithList } from "./display"
 import { formatSchema, parseConstraints, typeName } from "./describe-schema"
 import { summarizeEvent, searchWhere, type EventRow } from "./events-overview"
 import { JACK_TOOLS, findJackTool } from "./index"
@@ -308,6 +309,19 @@ describe("describe_schema formatting", () => {
     expect(missing).toEqual(["SystemSetting"])
     expect(text).toContain("Not found, or not readable by Jack: SystemSetting")
     expect(text).not.toContain("How the club's data fits together")
+  })
+})
+
+describe("forModelWithList", () => {
+  it("keeps the whole list when it fits, and trims it with a note when it doesn't", () => {
+    const items = Array.from({ length: 50 }, (_, i) => ({ id: i, title: "x".repeat(40) }))
+    expect(JSON.parse(forModelWithList({ count: 50 }, "events", items)).events).toHaveLength(50)
+    const trimmed = forModelWithList({ count: 50 }, "events", items, 1_000)
+    const body = JSON.parse(trimmed)
+    expect(trimmed.length).toBeLessThanOrEqual(1_000)
+    expect(body.count).toBe(50)
+    expect(body.events.length).toBeLessThan(50)
+    expect(body.eventsNote).toBe(`Only the first ${body.events.length} of 50 events fit in this reply. Narrow the request to see the rest.`)
   })
 })
 

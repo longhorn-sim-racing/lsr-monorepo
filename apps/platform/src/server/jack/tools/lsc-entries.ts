@@ -2,7 +2,7 @@ import type { PaymentStatus } from "@prisma/client"
 import { z } from "zod"
 import { prisma } from "@/server/db"
 import { listSeasonEntrants, type EntryStatus, type SeasonEntrant } from "@/server/services/league-entry.service"
-import { forModel, plural, tableDisplay } from "./display"
+import { forModel, forModelWithList, plural, tableDisplay } from "./display"
 import { DEFAULT_LEAGUE, resolveLeagueSeason } from "./seasons"
 import { addDays, centralDate, centralDateInput, ct, dollars, startOfCentralDay } from "./time"
 import type { JackTool } from "./types"
@@ -144,7 +144,7 @@ export const lscEntriesTool: JackTool<z.infer<typeof input>> = {
     }
 
     return {
-      forModel: forModel(result),
+      forModel: listDrivers ? forModelWithList(result, "drivers", drivers) : forModel(result),
       label: `Looked up ${season.name} entries (${summary.entries.entered} entered, ${plural(summary.forms.total, "form")})`,
       displays: [
         tableDisplay(

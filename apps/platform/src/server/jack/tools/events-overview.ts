@@ -2,7 +2,7 @@ import type { AttendanceReportingMode, EventStatus, Prisma, RegistrationStatus, 
 import { z } from "zod"
 import { getEffectiveEventStatus, isEventPublic } from "@/lib/events"
 import { prisma } from "@/server/db"
-import { forModel, plural, tableDisplay } from "./display"
+import { forModelWithList, plural, tableDisplay } from "./display"
 import { centralDateInput, centralRange, ct, ctShort, dollars } from "./time"
 import type { JackTool } from "./types"
 
@@ -162,7 +162,7 @@ export const eventsOverviewTool: JackTool<z.infer<typeof input>> = {
     }
 
     return {
-      forModel: forModel(result),
+      forModel: forModelWithList(result, "events", rows),
       label: `Looked up events (${plural(rows.length, "event")}${search ? ` matching "${search}"` : ""}, ${range.from} to ${range.to})`,
       displays: rows.length
         ? [

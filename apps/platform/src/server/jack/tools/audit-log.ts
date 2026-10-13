@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client"
 import { z } from "zod"
 import { prisma } from "@/server/db"
-import { forModel, plural, tableDisplay } from "./display"
+import { forModelWithList, plural, tableDisplay } from "./display"
 import { centralDateInput, centralRange, ct, ctShort } from "./time"
 import type { JackTool } from "./types"
 
@@ -84,7 +84,7 @@ export const auditLogTool: JackTool<z.infer<typeof input>> = {
     }
 
     return {
-      forModel: forModel(result),
+      forModel: forModelWithList(result, "entries", rows),
       label: `Read the audit log (${plural(total, "entry", "entries")}, ${range.from} to ${range.to})`,
       displays: [
         entries.length

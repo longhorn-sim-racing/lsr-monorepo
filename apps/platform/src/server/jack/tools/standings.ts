@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { prisma } from "@/server/db"
 import { getStandings } from "@/server/repos/standings.repo"
-import { forModel, tableDisplay } from "./display"
+import { forModelWithList, tableDisplay } from "./display"
 import { DEFAULT_LEAGUE, resolveLeagueSeason } from "./seasons"
 import { ct, ctShort } from "./time"
 import type { JackTool } from "./types"
@@ -79,7 +79,7 @@ export const standingsTool: JackTool<z.infer<typeof input>> = {
     }
 
     return {
-      forModel: forModel(result),
+      forModel: forModelWithList(result, "standings", top),
       label: `Looked up ${season.name} standings (${standings.length} drivers, ${roundRows.filter((r) => r.results === "results in").length} of ${roundRows.length} rounds with results)`,
       displays: [
         standings.length

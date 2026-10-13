@@ -2,7 +2,7 @@ import type { PaymentStatus, ProductType } from "@prisma/client"
 import { z } from "zod"
 import { PAYMENT_KIND_LABELS, PAYMENT_STATUSES, paymentKind, type PaymentKind } from "@/lib/payments"
 import { prisma } from "@/server/db"
-import { forModel, tableDisplay } from "./display"
+import { forModel, forModelWithList, tableDisplay } from "./display"
 import { centralDate, centralDateInput, centralRange, ct, dollars } from "./time"
 import type { JackTool } from "./types"
 
@@ -150,7 +150,7 @@ export const paymentsSummaryTool: JackTool<z.infer<typeof input>> = {
     }
 
     return {
-      forModel: forModel(result),
+      forModel: result.payments ? forModelWithList(result, "payments", result.payments) : forModel(result),
       label: `Looked up payments (${range.from} to ${range.to}: $${summary.collectedDollars.toFixed(2)} collected, ${summary.totals.succeeded.count} paid)`,
       displays: [
         payments.length
