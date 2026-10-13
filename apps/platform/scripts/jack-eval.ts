@@ -98,7 +98,7 @@ if (!database.ok) {
   console.error(database.error);
   process.exit(1);
 }
-if (!DRY_RUN && !process.env.ANTHROPIC_API_KEY?.trim()) {
+if (!DRY_RUN && !(REGRADE && NO_JUDGE) && !process.env.ANTHROPIC_API_KEY?.trim()) {
   console.error("ANTHROPIC_API_KEY isn't set, so the eval can't ask Claude. Add it, or use --dry-run to check the plumbing with a fake model.");
   process.exit(1);
 }
@@ -447,7 +447,7 @@ function readRows(persona: JackRoomPersonaKey): Row[] {
 }
 
 /** Checks that read only the answer's text (plus whether a chart was made), so they can rerun on a saved answer */
-const TEXT_RECHECK = new Set(["upcoming-events", "lsc-missing-results", "lsc-other-schools", "followup-which-ut", "analysis-gm-trend"]);
+const TEXT_RECHECK = new Set(["upcoming-events", "lsc-missing-results", "lsc-other-schools", "followup-which-ut", "analysis-gm-trend", "charges-this-month"]);
 
 /**
  * --regrade: for each saved answer, reruns the text checks that changed and asks the judge again
