@@ -29,7 +29,7 @@ function room(exchanges: { ask: [string, string][]; reply?: Partial<HistoryRow> 
   for (const exchange of exchanges) {
     const asks = exchange.ask.map(([name, text]) => officer(name, text))
     rows.push(...asks)
-    const reply = row({ kind: "assistant", content: "An answer.", ...exchange.reply })
+    const reply = row({ kind: "assistant", content: "An answer.", model: "claude-sonnet-5-5", ...exchange.reply })
     rows.push(reply)
     for (const ask of asks) ask.answeredById = reply.id
   }
@@ -80,7 +80,7 @@ describe("buildHistory", () => {
     // Dylan posted while the first reply was being set up, so it was left for the second reply
     const gray = officer("Gray", "First")
     const dylan = officer("Dylan", "Second")
-    const first = row({ kind: "assistant", content: "Answer one." })
+    const first = row({ kind: "assistant", content: "Answer one.", model: "claude-sonnet-5-5" })
     const second = row({ kind: "assistant", status: "streaming" })
     gray.answeredById = first.id
     dylan.answeredById = second.id
@@ -101,6 +101,18 @@ describe("buildHistory", () => {
 
     expect(history).toHaveLength(1)
     expect(history[0].content).toMatch(/Gray: Q$/)
+  })
+
+  it("leaves out replies Claude didn't write, so their questions carry over", () => {
+    const rows = room([
+      { ask: [["Gray", "How many members?"]], reply: { content: "Jack isn't connected yet: an admin needs to add the Anthropic API key.", model: null } },
+      { ask: [["Gray", "Now?"]], reply: { status: "streaming" } },
+    ])
+
+    const history = buildHistory(rows, rows.at(-1)!.id)
+
+    expect(history).toHaveLength(1)
+    expect(history[0].content).toMatch(/Gray: How many members\?\n\n\[.+\]\nGray: Now\?$/)
   })
 
   it("marks replies that failed", () => {

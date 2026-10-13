@@ -498,6 +498,7 @@ describe("replies from Claude", () => {
     const r1 = db.addMessage({
       roomId: room.id,
       persona: "jack",
+      model: "claude-sonnet-5-5",
       content: "There are 42 members.",
       toolCalls: [{ id: "t1", name: "run_sql", label: "Ran a query (1 row)", status: "done", at: 0, input: { sql: 'select count(*) from "User"' }, displays: [] }],
     })

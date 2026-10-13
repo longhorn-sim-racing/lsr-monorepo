@@ -37,6 +37,8 @@ const EARLIER_LEFT_OUT = "(Earlier messages in this room aren't included.)"
  * - An officer turn is every message a reply answered (`answeredById`), as "Name: text" under a
  *   Central Time timestamp, so several officers posting during one answer become one turn. Room
  *   notes (a persona switch) go in the turn they came before, as context.
+ * - A reply Claude didn't write (a "not connected" or "budget used up" notice, or a placeholder
+ *   from before the model) is left out, so the questions it got carry into the next turn.
  * - An earlier reply is its text plus a one-line note of the tools it used. Its thinking and raw
  *   tool calls aren't kept: each reply's own tool loop is append-only, and across replies the history
  *   is rebuilt as plain text, so no thinking block is ever replayed into a changed conversation.
@@ -72,7 +74,7 @@ export function buildHistory(rows: HistoryRow[], replyId: string, limits: Histor
     const lead = index === 0 && start > 0 ? `${EARLIER_LEFT_OUT}\n` : ""
     const officers = renderOfficerTurn(turn.items)
     if (officers || lead) entries.push({ role: "user", text: lead + officers })
-    const reply = turn.reply ? renderReply(turn.reply) : ""
+    const reply = turn.reply && !isNotice(turn.reply) ? renderReply(turn.reply) : ""
     if (reply) entries.push({ role: "assistant", text: reply })
   })
 
@@ -95,7 +97,7 @@ function byTime(a: HistoryRow, b: HistoryRow) {
 }
 
 function turnSize(turn: { reply: HistoryRow | null; items: HistoryRow[] }): number {
-  return turn.items.reduce((sum, item) => sum + item.content.length + 40, 0) + (turn.reply ? renderReply(turn.reply).length : 0)
+  return turn.items.reduce((sum, item) => sum + item.content.length + 40, 0) + (turn.reply && !isNotice(turn.reply) ? renderReply(turn.reply).length : 0)
 }
 
 /** Index of the first turn sent: the last `maxTurns`, cut further while the history is too big. Always keeps the newest */
@@ -129,6 +131,11 @@ function renderOfficerTurn(items: HistoryRow[]): string {
     item.kind === "system" ? `(Room note: ${item.content})` : `${item.author?.displayName ?? FORMER_OFFICER}: ${item.content}`
   )
   return `[${formatTurnTime(items[items.length - 1].createdAt)}]\n${lines.join("\n")}`
+}
+
+/** A finished reply with no model never reached Claude: a notice, or a pre-model placeholder */
+function isNotice(reply: HistoryRow): boolean {
+  return reply.status === "done" && !reply.model
 }
 
 function renderReply(reply: HistoryRow): string {
