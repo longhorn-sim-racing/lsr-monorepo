@@ -6,6 +6,7 @@ import { Analytics } from "@vercel/analytics/react"
 import { SpeedInsights } from "@vercel/speed-insights/next"
 import React from "react";
 import { SiteFooter } from "@/components/site-footer"
+import { PublicChrome } from "@/components/public-chrome"
 import { LiveBanner } from "@/components/live-banner";
 import { getCachedSessionUser } from "@/server/auth/cached-session";
 import { prisma } from "@/server/db";
@@ -152,12 +153,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     />
     <CartProvider>
       {/* Maintenance: import MaintenanceBanner from "@/components/maintenance-banner" and render <MaintenanceBanner /> here */}
-      <LiveBanner />
-      <SiteHeader user={user} roles={roles} activeTierKey={activeTierKey} />
+      <PublicChrome>
+        <LiveBanner />
+        <SiteHeader user={user} roles={roles} activeTierKey={activeTierKey} />
+      </PublicChrome>
       <main className="flex-1">{children}</main>
-      <SiteFooter />
+      <PublicChrome>
+        <SiteFooter />
+        <RacingNumberPrompt userId={user?.id ?? null} hasRacingNumber={user?.racingNumber != null} />
+      </PublicChrome>
       <Toaster position="bottom-right" />
-      <RacingNumberPrompt userId={user?.id ?? null} hasRacingNumber={user?.racingNumber != null} />
     </CartProvider>
     <Analytics />
     <SpeedInsights />

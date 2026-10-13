@@ -1,21 +1,28 @@
-import { redirect } from "next/navigation"
-import { requireOfficer } from "@/server/auth/guards"
-import { AdminSidebar } from "@/components/admin/admin-sidebar"
+import type { Viewport } from "next"
+import { requireOfficerPage } from "@/server/auth/guards"
+import { getCachedSessionUser } from "@/server/auth/cached-session"
+import { AdminShell } from "@/components/admin/shell/admin-shell"
 
 export const dynamic = "force-dynamic"
 
+export const viewport: Viewport = {
+  colorScheme: "light",
+  themeColor: "#1C1917",
+}
+
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  try {
-    await requireOfficer();
-  } catch {
-    redirect("/403");
-  }
+  const officer = await requireOfficerPage()
+  const { roles } = await getCachedSessionUser()
+
   return (
-    <div className="flex min-h-screen">
-      <AdminSidebar />
-      <div className="flex-1 p-6 overflow-x-hidden">
-        {children}
-      </div>
-    </div>
+    <AdminShell
+      user={{
+        displayName: officer.displayName,
+        avatarUrl: officer.avatarUrl,
+        roleLabel: roles.includes("admin") ? "Admin" : "Officer",
+      }}
+    >
+      {children}
+    </AdminShell>
   )
 }
