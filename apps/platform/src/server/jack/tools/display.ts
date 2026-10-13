@@ -1,8 +1,8 @@
 import type { JackCellValue, JackToolDisplay } from "@/lib/jack/parts"
 import { fitRows, jsonText, toCell } from "./cells"
 
-/** Most rows a typed tool shows in the room; the model still gets everything it asked for */
-export const DISPLAY_ROWS = 50
+/** Most rows a typed tool shows in the room (a whole member roster fits); the model still gets everything it asked for */
+export const DISPLAY_ROWS = 200
 
 /** A table display from rows of objects, picking and naming the columns to show */
 export function tableDisplay<T>(

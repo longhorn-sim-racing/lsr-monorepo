@@ -53,9 +53,12 @@ export function summarizeEvent(event: EventRow, counts: Counts, now = new Date()
     status: event.status,
     effectiveStatus: getEffectiveEventStatus(event),
     public: isEventPublic(event, now),
+    // Settings, not whether it's open right now: a past event that took sign-ups still says true
+    takesRegistrations: event.registrationEnabled,
+    takesCheckIns: checkInRequired,
     registration: {
-      open: event.registrationEnabled,
       capacity: event.registrationMax,
+      filled: event.registrationMax ? `${registered}/${event.registrationMax}` : null,
       feeDollars: event.registrationFeeCents ? dollars(event.registrationFeeCents) : null,
       registered,
       waitlisted: counts.WAITLISTED ?? 0,
@@ -70,8 +73,10 @@ export function summarizeEvent(event: EventRow, counts: Counts, now = new Date()
       event._count.ingestedSessions > 0
         ? "results in"
         : event._count.rawResultUploads > 0
-          ? "uploaded, no race results"
-          : null,
+          ? "uploaded, no race results yet"
+          : started && event.series
+            ? "none uploaded"
+            : null,
     manageUrl: `/admin/events/${event.id}/manage`,
   }
 }
@@ -97,23 +102,28 @@ const input = z.object({
   to: centralDateInput.optional().describe("Last Central date (default: 60 days ahead, or a year ahead with search)"),
   search: z.string().max(80).optional().describe('Words that must all appear in the title, slug or series, e.g. "general meeting" or "round 4"'),
   includeDrafts: z.boolean().default(true).describe("Include DRAFT events (hidden from members)"),
+  withCheckInsOnly: z.boolean().default(false).describe("Only events where someone checked in (default range: the last two years), e.g. for 'the most recent event that had check-ins'"),
   limit: z.number().int().min(1).max(100).default(40),
 })
 
 export const eventsOverviewTool: JackTool<z.infer<typeof input>> = {
   name: "events_overview",
   description:
-    "Events in a date range (Central time), oldest first, each with its stored status and effective status (what members see: upcoming, in progress, completed), whether it's public, registration (capacity, registered, waitlisted, said no), attendance (check-ins, or everyone registered when the event doesn't take check-ins) and whether race results are in. Use it for 'what's on the calendar', 'is GM 1 scheduled', 'how many came to X'. Search matches words in the title.",
+    "Events in a date range (Central time, with weekdays), oldest first, each with its stored status and effective status (what members see: upcoming, in progress, completed), whether it's public, whether it takes registrations and check-ins at all (event settings, not whether they're open right now), registration (capacity, registered, how full, waitlisted, said no), attendance (check-ins, or everyone registered when the event doesn't take check-ins), check-in count, and whether race results are in. Use it for 'what's on the calendar', 'is GM 1 scheduled', 'how many came to X', 'how full were our events', 'the last event with check-ins' (withCheckInsOnly). Search matches words in the title, slug or series.",
   input,
-  async run({ from, to, search, includeDrafts, limit }) {
-    const wide = search && !from && !to
-    const range = centralRange({ from, to }, wide ? { fromDaysAgo: 365, toDaysAhead: 365 } : { fromDaysAgo: 14, toDaysAhead: 60 })
+  async run({ from, to, search, includeDrafts, withCheckInsOnly, limit }) {
+    const wide = (search || withCheckInsOnly) && !from && !to
+    const range = centralRange(
+      { from, to },
+      withCheckInsOnly && wide ? { fromDaysAgo: 730, toDaysAhead: 1 } : wide ? { fromDaysAgo: 365, toDaysAhead: 365 } : { fromDaysAgo: 14, toDaysAhead: 60 },
+    )
     if (!range.ok) return { isError: true, forModel: range.error, label: "Events lookup failed", displays: [] }
 
     const events: EventRow[] = await prisma.event.findMany({
       where: {
         startsAtUtc: { gte: range.start, lte: range.end },
         ...(includeDrafts ? {} : { status: { not: "DRAFT" } }),
+        ...(withCheckInsOnly ? { attendances: { some: {} } } : {}),
         ...searchWhere(search),
       },
       orderBy: { startsAtUtc: "asc" },

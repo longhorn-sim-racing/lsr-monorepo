@@ -18,6 +18,7 @@ import {
   shapeSqlResult,
   SQL_TABLE_DISPLAY_ROWS,
   sqlIdentifiers,
+  timeKinds,
   wrapSql,
 } from "./run-sql"
 
@@ -149,7 +150,61 @@ describe("prepareSql", () => {
 describe("wrapSql", () => {
   it("caps rows at one past the limit and keeps a trailing comment from eating the wrapper", () => {
     const wrapped = wrapSql("SELECT 1 -- note")
-    expect(wrapped).toBe(`SELECT * FROM (\nSELECT 1 -- note\n) AS jack_q LIMIT ${MAX_SQL_ROWS + 1}`)
+    expect(wrapped).toBe(`SELECT jack_q.*, row_to_json(jack_q)::text AS "__jack_row" FROM (\nSELECT 1 -- note\n) AS jack_q LIMIT ${MAX_SQL_ROWS + 1}`)
+  })
+})
+
+describe("times in run_sql results", () => {
+  // What Prisma hands back: Dates for date, timestamp and timestamptz alike, plus the row as Postgres wrote it
+  const row = (values: Record<string, unknown>, written: Record<string, unknown>) => ({ ...values, __jack_row: JSON.stringify(written) })
+
+  it("tells dates from timestamps by how Postgres wrote them", () => {
+    const kinds = timeKinds([
+      row(
+        { day: new Date("2026-10-09T00:00:00Z"), at: new Date("2026-10-10T00:00:00Z"), instant: new Date("2026-10-09T21:49:00Z"), n: 1 },
+        { day: "2026-10-09", at: "2026-10-10T00:00:00", instant: "2026-10-09T21:49:00+00:00", n: 1 },
+      ),
+    ])
+    expect(Object.fromEntries(kinds)).toEqual({ day: "date", at: "timestamp", instant: "timestamptz" })
+  })
+
+  it("gives the model Central times with the weekday and dates as dates, and the room UTC ISO", () => {
+    // A 7 PM CDT event starts at midnight UTC: it must not be mistaken for a date
+    const result = shapeSqlResult(
+      'SELECT "startsAtUtc", day FROM x',
+      [row({ startsAtUtc: new Date("2026-10-10T00:00:00Z"), day: new Date("2026-10-09T00:00:00Z") }, { startsAtUtc: "2026-10-10T00:00:00", day: "2026-10-09" })],
+      4,
+    )
+    const body = JSON.parse(result.forModel)
+    expect(body.columns).toEqual(["startsAtUtc", "day"])
+    expect(body.rows).toEqual([["Fri 2026-10-09 19:00 CT", "2026-10-09"]])
+    expect(body.note).toBe("Times are shown in Central time (CT) with the weekday.")
+    expect(result.displays?.find((d) => d.kind === "table")).toMatchObject({ columns: ["startsAtUtc", "day"], rows: [["2026-10-10T00:00:00.000Z", "2026-10-09"]] })
+  })
+
+  it("warns when the query converted times to Central itself", () => {
+    const result = shapeSqlResult(
+      "SELECT \"createdAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago' AS at FROM x",
+      [row({ at: new Date("2026-10-09T16:49:00Z") }, { at: "2026-10-09T16:49:00" })],
+      4,
+    )
+    expect(JSON.parse(result.forModel).note).toContain("This query converts times with AT TIME ZONE")
+  })
+
+  it("doesn't warn when a converted time is cast to a date or only used to filter", () => {
+    for (const sql of [
+      "SELECT \"startsAtUtc\", (\"startsAtUtc\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::date AS day FROM x",
+      "SELECT \"startsAtUtc\", date_trunc('week', \"createdAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::date AS week FROM x",
+      "SELECT \"startsAtUtc\" FROM x WHERE \"startsAtUtc\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago' >= '2026-10-01'",
+    ]) {
+      const result = shapeSqlResult(sql, [row({ startsAtUtc: new Date("2026-10-10T00:00:00Z") }, { startsAtUtc: "2026-10-10T00:00:00" })], 4)
+      expect(JSON.parse(result.forModel).note, sql).toBe("Times are shown in Central time (CT) with the weekday.")
+    }
+  })
+
+  it("treats a Date as a stored UTC time when the row's JSON isn't there", () => {
+    const result = shapeSqlResult("SELECT at", [{ at: new Date("2026-12-01T00:30:00Z") }], 2)
+    expect(JSON.parse(result.forModel).rows).toEqual([["Mon 2026-11-30 18:30 CT"]])
   })
 })
 
@@ -211,8 +266,10 @@ describe("shapeSqlResult", () => {
     expect(body.truncated).toBe(true)
     expect(body.note).toContain(`More than ${MAX_SQL_ROWS} rows`)
     expect(result.label).toBe(`Ran a query (${MAX_SQL_ROWS}+ rows)`)
+    // The room shows every row that came back (up to the cap), so a whole member roster fits
     const table = result.displays?.find((d) => d.kind === "table")
-    expect(table).toMatchObject({ truncated: true, caption: `First ${SQL_TABLE_DISPLAY_ROWS} of ${MAX_SQL_ROWS}+ rows` })
+    expect(SQL_TABLE_DISPLAY_ROWS).toBe(MAX_SQL_ROWS)
+    expect(table).toMatchObject({ truncated: true, caption: `First ${MAX_SQL_ROWS} rows (more matched)` })
     expect(table?.kind === "table" && table.rows).toHaveLength(SQL_TABLE_DISPLAY_ROWS)
   })
 

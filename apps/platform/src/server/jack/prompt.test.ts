@@ -29,7 +29,19 @@ describe("buildSystemPrompt", () => {
 
   it("carries the rules officers rely on", () => {
     const text = buildSystemPrompt("jack", { schemaNotes: "" })[0].text
-    for (const rule of [/read-only/, /Never move money/, /Central Time \(America\/Chicago\)/, /emails or EIDs/, /run_sql/, /describe_schema/, /chart tool/, /draft_event/]) {
+    for (const rule of [
+      /read-only/,
+      /Never move money/,
+      /Central Time \(America\/Chicago\)/,
+      /emails or EIDs/,
+      /run_sql/,
+      /describe_schema/,
+      /chart tool/,
+      /draft_event/,
+      // Added after the eval: the commonest slip was adding background no tool gave
+      /Say only what the tools returned/,
+      /Give links exactly as a tool returns them/,
+    ]) {
       expect(text).toMatch(rule)
     }
   })

@@ -5,6 +5,7 @@ import { describeSchemaTool } from "./describe-schema"
 import { draftEventTool } from "./draft-event"
 import { eventsOverviewTool } from "./events-overview"
 import { lscEntriesTool } from "./lsc-entries"
+import { memberActivityTool } from "./member-activity"
 import { paymentsSummaryTool } from "./payments-summary"
 import { runSqlTool } from "./run-sql"
 import { standingsTool } from "./standings"
@@ -20,6 +21,7 @@ import type { AnyJackTool } from "./types"
  */
 export const JACK_TOOLS: AnyJackTool[] = [
   clubMembersTool,
+  memberActivityTool,
   eventsOverviewTool,
   lscEntriesTool,
   paymentsSummaryTool,

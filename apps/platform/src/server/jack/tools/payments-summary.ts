@@ -68,6 +68,33 @@ export function summarizePayments(payments: PaymentRow[]) {
 
 const KIND_TYPES: Record<PaymentKind, ProductType> = { dues: "ANNUAL_DUES", league: "LEAGUE_FEE", event: "EVENT_FEE" }
 
+/** What a payment was for: its product, or for an event fee the event (from the seat it paid for, or its metadata) */
+export function purchaseKey(p: { productId: string | null; metadata: unknown; eventRegistration?: { eventId: string } | null }): string {
+  if (p.productId) return `product:${p.productId}`
+  const eventId = p.eventRegistration?.eventId ?? (p.metadata as Record<string, unknown> | null)?.eventId
+  return `event:${typeof eventId === "string" ? eventId : "unknown"}`
+}
+
+type Attempt = { userId: string; status: PaymentStatus; productId: string | null; metadata: unknown; createdAt: Date; amountCents: number; eventRegistration?: { eventId: string } | null }
+
+/**
+ * The club's "started a checkout and never paid": someone with a pending or failed checkout for an
+ * item they haven't paid for since (a later successful payment for the same item clears it, whenever
+ * it came). One row per person and item, with their latest attempt.
+ */
+export function unpaidCheckouts<T extends Attempt>(attempts: T[], succeeded: Pick<Attempt, "userId" | "productId" | "metadata" | "eventRegistration">[]): T[] {
+  const paid = new Set(succeeded.map((p) => `${p.userId}|${purchaseKey(p)}`))
+  const latest = new Map<string, T>()
+  for (const a of attempts) {
+    if (a.status !== "pending" && a.status !== "failed") continue
+    const key = `${a.userId}|${purchaseKey(a)}`
+    if (paid.has(key)) continue
+    const seen = latest.get(key)
+    if (!seen || a.createdAt > seen.createdAt) latest.set(key, a)
+  }
+  return [...latest.values()].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+}
+
 const input = z.object({
   from: centralDateInput.optional().describe("First Central date (default: the 1st of this month)"),
   to: centralDateInput.optional().describe("Last Central date (default: today)"),
@@ -75,15 +102,20 @@ const input = z.object({
   status: z.enum(PAYMENT_STATUSES).optional().describe("Only this status"),
   list: z.boolean().default(false).describe("Also list the payments themselves (name, email, item, amount, status, times)"),
   limit: z.number().int().min(1).max(100).default(25).describe("How many payments to list"),
+  unpaidCheckouts: z
+    .boolean()
+    .default(false)
+    .describe("Instead: everyone who started a checkout and never paid for that item (all time unless from/to are given), the club's definition"),
 })
 
 export const paymentsSummaryTool: JackTool<z.infer<typeof input>> = {
   name: "payments_summary",
   description:
-    "Payments over a date range (Central), in dollars: totals by status (succeeded, pending, failed, refunded), collected money, a breakdown by item (dues, league entry, each paid event) and status, and payments flagged as duplicates that need a refund in Stripe. Succeeded and refunded payments are dated by when they were paid; pending and failed ones by when checkout started. Read only: Jack never refunds or charges. Donations aren't here (they live only in Stripe).",
+    "Payments over a date range (Central), in dollars: totals by status (succeeded, pending, failed, refunded), collected money, a breakdown by item (dues, league entry, each paid event) and status, and payments flagged as duplicates that need a refund in Stripe. Succeeded and refunded payments are dated by when they were paid; pending and failed ones by when checkout started. Read only: Jack never refunds or charges. Donations aren't here (they live only in Stripe). unpaidCheckouts lists the people who started a checkout and never paid for that item, by the club's definition (a later successful payment for the same thing clears it); use it for 'who didn't finish paying'.",
   input,
-  async run({ from, to, kind, status, list, limit }) {
+  async run({ from, to, kind, status, list, limit, unpaidCheckouts: unpaidOnly }) {
     const now = new Date()
+    if (unpaidOnly) return runUnpaidCheckouts({ from, to, now })
     const range = centralRange({ from: from ?? `${centralDate(now).slice(0, 8)}01`, to }, { fromDaysAgo: 0, toDaysAhead: 0 }, now)
     if (!range.ok) return { isError: true, forModel: range.error, label: "Payments lookup failed", displays: [] }
     const window = { gte: range.start, lte: range.end }
@@ -168,4 +200,59 @@ export const paymentsSummaryTool: JackTool<z.infer<typeof input>> = {
       ],
     }
   },
+}
+
+/** unpaidCheckouts: the people, what they started, and when */
+async function runUnpaidCheckouts({ from, to, now }: { from?: string; to?: string; now: Date }) {
+  const range = from || to ? centralRange({ from, to }, { fromDaysAgo: 0, toDaysAhead: 0 }, now) : null
+  if (range && !range.ok) return { isError: true, forModel: range.error, label: "Payments lookup failed", displays: [] }
+  const select = {
+    userId: true,
+    status: true,
+    productId: true,
+    metadata: true,
+    createdAt: true,
+    amountCents: true,
+    eventRegistration: { select: { eventId: true, event: { select: { title: true } } } },
+    product: { select: { name: true } },
+    user: { select: { displayName: true, email: true } },
+  } as const
+  const [attempts, succeeded] = await Promise.all([
+    prisma.payment.findMany({
+      where: { status: { in: ["pending", "failed"] }, ...(range?.ok ? { createdAt: { gte: range.start, lte: range.end } } : {}) },
+      select,
+    }),
+    prisma.payment.findMany({ where: { status: "succeeded" }, select: { userId: true, productId: true, metadata: true, eventRegistration: { select: { eventId: true } } } }),
+  ])
+  const open = unpaidCheckouts(attempts, succeeded)
+  const rows = open.map((p) => ({
+    name: p.user.displayName,
+    email: p.user.email,
+    item: p.product?.name ?? (p.eventRegistration ? `Event fee: ${p.eventRegistration.event.title}` : "Event fee"),
+    dollars: dollars(p.amountCents),
+    lastTry: ct(p.createdAt),
+    status: p.status,
+  }))
+  const people = new Set(open.map((p) => p.userId)).size
+  const result = {
+    window: range?.ok ? { from: range.from, to: range.to, timeZone: "America/Chicago" } : "all time",
+    definition: "Started a checkout (pending or failed) for an item and has no successful payment for that same item, at any time. One row per person and item.",
+    people,
+    checkouts: rows,
+  }
+  return {
+    forModel: forModelWithList(result, "checkouts", rows),
+    label: `Found ${people === 1 ? "1 person" : `${people} people`} who started a checkout and didn't pay`,
+    displays: rows.length
+      ? [
+          tableDisplay(rows, [
+            { header: "Name", value: (r) => r.name },
+            { header: "Item", value: (r) => r.item },
+            { header: "Amount", value: (r) => `$${r.dollars.toFixed(2)}` },
+            { header: "Last try (CT)", value: (r) => r.lastTry },
+            { header: "Status", value: (r) => r.status },
+          ]),
+        ]
+      : [{ kind: "note" as const, text: "Nobody has an unpaid checkout." }],
+  }
 }
