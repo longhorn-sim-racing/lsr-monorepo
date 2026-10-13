@@ -1,28 +1,23 @@
+import type { Metadata } from "next"
+import { notFound } from "next/navigation"
+import { getVenue } from "@/server/queries/venue"
+import { requireOfficerPage } from "@/server/auth/guards"
+import { PageHeader } from "@/components/admin/kit"
+import { VenueForm } from "@/components/admin/venue-form"
 
-import { getVenue } from "@/server/queries/venue";
-import { VenueForm } from "@/components/admin/venue-form";
-import { notFound } from "next/navigation";
-import { requireOfficerPage } from "@/server/auth/guards";
+export const metadata: Metadata = { title: "Edit venue" }
 
-type EditVenueArgs = {
-  params: Promise<{ id: string }>;
-};
+export default async function EditVenuePage({ params }: { params: Promise<{ id: string }> }) {
+  await requireOfficerPage()
+  const { id } = await params
+  const venue = await getVenue(id)
 
-export default async function EditVenuePage({ params }: EditVenueArgs) {
-  await requireOfficerPage();
-  const { id } = await params;
-  const venue = await getVenue(id);
-
-  if (!venue) {
-    return notFound();
-  }
+  if (!venue) notFound()
 
   return (
-    <div className="mx-auto max-w-2xl p-8">
-      <h1 className="text-3xl font-bold mb-6">Edit Venue</h1>
-      <div className="overflow-x-auto">
-        <VenueForm venue={venue} />
-      </div>
-    </div>
-  );
+    <>
+      <PageHeader title={venue.name} description="Edit venue" back={{ href: "/admin/venues", label: "Venues" }} />
+      <VenueForm venue={venue} />
+    </>
+  )
 }

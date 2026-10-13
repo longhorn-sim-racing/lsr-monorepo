@@ -1,21 +1,20 @@
-import { EventForm } from "@/components/admin/event-form";
-import { getAllEventSeries } from "@/server/queries/events";
-import { getAllVenues } from "@/server/queries/venue";
-import { requireOfficerPage } from "@/server/auth/guards";
+import type { Metadata } from "next"
+import { EventForm } from "@/components/admin/event-form"
+import { PageHeader } from "@/components/admin/kit"
+import { getAllEventSeries } from "@/server/queries/events"
+import { getAllVenues } from "@/server/queries/venue"
+import { requireOfficerPage } from "@/server/auth/guards"
+
+export const metadata: Metadata = { title: "New event" }
 
 export default async function NewEventPage() {
-  await requireOfficerPage();
-  const [series, venues] = await Promise.all([
-    getAllEventSeries(),
-    getAllVenues(),
-  ]);
+  await requireOfficerPage()
+  const [series, venues] = await Promise.all([getAllEventSeries(), getAllVenues()])
 
   return (
-    <div className="mx-auto max-w-4xl p-8 pb-32">
-      <h1 className="text-3xl font-bold mb-6">New Event</h1>
-      <div className="overflow-x-auto">
-        <EventForm series={series} venues={venues} />
-      </div>
-    </div>
-  );
+    <>
+      <PageHeader title="New event" description="Fill in the details, then publish it, schedule it, or keep it as a draft." back={{ href: "/admin/events", label: "Events" }} />
+      <EventForm series={series} venues={venues} />
+    </>
+  )
 }

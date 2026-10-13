@@ -1,14 +1,16 @@
-import { VenueForm } from "@/components/admin/venue-form";
-import { requireOfficerPage } from "@/server/auth/guards";
+import type { Metadata } from "next"
+import { requireOfficerPage } from "@/server/auth/guards"
+import { PageHeader } from "@/components/admin/kit"
+import { VenueForm } from "@/components/admin/venue-form"
+
+export const metadata: Metadata = { title: "New venue" }
 
 export default async function NewVenuePage() {
-  await requireOfficerPage();
+  await requireOfficerPage()
   return (
-    <div className="mx-auto max-w-2xl p-8">
-      <h1 className="text-3xl font-bold mb-6">New Venue</h1>
-      <div className="overflow-x-auto">
-        <VenueForm />
-      </div>
-    </div>
-  );
+    <>
+      <PageHeader title="New venue" back={{ href: "/admin/venues", label: "Venues" }} />
+      <VenueForm />
+    </>
+  )
 }
