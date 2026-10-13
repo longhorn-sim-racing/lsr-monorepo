@@ -153,15 +153,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     />
     <CartProvider>
       {/* Maintenance: import MaintenanceBanner from "@/components/maintenance-banner" and render <MaintenanceBanner /> here */}
-      <PublicChrome>
-        <LiveBanner />
-        <SiteHeader user={user} roles={roles} activeTierKey={activeTierKey} />
-      </PublicChrome>
+      {/* One wrapper per piece: a wrapper around several (including the async banner) shifted React's ids and broke hydration */}
+      <PublicChrome><LiveBanner /></PublicChrome>
+      <PublicChrome><SiteHeader user={user} roles={roles} activeTierKey={activeTierKey} /></PublicChrome>
       <main className="flex-1">{children}</main>
-      <PublicChrome>
-        <SiteFooter />
-        <RacingNumberPrompt userId={user?.id ?? null} hasRacingNumber={user?.racingNumber != null} />
-      </PublicChrome>
+      <PublicChrome><SiteFooter /></PublicChrome>
+      <PublicChrome><RacingNumberPrompt userId={user?.id ?? null} hasRacingNumber={user?.racingNumber != null} /></PublicChrome>
       <Toaster position="bottom-right" />
     </CartProvider>
     <Analytics />
