@@ -44,8 +44,8 @@ describe("buildSystemPrompt", () => {
       /name them in your reply/,
       // Added after the second eval: name the page that does a change, instead of guessing another way
       /name the admin console page that does it/,
-      /Products: prices, including the LSC entry fee/,
-      /Members and roles: member profiles and roles/,
+      /Products: annual dues and the LSC entry fee/,
+      /Only admins can give someone the officer or admin role/,
     ]) {
       expect(text).toMatch(rule)
     }

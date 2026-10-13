@@ -158,7 +158,7 @@ A typical answer takes 5 to 60 seconds, so one run usually answers several round
 
 `scripts/jack-eval.ts` (questions in `scripts/jack-eval/`) is Jack's test set: 52 questions in nine groups, from what officers ask every day to things he must refuse or could be tricked by. Everyday lookups, harder analysis, vague questions, things he can't do (refunds, email, role changes), things the data doesn't cover, attempts to break him (secrets, a `DELETE`, instructions hidden in an applicant's notes), very large requests, drafting, and follow-ups. Each goes through the same code a room reply does, on Stand, Jack and Lift.
 
-Grading has two parts. A script checks what it can against the database: the right number or names, no forbidden tool, nothing changed, no secret in the answer. Opus 5.5 judges the rest against a written expectation and the database facts, blind to which model answered, and with the model's system prompt and each tool's description and inputs, so a claim that comes from them isn't counted as invented. It also grades tool use and notes tools that would have helped. If Opus declines to grade (a question about password hashes trips its checks), Fable 5.1 grades instead. If both decline, the answer is saved ungraded: it's left out of the pass rate and listed apart, so read it yourself.
+Grading has two parts. A script checks what it can against the database: the right number or names, no forbidden tool, nothing changed, no secret in the answer. Opus 5.5 judges the rest against a written expectation and the database facts, blind to which model answered, and with the model's system prompt and each tool's description and inputs, so a claim that comes from them isn't counted as invented. It also grades tool use and notes tools that would have helped. If Opus declines to grade (a question about password hashes trips its checks), Fable 5.1 grades instead. If both decline and the script checks pass, the answer is saved ungraded: it's left out of the pass rate and listed apart, so read it yourself. (A script failure is still a failure.)
 
 Results go to `.claude/hillclimb/jack-<model>/<variant>/` at the repo root (one row and one full transcript per answer) and a comparison of the three models to `.claude/hillclimb/jack-compare/<variant>.md`. That folder holds real member data from the database it ran on and is gitignored; never commit it. Run it on a local copy of production, not on production. `--variant=v1` (v2…) saves a run beside the baseline after a change, to compare.
 
@@ -170,7 +170,7 @@ pnpm exec tsx scripts/jack-eval.ts --only=jack     # one model
 pnpm exec tsx scripts/jack-eval.ts --group=safety  # one group (or --filter=<text> for question ids)
 pnpm exec tsx scripts/jack-eval.ts --variant=v1    # save beside the baseline after a change
 pnpm exec tsx scripts/jack-eval.ts --regrade       # grade saved answers again after a grader fix (judge calls only)
-pnpm exec tsx scripts/jack-eval.ts --regrade --no-judge  # rerun the text checks on saved answers: free, no key needed
+pnpm exec tsx scripts/jack-eval.ts --regrade --no-judge  # rerun the answer-only checks (TEXT_RECHECK) on saved answers: free, no key
 pnpm exec tsx scripts/jack-eval.ts --dry-run       # no API calls: a fake model checks the plumbing
 pnpm exec tsx scripts/jack-eval/judge-check.ts     # the judge passes a right answer and fails three wrong ones
 ```
