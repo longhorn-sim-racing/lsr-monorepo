@@ -11,7 +11,8 @@
  *
  *   pnpm --filter @lsr/platform exec tsx scripts/check-jack-realtime.ts
  *
- * Refuses to run unless NEXT_PUBLIC_SUPABASE_URL and DATABASE_URL point at 127.0.0.1/localhost.
+ * Refuses to run unless NEXT_PUBLIC_SUPABASE_URL and DATABASE_URL point at 127.0.0.1/localhost (and
+ * DATABASE_URL has no host override in its query string).
  * Creates throwaway users (random passwords, never printed) and a room, and deletes them at the end.
  * The reply comes from the scripted fake Claude (src/server/jack/fake-claude.ts), passed in through the
  * reply loop's deps, so it never calls the Anthropic API (with or without ANTHROPIC_API_KEY) and
@@ -22,6 +23,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import type { JackRoomEvent } from "../src/lib/jack/types";
+import { localDatabaseProblem } from "../src/server/jack/eval-support";
 
 // ---------------------------------------------------------------------------
 // env: load .env.local / .env without overriding what's already set
@@ -51,12 +53,16 @@ function hostOf(url: string | undefined) {
     return "";
   }
 }
-for (const name of ["NEXT_PUBLIC_SUPABASE_URL", "DATABASE_URL"]) {
-  const host = hostOf(process.env[name]);
-  if (!LOCAL_HOSTS.includes(host)) {
-    console.error(`Refusing to run: ${name} points at "${host || "nothing"}", not the local Supabase stack.`);
-    process.exit(1);
-  }
+const supabaseHost = hostOf(process.env.NEXT_PUBLIC_SUPABASE_URL);
+if (!LOCAL_HOSTS.includes(supabaseHost)) {
+  console.error(`Refusing to run: NEXT_PUBLIC_SUPABASE_URL points at "${supabaseHost || "nothing"}", not the local Supabase stack.`);
+  process.exit(1);
+}
+// The database URL also has to be local by its query string (no ?host= pointing elsewhere)
+const databaseProblem = localDatabaseProblem("DATABASE_URL", process.env.DATABASE_URL);
+if (databaseProblem) {
+  console.error(`Refusing to run: ${databaseProblem}`);
+  process.exit(1);
 }
 for (const name of ["NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"]) {
   if (!process.env[name]) {

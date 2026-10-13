@@ -1,7 +1,7 @@
 /**
- * Pure helpers for scripts/jack-eval.ts (#161): which database the eval may run against, and how its
- * checks read numbers out of an answer. Here rather than in the script so they're unit-tested. No
- * imports, no environment: the script passes everything in.
+ * Pure helpers for scripts/jack-eval.ts (#161): which database the eval may run against (the local-only
+ * check scripts use the same test), and how its checks read numbers out of an answer. Here rather than
+ * in the scripts so they're unit-tested. No imports, no environment: the scripts pass everything in.
  */
 
 // ---------------------------------------------------------------------------
@@ -10,7 +10,21 @@
 
 const LOCAL_HOSTS = ["127.0.0.1", "localhost", "::1", "[::1]"]
 
-type DbTarget = { host: string; port: string; database: string; projectRef: string | null }
+/**
+ * Connection-string parameters that point the connection somewhere other than the URL's host: Prisma
+ * and libpq honor `?host=` (and libpq `hostaddr` and `service`) over it, so
+ * postgresql://…@localhost/postgres?host=<elsewhere> isn't local at all
+ */
+const HOST_OVERRIDES = ["host", "hostaddr", "service"]
+
+type DbTarget = {
+  host: string
+  port: string
+  database: string
+  projectRef: string | null
+  /** A query parameter that would send the connection elsewhere (HOST_OVERRIDES), if the URL has one */
+  hostOverride: string | null
+}
 
 /** Host, port and database of a Postgres URL; the Supabase project ref when the user is `role.<ref>` (the pooler's form). Null if it isn't one */
 export function parseDatabaseUrl(url: string | undefined): DbTarget | null {
@@ -29,7 +43,23 @@ export function parseDatabaseUrl(url: string | undefined): DbTarget | null {
     port: parsed.port || "5432",
     database: decodeURIComponent(parsed.pathname.replace(/^\//, "")) || "(default)",
     projectRef: dot > 0 ? user.slice(dot + 1) : null,
+    hostOverride: [...parsed.searchParams.keys()].find((key) => HOST_OVERRIDES.includes(key.toLowerCase())) ?? null,
   }
+}
+
+const overrideProblem = (name: string, key: string) =>
+  `${name} sets ${key}= in its query string, which would connect somewhere other than the host it names. Take it out (these scripts only run on a database named by its URL's host).`
+
+/**
+ * Why a URL isn't this machine's database, for the local-only check scripts; null when it is
+ * (127.0.0.1 or localhost, with no host override in its query string)
+ */
+export function localDatabaseProblem(name: string, url: string | undefined): string | null {
+  const target = parseDatabaseUrl(url)
+  if (!target) return `${name} isn't set (or isn't a postgres:// URL).`
+  if (target.hostOverride) return overrideProblem(name, target.hostOverride)
+  if (!LOCAL_HOSTS.includes(target.host)) return `${name} points at ${target.host}, not the local database (127.0.0.1 or localhost).`
+  return null
 }
 
 export type EvalDatabase = { ok: true; host: string; port: string; database: string; local: boolean } | { ok: false; error: string }
@@ -43,6 +73,7 @@ export type EvalDatabase = { ok: true; host: string; port: string; database: str
 export function checkEvalDatabase(env: { DATABASE_URL?: string; JACK_DATABASE_URL?: string }, allowRemote?: string): EvalDatabase {
   const main = parseDatabaseUrl(env.DATABASE_URL)
   if (!main) return { ok: false, error: "DATABASE_URL isn't set (or isn't a postgres:// URL) in the environment or apps/platform/.env.local / .env." }
+  if (main.hostOverride) return { ok: false, error: `Refusing to run: ${overrideProblem("DATABASE_URL", main.hostOverride)}` }
   const local = LOCAL_HOSTS.includes(main.host)
   if (!local && allowRemote?.toLowerCase() !== main.host) {
     return {
@@ -60,6 +91,7 @@ export function checkEvalDatabase(env: { DATABASE_URL?: string; JACK_DATABASE_UR
       error: "JACK_DATABASE_URL isn't set. The eval runs Jack's SQL tools as jack_readonly on the same database (scripts/jack-local-sql-role.ts sets it up locally).",
     }
   }
+  if (jack.hostOverride) return { ok: false, error: `Refusing to run: ${overrideProblem("JACK_DATABASE_URL", jack.hostOverride)}` }
   const mismatch =
     jack.host !== main.host
       ? `host ${jack.host}`

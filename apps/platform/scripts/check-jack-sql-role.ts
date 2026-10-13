@@ -13,19 +13,25 @@
  *   - set_config('role', 'postgres', true) and SET ROLE can't escalate
  *   - the 5s statement timeout stops pg_sleep(6), even after set_config tries to lift it
  *   - run_sql (the tool) rejects or maps each of these the way the model should see them
- *   - run_sql refuses catalog and settings access the role itself is allowed (current_setting,
- *     pg_settings, pg_db_role_setting, pg_trigger, pg_proc, advisory locks, NOTIFY, file reads, large
- *     objects, dblink, ending other sessions), and the check shows which of them the role could reach
+ *   - run_sql refuses catalog and settings access the role itself is allowed: every pg_ name but
+ *     pg_typeof and pg_size_pretty (pg_settings, pg_db_role_setting, pg_roles, pg_user, pg_trigger,
+ *     pg_proc, advisory locks, notifications, file reads, ending other sessions), current_setting and
+ *     set_config, the XML exports that read a table or schema named in a string, large objects and
+ *     dblink, including after a -- comment ended by a carriage return. The check shows which of them
+ *     the role itself could reach
+ *   - run_sql drops session advisory locks after every query, failing ones included
  *
  * Warns (doesn't fail) when the database keeps secret-looking settings in pg_db_role_setting, which any
  * role can read. Local Supabase does by design (its well-known local JWT secret in
  * app.settings.jwt_secret); production shouldn't. Only setting names are printed, never values.
  *
- * Refuses unless DATABASE_URL and JACK_DATABASE_URL point at 127.0.0.1 or localhost. Writes nothing.
+ * Refuses unless DATABASE_URL and JACK_DATABASE_URL point at 127.0.0.1 or localhost (no host or hostaddr
+ * in the query string). Writes nothing.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { PrismaClient } from "@prisma/client";
+import { localDatabaseProblem } from "../src/server/jack/eval-support";
 
 for (const file of [".env.local", ".env"]) {
   const path = resolve(process.cwd(), file);
@@ -44,12 +50,9 @@ for (const file of [".env.local", ".env"]) {
   }
 }
 for (const name of ["DATABASE_URL", "JACK_DATABASE_URL"]) {
-  let host = "";
-  try {
-    host = new URL(process.env[name] ?? "").hostname;
-  } catch {}
-  if (!["127.0.0.1", "localhost"].includes(host)) {
-    console.error(`Refusing to run: ${name} points at "${host || "nothing"}", not the local database.${name === "JACK_DATABASE_URL" ? " Run scripts/jack-local-sql-role.ts first." : ""}`);
+  const problem = localDatabaseProblem(name, process.env[name]);
+  if (problem) {
+    console.error(`Refusing to run: ${problem}${name === "JACK_DATABASE_URL" ? " Run scripts/jack-local-sql-role.ts first." : ""}`);
     process.exit(1);
   }
 }
@@ -175,6 +178,8 @@ async function main() {
     ["pg_db_role_setting", `SELECT count(*)::int AS n FROM pg_db_role_setting`],
     ["pg_trigger.tgargs", `SELECT count(tgargs)::int AS n FROM pg_trigger`],
     ["pg_proc.prosrc", `SELECT count(prosrc)::int AS n FROM pg_proc`],
+    ["pg_roles.rolconfig", `SELECT count(rolconfig)::int AS n FROM pg_roles`],
+    ["table_to_xml('pg_db_role_setting')", `SELECT length(table_to_xml('pg_db_role_setting', true, false, '')::text) > 0 AS readable`],
   ];
   for (const [name, sql] of reachable) {
     const outcome = await attempt(sql);
@@ -238,6 +243,13 @@ async function main() {
     ["pg_terminate_backend", `SELECT pg_terminate_backend(pg_backend_pid()) AS t`],
     ["pg_cancel_backend", `SELECT pg_cancel_backend(1) AS t`],
     ["query_to_xml (a query hidden in a string)", `SELECT query_to_xml('select current_setting(''app.settings.jwt_secret'', true)', true, true, '')::text AS x`],
+    ["table_to_xml (a catalog table named in a string)", `SELECT table_to_xml('pg_db_role_setting', true, false, '')::text AS x`],
+    ["schema_to_xml (the whole catalog)", `SELECT schema_to_xml('pg_catalog', true, false, '')::text AS x`],
+    ["database_to_xml", `SELECT database_to_xml(true, false, '')::text AS x`],
+    ["pg_roles (rolconfig)", `SELECT * FROM pg_roles`],
+    ["row_to_json over pg_user (useconfig)", `SELECT row_to_json(u)::text AS r FROM pg_user u`],
+    ["pg_sleep (any pg_ function)", `SELECT pg_sleep(0)::text AS s`],
+    ["a -- comment ended by a carriage return", `SELECT 1 AS a -- note\r, length(current_setting('app.settings.jwt_secret', true)) AS secret_len`],
   ];
   for (const [name, sql] of offLimits) {
     r = await tool(sql);
@@ -245,16 +257,38 @@ async function main() {
   }
   r = await tool(`SELECT 'current_setting' AS s -- pg_settings`);
   report(!r.isError, "run_sql: off-limits names inside strings and comments don't count", r.forModel.slice(0, 80));
+  r = await tool(`SELECT pg_typeof(1)::text AS t, pg_size_pretty(1024::bigint) AS s, 1 AS notify, 2 AS lo_count`);
+  report(!r.isError, "run_sql: pg_typeof, pg_size_pretty and harmless aliases still work", r.forModel.slice(0, 80));
 
   // A setting changed on the tool's pooled connection (outside run_sql, which refuses set_config)
   // doesn't carry into run_sql's next query: each gets its own 5s, read-only transaction
   const pool = getJackSqlClient()!;
+
+  // A session advisory lock on the tool's connection (taken outside run_sql, which refuses them) is
+  // gone after run_sql's next query, whether it worked or failed
+  const advisoryHeld = async () =>
+    (await pool.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()`))[0].n;
+  await pool.$queryRawUnsafe(`SELECT pg_advisory_lock(4242)::text AS l`);
+  const heldBefore = await advisoryHeld();
+  r = await tool(`SELECT nope FROM "Event"`);
+  let heldAfter = await advisoryHeld();
+  report(
+    heldBefore === 1 && heldAfter === 0 && !!r.isError && r.forModel.startsWith("Postgres error 42703"),
+    "run_sql: a failing query still drops session advisory locks (and reports its own error)",
+    `${heldBefore} held before, ${heldAfter} after; ${r.forModel.slice(0, 60)}`
+  );
+  await pool.$queryRawUnsafe(`SELECT pg_advisory_lock(4242)::text AS l`);
+  r = await tool(`SELECT count(*) AS n FROM "Event"`);
+  heldAfter = await advisoryHeld();
+  report(!r.isError && heldAfter === 0, "run_sql: a query that works drops them too", `${heldAfter} held after`);
+
   await pool.$queryRawUnsafe(`SELECT set_config('statement_timeout', '0', false) AS t`);
   await pool.$executeRawUnsafe("SET default_transaction_read_only = off");
   started = Date.now();
-  r = await tool(`SELECT pg_sleep(6)::text AS s`);
+  // A long query that names nothing off-limits: about 10^10 rows to count
+  r = await tool(`SELECT count(*) AS n FROM generate_series(1, 100000) AS a, generate_series(1, 100000) AS b`);
   seconds = (Date.now() - started) / 1000;
-  report(!!r.isError && r.forModel.includes("longer than 5s") && seconds < 6, "run_sql: the 5s timeout holds after the session's was lifted", `${seconds.toFixed(1)}s: ${r.forModel.slice(0, 60)}`);
+  report(!!r.isError && r.forModel.includes("longer than 5s") && seconds < 7, "run_sql: the 5s timeout holds after the session's was lifted", `${seconds.toFixed(1)}s: ${r.forModel.slice(0, 60)}`);
   r = await tool(`SELECT id FROM "Event" LIMIT 1 FOR UPDATE`);
   report(!!r.isError && r.forModel.includes("read-only transaction"), "run_sql: read-only holds after the session's default was turned off", r.forModel.slice(0, 80));
   await pool.$disconnect();

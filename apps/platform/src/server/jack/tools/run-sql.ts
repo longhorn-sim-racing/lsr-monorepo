@@ -16,9 +16,13 @@ export const MAX_SQL_MODEL_CHARS = 20_000
 export const SQL_TABLE_DISPLAY_ROWS = 50
 const DISPLAY_CELL_CHARS = 200
 const STATEMENT_TIMEOUT = "5s"
+const UNLOCK_ALL = "SELECT pg_advisory_unlock_all()"
 
-/** Leading whitespace, comments and opening parentheses, which can come before the first keyword */
-const LEAD = /^(?:\s|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/|\()*/
+/**
+ * Leading whitespace, comments and opening parentheses, which can come before the first keyword. A
+ * -- comment ends at a newline or a carriage return, as Postgres reads it
+ */
+const LEAD = /^(?:\s|--[^\n\r]*(?:[\n\r]|$)|\/\*[\s\S]*?\*\/|\()*/
 
 export function prepareSql(raw: string): { ok: true; sql: string } | { ok: false; error: string } {
   let sql = raw.trim()
@@ -35,61 +39,74 @@ export function prepareSql(raw: string): { ok: true; sql: string } | { ok: false
   if (offLimits) {
     return {
       ok: false,
-      error: `Catalog and settings access is off-limits to Jack: ${offLimits} isn't allowed in run_sql (server settings, function and trigger source, files, large objects, locks, notifications and other databases can hold secrets or reach outside the query). Query the club's tables in schema public instead; describe_schema lists them.`,
+      error: `Catalog and settings access is off-limits to Jack: ${offLimits} isn't allowed in run_sql (system catalogs and pg_ functions, server settings, XML exports, large objects and other databases). Query the club's tables in schema public instead; describe_schema lists them.`,
     }
   }
   return { ok: true, sql }
 }
 
 /**
- * Names run_sql refuses outright. Postgres lets every role read the system catalogs and call these
- * functions, so jack_readonly's grants don't stop them: settings (a database can hold secrets in its
- * settings, e.g. Supabase's local JWT secret in app.settings.jwt_secret, readable through
- * current_setting and pg_db_role_setting), function and trigger source and arguments, server files,
- * large objects, advisory locks, notifications, other databases, other sessions, and functions that
- * run a query given as text (which would hide any of the above inside a string).
+ * What run_sql refuses, by name. jack_readonly's grants are the real guard (read-only, public tables,
+ * no SystemSetting), but Postgres lets every role read the system catalogs and call many server
+ * functions, grants or not, and a database can keep secrets there (local Supabase keeps its JWT
+ * secret in a database setting, readable through current_setting and pg_db_role_setting). So, as
+ * defense in depth, run_sql turns away:
+ *
+ * - every name starting with pg_ (the catalog tables and views, pg_catalog itself, and the server's
+ *   pg_ functions: settings, function source, trigger arguments, files, locks, notifications, other
+ *   sessions), except the harmless helpers in ALLOWED_PG_NAMES;
+ * - the XML export functions (*_to_xml*, *xmlschema*), which read a table, a schema, a whole
+ *   database or a query named in a string, where the name check can't see it;
+ * - the names below: settings functions, catalog columns that hold settings or source, ts_stat
+ *   (also runs a query from a string), large-object functions, and dblink (other databases).
+ *
+ * Names count as identifiers only: in a string or a comment they're fine, and an alias like
+ * "notify" or "lo_count" is fine too.
  */
+export const ALLOWED_PG_NAMES = new Set(["pg_typeof", "pg_size_pretty"])
+
 export const OFF_LIMITS_NAMES = new Set([
-  // settings
+  // settings, and catalog columns that hold settings or function source
   "current_setting",
   "set_config",
-  "pg_settings",
-  "pg_show_all_settings",
-  "pg_db_role_setting",
-  "pg_file_settings",
-  "pg_show_all_file_settings",
   "rolconfig",
   "useconfig",
   "setconfig",
-  // function and trigger source and arguments
-  "pg_trigger",
-  "pg_get_triggerdef",
-  "pg_proc",
   "prosrc",
   "probin",
-  "pg_get_functiondef",
-  // notifications
-  "pg_notify",
-  "notify",
-  "listen",
-  "unlisten",
-  // server files and other sessions
-  "pg_stat_file",
-  "pg_terminate_backend",
-  "pg_cancel_backend",
-  // a query passed as text runs unchecked
-  "query_to_xml",
-  "query_to_xmlschema",
-  "query_to_xml_and_xmlschema",
-  "cursor_to_xml",
-  "cursor_to_xmlschema",
+  // runs a query given as text
   "ts_stat",
+  // large objects (server files and stored blobs)
+  "lo_import",
+  "lo_export",
+  "lo_get",
+  "lo_put",
+  "lo_open",
+  "lo_close",
+  "lo_creat",
+  "lo_create",
+  "lo_unlink",
+  "lo_from_bytea",
+  "lo_lseek",
+  "lo_lseek64",
+  "lo_tell",
+  "lo_tell64",
+  "lo_truncate",
+  "lo_truncate64",
+  "loread",
+  "lowrite",
+  "lo_manage",
 ])
-/** Families of the same, by prefix: advisory locks, file reads and listings, large objects, dblink */
-export const OFF_LIMITS_PREFIXES = ["pg_advisory", "pg_try_advisory", "pg_read_", "pg_ls_", "lo_", "dblink"]
 
-const IDENT_START = /[A-Za-z_\u0080-￿]/
-const IDENT_PART = /[A-Za-z0-9_$\u0080-￿]/
+/** Whether run_sql refuses an identifier (lowercased) */
+export function isOffLimitsName(name: string): boolean {
+  if (name.startsWith("pg_")) return !ALLOWED_PG_NAMES.has(name)
+  if (name.includes("_to_xml") || name.includes("xmlschema")) return true
+  return OFF_LIMITS_NAMES.has(name) || name.startsWith("dblink")
+}
+
+const IDENT_START = /[A-Za-z_\u0080-\uffff]/
+const IDENT_PART = /[A-Za-z0-9_$\u0080-\uffff]/
 
 /**
  * The identifiers in a query, lowercased, outside string literals and comments. Quoted identifiers
@@ -118,8 +135,10 @@ export function sqlIdentifiers(sql: string): string[] | null {
     const ch = sql[i]
     const next = sql[i + 1]
     if (ch === "-" && next === "-") {
-      const end = sql.indexOf("\n", i)
-      i = end === -1 ? n : end + 1
+      // A line comment ends at a newline or a carriage return (Postgres reads both)
+      let end = i + 2
+      while (end < n && sql[end] !== "\n" && sql[end] !== "\r") end++
+      i = end + 1
     } else if (ch === "/" && next === "*") {
       // Block comments nest in Postgres
       let depth = 1
@@ -171,7 +190,7 @@ export function sqlIdentifiers(sql: string): string[] | null {
 export function findOffLimits(sql: string): string | null {
   const names = sqlIdentifiers(sql)
   if (names === null) return 'a Unicode-escaped identifier (U&"…")'
-  return names.find((name) => OFF_LIMITS_NAMES.has(name) || OFF_LIMITS_PREFIXES.some((prefix) => name.startsWith(prefix))) ?? null
+  return names.find(isOffLimitsName) ?? null
 }
 
 /** Caps the rows in the database: one more than the cap, to tell whether more matched. The newline keeps a trailing -- comment from swallowing the wrapper. */
@@ -281,7 +300,7 @@ export const runSqlTool: JackTool<z.infer<typeof input>> = {
     `At most ${MAX_SQL_ROWS} rows come back, and long results are trimmed: aggregate (COUNT, SUM, GROUP BY) rather than listing when you can.`,
     `Queries stop after ${STATEMENT_TIMEOUT}. Duplicate column names collapse, so alias them. Cast unusual types (interval, regclass, point) to text.`,
     "Money is stored in cents (amountCents): divide by 100 for dollars. The room sees the SQL and a table of the rows.",
-    "Server settings (current_setting, pg_settings), function and trigger source, files, locks and other catalog internals are off-limits.",
+    "The system catalogs and pg_ functions (except pg_typeof and pg_size_pretty), server settings, XML exports and large objects are off-limits.",
   ].join(" "),
   input,
   async run({ sql, purpose }, ctx) {
@@ -300,10 +319,19 @@ export const runSqlTool: JackTool<z.infer<typeof input>> = {
           // set_config, so every query gets its own read-only transaction and timeout
           await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY")
           await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT}'`)
-          const rows = await tx.$queryRawUnsafe<Record<string, unknown>[]>(wrapSql(prepared.sql))
           // Session advisory locks outlive the transaction on a pooled connection. prepareSql refuses
-          // pg_advisory*, so there shouldn't be any; this lets go of any that got through anyway
-          await tx.$executeRawUnsafe("SELECT pg_advisory_unlock_all()")
+          // pg_ functions, so there shouldn't be any; this lets go of any that got through anyway,
+          // also when the query fails (the savepoint keeps the transaction usable for it)
+          await tx.$executeRawUnsafe("SAVEPOINT jack_query")
+          let rows: Record<string, unknown>[]
+          try {
+            rows = await tx.$queryRawUnsafe<Record<string, unknown>[]>(wrapSql(prepared.sql))
+          } catch (error) {
+            await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT jack_query")
+            await tx.$executeRawUnsafe(UNLOCK_ALL)
+            throw error
+          }
+          await tx.$executeRawUnsafe(UNLOCK_ALL)
           return rows
         },
         { maxWait: 5_000, timeout: 9_000 },

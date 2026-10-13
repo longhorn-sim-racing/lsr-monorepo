@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { checkEvalDatabase, mentionsDollars, mentionsNumber, parseDatabaseUrl, stripDatesAndTimes } from "./eval-support"
+import { checkEvalDatabase, localDatabaseProblem, mentionsDollars, mentionsNumber, parseDatabaseUrl, stripDatesAndTimes } from "./eval-support"
 
 const LOCAL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 const LOCAL_JACK = "postgresql://jack_readonly:pw@127.0.0.1:54322/postgres"
@@ -46,6 +46,29 @@ describe("checkEvalDatabase", () => {
       ok: false,
       error: expect.stringContaining("project zyxwvuts"),
     })
+  })
+
+  it("refuses a local-looking URL whose query string sends the connection elsewhere", () => {
+    const sneaky = `${LOCAL}?host=db.abcdefgh.supabase.co`
+    expect(checkEvalDatabase({ DATABASE_URL: sneaky, JACK_DATABASE_URL: LOCAL_JACK })).toMatchObject({ ok: false, error: expect.stringContaining("host=") })
+    expect(checkEvalDatabase({ DATABASE_URL: `${LOCAL}?sslmode=disable&HostAddr=10.0.0.5`, JACK_DATABASE_URL: LOCAL_JACK })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("HostAddr="),
+    })
+    expect(checkEvalDatabase({ DATABASE_URL: LOCAL, JACK_DATABASE_URL: `${LOCAL_JACK}?service=prod` })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("JACK_DATABASE_URL sets service="),
+    })
+    // even when --allow-remote names the URL's host
+    expect(checkEvalDatabase({ DATABASE_URL: `${POOLER}&host=elsewhere`, JACK_DATABASE_URL: POOLER_JACK }, "aws-0-us-east-1.pooler.supabase.com").ok).toBe(false)
+    expect(checkEvalDatabase({ DATABASE_URL: `${LOCAL}?connection_limit=1`, JACK_DATABASE_URL: `${LOCAL_JACK}?pgbouncer=true` }).ok).toBe(true)
+  })
+
+  it("tells the local-only check scripts when a URL isn't this machine", () => {
+    expect(localDatabaseProblem("DATABASE_URL", LOCAL)).toBeNull()
+    expect(localDatabaseProblem("DATABASE_URL", `${LOCAL}?host=prod.example.com`)).toContain("host=")
+    expect(localDatabaseProblem("DATABASE_URL", POOLER)).toContain("aws-0-us-east-1.pooler.supabase.com")
+    expect(localDatabaseProblem("DATABASE_URL", undefined)).toContain("isn't set")
   })
 
   it("refuses when DATABASE_URL is missing or isn't Postgres", () => {

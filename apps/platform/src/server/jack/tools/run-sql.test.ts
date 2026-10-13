@@ -66,10 +66,26 @@ describe("prepareSql", () => {
   it("turns away catalog, settings and server-function access, whatever the case or quoting", () => {
     const blocked: [string, string][] = [
       ["SELECT current_setting('app.settings.jwt_secret')", "current_setting"],
-      ["SELECT pg_catalog.CURRENT_SETTING('app.settings.jwt_secret', true)", "current_setting"],
+      ["SELECT pg_catalog.CURRENT_SETTING('app.settings.jwt_secret', true)", "pg_catalog"],
       ["SELECT set_config('statement_timeout', '0', false)", "set_config"],
       ["SELECT name, setting FROM pg_settings", "pg_settings"],
-      ['SELECT * FROM pg_catalog."pg_settings"', "pg_settings"],
+      ['SELECT * FROM pg_catalog."pg_settings"', "pg_catalog"],
+      ['SELECT * FROM "PG_SETTINGS"', "pg_settings"],
+      ["SELECT * FROM pg_roles", "pg_roles"],
+      ["SELECT row_to_json(u) FROM pg_user u", "pg_user"],
+      ["SELECT count(*) FROM pg_stat_activity", "pg_stat_activity"],
+      ["SELECT table_to_xml('pg_db_role_setting', true, false, '')", "table_to_xml"],
+      ["SELECT table_to_xml_and_xmlschema('x', true, false, '')", "table_to_xml_and_xmlschema"],
+      ["SELECT schema_to_xml('pg_catalog', true, false, '')", "schema_to_xml"],
+      ["SELECT database_to_xml(true, false, '')", "database_to_xml"],
+      ["SELECT database_to_xmlschema(true, false, '')", "database_to_xmlschema"],
+      ["SELECT cursor_to_xml('c', 1, true, false, '')", "cursor_to_xml"],
+      ["SELECT * FROM ts_stat('select 1')", "ts_stat"],
+      ["SELECT lo_get(1)", "lo_get"],
+      ["SELECT loread(1, 10)", "loread"],
+      ["SELECT * FROM dblink_exec('x')", "dblink_exec"],
+      // A -- comment ends at a carriage return too, so the call after it is real SQL
+      ["SELECT 1 AS a -- note\r, length(current_setting('app.settings.jwt_secret', true)) AS secret_len", "current_setting"],
       ["SELECT * FROM pg_show_all_settings()", "pg_show_all_settings"],
       ["SELECT setconfig FROM pg_db_role_setting", "setconfig"],
       ["SELECT * FROM pg_file_settings", "pg_file_settings"],
@@ -107,17 +123,26 @@ describe("prepareSql", () => {
   it("doesn't mistake strings, comments, aliases or the club's own names for off-limits ones", () => {
     const fine = [
       "SELECT 'current_setting' AS s",
+      "SELECT 'pg_db_role_setting' AS s",
       "SELECT 1 -- pg_settings\n",
+      "SELECT 1 -- pg_settings\r\n, 2 AS b",
       "SELECT 1 /* pg_proc /* nested */ prosrc */",
       "SELECT E'it\\'s pg_settings' AS s",
       "SELECT $$pg_read_file('x')$$ AS s",
       "SELECT $q$ lo_import $q$ AS s",
       'SELECT count(*) AS listens FROM "Notification" n JOIN "NotificationPreference" p ON p."userId" = n."userId"',
-      'SELECT "User"."displayName" AS "pg_note" FROM "User"',
+      'SELECT "User"."displayName" AS notify, 1 AS listen, 2 AS unlisten, 3 AS lo_count FROM "User"',
+      "SELECT pg_typeof(1) AS t, pg_size_pretty(1024::bigint) AS s",
     ]
     for (const sql of fine) expect(prepareSql(sql).ok, sql).toBe(true)
     expect(findOffLimits('SELECT "Event"."title" FROM "Event"')).toBeNull()
     expect(sqlIdentifiers('SELECT "a""b" FROM x')).toEqual(["select", 'a"b', "from", "x"])
+    expect(sqlIdentifiers("SELECT 1 -- a\rb")).toEqual(["select", "b"])
+  })
+
+  it("lets a statement through a carriage-return comment only when what follows is fine", () => {
+    expect(prepareSql("-- members\rSELECT 1").ok).toBe(true)
+    expect(prepareSql("-- SELECT\rDELETE FROM x").ok).toBe(false)
   })
 })
 
@@ -244,10 +269,25 @@ describe("run_sql", () => {
     expect(sql.executed).toEqual([
       "SET TRANSACTION READ ONLY",
       "SET LOCAL statement_timeout = '5s'",
+      "SAVEPOINT jack_query",
       wrapSql('SELECT count(*) AS n FROM "User"'),
       "SELECT pg_advisory_unlock_all()",
     ])
     expect(JSON.parse(result.forModel).rows).toEqual([[4]])
+  })
+
+  it("drops advisory locks when the query fails too, after rolling back to the savepoint", async () => {
+    sql.query.mockRejectedValue(pgError("42703", 'column "nope" does not exist'))
+    const result = await runSqlTool.run({ sql: 'SELECT nope FROM "User"' }, ctx)
+    expect(result).toMatchObject({ isError: true, forModel: 'Postgres error 42703: column "nope" does not exist' })
+    expect(sql.executed).toEqual([
+      "SET TRANSACTION READ ONLY",
+      "SET LOCAL statement_timeout = '5s'",
+      "SAVEPOINT jack_query",
+      wrapSql('SELECT nope FROM "User"'),
+      "ROLLBACK TO SAVEPOINT jack_query",
+      "SELECT pg_advisory_unlock_all()",
+    ])
   })
 
   it("refuses a settings read before it reaches the database", async () => {
