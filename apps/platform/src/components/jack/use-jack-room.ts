@@ -41,8 +41,12 @@ type Options = {
 /** First wait before refetching a snapshot to close a gap; later tries wait longer (the database saves about once a second) */
 const RESYNC_DELAY_MS = 600
 const MAX_RESYNC_ATTEMPTS = 8
-/** While a reply streams, a snapshot after this long with no room events, in case its deltas or done event went missing */
+/**
+ * While a reply streams, a snapshot after this long with no room events, in case its deltas or done
+ * event went missing; each one after that waits twice as long, up to QUIET_RESYNC_MAX_MS
+ */
 const QUIET_RESYNC_MS = 30_000
+const QUIET_RESYNC_MAX_MS = 5 * 60_000
 /** A snapshot this long after the last done event, for anything missed around it (another officer's message, a part) */
 const AFTER_DONE_RESYNC_MS = 1_500
 /** Joining again after the server closed the channel: the first wait, doubling up to the last */
@@ -79,7 +83,8 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
   const rejoins = useRef(0)
   /** When this viewer last heard from the room: a live event, or their own post or switch */
   const [lastEventAt, setLastEventAt] = useState(() => Date.now())
-  const [quietResyncAt, setQuietResyncAt] = useState(0)
+  /** The last snapshot taken because a streaming room went quiet, and how many in a row */
+  const [quietResync, setQuietResync] = useState({ at: 0, count: 0 })
   /** When a fresh snapshot last confirmed the room looked stuck */
   const [stallCheckedAt, setStallCheckedAt] = useState(0)
   const afterDone = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -159,22 +164,28 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
     return () => clearTimeout(timer)
   }, [state.needsResync, state.resyncAttempts, resync])
 
-  // A reply is streaming but the room has gone quiet: a missed done (or created) event would leave it
-  // "answering" forever, so look at the database every QUIET_RESYNC_MS until something happens
-  const streaming = state.messages.some((m) => m.status === "streaming")
-  useEffect(() => {
-    if (!streaming) return
-    const since = Math.max(lastEventAt, quietResyncAt)
-    const timer = setTimeout(() => {
-      setQuietResyncAt(Date.now())
-      void resync()
-    }, Math.max(0, since + QUIET_RESYNC_MS - Date.now()))
-    return () => clearTimeout(timer)
-  }, [streaming, lastEventAt, quietResyncAt, resync])
-
   // Officer messages no reply has picked up, or a reply stuck streaming, after the room's been quiet a
   // while: check the database once more, then offer to ask Jack to continue
   const candidate = stallCandidate(state.messages)
+
+  // A reply is streaming but the room has gone quiet: a missed done (or created) event would leave it
+  // "answering" forever, so look at the database after QUIET_RESYNC_MS, then less and less often (a
+  // room event starts it over). Not while the room offers "continue": a reply that's really stuck stays
+  // that way until someone asks, and every open tab would keep fetching the room for nothing
+  const streaming = state.messages.some((m) => m.status === "streaming")
+  const stuckOffered = candidate === "stuck" && stallCheckedAt > lastEventAt
+  useEffect(() => {
+    if (!streaming || stuckOffered) return
+    const inARow = quietResync.at > lastEventAt ? quietResync.count : 0
+    const since = Math.max(lastEventAt, quietResync.at)
+    const wait = Math.min(QUIET_RESYNC_MAX_MS, QUIET_RESYNC_MS * 2 ** inARow)
+    const timer = setTimeout(() => {
+      setQuietResync({ at: Date.now(), count: inARow + 1 })
+      void resync()
+    }, Math.max(0, since + wait - Date.now()))
+    return () => clearTimeout(timer)
+  }, [streaming, stuckOffered, lastEventAt, quietResync, resync])
+
   useEffect(() => {
     if (!candidate) return
     const timer = setTimeout(

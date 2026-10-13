@@ -78,7 +78,8 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
     }
 
     case "message.created": {
-      const drained = drain(upsert(state.messages, action.message), heldOf(state), action.message.id)
+      const messages = action.answers?.length ? markAnswered(state.messages, action.answers) : state.messages
+      const drained = drain(upsert(messages, action.message), heldOf(state), action.message.id)
       return settle(state, drained.messages, drained.held, false)
     }
 
@@ -174,10 +175,54 @@ function byTime(a: JackMessageView, b: JackMessageView) {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
 }
 
-/** Of two copies of one message, the one that's further along; two streaming copies pool their tool parts */
+/** The officer messages a new reply answers, marked so (a message is answered for good once it is) */
+function markAnswered(messages: JackMessageView[], ids: string[]): JackMessageView[] {
+  let copy: JackMessageView[] | null = null
+  messages.forEach((message, index) => {
+    if (message.answered || !ids.includes(message.id)) return
+    copy ??= messages.slice()
+    copy[index] = { ...message, answered: true }
+  })
+  return copy ?? messages
+}
+
+/** Two finished copies say the same thing (parts compared by what changes; a finished part's displays don't) */
+function sameFinal(a: JackMessageView, b: JackMessageView): boolean {
+  return (
+    a.content === b.content &&
+    a.status === b.status &&
+    a.streamSeq === b.streamSeq &&
+    a.answered === b.answered &&
+    a.createdAt === b.createdAt &&
+    JSON.stringify(a.author) === JSON.stringify(b.author) &&
+    a.tools.length === b.tools.length &&
+    a.tools.every((part, i) => {
+      const other = b.tools[i]
+      return (
+        part.id === other.id &&
+        part.status === other.status &&
+        part.label === other.label &&
+        part.at === other.at &&
+        part.ms === other.ms &&
+        part.error === other.error &&
+        part.displays.length === other.displays.length
+      )
+    })
+  )
+}
+
+/**
+ * Of two copies of one message, the one that's further along; two streaming copies pool their tool
+ * parts. When two finished copies say the same thing the current object stays, so a snapshot doesn't
+ * re-render every row. Once a copy says a message is answered, it stays answered
+ */
 function further(current: JackMessageView, incoming: JackMessageView): JackMessageView {
   if (isFinal(current) !== isFinal(incoming)) return isFinal(current) ? current : incoming
-  if (isFinal(incoming)) return incoming
+  if (isFinal(incoming)) {
+    const answered = current.answered || incoming.answered
+    const next = incoming.answered === answered ? incoming : { ...incoming, answered }
+    return sameFinal(current, next) ? current : next
+  }
   const base = incoming.streamSeq > current.streamSeq ? incoming : current
   const other = base === incoming ? current : incoming
   let tools = base.tools
@@ -269,18 +314,14 @@ export const STALL_QUIET_MS = 20_000
 export const STUCK_QUIET_MS = ROOM_LOCK_STALE_MS + 15_000
 
 /**
- * What the room may be stuck on, before counting how long it's been quiet: "unanswered" when the last
- * officer messages come after the last reply and nothing is streaming; "stuck" when a reply is still
- * streaming. Null when nothing is waiting
+ * What the room may be stuck on, before counting how long it's been quiet: "unanswered" when an
+ * officer message hasn't been picked up by a reply (`answered`, not the order: one posted while a reply
+ * was being set up sorts above it) and nothing is streaming; "stuck" when a reply is still streaming.
+ * Null when nothing is waiting
  */
 export function stallCandidate(messages: JackMessageView[]): "unanswered" | "stuck" | null {
   if (messages.some((m) => m.status === "streaming")) return "stuck"
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const kind = messages[i].author.kind
-    if (kind === "assistant") return null
-    if (kind === "user") return "unanswered"
-  }
-  return null
+  return messages.some((m) => m.author.kind === "user" && !m.answered) ? "unanswered" : null
 }
 
 /** How long a stall candidate has to stay quiet before the room offers to ask Jack to continue */

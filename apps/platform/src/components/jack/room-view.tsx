@@ -83,7 +83,7 @@ export function JackRoomView({ room, messages, present, connection, stall, rooms
         </header>
         <MessageList messages={messages} followSignal={sentCount} />
         <AnswerStatus messages={messages} />
-        {stall ? <ContinueBar stall={stall} persona={room.persona} onContinue={onContinue} /> : null}
+        {stall ? <ContinueBar stall={stall} name={stalledName(stall, messages, room.persona)} onContinue={onContinue} /> : null}
         <Composer persona={room.persona} onSend={send} />
       </section>
     </div>
@@ -330,11 +330,16 @@ function AnswerStatus({ messages }: { messages: JackMessageView[] }) {
   )
 }
 
+/** Who stopped: the persona of the reply stuck streaming, or for unanswered messages the room's */
+function stalledName(stall: "unanswered" | "stuck", messages: JackMessageView[], persona: JackRoomPersonaKey): string {
+  const stuck = stall === "stuck" ? messages.findLast((m) => m.status === "streaming") : undefined
+  return JACK_PERSONA_NAME[stuck?.author.kind === "assistant" ? stuck.author.persona : persona]
+}
+
 /** Offers to ask Jack to continue when officer messages sit unanswered, or a reply stopped partway */
-function ContinueBar({ stall, persona, onContinue }: { stall: "unanswered" | "stuck"; persona: JackRoomPersonaKey; onContinue: RoomViewProps["onContinue"] }) {
+function ContinueBar({ stall, name, onContinue }: { stall: "unanswered" | "stuck"; name: string; onContinue: RoomViewProps["onContinue"] }) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const name = JACK_PERSONA_NAME[persona]
 
   async function ask() {
     setPending(true)

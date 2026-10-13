@@ -39,6 +39,13 @@ export type JackMessageView = {
   status: JackMessageStatusKey
   /** The last streamed delta included in `content` */
   streamSeq: number
+  /**
+   * Officer messages: whether a reply has picked it up (JackMessage.answeredById is set). Always true
+   * for other messages, which nobody answers. A message waiting for an answer can sort above the reply
+   * that's streaming (it was posted while the reply was being set up), so this, not the order, says
+   * what's still waiting
+   */
+  answered: boolean
   /** ISO timestamp */
   createdAt: string
 }
@@ -78,8 +85,11 @@ export const JACK_EVENT = {
   room: "room.updated",
 } as const
 
-/** A new message: an officer's, a system note, or a model reply that's about to stream */
-export type JackCreatedEvent = { type: typeof JACK_EVENT.created; message: JackMessageView }
+/**
+ * A new message: an officer's, a system note, or a model reply that's about to stream. A reply lists
+ * the officer messages it answers in `answers`, so viewers can mark them answered
+ */
+export type JackCreatedEvent = { type: typeof JACK_EVENT.created; message: JackMessageView; answers?: string[] }
 /**
  * The next piece of a streaming reply. `seq` counts up from 1 per message with no gaps. With `replace`
  * the text is the reply's whole text so far, replacing what streamed before (the server took some back,

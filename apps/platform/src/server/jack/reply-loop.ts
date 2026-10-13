@@ -205,7 +205,7 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
     })
     return created
   })
-  await deps.broadcast(roomId, { type: JACK_EVENT.created, message: toMessageView(reply) })
+  await deps.broadcast(roomId, { type: JACK_EVENT.created, message: toMessageView(reply), answers: waiting.map((m) => m.id) })
 
   const persona: JackRoomPersonaKey = reply.persona === "lift" ? "lift" : "jack"
   const usage = new UsageTally(JACK_MODELS[persona].model)

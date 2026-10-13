@@ -21,6 +21,7 @@ const reply = (fields: Partial<JackMessageView> = {}): JackMessageView => ({
   tools: [],
   status: "done",
   streamSeq: 4,
+  answered: true,
   createdAt: "2026-10-13T20:00:00.000Z",
   ...fields,
 })

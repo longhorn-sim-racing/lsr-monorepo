@@ -4,7 +4,7 @@ import { initRoomState, roomReducer, stallCandidate, stallQuietMs, STALL_QUIET_M
 import { ROOM_LOCK_STALE_MS } from "./timing"
 import type { JackMessageView, JackRoomView } from "./types"
 
-const officerMessage = (id: string, createdAt: string, content = "How many LSC applications?"): JackMessageView => ({
+const officerMessage = (id: string, createdAt: string, content = "How many LSC applications?", answered = true): JackMessageView => ({
   id,
   roomId: "room-1",
   author: { kind: "user", userId: "officer-1", displayName: "Gray" },
@@ -12,8 +12,10 @@ const officerMessage = (id: string, createdAt: string, content = "How many LSC a
   tools: [],
   status: "done",
   streamSeq: 0,
+  answered,
   createdAt,
 })
+const waitingMessage = (id: string, createdAt: string) => officerMessage(id, createdAt, "Still waiting?", false)
 
 const reply = (fields: Partial<JackMessageView> = {}): JackMessageView => ({
   id: "reply-1",
@@ -23,6 +25,7 @@ const reply = (fields: Partial<JackMessageView> = {}): JackMessageView => ({
   tools: [],
   status: "streaming",
   streamSeq: 0,
+  answered: true,
   createdAt: "2026-10-12T20:00:01.000Z",
   ...fields,
 })
@@ -380,16 +383,23 @@ describe("roomReducer", () => {
 describe("stallCandidate", () => {
   const note: JackMessageView = { ...officerMessage("s1", "2026-10-12T20:00:05.000Z", "Gray switched this room to Lift"), author: { kind: "system" } }
 
-  it("is unanswered when officer messages come after the last reply and nothing streams", () => {
-    expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z")])).toBe("unanswered")
+  it("is unanswered when an officer message no reply picked up waits and nothing streams", () => {
+    expect(stallCandidate([waitingMessage("m1", "2026-10-12T20:00:00.000Z")])).toBe("unanswered")
     const answered = [officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" })]
     expect(stallCandidate(answered)).toBeNull()
-    expect(stallCandidate([...answered, officerMessage("m2", "2026-10-12T20:00:09.000Z")])).toBe("unanswered")
-    expect(stallCandidate([...answered, officerMessage("m2", "2026-10-12T20:00:09.000Z"), note])).toBe("unanswered")
+    expect(stallCandidate([...answered, waitingMessage("m2", "2026-10-12T20:00:09.000Z")])).toBe("unanswered")
+    expect(stallCandidate([...answered, waitingMessage("m2", "2026-10-12T20:00:09.000Z"), note])).toBe("unanswered")
   })
 
-  it("ignores system notes after the last reply", () => {
+  it("goes by answered, not order: a message posted while the reply was set up sorts above it", () => {
+    // Posted between the run looking for messages and creating its reply: older than the reply, not in it
+    const race = [officerMessage("m1", "2026-10-12T20:00:00.000Z"), waitingMessage("m2", "2026-10-12T20:00:00.500Z"), reply({ status: "done" })]
+    expect(stallCandidate(race)).toBe("unanswered")
+  })
+
+  it("ignores system notes, and answered messages after the last reply", () => {
     expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" }), note])).toBeNull()
+    expect(stallCandidate([reply({ status: "done" }), officerMessage("m2", "2026-10-12T20:00:09.000Z")])).toBeNull()
     expect(stallCandidate([])).toBeNull()
   })
 
@@ -398,5 +408,56 @@ describe("stallCandidate", () => {
     expect(stallQuietMs("stuck")).toBe(STUCK_QUIET_MS)
     expect(STUCK_QUIET_MS).toBeGreaterThan(ROOM_LOCK_STALE_MS)
     expect(stallQuietMs("unanswered")).toBe(STALL_QUIET_MS)
+  })
+})
+
+describe("answered officer messages", () => {
+  const replyCreated = (answers: string[]): RoomAction => ({ type: "message.created", message: reply(), answers })
+
+  it("marks the messages a new reply answers", () => {
+    const state = run(start(), created(waitingMessage("m1", "2026-10-12T20:00:00.000Z")), created(waitingMessage("m2", "2026-10-12T20:00:00.500Z")), replyCreated(["m1"]))
+
+    expect(state.messages.find((m) => m.id === "m1")?.answered).toBe(true)
+    expect(state.messages.find((m) => m.id === "m2")?.answered).toBe(false)
+    expect(stallCandidate(run(state, done(reply({ status: "done" }))).messages)).toBe("unanswered")
+  })
+
+  it("keeps a message answered when an older copy (the poster's own, or a stale snapshot) says it isn't", () => {
+    const answered = run(start(), created(waitingMessage("m1", "2026-10-12T20:00:00.000Z")), replyCreated(["m1"]))
+    const state = run(answered, created(waitingMessage("m1", "2026-10-12T20:00:00.000Z")), snapshot([waitingMessage("m1", "2026-10-12T20:00:00.000Z")]))
+
+    expect(state.messages.find((m) => m.id === "m1")?.answered).toBe(true)
+  })
+
+  it("takes answered from a snapshot when the reply's created event was missed", () => {
+    const missed = run(start(), created(waitingMessage("m1", "2026-10-12T20:00:00.000Z")))
+    const state = run(missed, snapshot([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done", content: "Hi" })]))
+
+    expect(state.messages.find((m) => m.id === "m1")?.answered).toBe(true)
+  })
+})
+
+describe("snapshots and unchanged messages", () => {
+  it("keeps each finished message's object when a snapshot has the same copy, so rows don't re-render", () => {
+    const table = { kind: "table" as const, columns: ["n"], rows: [[13]], truncated: false }
+    const messages = [
+      officerMessage("m1", "2026-10-12T20:00:00.000Z"),
+      reply({ status: "done", content: "13.", tools: [part("t1", { status: "done", label: "Ran a query", displays: [table] })] }),
+    ]
+    const before = start(messages)
+    // A snapshot builds fresh objects for the same rows
+    const after = run(before, snapshot(structuredClone(messages)))
+
+    expect(after.messages).toBe(before.messages)
+    expect(after.messages[0]).toBe(before.messages[0])
+    expect(after.messages[1]).toBe(before.messages[1])
+  })
+
+  it("still takes a snapshot's copy when it says something new", () => {
+    const before = start([reply({ status: "done", content: "13." })])
+    const after = run(before, snapshot([reply({ status: "error", content: "13." })]))
+
+    expect(after.messages[0]).not.toBe(before.messages[0])
+    expect(after.messages[0].status).toBe("error")
   })
 })

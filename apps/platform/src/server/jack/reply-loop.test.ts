@@ -146,6 +146,7 @@ describe("runRoom", () => {
 
     const types = radio.sent.map((s) => s.event.type)
     expect(types[0]).toBe("message.created")
+    expect(radio.of("message.created")[0]).toMatchObject({ message: { id: reply.id }, answers: [question.id] })
     expect(types.at(-1)).toBe("message.done")
     const deltas = radio.of("message.delta")
     expect(deltas.length).toBeGreaterThan(5) // it streams, in ~150 ms batches over a few seconds
