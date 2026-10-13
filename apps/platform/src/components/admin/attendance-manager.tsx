@@ -164,7 +164,7 @@ export function AttendanceManager({
       id: "member",
       header: "Member",
       sortValue: (row) => row.displayName,
-      className: "max-w-[16rem]",
+      className: "max-w-[10rem] sm:max-w-[16rem]",
       cell: (row) => <CellStack primary={row.displayName} secondary={`@${row.handle}`} />,
     },
     { id: "state", header: "Status", sortValue: (row) => row.state, cell: (row) => <StateBadge row={row} /> },
@@ -220,7 +220,7 @@ export function AttendanceManager({
         rows={rows}
         columns={columns}
         getRowId={(row) => row.key}
-        minWidth={480}
+        minWidth={340}
         noun={{ one: "person", many: "people" }}
         search={{ placeholder: "Search the guest list", text: (row) => `${row.displayName} ${row.handle}` }}
         filters={

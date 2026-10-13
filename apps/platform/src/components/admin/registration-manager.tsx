@@ -190,7 +190,7 @@ export function RegistrationManager({
       id: "member",
       header: "Member",
       sortValue: (row) => row.displayName,
-      className: "max-w-[16rem]",
+      className: "max-w-[10rem] sm:max-w-[16rem]",
       cell: (row) => <CellStack primary={row.displayName} secondary={`@${row.handle}`} />,
     },
     { id: "source", header: "How", hideBelow: "md", cell: (row) => <Source row={row} /> },
@@ -211,7 +211,7 @@ export function RegistrationManager({
           rows={registered}
           columns={registeredColumns}
           getRowId={(row) => row.id}
-          minWidth={480}
+          minWidth={340}
           noun={{ one: "person", many: "people" }}
           search={registered.length > 8 ? { placeholder: "Search registered", text: (row) => `${row.displayName} ${row.handle}` } : undefined}
           empty={<EmptyState title="Nobody has registered yet" description="People who sign up on the event page show up here." />}
@@ -247,7 +247,7 @@ export function RegistrationManager({
         ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={order} strategy={verticalListSortingStrategy}>
-              <Table minWidth={480}>
+              <Table minWidth={340}>
                 <THead>
                   <TH>
                     <span className="sr-only">Reorder</span>
@@ -262,7 +262,7 @@ export function RegistrationManager({
                 <tbody>
                   {waitlistRows.map((row, index) => (
                     <SortableRow key={row.id} id={row.id} position={index + 1}>
-                      <TD className="max-w-[16rem]">
+                      <TD className="max-w-[10rem] sm:max-w-[16rem]">
                         <CellStack primary={row.displayName} secondary={`@${row.handle}`} />
                       </TD>
                       <TD className="hidden whitespace-nowrap sm:table-cell">{centralDateTime(row.createdAt)}</TD>
@@ -299,7 +299,7 @@ export function RegistrationManager({
               },
             ]}
             getRowId={(row) => row.id}
-            minWidth={420}
+            minWidth={340}
             noun={{ one: "person", many: "people" }}
             rowActions={(row) => (
               <RowActions>

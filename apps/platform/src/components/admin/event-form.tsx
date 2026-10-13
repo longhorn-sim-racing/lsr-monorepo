@@ -58,7 +58,7 @@ export function EventForm({ event, series, venues }: { event?: Event; series: Ev
       onKeyDown={(e) => {
         if (e.key === "Enter" && e.target instanceof HTMLInputElement) e.preventDefault()
       }}
-      className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_320px]"
+      className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]"
     >
       <input type="hidden" name="timezone" value={timezone} />
 
@@ -145,8 +145,8 @@ export function EventForm({ event, series, venues }: { event?: Event; series: Ev
             <Field label="Internal notes" htmlFor="description" hint="Only officers see this.">
               <Textarea id="description" name="description" rows={3} defaultValue={event?.description ?? ""} />
             </Field>
-            <Field label="Hero image" hint="Shown at the top of the event page.">
-              <ImageUploader name="heroImageUrl" defaultValue={event?.heroImageUrl} />
+            <Field label="Hero image" htmlFor="heroImageUrl" hint="Shown at the top of the event page.">
+              <ImageUploader id="heroImageUrl" name="heroImageUrl" defaultValue={event?.heroImageUrl} />
             </Field>
             <Field label="Stream link" htmlFor="streamUrl" hint="Plays on the event page while it's live.">
               <Input id="streamUrl" name="streamUrl" type="url" defaultValue={event?.streamUrl ?? ""} placeholder="https://twitch.tv/…" />
@@ -196,7 +196,7 @@ export function EventForm({ event, series, venues }: { event?: Event; series: Ev
         </Panel>
       </div>
 
-      <Panel className="lg:sticky lg:top-[60px]">
+      <Panel className="xl:sticky xl:top-[60px]">
         <PanelHeader
           title="Publish"
           description={

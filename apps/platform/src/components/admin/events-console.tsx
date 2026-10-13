@@ -95,7 +95,7 @@ export function EventsConsole({ events }: { events: AdminEventRow[] }) {
       id: "event",
       header: "Event",
       sortValue: (row) => row.title,
-      className: "max-w-[22rem]",
+      className: "max-w-[13rem] sm:max-w-[22rem]",
       cell: (row) => (
         <CellStack
           primary={
