@@ -3,10 +3,10 @@
 import { revalidatePath } from "next/cache"
 import { requireOfficer } from "@/server/auth/guards"
 import { createAuditLog } from "@/server/audit/log"
-import { createRoom, getRoomSnapshot, postOfficerMessage, type RoomSnapshot } from "@/server/jack/rooms"
-import { jackMessageSchema, jackRoomIdSchema, jackRoomTitleSchema } from "@/schemas/jack.schema"
+import { createRoom, getRoomSnapshot, postOfficerMessage, setRoomPersona, type RoomSnapshot } from "@/server/jack/rooms"
+import { jackMessageSchema, jackPersonaSwitchSchema, jackRoomIdSchema, jackRoomTitleSchema } from "@/schemas/jack.schema"
 import type { ActionResult } from "@/lib/action-result"
-import type { JackMessageView } from "@/lib/jack/types"
+import { JACK_PERSONA_NAME, type JackMessageView, type JackRoomView } from "@/lib/jack/types"
 
 const ROOM_GONE = "That room doesn't exist anymore."
 
@@ -56,4 +56,35 @@ export async function loadJackRoomSnapshot(roomId: string): Promise<ActionResult
   const snapshot = await getRoomSnapshot(id.data)
   if (!snapshot) return { ok: false, error: ROOM_GONE }
   return { ok: true, data: snapshot }
+}
+
+/**
+ * Switches which model answers in a room (Jack or Lift). It's per room, not per message, so the
+ * room's prompt cache survives. Posts a note to the room saying who switched it.
+ */
+export async function setJackRoomPersona(
+  roomId: string,
+  persona: string
+): Promise<ActionResult<{ room: JackRoomView; message: JackMessageView | null }>> {
+  const officer = await requireOfficer()
+
+  const parsed = jackPersonaSwitchSchema.safeParse({ roomId, persona })
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message }
+
+  const result = await setRoomPersona(parsed.data.roomId, officer, parsed.data.persona)
+  if (!result) return { ok: false, error: ROOM_GONE }
+  if (!result.changed) return { ok: true, data: { room: result.room, message: null } }
+
+  await createAuditLog({
+    actorUserId: officer.id,
+    actionType: "UPDATE",
+    entityType: "JACK_ROOM",
+    entityId: result.room.id,
+    summary: `Switched Jack room to ${JACK_PERSONA_NAME[result.room.persona]}`,
+    before: { persona: result.before },
+    after: { persona: result.room.persona },
+  })
+
+  // No revalidatePath, as with posting: the room is live and the list renders fresh on every visit
+  return { ok: true, data: { room: result.room, message: result.message } }
 }

@@ -10,6 +10,7 @@ type Where = Record<string, unknown>
 export type FakeRoom = {
   id: string
   title: string | null
+  persona: "jack" | "lift"
   createdById: string | null
   createdAt: Date
   updatedAt: Date
@@ -21,6 +22,7 @@ export type FakeRoom = {
 export type FakeMessage = {
   id: string
   roomId: string
+  kind: "user" | "assistant" | "system"
   authorUserId: string | null
   persona: "jack" | "lift" | "stand" | null
   content: string
@@ -46,9 +48,10 @@ function matches(row: Row, where: Where = {}): boolean {
     if (condition === null) return value === null || value === undefined
     if (condition instanceof Date) return value instanceof Date && value.getTime() === condition.getTime()
     if (typeof condition === "object") {
-      const c = condition as { lt?: Date; in?: unknown[] }
+      const c = condition as { lt?: Date; in?: unknown[]; not?: unknown }
       if (c.lt !== undefined) return value instanceof Date && value < c.lt
       if (c.in !== undefined) return c.in.includes(value)
+      if ("not" in c) return value !== c.not
     }
     return value === condition
   })
@@ -109,6 +112,7 @@ export function createFakeJackDb() {
       const room: FakeRoom = {
         id: `room-${++ids}`,
         title: null,
+        persona: "jack",
         createdById: null,
         createdAt: now,
         updatedAt: now,
@@ -124,6 +128,7 @@ export function createFakeJackDb() {
       const now = tick()
       const message: FakeMessage = {
         id: `msg-${++ids}`,
+        kind: fields.persona ? "assistant" : "user",
         authorUserId: null,
         persona: null,
         content: "",
@@ -165,6 +170,14 @@ export function createFakeJackDb() {
         await step("jackRoom.findFirst", { where })
         const room = state.rooms.find((r) => matches(r, where))
         return room ? pick(room, select) : null
+      },
+      async findUnique(args: { where: Where; select?: Record<string, boolean> }) {
+        return db.jackRoom.findFirst(args)
+      },
+      async findUniqueOrThrow(args: { where: Where; select?: Record<string, boolean> }) {
+        const room = await db.jackRoom.findFirst(args)
+        if (!room) throw new Error("No JackRoom found")
+        return room
       },
     },
 

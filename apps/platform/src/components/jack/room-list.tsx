@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useState } from "react"
-import { jackRoomTitle, type JackRoomSummary } from "@/lib/jack/types"
+import { JACK_PERSONA_NAME, jackRoomTitle, type JackRoomSummary } from "@/lib/jack/types"
 
 /*
  * The rooms list, drawn plainly on purpose (it gets restyled later). It renders what it's given and
@@ -31,8 +31,8 @@ export function JackRoomList({ rooms, onCreate }: RoomListProps) {
                 {jackRoomTitle(room)}
               </Link>
               <p className="text-sm">
-                {room.createdByName ? `Opened by ${room.createdByName}, ` : null}
-                last active {new Date(room.updatedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
+                {JACK_PERSONA_NAME[room.persona]} answers. {room.createdByName ? `Opened by ${room.createdByName}. ` : null}
+                Last active {new Date(room.updatedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
               </p>
             </li>
           ))}

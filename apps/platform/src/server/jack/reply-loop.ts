@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { JACK_EVENT } from "@/lib/jack/types"
+import { JACK_EVENT, JACK_PERSONA_NAME, type JackPersonaKey } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
 import { DeltaStream } from "./delta-stream"
@@ -20,10 +20,10 @@ const defaultDeps: ReplyLoopDeps = {
 /** The placeholder reply takes about this long to stream, so viewers can watch it arrive */
 const PLACEHOLDER_STREAM_MS = 3_000
 
-/** Officer messages Jack hasn't answered yet, oldest first */
+/** Officer messages nobody has answered yet, oldest first (system notes don't get answers) */
 function findUnanswered(roomId: string) {
   return prisma.jackMessage.findMany({
-    where: { roomId, persona: null, answeredById: null },
+    where: { roomId, kind: "user", answeredById: null },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     include: jackMessageInclude,
   })
@@ -31,7 +31,7 @@ function findUnanswered(roomId: string) {
 
 async function hasUnanswered(roomId: string) {
   const first = await prisma.jackMessage.findFirst({
-    where: { roomId, persona: null, answeredById: null },
+    where: { roomId, kind: "user", answeredById: null },
     select: { id: true },
   })
   return first !== null
@@ -87,11 +87,12 @@ async function closeInterruptedReplies(roomId: string, deps: ReplyLoopDeps) {
   }
 }
 
-/** One reply to every message in `waiting` */
+/** One reply to every message in `waiting`, from the room's persona as it is now */
 async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoopDeps) {
   const reply = await prisma.$transaction(async (tx) => {
+    const room = await tx.jackRoom.findUnique({ where: { id: roomId }, select: { persona: true } })
     const created = await tx.jackMessage.create({
-      data: { roomId, persona: "jack", status: "streaming" },
+      data: { roomId, kind: "assistant", persona: room?.persona ?? "jack", status: "streaming" },
       include: jackMessageInclude,
     })
     await tx.jackMessage.updateMany({
@@ -114,7 +115,7 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   let status: "done" | "error" = "done"
   let result: { content: string; streamSeq: number }
   try {
-    const pieces = chunkForStreaming(placeholderReply(waiting))
+    const pieces = chunkForStreaming(placeholderReply(reply.persona ?? "jack", waiting))
     const pause = Math.max(10, Math.round(PLACEHOLDER_STREAM_MS / pieces.length))
     for (const piece of pieces) {
       stream.write(piece)
@@ -142,10 +143,10 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   await deps.broadcast(roomId, { type: JACK_EVENT.done, message: toMessageView(final) })
 }
 
-/** What Jack says until he has a model behind him: the question(s), with who asked */
-export function placeholderReply(waiting: Pick<JackMessageRow, "content" | "author">[]): string {
+/** What the persona says until there's a model behind it: the question(s), with who asked */
+export function placeholderReply(persona: JackPersonaKey, waiting: Pick<JackMessageRow, "content" | "author">[]): string {
   const asked = waiting.map((m) => `${m.author?.displayName ?? FORMER_OFFICER}: ${m.content}`).join("\n")
-  return `Jack here (placeholder, no AI yet). You asked:\n${asked}`
+  return `${JACK_PERSONA_NAME[persona]} here (placeholder, no AI yet). You asked:\n${asked}`
 }
 
 /** Splits text into at most `maxPieces` runs of whole words, in order (joined back, they're the text) */

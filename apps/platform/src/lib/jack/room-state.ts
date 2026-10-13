@@ -1,4 +1,4 @@
-import type { JackMessageView, JackRoomEvent } from "./types"
+import type { JackMessageView, JackRoomEvent, JackRoomView } from "./types"
 
 /**
  * A room's messages as one viewer sees them, built from a snapshot (the database) plus the live
@@ -9,8 +9,11 @@ import type { JackMessageView, JackRoomEvent } from "./types"
  * snapshot and applies only the deltas after its `streamSeq`. A delta that skips ahead is held
  * until the missing ones turn up or a newer snapshot covers them; meanwhile `needsResync` asks the
  * page for one. The done event carries the whole reply, so a reply always ends complete.
+ *
+ * The room's own settings (its persona) come the same two ways; the newer copy wins.
  */
 export type RoomState = {
+  room: JackRoomView
   messages: JackMessageView[]
   /** Deltas that can't be applied yet (they came after a gap, or before their message), by message id then seq */
   pending: Record<string, Record<number, string>>
@@ -20,20 +23,28 @@ export type RoomState = {
   resyncAttempts: number
 }
 
-export type RoomAction = JackRoomEvent | { type: "snapshot"; messages: JackMessageView[] }
+export type RoomSnapshotData = { room: JackRoomView; messages: JackMessageView[] }
 
-export function initRoomState(messages: JackMessageView[]): RoomState {
-  return { messages: [...messages].sort(byTime), pending: {}, needsResync: false, resyncAttempts: 0 }
+export type RoomAction = JackRoomEvent | ({ type: "snapshot" } & RoomSnapshotData)
+
+export function initRoomState({ room, messages }: RoomSnapshotData): RoomState {
+  return { room, messages: [...messages].sort(byTime), pending: {}, needsResync: false, resyncAttempts: 0 }
 }
 
 export function roomReducer(state: RoomState, action: RoomAction): RoomState {
   switch (action.type) {
     case "snapshot": {
+      const room = newerRoom(state.room, action.room)
       let messages = state.messages
       for (const message of action.messages) messages = upsert(messages, message)
       let pending = state.pending
       for (const id of Object.keys(pending)) ({ messages, pending } = drain(messages, pending, id))
-      return settle(state, messages, pending, true)
+      return settle({ ...state, room }, messages, pending, true)
+    }
+
+    case "room.updated": {
+      const room = newerRoom(state.room, action.room)
+      return room === state.room ? state : { ...state, room }
     }
 
     case "message.created": {
@@ -62,6 +73,10 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
     default:
       return state
   }
+}
+
+function newerRoom(current: JackRoomView, incoming: JackRoomView): JackRoomView {
+  return incoming.updatedAt >= current.updatedAt ? incoming : current
 }
 
 function isFinal(message: JackMessageView) {
@@ -128,5 +143,5 @@ function unpack(drained: Drained): [JackMessageView[], RoomState["pending"]] {
 function settle(state: RoomState, messages: JackMessageView[], pending: RoomState["pending"], fromSnapshot: boolean): RoomState {
   const needsResync = Object.keys(pending).length > 0
   const resyncAttempts = !needsResync ? 0 : fromSnapshot ? state.resyncAttempts + 1 : state.resyncAttempts
-  return { messages, pending, needsResync, resyncAttempts }
+  return { room: state.room, messages, pending, needsResync, resyncAttempts }
 }

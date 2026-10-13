@@ -3,8 +3,16 @@
 import { useCallback, useEffect, useReducer, useState } from "react"
 import type { RealtimeChannel } from "@supabase/supabase-js"
 import { createSupabaseBrowser } from "@/lib/supabase-browser"
-import { initRoomState, roomReducer } from "@/lib/jack/room-state"
-import { JACK_EVENT, jackRoomTopic, type JackMessageView, type JackPresence, type JackRoomEvent } from "@/lib/jack/types"
+import { initRoomState, roomReducer, type RoomSnapshotData } from "@/lib/jack/room-state"
+import {
+  JACK_EVENT,
+  jackRoomTopic,
+  type JackMessageView,
+  type JackPresence,
+  type JackRoomEvent,
+  type JackRoomPersonaKey,
+  type JackRoomView,
+} from "@/lib/jack/types"
 import type { ActionResult } from "@/lib/action-result"
 
 export type JackConnection = "connecting" | "live" | "error"
@@ -13,9 +21,13 @@ type Options = {
   roomId: string
   me: JackPresence
   /** The room as the server rendered it */
-  initialMessages: JackMessageView[]
-  loadSnapshot: (roomId: string) => Promise<ActionResult<{ messages: JackMessageView[] }>>
+  initial: RoomSnapshotData
+  loadSnapshot: (roomId: string) => Promise<ActionResult<RoomSnapshotData>>
   postMessage: (roomId: string, content: string) => Promise<ActionResult<JackMessageView>>
+  setPersona: (
+    roomId: string,
+    persona: JackRoomPersonaKey
+  ) => Promise<ActionResult<{ room: JackRoomView; message: JackMessageView | null }>>
 }
 
 /** First wait before refetching a snapshot to close a gap; later tries wait longer (the database saves about once a second) */
@@ -33,14 +45,14 @@ const leaving = new Map<string, Promise<unknown>>()
  * A room's live state: its messages (snapshot + live events through the pure reducer), who's in it,
  * and the connection. All the logic of the room page lives here; the components only draw it.
  */
-export function useJackRoom({ roomId, me, initialMessages, loadSnapshot, postMessage }: Options) {
-  const [state, dispatch] = useReducer(roomReducer, initialMessages, initRoomState)
+export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, setPersona }: Options) {
+  const [state, dispatch] = useReducer(roomReducer, initial, initRoomState)
   const [present, setPresent] = useState<JackPresence[]>([])
   const [connection, setConnection] = useState<JackConnection>("connecting")
 
   const resync = useCallback(async () => {
     const result = await loadSnapshot(roomId).catch(() => null)
-    if (result?.ok) dispatch({ type: "snapshot", messages: result.data.messages })
+    if (result?.ok) dispatch({ type: "snapshot", room: result.data.room, messages: result.data.messages })
   }, [roomId, loadSnapshot])
 
   useEffect(() => {
@@ -61,6 +73,7 @@ export function useJackRoom({ roomId, me, initialMessages, loadSnapshot, postMes
       ch.on("broadcast", { event: JACK_EVENT.created }, onEvent)
         .on("broadcast", { event: JACK_EVENT.delta }, onEvent)
         .on("broadcast", { event: JACK_EVENT.done }, onEvent)
+        .on("broadcast", { event: JACK_EVENT.room }, onEvent)
         .on("presence", { event: "sync" }, () => setPresent(presentOfficers(ch.presenceState<JackPresence>())))
         .subscribe((status) => {
           if (closed) return
@@ -101,7 +114,19 @@ export function useJackRoom({ roomId, me, initialMessages, loadSnapshot, postMes
     [roomId, postMessage]
   )
 
-  return { messages: state.messages, present, connection, send }
+  const switchPersona = useCallback(
+    async (persona: JackRoomPersonaKey) => {
+      const result = await setPersona(roomId, persona)
+      if (result.ok) {
+        dispatch({ type: JACK_EVENT.room, room: result.data.room })
+        if (result.data.message) dispatch({ type: JACK_EVENT.created, message: result.data.message })
+      }
+      return result
+    },
+    [roomId, setPersona]
+  )
+
+  return { room: state.room, messages: state.messages, present, connection, send, switchPersona }
 }
 
 /** One entry per officer, however many tabs they have open */

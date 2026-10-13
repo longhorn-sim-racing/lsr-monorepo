@@ -3,18 +3,24 @@
 import { JackRoomView } from "@/components/jack/room-view"
 import { useJackRoom } from "@/components/jack/use-jack-room"
 import { unexpectedError } from "@/lib/action-result"
-import type { JackMessageView, JackPresence } from "@/lib/jack/types"
-import { loadJackRoomSnapshot, postJackMessage } from "../actions"
+import type { RoomSnapshotData } from "@/lib/jack/room-state"
+import { jackRoomTitle, type JackPresence, type JackRoomPersonaKey } from "@/lib/jack/types"
+import { loadJackRoomSnapshot, postJackMessage, setJackRoomPersona } from "../actions"
 
 type JackRoomClientProps = {
-  roomId: string
-  title: string
-  initialMessages: JackMessageView[]
+  initial: RoomSnapshotData
   me: JackPresence
 }
 
-export function JackRoomClient({ roomId, title, initialMessages, me }: JackRoomClientProps) {
-  const room = useJackRoom({ roomId, me, initialMessages, loadSnapshot: loadJackRoomSnapshot, postMessage: postJackMessage })
+export function JackRoomClient({ initial, me }: JackRoomClientProps) {
+  const room = useJackRoom({
+    roomId: initial.room.id,
+    me,
+    initial,
+    loadSnapshot: loadJackRoomSnapshot,
+    postMessage: postJackMessage,
+    setPersona: setJackRoomPersona,
+  })
 
   async function send(content: string) {
     try {
@@ -25,7 +31,24 @@ export function JackRoomClient({ roomId, title, initialMessages, me }: JackRoomC
     }
   }
 
+  async function switchPersona(persona: JackRoomPersonaKey) {
+    try {
+      const result = await room.switchPersona(persona)
+      return result.ok ? null : result.error
+    } catch (error) {
+      return unexpectedError(error, "Couldn't switch")
+    }
+  }
+
   return (
-    <JackRoomView title={title} messages={room.messages} present={room.present} connection={room.connection} onSend={send} />
+    <JackRoomView
+      title={jackRoomTitle(room.room)}
+      persona={room.room.persona}
+      messages={room.messages}
+      present={room.present}
+      connection={room.connection}
+      onSend={send}
+      onSwitchPersona={switchPersona}
+    />
   )
 }

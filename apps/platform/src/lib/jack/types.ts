@@ -4,6 +4,8 @@
  */
 
 export type JackPersonaKey = "jack" | "lift" | "stand"
+/** The personas a room can be set to; Stand only does side jobs */
+export type JackRoomPersonaKey = "jack" | "lift"
 export type JackMessageStatusKey = "streaming" | "done" | "error"
 
 export const JACK_PERSONA_NAME: Record<JackPersonaKey, string> = {
@@ -12,9 +14,17 @@ export const JACK_PERSONA_NAME: Record<JackPersonaKey, string> = {
   stand: "Stand",
 }
 
+export const JACK_ROOM_PERSONAS: JackRoomPersonaKey[] = ["jack", "lift"]
+
+export function isJackRoomPersona(value: unknown): value is JackRoomPersonaKey {
+  return JACK_ROOM_PERSONAS.includes(value as JackRoomPersonaKey)
+}
+
+/** Who a message is from, matching JackMessage.kind: an officer, a model, or the room itself */
 export type JackAuthor =
-  | { kind: "officer"; userId: string | null; displayName: string }
-  | { kind: "persona"; persona: JackPersonaKey }
+  | { kind: "user"; userId: string | null; displayName: string }
+  | { kind: "assistant"; persona: JackPersonaKey }
+  | { kind: "system" }
 
 /** A message as a room shows it */
 export type JackMessageView = {
@@ -29,9 +39,19 @@ export type JackMessageView = {
   createdAt: string
 }
 
+/** A room's own settings, as its page shows them */
+export type JackRoomView = {
+  id: string
+  title: string | null
+  persona: JackRoomPersonaKey
+  /** ISO timestamp; the newer copy wins when a snapshot and a live update cross */
+  updatedAt: string
+}
+
 export type JackRoomSummary = {
   id: string
   title: string | null
+  persona: JackRoomPersonaKey
   createdByName: string | null
   createdAt: string
   updatedAt: string
@@ -50,16 +70,19 @@ export const JACK_EVENT = {
   created: "message.created",
   delta: "message.delta",
   done: "message.done",
+  room: "room.updated",
 } as const
 
-/** A new message: an officer's, or a model reply that's about to stream */
+/** A new message: an officer's, a system note, or a model reply that's about to stream */
 export type JackCreatedEvent = { type: typeof JACK_EVENT.created; message: JackMessageView }
 /** The next piece of a streaming reply. `seq` counts up from 1 per message with no gaps */
 export type JackDeltaEvent = { type: typeof JACK_EVENT.delta; messageId: string; seq: number; text: string }
 /** A reply finished (status done or error), with its full text */
 export type JackDoneEvent = { type: typeof JACK_EVENT.done; message: JackMessageView }
+/** The room's settings changed (e.g. its persona) */
+export type JackRoomUpdatedEvent = { type: typeof JACK_EVENT.room; room: JackRoomView }
 
-export type JackRoomEvent = JackCreatedEvent | JackDeltaEvent | JackDoneEvent
+export type JackRoomEvent = JackCreatedEvent | JackDeltaEvent | JackDoneEvent | JackRoomUpdatedEvent
 
 /** Who's in a room right now, as each officer's tab tracks it on the channel */
 export type JackPresence = { userId: string; displayName: string }

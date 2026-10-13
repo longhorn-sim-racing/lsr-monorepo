@@ -2,7 +2,6 @@ import { notFound } from "next/navigation"
 import { requireOfficerPage } from "@/server/auth/guards"
 import { getRoomSnapshot } from "@/server/jack/rooms"
 import { jackRoomIdSchema } from "@/schemas/jack.schema"
-import { jackRoomTitle } from "@/lib/jack/types"
 import { JackRoomClient } from "./room-client"
 
 export const dynamic = "force-dynamic"
@@ -23,12 +22,5 @@ export default async function JackRoomPage({ params }: JackRoomPageArgs) {
   const snapshot = await getRoomSnapshot(roomId)
   if (!snapshot) notFound()
 
-  return (
-    <JackRoomClient
-      roomId={roomId}
-      title={jackRoomTitle(snapshot.room)}
-      initialMessages={snapshot.messages}
-      me={{ userId: officer.id, displayName: officer.displayName }}
-    />
-  )
+  return <JackRoomClient initial={snapshot} me={{ userId: officer.id, displayName: officer.displayName }} />
 }

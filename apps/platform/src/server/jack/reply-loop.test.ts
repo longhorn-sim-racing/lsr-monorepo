@@ -9,6 +9,7 @@ vi.mock("@/server/db", async () => {
 
 import { prisma } from "@/server/db"
 import { placeholderReply, runRoom, type ReplyLoopDeps } from "./reply-loop"
+import { setRoomPersona } from "./rooms"
 import { releaseRoomLock, renewRoomLock, ROOM_LOCK_STALE_MS, tryAcquireRoomLock } from "./room-lock"
 
 const db = prisma as unknown as FakeJackDb
@@ -40,8 +41,8 @@ function ask(content: string, userId = "officer-gray") {
   return db.addMessage({ roomId: room.id, authorUserId: userId, content })
 }
 
-const replies = () => db.state.messages.filter((m) => m.persona !== null)
-const unanswered = () => db.state.messages.filter((m) => m.persona === null && m.answeredById === null)
+const replies = () => db.state.messages.filter((m) => m.kind === "assistant")
+const unanswered = () => db.state.messages.filter((m) => m.kind === "user" && m.answeredById === null)
 const textOf = (deltas: JackDeltaEvent[], messageId: string) =>
   deltas
     .filter((d) => d.messageId === messageId)
@@ -107,7 +108,8 @@ describe("runRoom", () => {
 
     expect(replies()).toHaveLength(1)
     const [reply] = replies()
-    const expected = placeholderReply([{ content: question.content, author: { displayName: "Gray" } }])
+    const expected = placeholderReply("jack", [{ content: question.content, author: { displayName: "Gray" } }])
+    expect(expected).toMatch(/^Jack here/)
     expect(expected).toContain("Gray: How many LSC applications are there?")
     expect(reply).toMatchObject({ persona: "jack", status: "done", content: expected })
     expect(db.state.messages.find((m) => m.id === question.id)?.answeredById).toBe(reply.id)
@@ -212,7 +214,7 @@ describe("runRoom", () => {
 
     expect(posterRun).not.toBeNull()
     expect(replies()).toHaveLength(2)
-    const answeredBy = db.state.messages.filter((m) => m.persona === null).map((m) => m.answeredById)
+    const answeredBy = db.state.messages.filter((m) => m.kind === "user").map((m) => m.answeredById)
     expect(new Set(answeredBy).size).toBe(2) // each question got its own reply, none twice
     expect(unanswered()).toHaveLength(0)
     expect(db.room(room.id).runId).toBeNull()
@@ -289,5 +291,66 @@ describe("runRoom", () => {
 
     expect(replies()).toHaveLength(0)
     expect(db.room(room.id).runId).toBe("newer-run")
+  })
+
+  it("answers as the room's persona", async () => {
+    db.room(room.id).persona = "lift"
+    ask("Hard one: which drivers improved most this season?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(replies()).toHaveLength(1)
+    expect(replies()[0]).toMatchObject({ kind: "assistant", persona: "lift", status: "done" })
+    expect(replies()[0].content).toMatch(/^Lift here/)
+    const created = radio.of("message.created")[0]
+    expect(created.message.author).toEqual({ kind: "assistant", persona: "lift" })
+  })
+
+  it("doesn't answer system notes", async () => {
+    db.addMessage({ roomId: room.id, kind: "system", authorUserId: "officer-gray", content: "Gray switched this room to Lift" })
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(replies()).toHaveLength(0)
+    expect(radio.broadcast).not.toHaveBeenCalled()
+  })
+})
+
+describe("setRoomPersona", () => {
+  const gray = { id: "officer-gray", displayName: "Gray" }
+
+  it("switches the room, posts who did it, and tells the room", async () => {
+    const result = await setRoomPersona(room.id, gray, "lift", radio.broadcast)
+
+    expect(result).toMatchObject({ changed: true, before: "jack", room: { id: room.id, persona: "lift" } })
+    expect(db.room(room.id).persona).toBe("lift")
+    const notes = db.state.messages.filter((m) => m.kind === "system")
+    expect(notes).toHaveLength(1)
+    expect(notes[0]).toMatchObject({ content: "Gray switched this room to Lift", authorUserId: "officer-gray", persona: null })
+    expect(radio.sent.map((s) => s.event.type)).toEqual(["room.updated", "message.created"])
+    expect(radio.of("message.created")[0].message.author).toEqual({ kind: "system" })
+  })
+
+  it("does nothing when the room already has that persona", async () => {
+    const result = await setRoomPersona(room.id, gray, "jack", radio.broadcast)
+
+    expect(result).toMatchObject({ changed: false, room: { persona: "jack" } })
+    expect(db.state.messages).toHaveLength(0)
+    expect(radio.broadcast).not.toHaveBeenCalled()
+  })
+
+  it("posts one note when two officers switch at once", async () => {
+    const dylan = { id: "officer-dylan", displayName: "Dylan" }
+    const results = await Promise.all([
+      setRoomPersona(room.id, gray, "lift", radio.broadcast),
+      setRoomPersona(room.id, dylan, "lift", radio.broadcast),
+    ])
+
+    expect(results.filter((r) => r?.changed)).toHaveLength(1)
+    expect(db.state.messages.filter((m) => m.kind === "system")).toHaveLength(1)
+  })
+
+  it("is null for a room that doesn't exist", async () => {
+    expect(await setRoomPersona("room-missing", gray, "lift", radio.broadcast)).toBeNull()
   })
 })

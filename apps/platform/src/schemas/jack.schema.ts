@@ -19,3 +19,8 @@ export const jackRoomTitleSchema = z
   .trim()
   .max(JACK_TITLE_MAX, `Keep the title under ${JACK_TITLE_MAX} characters`)
   .transform((title) => title || null);
+
+export const jackPersonaSwitchSchema = z.object({
+  roomId: jackRoomIdSchema,
+  persona: z.enum(["jack", "lift"], "Pick Jack or Lift"),
+});

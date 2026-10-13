@@ -893,12 +893,27 @@ model SystemSetting {
 
 // ---------- Jack (officer chat agent, #161) ----------
 
-/// Which model wrote a Jack message. Jack = Sonnet (every answer by default),
-/// Lift = Opus (hard questions, turned on per message), Stand = Haiku (side jobs like naming rooms)
+/// Which model wrote a Jack message. Jack = Sonnet (every answer by default), Lift = Opus (hard
+/// questions), Stand = Haiku (side jobs like naming rooms; never a room's persona)
 enum JackPersona {
   jack
   lift
   stand
+}
+
+/// Which model answers in a room. A room setting rather than a per-message one, so the room's
+/// prompt cache isn't thrown away by switching back and forth
+enum JackRoomPersona {
+  jack
+  lift
+}
+
+/// Who a message is from: an officer (user), a model (assistant), or the room itself (system,
+/// e.g. "Alex switched this room to Lift")
+enum JackMessageKind {
+  user
+  assistant
+  system
 }
 
 enum JackMessageStatus {
@@ -910,12 +925,14 @@ enum JackMessageStatus {
 /// A shared chat room in the admin console. Rooms aren't per user: every officer sees every room
 /// and can post in it. Live text goes out over the private Realtime channel `jack:room:<id>`.
 model JackRoom {
-  id          String    @id @default(uuid())
+  id          String          @id @default(uuid())
   title       String?
+  /// The model that answers here; officers switch it per room
+  persona     JackRoomPersona @default(jack)
   /// Null once the officer who opened it deletes their account
   createdById String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
   archivedAt  DateTime?
 
   /// The reply loop answering this room right now; one run per room at a time.
@@ -930,13 +947,16 @@ model JackRoom {
   @@index([archivedAt, updatedAt])
 }
 
-/// One message in a room: an officer's (authorUserId set, persona null) or a model's (persona set)
+/// One message in a room. `kind` says who it's from; a check constraint keeps `persona` set exactly
+/// on assistant messages, and `authorUserId` off them
 model JackMessage {
   id           String            @id @default(uuid())
   roomId       String
-  /// The officer who wrote it. Null for model messages, and for officer messages whose author deleted their account
+  kind         JackMessageKind
+  /// user: the officer who wrote it. system: the officer whose action it records. Null for assistant
+  /// messages, and once the officer deletes their account
   authorUserId String?
-  /// The model that wrote it. Null for officer messages
+  /// assistant: the model that wrote it. Null otherwise
   persona      JackPersona?
   content      String            @default("")
   /// Tool calls and their results (later steps)
@@ -945,11 +965,11 @@ model JackMessage {
   /// The last streamed delta whose text is saved in `content`. Viewers who open the room
   /// mid-answer apply only the deltas after it
   streamSeq    Int               @default(0)
-  /// For officer messages: the reply that answered it. Null until Jack picks it up, so a message
-  /// posted while he's answering waits for the next pass
+  /// user messages: the reply that answered it. Null until Jack picks it up, so a message posted
+  /// while he's answering waits for the next pass
   answeredById String?
 
-  /// Model messages only (later steps)
+  /// Assistant messages only (later steps)
   model           String?
   inputTokens     Int?
   outputTokens    Int?
@@ -965,6 +985,6 @@ model JackMessage {
   answers    JackMessage[] @relation("JackAnswer")
 
   @@index([roomId, createdAt])
-  @@index([roomId, answeredById])
+  @@index([roomId, kind, answeredById])
   @@index([authorUserId])
 }

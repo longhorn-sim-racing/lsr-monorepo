@@ -2,12 +2,19 @@
 CREATE TYPE "public"."JackPersona" AS ENUM ('jack', 'lift', 'stand');
 
 -- CreateEnum
+CREATE TYPE "public"."JackRoomPersona" AS ENUM ('jack', 'lift');
+
+-- CreateEnum
+CREATE TYPE "public"."JackMessageKind" AS ENUM ('user', 'assistant', 'system');
+
+-- CreateEnum
 CREATE TYPE "public"."JackMessageStatus" AS ENUM ('streaming', 'done', 'error');
 
 -- CreateTable
 CREATE TABLE "public"."JackRoom" (
     "id" TEXT NOT NULL,
     "title" TEXT,
+    "persona" "public"."JackRoomPersona" NOT NULL DEFAULT 'jack',
     "createdById" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -22,6 +29,7 @@ CREATE TABLE "public"."JackRoom" (
 CREATE TABLE "public"."JackMessage" (
     "id" TEXT NOT NULL,
     "roomId" TEXT NOT NULL,
+    "kind" "public"."JackMessageKind" NOT NULL,
     "authorUserId" TEXT,
     "persona" "public"."JackPersona",
     "content" TEXT NOT NULL DEFAULT '',
@@ -47,7 +55,7 @@ CREATE INDEX "JackRoom_archivedAt_updatedAt_idx" ON "public"."JackRoom"("archive
 CREATE INDEX "JackMessage_roomId_createdAt_idx" ON "public"."JackMessage"("roomId", "createdAt");
 
 -- CreateIndex
-CREATE INDEX "JackMessage_roomId_answeredById_idx" ON "public"."JackMessage"("roomId", "answeredById");
+CREATE INDEX "JackMessage_roomId_kind_answeredById_idx" ON "public"."JackMessage"("roomId", "kind", "answeredById");
 
 -- CreateIndex
 CREATE INDEX "JackMessage_authorUserId_idx" ON "public"."JackMessage"("authorUserId");
@@ -64,9 +72,9 @@ ALTER TABLE "public"."JackMessage" ADD CONSTRAINT "JackMessage_authorUserId_fkey
 -- AddForeignKey
 ALTER TABLE "public"."JackMessage" ADD CONSTRAINT "JackMessage_answeredById_fkey" FOREIGN KEY ("answeredById") REFERENCES "public"."JackMessage"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
-
--- A model message has no officer author
-ALTER TABLE "public"."JackMessage" ADD CONSTRAINT "JackMessage_author_or_persona_check" CHECK ("persona" IS NULL OR "authorUserId" IS NULL);
+-- Assistant messages, and only they, name their model; they have no officer author
+ALTER TABLE "public"."JackMessage" ADD CONSTRAINT "JackMessage_persona_check" CHECK (("kind" = 'assistant') = ("persona" IS NOT NULL));
+ALTER TABLE "public"."JackMessage" ADD CONSTRAINT "JackMessage_assistant_author_check" CHECK ("kind" <> 'assistant' OR "authorUserId" IS NULL);
 
 -- ---------------------------------------------------------------------------
 -- Realtime: only officers may use the private Broadcast channels `jack:room:<roomId>`.
