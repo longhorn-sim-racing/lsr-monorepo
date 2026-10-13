@@ -7,7 +7,7 @@ vi.mock("@/server/jack/sql-client", () => ({ getJackSqlClient: () => null, JACK_
 
 import type { SeasonEntrant } from "@/server/services/league-entry.service"
 import { auditWhere } from "./audit-log"
-import { bucketSignups, compactRow, monthsBefore, tierCounts } from "./club-members"
+import { bucketSignups, compactRow, membersForModel, monthsBefore, tierCounts } from "./club-members"
 import { forModelWithList, forModelWithLists, MAX_MODEL_CHARS } from "./display"
 import { formatSchema, parseConstraints, typeName } from "./describe-schema"
 import { summarizeEvent, searchWhere, type EventRow } from "./events-overview"
@@ -526,5 +526,34 @@ describe("club_members roster", () => {
     const trimmed = JSON.parse(forModelWithLists({ rosterDefinitions: "kept" }, [{ key: "roster", items: many, whenTrimmed: "Page with joinedFrom." }]))
     expect(trimmed.rosterDefinitions).toBe("kept")
     expect(trimmed.rosterNote).toMatch(/^Only the first \d+ of 400 roster fit in this reply\. Page with joinedFrom\.$/)
+  })
+})
+
+describe("club_members: the roster and the newest members", () => {
+  const newest = [{ name: "Newest One", joined: "Mon 2026-10-12 18:00 CT" }]
+  const signups = [{ period: "2026-10", signups: 3 }]
+  const member = (i: number, pad = 0) => ({ name: `Member ${i}`, email: `m${i}@utexas.edu`, joined: "2026-02-14", ...(pad ? { note: "x".repeat(pad) } : {}) })
+
+  it("leaves the newest list out when the whole club fits, and says why", () => {
+    const body = JSON.parse(membersForModel({}, { roster: { rows: [member(1), member(2)], definitions: "defs", kind: "members" }, wholeClub: true, newest, signups }))
+    expect(body.roster).toHaveLength(2)
+    expect(body.newest).toBe("left out: the roster has everyone, oldest first")
+  })
+
+  it("puts the newest members first when the roster is cut short (its newest rows are the ones cut)", () => {
+    const rows = Array.from({ length: 300 }, (_, i) => member(i, 60))
+    const body = JSON.parse(membersForModel({}, { roster: { rows, definitions: "defs", kind: "members" }, wholeClub: true, newest, signups }))
+    expect(body.newest).toEqual(newest)
+    expect(body.rosterNote).toMatch(/Ask again with joinedFrom and joinedTo/)
+    expect(body.rosterDefinitions).toBe("defs")
+  })
+
+  it("keeps the newest list for officers and filtered rosters", () => {
+    for (const roster of [
+      { rows: [member(1)], definitions: "defs", kind: "officers" as const },
+      { rows: [member(1)], definitions: "defs", kind: "members" as const },
+    ]) {
+      expect(JSON.parse(membersForModel({}, { roster, wholeClub: false, newest, signups })).newest).toEqual(newest)
+    }
   })
 })

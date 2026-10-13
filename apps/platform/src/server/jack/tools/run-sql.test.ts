@@ -198,6 +198,8 @@ describe("times in run_sql results", () => {
     for (const sql of [
       "SELECT \"startsAtUtc\", (\"startsAtUtc\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::date AS day FROM x",
       "SELECT \"startsAtUtc\", date_trunc('week', \"createdAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::date AS week FROM x",
+      // What the description tells it to write for a time of day
+      "SELECT \"startsAtUtc\", (\"startsAtUtc\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::time AS t FROM x",
       "SELECT \"startsAtUtc\" FROM x WHERE \"startsAtUtc\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago' >= '2026-10-01'",
     ]) {
       const result = shapeSqlResult(sql, [row({ startsAtUtc: new Date("2026-10-10T00:00:00Z") }, { startsAtUtc: "2026-10-10T00:00:00" })], 4)

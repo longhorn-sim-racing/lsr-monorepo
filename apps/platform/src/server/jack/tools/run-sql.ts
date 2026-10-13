@@ -258,17 +258,17 @@ function dateWithWeekday(date: string): string {
 
 const CENTRAL_ZONE = String.raw`(?:America\/Chicago|US\/Central|CST6CDT|CST|CDT)`
 
-/**
- * SQL that converts a time to Central and leaves it a timestamp, which run_sql then can't tell from
- * stored UTC. A conversion cast to date or text, compared in a filter, or formatted by to_char (a
- * format string comes next) comes out as something else, so it doesn't count. timezone('America/Chicago', x)
- * is the same conversion as a function
- */
 /** Any conversion to Central at all, used or not */
 const MENTIONS_CENTRAL = new RegExp(String.raw`AT\s+TIME\s+ZONE\s+'${CENTRAL_ZONE}'|\btimezone\s*\(\s*'${CENTRAL_ZONE}'`, "i")
 
+/**
+ * SQL that converts a time to Central and leaves it a timestamp, which run_sql then can't tell from
+ * stored UTC. A conversion cast to date, time or text, compared in a filter, or formatted by to_char
+ * (a format string comes next) comes out as something else, so it doesn't count (::timestamp still
+ * does). timezone('America/Chicago', x) is the same conversion as a function
+ */
 const CONVERTS_TO_CENTRAL = new RegExp(
-  String.raw`AT\s+TIME\s+ZONE\s+'${CENTRAL_ZONE}'(?!\s*\)*\s*(?:::\s*(?:date|text)|,\s*'|[<>=!]|BETWEEN\b|IN\b))|\btimezone\s*\(\s*'${CENTRAL_ZONE}'`,
+  String.raw`AT\s+TIME\s+ZONE\s+'${CENTRAL_ZONE}'(?!\s*\)*\s*(?:::\s*(?:date|text|time\b)|,\s*'|[<>=!]|BETWEEN\b|IN\b))|\btimezone\s*\(\s*'${CENTRAL_ZONE}'`,
   "i",
 )
 

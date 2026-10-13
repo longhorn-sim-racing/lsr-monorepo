@@ -129,23 +129,16 @@ export const clubMembersTool: JackTool<z.infer<typeof input>> = {
     const newestList = newestRows.map((u) => ({ name: u.displayName, handle: u.handle, email: u.email, eid: u.eid, status: u.status, joined: ct(u.createdAt) }))
     const people = roster === "none" ? null : await buildRoster(roster, { joinedFrom, joinedTo, now })
     if (people && "error" in people) return { isError: true, forModel: people.error, label: "Members lookup failed", displays: [] }
-    // A roster goes first and takes the room it needs. An unfiltered member roster already holds the
-    // newest members, so that list is left out then (and the result says so)
-    const wholeClub = roster === "members" && !joinedFrom && !joinedTo
-    const lists: ModelList[] = [
-      ...(people
-        ? [{ key: "roster", items: people.rows, ...(roster === "members" ? { whenTrimmed: "Ask again with joinedFrom and joinedTo to get the rest, a few months at a time." } : {}) }]
-        : []),
-      ...(wholeClub ? [] : [{ key: "newest", items: newestList }]),
-      { key: "signupPeriods", items: signups, keep: "last" as const },
-    ]
+    const forModelText = membersForModel(result, {
+      roster: people ? { rows: people.rows, definitions: people.note, kind: roster as "officers" | "members" } : null,
+      wholeClub: roster === "members" && !joinedFrom && !joinedTo,
+      newest: newestList,
+      signups,
+    })
 
     return {
       // A roster first, then the newest members (at most 50); a long signup range keeps its most recent periods
-      forModel: forModelWithLists(
-        people ? { ...result, rosterDefinitions: people.note, ...(wholeClub ? { newest: "left out: the roster has everyone, oldest first" } : {}) } : result,
-        lists,
-      ),
+      forModel: forModelText,
       label: people
         ? `Listed ${roster === "officers" ? plural(people.rows.length, "officer") : plural(people.rows.length, "member")}`
         : `Looked up members (${plural(members.length, "member")}, ${joined.length} joined since ${start})`,
@@ -158,6 +151,33 @@ export const clubMembersTool: JackTool<z.infer<typeof input>> = {
       ],
     }
   },
+}
+
+/**
+ * The model's JSON. A roster goes first and takes the room it needs. An unfiltered member roster that
+ * fits whole already holds the newest members, so that list is left out then (and the result says
+ * so); if the roster had to be cut short, its newest rows are the ones cut, so the newest list goes
+ * first instead.
+ */
+export function membersForModel(
+  result: Record<string, unknown>,
+  opts: { roster: { rows: unknown[]; definitions: string; kind: "officers" | "members" } | null; wholeClub: boolean; newest: unknown[]; signups: unknown[] },
+): string {
+  const rosterList: ModelList[] = opts.roster
+    ? [
+        {
+          key: "roster",
+          items: opts.roster.rows,
+          ...(opts.roster.kind === "members" ? { whenTrimmed: "Ask again with joinedFrom and joinedTo to get the rest, a few months at a time." } : {}),
+        },
+      ]
+    : []
+  const newest: ModelList = { key: "newest", items: opts.newest }
+  const periods: ModelList = { key: "signupPeriods", items: opts.signups, keep: "last" }
+  const base = opts.roster ? { ...result, rosterDefinitions: opts.roster.definitions } : result
+  if (!opts.roster || !opts.wholeClub) return forModelWithLists(base, [...rosterList, newest, periods])
+  const whole = forModelWithLists({ ...base, newest: "left out: the roster has everyone, oldest first" }, [...rosterList, periods])
+  return (JSON.parse(whole) as Record<string, unknown>).rosterNote ? forModelWithLists(base, [newest, ...rosterList, periods]) : whole
 }
 
 /** Officers and admins with titles, or every member (optionally by join date) with what they've done */
