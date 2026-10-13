@@ -2,12 +2,20 @@
 
 import Link from "next/link"
 import { useState } from "react"
+import { Badge, Button, EmptyState, Input, PageHeader, Panel, PanelHeader } from "@/components/admin/kit"
+import { cn } from "@/lib/utils"
 import { JACK_PERSONA_NAME, jackRoomTitle, type JackRoomSummary } from "@/lib/jack/types"
 
 /*
- * The rooms list, drawn plainly on purpose (it gets restyled later). It renders what it's given and
- * reports what the officer does; the page wires up the actions.
+ * The rooms list and the rooms rail beside a room. They render what they're given and report what the
+ * officer does; the pages wire up the actions.
  */
+
+const shortTime = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+
+export function formatRoomTime(iso: string) {
+  return shortTime.format(new Date(iso))
+}
 
 type RoomListProps = {
   rooms: JackRoomSummary[]
@@ -17,29 +25,32 @@ type RoomListProps = {
 
 export function JackRoomList({ rooms, onCreate }: RoomListProps) {
   return (
-    <div className="flex max-w-3xl flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold">Jack</h1>
-        <p className="text-sm">Shared rooms for asking Jack about club data. Every officer sees every room.</p>
-      </div>
+    <div className="mx-auto max-w-4xl">
+      <PageHeader title="Jack" description="Shared rooms for asking Jack about club data. Every officer sees every room, live." />
       <NewRoomForm onCreate={onCreate} />
-      {rooms.length ? (
-        <ul className="flex flex-col gap-2">
-          {rooms.map((room) => (
-            <li key={room.id} className="rounded border p-3">
-              <Link href={`/admin/jack/${room.id}`} className="font-semibold underline">
-                {jackRoomTitle(room)}
-              </Link>
-              <p className="text-sm">
-                {JACK_PERSONA_NAME[room.persona]} answers. {room.createdByName ? `Opened by ${room.createdByName}. ` : null}
-                Last active {new Date(room.updatedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
-              </p>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-sm">No rooms yet.</p>
-      )}
+      <Panel>
+        <PanelHeader title="Rooms" description="Newest activity first" />
+        {rooms.length ? (
+          <ul>
+            {rooms.map((room) => (
+              <li key={room.id} className="border-b border-admin-row last:border-b-0">
+                <Link href={`/admin/jack/${room.id}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 hover:bg-admin-surface">
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate font-semibold">{jackRoomTitle(room)}</span>
+                    <span className="text-xs text-admin-subtle">{room.createdByName ? `Opened by ${room.createdByName}` : "Opened by a former officer"}</span>
+                  </span>
+                  <span className="flex items-center gap-3 text-xs text-admin-subtle">
+                    {room.persona === "lift" && <Badge tone="accent">{JACK_PERSONA_NAME.lift}</Badge>}
+                    {formatRoomTime(room.updatedAt)}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyState title="No rooms yet" description="Open one above and ask Jack about events, members, LSC entries or payments." />
+        )}
+      </Panel>
     </div>
   )
 }
@@ -51,7 +62,7 @@ function NewRoomForm({ onCreate }: { onCreate: RoomListProps["onCreate"] }) {
 
   return (
     <form
-      className="flex flex-wrap items-end gap-2"
+      className="mb-4 flex flex-wrap items-start gap-2"
       onSubmit={async (e) => {
         e.preventDefault()
         if (creating) return
@@ -62,14 +73,54 @@ function NewRoomForm({ onCreate }: { onCreate: RoomListProps["onCreate"] }) {
         if (problem) setError(problem)
       }}
     >
-      <label className="flex flex-col text-sm">
-        Title (optional)
-        <input className="rounded border p-1" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} />
-      </label>
-      <button type="submit" className="rounded border px-3 py-1" disabled={creating}>
-        {creating ? "Opening..." : "New room"}
-      </button>
-      {error ? <p className="w-full text-sm text-red-600">{error}</p> : null}
+      <div className="flex min-w-0 flex-[1_1_280px] flex-col gap-1">
+        <label htmlFor="jack-room-title" className="sr-only">
+          Room title (optional)
+        </label>
+        <Input id="jack-room-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="What's this room about? (optional)" />
+        {error ? (
+          <p role="alert" className="text-xs font-medium text-tone-danger-foreground">
+            {error}
+          </p>
+        ) : null}
+      </div>
+      <Button type="submit" variant="primary" pending={creating}>
+        New room
+      </Button>
     </form>
+  )
+}
+
+/** The rooms column beside an open room, on wide screens. */
+export function JackRoomRail({ rooms, activeId }: { rooms: JackRoomSummary[]; activeId: string }) {
+  return (
+    <nav aria-label="Rooms" className="hidden min-h-0 w-[248px] shrink-0 flex-col gap-2.5 overflow-y-auto border-r bg-admin-surface px-2.5 py-3.5 lg:flex">
+      <div className="flex items-center justify-between px-1.5">
+        <span className="font-display text-lg font-semibold">Rooms</span>
+        <Button asChild size="sm" variant="primary">
+          <Link href="/admin/jack">New room</Link>
+        </Button>
+      </div>
+      <ul className="flex flex-col gap-0.5">
+        {rooms.map((room) => {
+          const active = room.id === activeId
+          return (
+            <li key={room.id}>
+              <Link
+                href={`/admin/jack/${room.id}`}
+                aria-current={active ? "page" : undefined}
+                className={cn("flex flex-col gap-0.5 rounded-md border px-2 py-2", active ? "border-border bg-card" : "border-transparent hover:bg-card")}
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span className={cn("truncate text-[13px]", active ? "font-bold" : "font-medium")}>{jackRoomTitle(room)}</span>
+                  <span className="shrink-0 text-[11px] text-admin-subtle">{formatRoomTime(room.updatedAt)}</span>
+                </span>
+                <span className="text-xs text-muted-foreground">{JACK_PERSONA_NAME[room.persona]} answers</span>
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </nav>
   )
 }

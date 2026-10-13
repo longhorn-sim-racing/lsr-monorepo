@@ -14,7 +14,10 @@ export type AdminNavGroup = {
 /** The admin console's navigation, grouped by job. The sidebar, top bar and command menu all read it. */
 export const ADMIN_NAV: AdminNavGroup[] = [
   {
-    items: [{ title: "Overview", href: "/admin", keywords: ["home", "dashboard"] }],
+    items: [
+      { title: "Overview", href: "/admin", keywords: ["home", "dashboard"] },
+      { title: "Jack", href: "/admin/jack", keywords: ["ai", "assistant", "ask", "chat", "rooms"] },
+    ],
   },
   {
     label: "Events",
