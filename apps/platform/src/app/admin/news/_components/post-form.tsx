@@ -1,59 +1,63 @@
 "use client"
 
-import { zodResolver } from "@hookform/resolvers/zod"
-import { useForm } from "react-hook-form"
+import { useState, useTransition } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useTransition, useState } from "react"
-import { newsPostSchema, NewsPostSchema } from "@/schemas/news.schema"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { Controller, useForm } from "react-hook-form"
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz"
+import { toast } from "sonner"
+import { newsPostSchema, type NewsPostSchema } from "@/schemas/news.schema"
 import { createPost, updatePost } from "@/server/actions/news"
+import { deletePost } from "@/app/admin/news/actions"
 import { slugify } from "@/lib/slug"
-import { cn } from "@/lib/utils"
+import { DEFAULT_TIMEZONE, dateToZonedValue, zoneLabel } from "@/lib/dates"
+import { unexpectedError } from "@/lib/action-result"
 import { ImageUploader } from "@/components/image-uploader"
-
-import { Button } from "@/components/ui/button"
 import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { Check, ChevronsUpDown, X } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+  Badge,
+  Button,
+  Field,
+  FormActions,
+  FormSection,
+  Input,
+  Panel,
+  PanelBody,
+  PanelFooter,
+  PanelHeader,
+  SplitLayout,
+  Textarea,
+  UserPicker,
+  useConfirm,
+  type AdminUserOption,
+} from "@/components/admin/kit"
+import { TagPicker } from "./tag-picker"
 
 interface PostFormProps {
   post?: NewsPostSchema & { id: string }
-  users: { id: string; displayName: string }[]
+  /** The post's current author, for the picker */
+  author: AdminUserOption | null
   availableTags: string[]
 }
 
-export function PostForm({ post, users, availableTags }: PostFormProps) {
-  const router = useRouter()
-  const [isPending, startTransition] = useTransition()
-  
-  // Author Combobox state
-  const [openAuthor, setOpenAuthor] = useState(false)
+function centralTime(date: Date) {
+  return `${formatInTimeZone(date, DEFAULT_TIMEZONE, "MMM d, yyyy, h:mm a")} ${zoneLabel(date, DEFAULT_TIMEZONE)}`
+}
 
-  // Tag Combobox state
-  const [openTag, setOpenTag] = useState(false)
-  const [tagInput, setTagInput] = useState("")
+function publishState(publishedAt: Date | null | undefined) {
+  if (!publishedAt) return { badge: <Badge>Draft</Badge>, note: "Only officers can see it." }
+  if (publishedAt.getTime() > Date.now()) return { badge: <Badge tone="info">Scheduled</Badge>, note: `Goes live ${centralTime(publishedAt)}.` }
+  return { badge: <Badge tone="success">Published</Badge>, note: `Live since ${centralTime(publishedAt)}.` }
+}
+
+export function PostForm({ post, author: initialAuthor, availableTags }: PostFormProps) {
+  const router = useRouter()
+  const confirm = useConfirm()
+  const [isPending, startTransition] = useTransition()
+  const [deleting, setDeleting] = useState(false)
+  const [author, setAuthor] = useState<AdminUserOption | null>(initialAuthor)
+  // New posts take their slug from the title until the slug is edited by hand
+  const [slugEdited, setSlugEdited] = useState(!!post)
 
   const form = useForm<NewsPostSchema>({
     resolver: zodResolver(newsPostSchema),
@@ -63,296 +67,220 @@ export function PostForm({ post, users, availableTags }: PostFormProps) {
       excerpt: post?.excerpt ?? "",
       coverImageUrl: post?.coverImageUrl ?? null,
       bodyMd: post?.bodyMd ?? "",
-      authorId: post?.authorId ?? "", 
+      authorId: post?.authorId ?? initialAuthor?.id ?? "",
       publishedAt: post?.publishedAt ?? null,
       tags: post?.tags ?? [],
     },
   })
+  const { errors, isSubmitted } = form.formState
 
   function onSubmit(data: NewsPostSchema) {
     startTransition(async () => {
-      let result;
-      if (post) {
-        result = await updatePost(post.id, data);
-      } else {
-        result = await createPost(data);
-      }
-
-      if (result.success) {
-        router.push("/admin/news");
-        router.refresh();
-      } else {
-        alert("Error: " + result.error);
+      try {
+        const result = post ? await updatePost(post.id, data) : await createPost(data)
+        if (result.success) {
+          toast.success(post ? "Post saved" : data.publishedAt ? "Post created" : "Draft saved")
+          router.push("/admin/news")
+          router.refresh()
+        } else {
+          toast.error(result.error)
+        }
+      } catch (error) {
+        toast.error(unexpectedError(error, "Couldn't save the post"))
       }
     })
   }
 
-  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    form.setValue("title", e.target.value);
-    if (!post) { 
-        const slug = slugify(e.target.value);
-        form.setValue("slug", slug);
+  async function onDelete() {
+    if (!post) return
+    const ok = await confirm({
+      tone: "danger",
+      title: `Delete "${post.title}"?`,
+      description: "The post comes off the news page and its link stops working. This can't be undone.",
+    })
+    if (!ok) return
+    setDeleting(true)
+    try {
+      await deletePost(post.id)
+      toast.success("Post deleted")
+      router.push("/admin/news")
+      router.refresh()
+    } catch (error) {
+      toast.error(unexpectedError(error, "Couldn't delete the post"))
+      setDeleting(false)
     }
   }
 
-  const currentTags = form.watch("tags");
-
-  const addTag = (tag: string) => {
-    if (!currentTags.includes(tag)) {
-      form.setValue("tags", [...currentTags, tag]);
-    }
-    setTagInput("");
-  }
-
-  const removeTag = (tag: string) => {
-    form.setValue("tags", currentTags.filter(t => t !== tag));
-  }
+  const publishedAt = form.watch("publishedAt")
+  const body = form.watch("bodyMd")
+  const words = body.trim() ? body.trim().split(/\s+/).length : 0
+  const state = publishState(publishedAt)
+  const scheduled = !!publishedAt && publishedAt.getTime() > Date.now()
+  const submitLabel = post ? "Save changes" : !publishedAt ? "Save draft" : scheduled ? "Schedule post" : "Publish post"
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8 max-w-4xl">
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <FormField
-            control={form.control}
-            name="title"
-            render={({ field }) => (
-                <FormItem>
-                <FormLabel>Title</FormLabel>
-                <FormControl>
-                    <Input placeholder="Post title" {...field} onChange={(e) => {
-                        field.onChange(e);
-                        handleTitleChange(e);
-                    }} />
-                </FormControl>
-                <FormMessage />
-                </FormItem>
-            )}
-            />
-            
-            <FormField
-            control={form.control}
-            name="slug"
-            render={({ field }) => (
-                <FormItem>
-                <FormLabel>Slug</FormLabel>
-                <FormControl>
-                    <Input placeholder="post-slug" {...field} />
-                </FormControl>
-                <FormMessage />
-                </FormItem>
-            )}
-            />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <FormField
-              control={form.control}
-              name="authorId"
-              render={({ field }) => (
-                <FormItem className="flex flex-col">
-                  <FormLabel>Author</FormLabel>
-                  <Popover open={openAuthor} onOpenChange={setOpenAuthor}>
-                    <PopoverTrigger asChild>
-                      <FormControl>
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={openAuthor}
-                          className={cn(
-                            "w-full justify-between",
-                            !field.value && "text-muted-foreground"
-                          )}
-                        >
-                          {field.value
-                            ? users.find((user) => user.id === field.value)?.displayName
-                            : "Select author..."}
-                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </FormControl>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                      <Command>
-                        <CommandInput placeholder="Search author..." />
-                        <CommandList>
-                            <CommandEmpty>No author found.</CommandEmpty>
-                            <CommandGroup>
-                            {users.map((user) => (
-                                <CommandItem
-                                value={user.displayName}
-                                key={user.id}
-                                onSelect={() => {
-                                    form.setValue("authorId", user.id)
-                                    setOpenAuthor(false)
-                                }}
-                                >
-                                <Check
-                                    className={cn(
-                                    "mr-2 h-4 w-4",
-                                    user.id === field.value ? "opacity-100" : "opacity-0"
-                                    )}
-                                />
-                                {user.displayName}
-                                </CommandItem>
-                            ))}
-                            </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="publishedAt"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Published Date (Optional)</FormLabel>
-                  <FormControl>
-                    <Input 
-                        type="datetime-local" 
-                        value={field.value ? new Date(field.value.getTime() - field.value.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ""}
-                        onChange={(e) => {
-                            const val = e.target.value;
-                            if (!val) {
-                                field.onChange(null);
-                            } else {
-                                field.onChange(new Date(val));
-                            }
-                        }}
-                    />
-                  </FormControl>
-                  <FormDescription>Leave blank to save as draft.</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-        </div>
-
-        {/* Tags */}
-        <FormItem>
-            <FormLabel>Tags</FormLabel>
-            <div className="flex flex-wrap gap-2 mb-2">
-                {currentTags.map(tag => (
-                    <Badge key={tag} variant="secondary" className="gap-1 pr-1">
-                        {tag}
-                        <span className="cursor-pointer rounded-full hover:bg-muted p-0.5" onClick={() => removeTag(tag)}>
-                            <X className="w-3 h-3" />
-                        </span>
-                    </Badge>
-                ))}
-            </div>
-            <Popover open={openTag} onOpenChange={setOpenTag}>
-                <PopoverTrigger asChild>
-                    <Button
-                        variant="outline"
-                        role="combobox"
-                        aria-expanded={openTag}
-                        className="justify-between"
+    <form
+      noValidate
+      onSubmit={form.handleSubmit(onSubmit, () => toast.error("Some fields need fixing before this can be saved."))}
+    >
+      <SplitLayout
+        main={
+          <Panel>
+            <PanelHeader title="Post" description="Written in Markdown: **bold**, _italic_, # headings, [links](https://…) and lists." />
+            <PanelBody className="flex flex-col gap-4">
+              <Field label="Title" htmlFor="post-title" required error={errors.title?.message}>
+                <Input
+                  id="post-title"
+                  placeholder="LSC Season 3 kicks off"
+                  aria-invalid={!!errors.title}
+                  {...form.register("title", {
+                    onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
+                      if (!slugEdited) form.setValue("slug", slugify(event.target.value), { shouldValidate: isSubmitted })
+                    },
+                  })}
+                />
+              </Field>
+              <Field
+                label="Link"
+                htmlFor="post-slug"
+                required
+                error={errors.slug?.message}
+                hint={post ? "Changing it breaks links already shared." : "Filled in from the title. Lowercase letters, numbers and hyphens."}
+              >
+                <div className="flex min-w-0 items-center rounded-md">
+                  <span className="flex h-8 shrink-0 items-center rounded-l-md border border-r-0 border-input bg-admin-surface px-2.5 text-[13px] text-admin-subtle">
+                    /news/
+                  </span>
+                  <Input
+                    id="post-slug"
+                    placeholder="lsc-season-3-kicks-off"
+                    className="rounded-l-none"
+                    aria-invalid={!!errors.slug}
+                    {...form.register("slug", { onChange: () => setSlugEdited(true) })}
+                  />
+                </div>
+              </Field>
+              <Field label="Excerpt" htmlFor="post-excerpt" hint="One or two sentences for the news page and link previews." error={errors.excerpt?.message}>
+                <Textarea id="post-excerpt" rows={2} placeholder="A short summary" {...form.register("excerpt")} />
+              </Field>
+              <Field
+                label="Body"
+                htmlFor="post-body"
+                required
+                error={errors.bodyMd?.message}
+                hint={`${words.toLocaleString()} ${words === 1 ? "word" : "words"}`}
+              >
+                <Textarea
+                  id="post-body"
+                  rows={20}
+                  className="min-h-[420px]"
+                  placeholder="Write the post here."
+                  aria-invalid={!!errors.bodyMd}
+                  {...form.register("bodyMd")}
+                />
+              </Field>
+            </PanelBody>
+          </Panel>
+        }
+        side={
+          <div className="flex flex-col gap-4">
+            <Panel>
+              <PanelHeader title="Publishing" description={<span className="flex flex-wrap items-center gap-2">{state.badge}{state.note}</span>} />
+              <PanelBody className="flex flex-col gap-4">
+                <Controller
+                  control={form.control}
+                  name="publishedAt"
+                  render={({ field }) => (
+                    <Field
+                      label="Publish date (Central)"
+                      htmlFor="post-published-at"
+                      hint="Blank keeps it a draft. A future time schedules it."
+                      error={errors.publishedAt?.message}
                     >
-                        Add Tag...
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[200px] p-0" align="start">
-                    <Command>
-                        <CommandInput 
-                            placeholder="Search or create tag..." 
-                            value={tagInput}
-                            onValueChange={setTagInput} 
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          id="post-published-at"
+                          type="datetime-local"
+                          className="w-auto min-w-0 flex-1"
+                          value={dateToZonedValue(field.value, DEFAULT_TIMEZONE)}
+                          onChange={(event) => field.onChange(event.target.value ? fromZonedTime(event.target.value, DEFAULT_TIMEZONE) : null)}
+                          onBlur={field.onBlur}
                         />
-                        <CommandList>
-                            <CommandEmpty>
-                                {tagInput && (
-                                    <div className="p-2">
-                                        <div 
-                                            className="text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground rounded-sm px-2 py-1.5"
-                                            onClick={() => {
-                                                addTag(tagInput);
-                                                setOpenTag(false);
-                                            }}
-                                        >
-                                            Create &ldquo;{tagInput}&rdquo;
-                                        </div>
-                                    </div>
-                                )}
-                            </CommandEmpty>
-                            <CommandGroup heading="Existing Tags">
-                                {availableTags.filter(t => !currentTags.includes(t)).map(tag => (
-                                    <CommandItem
-                                        key={tag}
-                                        value={tag}
-                                        onSelect={() => {
-                                            addTag(tag);
-                                            setOpenTag(false);
-                                        }}
-                                    >
-                                        <Check className={cn("mr-2 h-4 w-4 opacity-0")} />
-                                        {tag}
-                                    </CommandItem>
-                                ))}
-                            </CommandGroup>
-                        </CommandList>
-                    </Command>
-                </PopoverContent>
-            </Popover>
-        </FormItem>
+                        <Button type="button" size="sm" onClick={() => field.onChange(new Date())}>
+                          Now
+                        </Button>
+                        {field.value && (
+                          <Button type="button" size="sm" variant="ghost" onClick={() => field.onChange(null)}>
+                            Clear
+                          </Button>
+                        )}
+                      </div>
+                    </Field>
+                  )}
+                />
+                <Field label="Author" htmlFor="post-author" required error={errors.authorId?.message}>
+                  <UserPicker
+                    id="post-author"
+                    value={author}
+                    placeholder="Choose the author"
+                    onChange={(user) => {
+                      setAuthor(user)
+                      form.setValue("authorId", user?.id ?? "", { shouldValidate: isSubmitted, shouldDirty: true })
+                    }}
+                  />
+                </Field>
+              </PanelBody>
+              <PanelFooter>
+                <FormActions
+                  className="w-full"
+                  note={
+                    post && (
+                      <Button type="button" variant="danger" onClick={onDelete} pending={deleting} disabled={isPending}>
+                        Delete
+                      </Button>
+                    )
+                  }
+                >
+                  <Button asChild>
+                    <Link href="/admin/news">Cancel</Link>
+                  </Button>
+                  <Button type="submit" variant="primary" pending={isPending} disabled={deleting}>
+                    {submitLabel}
+                  </Button>
+                </FormActions>
+              </PanelFooter>
+            </Panel>
 
-
-        <FormField
-          control={form.control}
-          name="coverImageUrl"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Cover image</FormLabel>
-              <FormControl>
-                <ImageUploader defaultValue={field.value} onChange={(url) => field.onChange(url)} />
-              </FormControl>
-              <FormDescription>Optional. Shown on the news page and at the top of the post; landscape photos work best.</FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        <FormField
-          control={form.control}
-          name="excerpt"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Excerpt</FormLabel>
-              <FormControl>
-                <Textarea placeholder="Brief summary..." {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <FormField
-          control={form.control}
-          name="bodyMd"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Content (Markdown)</FormLabel>
-              <FormControl>
-                <Textarea placeholder="Type your markdown here..." className="h-96 font-mono" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        <div className="flex gap-4">
-            <Button type="submit" disabled={isPending}>
-            {isPending ? "Saving..." : (post ? "Update Post" : "Create Post")}
-            </Button>
-            <Button variant="outline" type="button" onClick={() => router.back()}>
-                Cancel
-            </Button>
-        </div>
-      </form>
-    </Form>
+            <Panel>
+              <PanelBody className="flex flex-col gap-5">
+                <FormSection title="Tags" description="Group related posts. Type a new name to create a tag.">
+                  <Controller
+                    control={form.control}
+                    name="tags"
+                    render={({ field }) => <TagPicker id="post-tags" value={field.value} onChange={field.onChange} options={availableTags} />}
+                  />
+                </FormSection>
+                <FormSection title="Cover image" description="Shown on the news page and at the top of the post. Landscape photos work best.">
+                  <Controller
+                    control={form.control}
+                    name="coverImageUrl"
+                    render={({ field }) => (
+                      <div className="flex flex-col gap-1.5">
+                        <ImageUploader id="post-cover" defaultValue={field.value} onChange={(url) => field.onChange(url)} aria-invalid={!!errors.coverImageUrl} />
+                        {errors.coverImageUrl?.message && (
+                          <p role="alert" className="text-xs font-medium text-tone-danger-foreground">
+                            {errors.coverImageUrl.message}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  />
+                </FormSection>
+              </PanelBody>
+            </Panel>
+          </div>
+        }
+      />
+    </form>
   )
 }
