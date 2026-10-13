@@ -4,7 +4,7 @@
  */
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { mentionsDollars, mentionsNumber } from "../../src/server/jack/eval-support";
-import { chicagoMonthStart, includesAll, mentionsDate, nextFriday7pm, number, PEOPLE, purchaseKey, TZ, type Question, type ToolPart } from "./shared";
+import { chicagoMonthStart, includesAll, mentionsDate, namesEvent, nextFriday7pm, number, PEOPLE, purchaseKey, TZ, type Question, type ToolPart } from "./shared";
 
 export const EVERYDAY: Question[] = [
   {
@@ -30,10 +30,21 @@ export const EVERYDAY: Question[] = [
   {
     id: "lsc-other-schools",
     ask: "How many of this season's LSC applications came from a school other than UT Austin?",
-    truth: async ({ lsc }) =>
-      lsc
-        ? number(lsc.entrants.filter((e) => e.application && e.application.school).length, "applications from other schools", ["application", "school", "driver", "entr", "form", "other"])
-        : null,
+    truth: async ({ lsc }) => {
+      if (!lsc) return null;
+      const schools = lsc.entrants.flatMap((e) => (e.application?.school ? [e.application.school] : []));
+      const n = schools.length;
+      const named = [...new Set(schools)];
+      return {
+        expected: `${n} applications from other schools${named.length ? ` (${named.join(", ")})` : ""}`,
+        // The count next to its noun, or anywhere when the answer also names every other school ("2: Clemson and A&M")
+        check: ({ text }) =>
+          mentionsNumber(text, n, ["application", "school", "driver", "entr", "form", "other"]) || (mentionsNumber(text, n) && includesAll(text, named).length === 0)
+            ? null
+            : `doesn't say ${n} applications from other schools`,
+        fakeAnswer: `${n} applications came from other schools${named.length ? `: ${named.join(", ")}` : ""}.`,
+      };
+    },
   },
   {
     id: "lsc-missing-results",
@@ -59,7 +70,7 @@ export const EVERYDAY: Question[] = [
       return {
         expected: missing.join(", "),
         check: ({ text }) => {
-          const left = includesAll(text, missing);
+          const left = missing.filter((title) => !namesEvent(text, title));
           return left.length ? `doesn't name ${left.join(", ")}` : null;
         },
         fakeAnswer: `Missing results: ${missing.join(", ")}.`,
@@ -183,7 +194,7 @@ export const EVERYDAY: Question[] = [
       return {
         expected: events.map((e) => `${e.title} (${formatInTimeZone(e.startsAtUtc, TZ, "EEE MMM d, h:mm a")} CT)`).join("; "),
         check: ({ text }) => {
-          const left = includesAll(text, events.map((e) => e.title));
+          const left = events.filter((e) => !namesEvent(text, e.title)).map((e) => e.title);
           if (left.length) return `doesn't name ${left.join(", ")}`;
           const wrongDates = events.filter((e) => !mentionsDate(text, e.startsAtUtc)).map((e) => e.title);
           return wrongDates.length ? `no Central Time date for ${wrongDates.join(", ")}` : null;

@@ -86,6 +86,20 @@ export function mentionsDate(text: string, at: Date): boolean {
   );
 }
 
+/**
+ * Whether an answer names an event: its full title, or for a race round the part after "@" (the
+ * track, without any parenthesized note) or "Round N". Answers rightly shorten "Lone Star Cup S3
+ * Round 5 @ Long Beach" to "Round 5 at Long Beach".
+ */
+export function namesEvent(text: string, title: string): boolean {
+  const t = text.toLowerCase();
+  if (t.includes(title.toLowerCase())) return true;
+  const track = title.split("@")[1]?.replace(/\(.*?\)/g, "").trim();
+  if (track && t.includes(track.toLowerCase())) return true;
+  const round = title.match(/\bround\s+(\d+)\b/i)?.[1];
+  return Boolean(round && new RegExp(`\\bround\\s*${round}\\b|\\br${round}\\b`, "i").test(text));
+}
+
 export const PEOPLE = ["people", "person", "member", "officer", "user", "driver", "account", "checkout", "attendee"];
 
 // ---------------------------------------------------------------------------

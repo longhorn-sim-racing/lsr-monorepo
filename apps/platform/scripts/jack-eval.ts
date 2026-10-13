@@ -16,6 +16,8 @@
  *   --variant=<name>      where results go: baseline (default), or v1, v2... after a change to compare against it
  *   --fresh               ignore results already saved for this variant (otherwise finished ones are skipped)
  *   --no-judge            script checks only (no judge calls)
+ *   --regrade             grade the saved answers again after a grader fix: text checks rerun, and the judge
+ *                         looks again at answers it failed (no model calls for the answers themselves)
  *   --concurrency=<n>     questions in flight at once (default 5)
  *   --as=<email|handle>   the officer asking (default the first officer or admin)
  *   --verbose             print every answer
@@ -43,7 +45,7 @@ import type { JackRoomPersonaKey } from "../src/lib/jack/types";
 import { checkEvalDatabase } from "../src/server/jack/eval-support";
 import { BEHAVIOR, PLANTED, seedPlanted } from "./jack-eval/behavior";
 import { EVERYDAY } from "./jack-eval/everyday";
-import { JUDGE_MODEL, judgeAnswer, type JudgeGrade, type ToolTrace } from "./jack-eval/judge";
+import { JudgeDeclined, judgeAnswer, judgeCostUsd, type JudgeGrade, type ToolTrace } from "./jack-eval/judge";
 import { loadLsc, type Answer, type EvalContext, type Exchange, type Group, type Question } from "./jack-eval/shared";
 
 /** apps/platform, wherever this is run from: only its env files are read */
@@ -72,6 +74,8 @@ const DRY_RUN = args.includes("--dry-run");
 const VERBOSE = args.includes("--verbose");
 const PILOT = args.includes("--pilot");
 const FRESH = args.includes("--fresh");
+/** Grades a variant's saved answers again (fixed checks, and the judge for answers it failed) without asking the models again */
+const REGRADE = args.includes("--regrade");
 const NO_JUDGE = args.includes("--no-judge") || DRY_RUN;
 const ONLY = arg("only");
 const FILTER = arg("filter");
@@ -281,9 +285,15 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
   let judged: Awaited<ReturnType<typeof judgeAnswer>> | null = null;
   if (c.judge) {
     try {
-      judged = await judgeAnswer(c.judge, { question: ask, before, expect, facts, tools: traces, answer: out.text, ending: out.outcome === "answered" ? undefined : out.outcome }, AbortSignal.timeout(180_000));
+      judged = await judgeAnswer(
+        c.judge,
+        { question: ask, asker: c.officer.displayName, before, expect, facts, tools: traces, answer: out.text, ending: out.outcome === "answered" ? undefined : out.outcome },
+        AbortSignal.timeout(180_000)
+      );
     } catch (error) {
-      return { error: `judge failed: ${error instanceof Error ? error.message : String(error)}`, usage: usage.tokens };
+      // Both judges' safety checks can trip on a question about secrets; the script checks still grade it
+      if (error instanceof JudgeDeclined) console.log(`  ${persona.padEnd(5)} note  ${question.id}: both judges declined; graded by the script checks only`);
+      else return { error: `judge failed: ${error instanceof Error ? error.message : String(error)}`, usage: usage.tokens };
     }
   }
   const g = judged?.grade;
@@ -318,12 +328,7 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
       ? {
           judge_model: judged.model,
           judge_usage: judged.usage,
-          judge_cost_usd: mods.costUsd(JUDGE_MODEL, {
-            inputTokens: judged.usage.input_tokens,
-            cacheWriteTokens: judged.usage.cache_creation_input_tokens ?? 0,
-            cacheReadTokens: judged.usage.cache_read_input_tokens ?? 0,
-            outputTokens: judged.usage.output_tokens,
-          }),
+          judge_cost_usd: judgeCostUsd(judged.model, judged.usage),
         }
       : {}),
     meta: {
@@ -335,7 +340,7 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
       sql_calls: out.parts.filter((p) => p.name === "run_sql").length,
       typed_calls: out.parts.filter((p) => TYPED_TOOLS.has(p.name)).length,
       describe_calls: out.parts.filter((p) => p.name === "describe_schema").length,
-      ...(g ? { tool_use: g.tool_use, tool_notes: g.tool_notes, tool_gap: g.tool_gap } : {}),
+      ...(g ? { tool_use: g.tool_use, tool_notes: g.tool_notes, tool_gap: g.tool_gap } : c.judge ? { tool_notes: "Both judges declined to grade this question; script checks only." } : {}),
       expected: truth.expected,
       answer: out.text,
     },
@@ -409,6 +414,104 @@ function readRows(persona: JackRoomPersonaKey): Row[] {
   return [...latest.values()];
 }
 
+/** Checks that read only the answer's text (plus whether a chart was made), so they can rerun on a saved answer */
+const TEXT_RECHECK = new Set(["upcoming-events", "lsc-missing-results", "lsc-other-schools", "followup-which-ut", "analysis-gm-trend"]);
+
+/**
+ * --regrade: for each saved answer, reruns the text checks that changed and asks the judge again
+ * where it failed the answer, then saves the new grade as the answer's latest row. The answers, tool
+ * calls and costs stay as they were; the judge's new cost is added.
+ */
+async function regrade(c: Ctx, personas: JackRoomPersonaKey[]) {
+  let rejudged = 0;
+  for (const persona of personas) {
+    const dir = resolve(flowDir(persona), VARIANT);
+    for (const row of readRows(persona)) {
+      const question = QUESTIONS.find((q) => q.id === row.prompt_id);
+      if (!question || (FILTER && !row.prompt_id.includes(FILTER)) || (GROUP && row.meta.group !== GROUP)) continue;
+      const ctx: EvalContext = { prisma: c.prisma, now: c.now, persona, officer: c.officer, startedAt: c.startedAt, lsc: c.lsc };
+      const truth = await question.truth(ctx);
+      if (!truth) continue;
+      const tracePath = resolve(dir, "traces", `${row.prompt_id}_rep0.json`);
+      if (!existsSync(tracePath)) continue;
+      const turns = JSON.parse(readFileSync(tracePath, "utf8")) as { role: string; name?: string; content: string }[];
+      const tools: ToolTrace[] = [];
+      for (let i = 0; i < turns.length; i++) {
+        if (turns[i].role !== "tool_call") continue;
+        const result = turns[i + 1]?.role === "tool_result" ? turns[i + 1].content : "";
+        let input: unknown = turns[i].content;
+        try {
+          input = JSON.parse(turns[i].content);
+        } catch {}
+        tools.push({ name: turns[i].name ?? "?", input, result: result.startsWith("ERROR: ") ? "" : result, ...(result.startsWith("ERROR: ") ? { error: result.slice(7) } : {}) });
+      }
+      // Only what the text checks look at: the text, and which tools ran (a chart part counts as a chart)
+      const parts = row.meta.tools.map((name, i) => ({
+        id: `saved-${i}`,
+        name,
+        label: name,
+        status: "done" as const,
+        at: 0,
+        input: {},
+        displays: name === "chart" ? [{ kind: "chart" as const, chart: { type: "bar" as const, title: "", xKey: "x", series: [], rows: [] } }] : [],
+      }));
+      let failures = row.meta.failures;
+      if (TEXT_RECHECK.has(row.prompt_id)) {
+        const checked = truth.check({ text: row.meta.answer, parts });
+        failures = [...failures.filter((f) => f.startsWith("ended as")), ...(checked ? [checked] : [])];
+      }
+      const scriptOk = failures.length === 0;
+
+      const judgeFailed = row.grade.meets === 0 || row.grade.facts === 0 || row.grade.honest === 0;
+      let grade = row.grade;
+      let extra: Partial<Row> = {};
+      if (c.judge && (judgeFailed || TEXT_RECHECK.has(row.prompt_id))) {
+        const before = question.before ? ((await question.before(ctx)) ?? []) : [];
+        const judged = await judgeAnswer(
+          c.judge,
+          {
+            question: row.prompt,
+            asker: c.officer.displayName,
+            before,
+            expect: question.expect ?? GROUP_EXPECT[question.group ?? "everyday"],
+            facts: truth.facts ?? (truth.judgeOnly ? undefined : `The right answer: ${truth.expected}.`),
+            tools,
+            answer: row.meta.answer,
+            ending: row.outcome === "answered" ? undefined : row.outcome,
+          },
+          AbortSignal.timeout(180_000)
+        );
+        rejudged++;
+        const g = judged.grade;
+        grade = {
+          pass: 0,
+          check: 0,
+          meets: Number(g.meets_expectation),
+          facts: Number(g.facts_correct !== "no"),
+          honest: Number(g.no_invention),
+          clear: Number(g.clear),
+          tools_ok: Number(g.tool_use === "good" || g.tool_use === "none_needed"),
+        };
+        extra = {
+          explanation: { meets: g.explanation, tools_ok: g.tool_notes },
+          judge_model: judged.model,
+          judge_usage: judged.usage,
+          judge_cost_usd: (row.judge_cost_usd ?? 0) + judgeCostUsd(judged.model, judged.usage),
+          meta: { ...row.meta, tool_use: g.tool_use, tool_notes: g.tool_notes, tool_gap: g.tool_gap },
+        };
+      }
+      const judgeOk = grade.meets === undefined || Boolean(grade.meets && grade.facts && grade.honest);
+      const next: Row = { ...row, ...extra, grade: { ...grade, check: Number(scriptOk), pass: Number(scriptOk && judgeOk) } };
+      next.meta = { ...next.meta, failures };
+      if (next.grade.pass !== row.grade.pass || extra.judge_model) {
+        appendFileSync(resolve(dir, "results.jsonl"), JSON.stringify(next) + "\n");
+        console.log(`  ${persona.padEnd(5)} ${row.grade.pass ? "PASS" : "FAIL"} -> ${next.grade.pass ? "PASS" : "FAIL"}  ${row.prompt_id}`);
+      }
+    }
+  }
+  console.log(`\n  regraded; the judge looked again at ${rejudged} answers`);
+}
+
 async function main() {
   const { prisma } = await import("../src/server/db");
   if (!database.ok) return; // narrowed above; for TypeScript
@@ -431,6 +534,16 @@ async function main() {
 
   const judge = NO_JUDGE ? null : new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim(), maxRetries: 4 });
   const c: Ctx = { prisma, officer, lsc, now, startedAt, judge, mods };
+  if (REGRADE) {
+    if (DRY_RUN) throw new Error("--regrade and --dry-run don't go together");
+    await regrade(c, personas);
+    const summary = summarize(personas.flatMap((p) => readRows(p)), personas, mods.JACK_MODELS);
+    const path = resolve(OUT_DIR, "jack-compare", `${VARIANT}.md`);
+    writeFileSync(path, summary);
+    console.log(`\n${summary}\n  saved: ${path}`);
+    await prisma.$disconnect();
+    return;
+  }
 
   const rule = "=".repeat(78);
   console.log(rule);
@@ -439,7 +552,7 @@ async function main() {
       ? `  JACK EVAL on the LOCAL database ${database.host}:${database.port}/${database.database}`
       : `  JACK EVAL on a REMOTE database ${database.host}:${database.port}/${database.database} (allowed by --allow-remote)`
   );
-  console.log(`  ${DRY_RUN ? "Dry run: fake model, no API calls, nothing spent or saved." : `Real run: calls Claude and costs money${judge ? `, judged by ${JUDGE_MODEL}` : ", no judge"}.`}`);
+  console.log(`  ${DRY_RUN ? "Dry run: fake model, no API calls, nothing spent or saved." : `Real run: calls Claude and costs money${judge ? ", judged by claude-opus-5-5 (Fable 5.1 if Opus declines)" : ", no judge"}.`}`);
   console.log(rule);
   console.log(`  asking as: ${officer.displayName}   variant: ${VARIANT}   in flight: ${CONCURRENCY}`);
   console.log(`  ${questions.length} questions x ${personas.map((p) => mods.JACK_MODELS[p].model).join(", ")}\n`);
