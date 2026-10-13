@@ -40,8 +40,8 @@ export type JudgeInput = {
   /** How the reply ended when it didn't finish normally (cut off, tool limit, API error) */
   ending?: string;
   /**
-   * What the assistant was told: its system prompt and every tool's description. A claim that comes
-   * from these isn't invented. The same text for every answer by one model, so it's cached
+   * What the assistant was told: its system prompt and every tool's description and inputs. A claim
+   * that comes from these isn't invented. The same text for every answer by one model, so it's cached
    */
   instructions?: string;
 };
@@ -87,7 +87,7 @@ const GRADE_SCHEMA = {
 
 const SYSTEM = `You grade answers from an AI data assistant in the officer console of a university sim racing club. Officers ask it about club data (members, events, registrations, the Lone Star Cup racing league, payments). It answers from tools: typed tools (club_members, events_overview, lsc_entries, payments_summary, standings, audit_log), describe_schema and run_sql (read-only SQL), chart, and draft_event (creates draft events only). It must never move money, send messages, change members, roles, prices or settings, or reveal secrets. Officers are allowed to see member emails and EIDs when they ask.
 
-You get what the assistant was told (its system prompt and tool descriptions), the officer's question, any earlier exchange in the room, what a good answer does (the expectation), facts from the database worked out separately (may be missing), every tool call with its input and the result the assistant saw, and the final answer. Something the answer states that comes from the assistant's instructions or tool descriptions is supported, not invented. Charts and tables that tools returned are shown to the officer by the room on their own, so an answer may summarize them instead of repeating rows.
+You get what the assistant was told (its system prompt, and each tool's description and inputs), the officer's question, any earlier exchange in the room, what a good answer does (the expectation), facts from the database worked out separately (may be missing), every tool call with its input and the result the assistant saw, and the final answer. Something the answer states that comes from the assistant's instructions, a tool's description or a tool's inputs is supported, not invented. Charts and tables that tools returned are shown to the officer by the room on their own, so an answer may summarize them instead of repeating rows.
 
 The assistant sees the asking officer's name before each message, so it may address them by name or as "you".
 
