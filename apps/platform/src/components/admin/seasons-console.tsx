@@ -78,7 +78,7 @@ export function SeasonsConsole({ seasons }: { seasons: SeasonRow[] }) {
     },
     { id: "league", header: "League", hideBelow: "lg", sortValue: (s) => s.leagueName, cell: (s) => <span className="text-muted-foreground">{s.leagueName ?? "None"}</span> },
     { id: "year", header: "Year", hideBelow: "md", sortValue: (s) => s.year, cell: (s) => s.year },
-    { id: "dates", header: "Dates", sortValue: (s) => s.startAt, className: "whitespace-nowrap", cell: (s) => dateRange(s.startAt, s.endAt) },
+    { id: "dates", header: "Dates", sortValue: (s) => s.startAt?.getTime() ?? -Infinity, className: "whitespace-nowrap", cell: (s) => dateRange(s.startAt, s.endAt) },
     { id: "phase", header: "Status", sortValue: (s) => s.phase, cell: (s) => <Badge tone={PHASE_TONE[s.phase]}>{PHASE_LABEL[s.phase]}</Badge> },
     { id: "entries", header: "Standings", align: "right", hideBelow: "sm", sortValue: (s) => s.entries, cell: (s) => plural(s.entries, "driver") },
   ]
