@@ -260,7 +260,15 @@ const QUESTIONS: Question[] = [
   {
     id: "user-accounts",
     ask: "How many user accounts are on the site in total?",
-    truth: async ({ prisma }) => number(await prisma.user.count(), "accounts"),
+    truth: async ({ prisma }) => {
+      // Counting deleted accounts or not are both fair readings
+      const [all, live] = await Promise.all([prisma.user.count(), prisma.user.count({ where: { status: { not: "deleted" } } })]);
+      return {
+        expected: `${all} accounts${live !== all ? ` (${live} not deleted)` : ""}`,
+        check: ({ text }) => (mentionsNumber(text, all) || mentionsNumber(text, live) ? null : `doesn't say ${all}`),
+        fakeAnswer: `There are ${all} accounts.`,
+      };
+    },
   },
   {
     id: "new-accounts",
