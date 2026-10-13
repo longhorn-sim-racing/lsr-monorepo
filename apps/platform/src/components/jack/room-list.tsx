@@ -4,7 +4,9 @@ import Link from "next/link"
 import { useState } from "react"
 import { Badge, Button, EmptyState, Input, PageHeader, Panel, PanelHeader } from "@/components/admin/kit"
 import { cn } from "@/lib/utils"
+import type { JackSpend } from "@/lib/jack/spend"
 import { JACK_PERSONA_NAME, jackRoomTitle, type JackRoomSummary } from "@/lib/jack/types"
+import { SpendMeter } from "./spend-meter"
 
 /*
  * The rooms list and the rooms rail beside a room. They render what they're given and report what the
@@ -19,14 +21,20 @@ export function formatRoomTime(iso: string) {
 
 type RoomListProps = {
   rooms: JackRoomSummary[]
+  /** This month's spend; null if it couldn't be loaded */
+  spend: JackSpend | null
   /** Resolves with an error to show, or null once the room is open */
   onCreate: (title: string) => Promise<string | null>
 }
 
-export function JackRoomList({ rooms, onCreate }: RoomListProps) {
+export function JackRoomList({ rooms, spend, onCreate }: RoomListProps) {
   return (
     <div className="mx-auto max-w-4xl">
-      <PageHeader title="Jack" description="Shared rooms for asking Jack about club data. Every officer sees every room, live." />
+      <PageHeader
+        title="Jack"
+        description="Shared rooms for asking Jack about club data. Every officer sees every room, live."
+        actions={spend ? <SpendMeter spend={spend} className="text-[13px]" /> : null}
+      />
       <NewRoomForm onCreate={onCreate} />
       <Panel>
         <PanelHeader title="Rooms" description="Newest activity first" />
