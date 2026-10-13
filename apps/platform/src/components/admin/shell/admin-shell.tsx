@@ -57,7 +57,7 @@ export function AdminShell({ user, theme: initialTheme, children }: { user: Shel
 
   return (
     <div className={`admin-${theme} flex min-h-dvh bg-background font-sans text-sm text-foreground`}>
-      <aside className="admin-nav-scroll sticky top-0 hidden h-dvh w-[236px] shrink-0 overflow-y-auto bg-admin-nav text-admin-nav-foreground md:block">
+      <aside className="admin-nav-scroll sticky top-0 hidden h-dvh w-[236px] shrink-0 overflow-y-auto border-r border-admin-nav-border bg-admin-nav text-admin-nav-foreground md:block">
         <AdminSidebarContent user={user} onSearch={openSearch} />
       </aside>
 
