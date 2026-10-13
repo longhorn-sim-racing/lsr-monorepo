@@ -289,11 +289,11 @@ describe("runRoom", () => {
     expect(unanswered()).toHaveLength(0)
   })
 
-  it("ends a reply as an error when saving it fails, and keeps going", async () => {
+  it("ends a reply as an error when its final save fails, and keeps going", async () => {
     ask("First question")
     let failed = false
     db.state.hook = (op, { data }) => {
-      if (!failed && op === "jackMessage.update" && data && !("status" in data)) {
+      if (!failed && op === "jackMessage.update" && data && "status" in data) {
         failed = true
         throw new Error("connection reset")
       }
@@ -302,10 +302,34 @@ describe("runRoom", () => {
     await onFakeTimers(() => runRoom(room.id, deps))
 
     expect(replies()).toHaveLength(1)
-    expect(replies()[0].status).toBe("error")
-    expect(radio.of("message.done")[0].message.status).toBe("error")
+    expect(radio.of("message.done")[0].message.status).toBe("error") // viewers see it end
     expect(unanswered()).toHaveLength(0) // claimed, so it isn't retried forever
     expect(db.room(room.id).runId).toBeNull()
+
+    // The row couldn't be saved, so it's still marked streaming; the next run closes it
+    expect(replies()[0].status).toBe("streaming")
+    await onFakeTimers(() => runRoom(room.id, deps))
+    expect(replies()[0].status).toBe("error")
+  })
+
+  it("finishes a reply normally when a partial save fails mid-stream", async () => {
+    ask("First question")
+    let failures = 0
+    db.state.hook = (op, { data }) => {
+      if (op === "jackMessage.update" && data && "streamSeq" in data && !("status" in data)) {
+        failures++
+        throw new Error("connection reset")
+      }
+    }
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(failures).toBeGreaterThan(0)
+    const [reply] = replies()
+    expect(reply.status).toBe("done")
+    expect(reply.content).toMatch(/^Jack here/)
+    expect(radio.of("message.done")[0].message).toMatchObject({ status: "done", content: reply.content })
+    expect(textOf(radio.of("message.delta"), reply.id)).toBe(reply.content)
   })
 
   it("stops without answering when its lock was taken over", async () => {
@@ -540,7 +564,7 @@ describe("Stand names untitled rooms", () => {
     db.room(room.id).title = null
   })
 
-  it("names the room after its first answer, saves Stand's cost on a note, and tells the room", async () => {
+  it("names the room after its first answer, saves Stand's cost, and tells the room", async () => {
     claude = fakeClaude([{ text: "There are 13 applications." }], [{ text: '"LSC Application Count."', usage: { input: 120, output: 40 } }])
     ask("How many LSC applications are there?")
 
@@ -548,8 +572,11 @@ describe("Stand names untitled rooms", () => {
 
     expect(db.room(room.id).title).toBe("LSC Application Count")
     const note = db.state.messages.find((m) => m.kind === "system")
-    expect(note).toMatchObject({ content: "Stand named this room “LSC Application Count”", model: "claude-haiku-5-5", persona: null, inputTokens: 120, outputTokens: 40 })
-    expect(note?.costUsd).toBeCloseTo((120 * 0.1 + 40 * 0.5) / 1e6, 9)
+    expect(note).toMatchObject({ content: "Stand named this room “LSC Application Count”", persona: null, costUsd: null })
+    expect(db.state.usage).toEqual([
+      expect.objectContaining({ roomId: room.id, persona: "stand", job: "name_room", outcome: "named", model: "claude-haiku-5-5", inputTokens: 120, outputTokens: 40 }),
+    ])
+    expect(db.state.usage[0].costUsd).toBeCloseTo((120 * 0.1 + 40 * 0.5) / 1e6, 9)
 
     const [request] = claude.creates
     expect(request).toMatchObject({ model: "claude-haiku-5-5", max_tokens: 1_024, output_config: { effort: "low" } })
@@ -603,5 +630,233 @@ describe("Stand names untitled rooms", () => {
 
     expect(replies()[0].content).toMatch(/^Jack here/)
     expect(claude.creates).toHaveLength(0)
+  })
+})
+
+describe("spend as it goes", () => {
+  /** The reply's saved cost each time it changed before the final save */
+  function costsSavedMidReply() {
+    const costs: number[] = []
+    db.state.hook = (op, { data }) => {
+      if (op === "jackMessage.update" && data && "costUsd" in data && !("status" in data)) costs.push(data.costUsd as number)
+    }
+    return costs
+  }
+  const lookup: JackTool<{ what: string }> = {
+    name: "lookup",
+    description: "Looks something up.",
+    input: z.object({ what: z.string() }),
+    run: async ({ what }) => ({ forModel: `${what}: 13`, label: `Looked up ${what}` }),
+  }
+
+  it("saves the reply's tokens and cost after every Claude call, adding up", async () => {
+    deps.tools = [lookup]
+    claude = fakeClaude([
+      { text: "Checking.", tools: [{ name: "lookup", input: { what: "a" } }], usage: { input: 1_000, output: 100 } },
+      { text: "13.", usage: { input: 50, output: 10, cacheRead: 1_000 } },
+    ])
+    const costs = costsSavedMidReply()
+    ask("How many?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const first = (1_000 * 2 + 100 * 10) / 1e6
+    const both = first + (50 * 2 + 10 * 10 + 1_000 * 0.2) / 1e6
+    expect(costs).toHaveLength(2)
+    expect(costs[0]).toBeCloseTo(first, 9)
+    expect(costs[1]).toBeCloseTo(both, 9)
+    expect(replies()[0]).toMatchObject({ inputTokens: 1_050, outputTokens: 110, cacheReadTokens: 1_000 })
+    expect(replies()[0].costUsd).toBeCloseTo(both, 9)
+  })
+
+  it("counts a call that failed partway, from the usage it reported before failing", async () => {
+    claude = fakeClaude([
+      { text: "Partial", usage: { input: 2_000, output: 30 }, error: new Anthropic.InternalServerError(529, { type: "error" }, "overloaded", new Headers()) },
+    ])
+    ask("Charges this month?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const [reply] = replies()
+    expect(reply.status).toBe("error")
+    expect(reply).toMatchObject({ model: "claude-sonnet-5-5", inputTokens: 2_000 })
+    expect(reply.costUsd).toBeGreaterThan(0)
+  })
+
+  it("counts a call whose tool input came through garbled, and the call re-issued after it", async () => {
+    deps.tools = [lookup]
+    claude = fakeClaude([
+      { text: "Let me", tools: [{ name: "lookup", input: { what: "x" } }], usage: { input: 1_000, output: 40 }, error: new Error("Unable to parse tool parameter JSON") },
+      { text: "13.", usage: { input: 1_000, output: 10 } },
+    ])
+    ask("How many?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(replies()[0]).toMatchObject({ status: "done", content: "13.", inputTokens: 2_000, outputTokens: 50 })
+  })
+})
+
+describe("text taken back mid-stream", () => {
+  /** What a viewer ends up with from the deltas alone, in seq order: appending, or swapping in on replace */
+  function viewerText(messageId: string) {
+    let text = ""
+    for (const delta of radio.of("message.delta").filter((d) => d.messageId === messageId)) text = delta.replace ? delta.text : text + delta.text
+    return text
+  }
+
+  it("replaces a declined partial for viewers too, not just in the done event", async () => {
+    claude = fakeClaude([{ text: "Sure, here is how to do that in detail", stop: "refusal", refusalCategory: "cyber" }], undefined, { chunkSize: 4, chunkDelayMs: 60 })
+    ask("Something odd")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const [reply] = replies()
+    expect(reply.content).toMatch(/^I can't help with that one/)
+    expect(radio.of("message.delta").some((d) => d.replace)).toBe(true)
+    expect(viewerText(reply.id)).toBe(reply.content)
+  })
+
+  it("drops the garbled call's text for viewers before the re-issued call streams its own", async () => {
+    const lookup: JackTool<{ what: string }> = {
+      name: "lookup",
+      description: "Looks something up.",
+      input: z.object({ what: z.string() }),
+      run: async ({ what }) => ({ forModel: `${what}: 13`, label: `Looked up ${what}` }),
+    }
+    deps.tools = [lookup]
+    claude = fakeClaude(
+      [
+        { text: "Let me look that up", tools: [{ id: "garbled", name: "lookup", input: { what: "x" } }], error: new Error("Unable to parse tool parameter JSON") },
+        { text: "Let me look that up.", tools: [{ id: "ok", name: "lookup", input: { what: "events" } }] },
+        { text: "There are 13." },
+      ],
+      undefined,
+      { chunkSize: 4, chunkDelayMs: 60 }
+    )
+    ask("How many events?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const [reply] = replies()
+    expect(reply.content).toBe("Let me look that up.\n\nThere are 13.")
+    expect(viewerText(reply.id)).toBe(reply.content) // never "Let me look that upLet me look that up."
+    const garbled = parseToolParts(reply.toolCalls).find((p) => p.id === "garbled")
+    expect(garbled).toMatchObject({ status: "error", at: 0 })
+  })
+})
+
+describe("run deadline", () => {
+  it("doesn't start another answer without enough time left: it lets go and leaves the messages waiting", async () => {
+    deps.timing = { runDeadlineMs: 10_000, minAnswerMs: 6_000, replyDeadlineMs: 9_000 }
+    // About 6 s per answer: 60 pieces 100 ms apart
+    claude = fakeClaude(() => ({ text: "x".repeat(120) }), undefined, { chunkSize: 2, chunkDelayMs: 100 })
+    ask("First question")
+    let queued = false
+    db.state.hook = (op) => {
+      if (!queued && op === "jackMessage.update" && replies().length === 1) {
+        queued = true
+        ask("A follow-up", "officer-dylan")
+      }
+    }
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(replies()).toHaveLength(1)
+    expect(replies()[0].status).toBe("done")
+    expect(unanswered().map((m) => m.content)).toEqual(["A follow-up"])
+    expect(db.room(room.id).runId).toBeNull() // let go, so a post or "continue" can start a fresh run
+  })
+
+  it("cancels an answer still going at its deadline, and ends it with a message", async () => {
+    deps.timing = { runDeadlineMs: 100_000, minAnswerMs: 1_000, replyDeadlineMs: 2_000 }
+    claude = fakeClaude([{ text: "y".repeat(400) }], undefined, { chunkSize: 2, chunkDelayMs: 100 })
+    ask("A slow one")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const [reply] = replies()
+    expect(reply.status).toBe("error")
+    expect(reply.content).toMatch(/stopped before it finished/)
+    expect(reply.content.length).toBeLessThan(400)
+    expect(db.room(room.id).runId).toBeNull()
+  })
+
+  it("stops at the run's deadline even when the answer's own cap is later", async () => {
+    deps.timing = { runDeadlineMs: 3_000, minAnswerMs: 1_000, replyDeadlineMs: 60_000 }
+    claude = fakeClaude([{ text: "z".repeat(400) }], undefined, { chunkSize: 2, chunkDelayMs: 100 })
+    ask("Another slow one")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(replies()[0]).toMatchObject({ status: "error" })
+    expect(replies()[0].content).toMatch(/stopped before it finished/)
+  })
+
+  it("tells an answer to wrap up a minute before it would be cancelled", async () => {
+    // 200 s for the answer: told to wrap up at 140 s, sooner than the usual 150 s
+    deps.timing = { runDeadlineMs: 280_000, minAnswerMs: 150_000, replyDeadlineMs: 200_000 }
+    const seen: number[] = []
+    const lookup: JackTool<{ what: string }> = {
+      name: "lookup",
+      description: "Looks something up.",
+      input: z.object({ what: z.string() }),
+      run: async ({ what }) => {
+        await new Promise((resolve) => setTimeout(resolve, 70_000))
+        seen.push(Date.now())
+        return { forModel: `${what}: 13`, label: `Looked up ${what}` }
+      },
+    }
+    deps.tools = [lookup]
+    deps.limits = { toolTimeoutMs: 200_000 }
+    claude = fakeClaude([
+      { tools: [{ name: "lookup", input: { what: "a" } }] },
+      { tools: [{ name: "lookup", input: { what: "b" } }] },
+      { text: "Done." },
+    ])
+    ask("Two slow lookups")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    // 140 s in after two lookups: the third call goes out with tools off
+    expect(seen).toHaveLength(2)
+    expect(claude.calls[2].tool_choice).toEqual({ type: "none" })
+    expect(replies()[0]).toMatchObject({ status: "done", content: "Done." })
+  })
+})
+
+describe("resumeRoom", () => {
+  it("answers messages a run left waiting, and does nothing for a live run", async () => {
+    const { resumeRoom } = await import("./rooms")
+    ask("Left waiting")
+    db.room(room.id).runId = "live-run"
+    db.room(room.id).runStartedAt = new Date()
+
+    expect(await onFakeTimers(() => resumeRoom(room.id, deps))).toBe(true)
+    expect(replies()).toHaveLength(0)
+
+    db.room(room.id).runId = null
+    db.room(room.id).runStartedAt = null
+    await onFakeTimers(() => resumeRoom(room.id, deps))
+    expect(replies()).toHaveLength(1)
+    expect(unanswered()).toHaveLength(0)
+  })
+
+  it("takes over a dead run once its lock is stale, closing the half-written reply", async () => {
+    const { resumeRoom } = await import("./rooms")
+    const stuck = db.addMessage({ roomId: room.id, persona: "jack", status: "streaming", content: "Half", streamSeq: 2 })
+    ask("Waiting behind it")
+    db.room(room.id).runId = "dead-run"
+    db.room(room.id).runStartedAt = new Date(Date.now() - ROOM_LOCK_STALE_MS - MINUTE)
+
+    await onFakeTimers(() => resumeRoom(room.id, deps))
+
+    expect(db.state.messages.find((m) => m.id === stuck.id)?.status).toBe("error")
+    expect(unanswered()).toHaveLength(0)
+  })
+
+  it("is false for a room that doesn't exist", async () => {
+    const { resumeRoom } = await import("./rooms")
+    expect(await resumeRoom("room-missing", deps)).toBe(false)
   })
 })

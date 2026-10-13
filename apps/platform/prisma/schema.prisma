@@ -936,15 +936,41 @@ model JackRoom {
   archivedAt  DateTime?
 
   /// The reply loop answering this room right now; one run per room at a time.
-  /// Taken with a conditional update; a lock older than ~10 minutes is from a run that died
-  /// and the next post takes it over (src/server/jack/room-lock.ts)
+  /// Taken with a conditional update; a lock older than ~6 minutes is from a run that died
+  /// and the next post (or "continue") takes it over (src/server/jack/room-lock.ts)
   runId        String?
   runStartedAt DateTime?
 
   createdBy User?         @relation("JackRoomCreator", fields: [createdById], references: [id], onDelete: SetNull)
   messages  JackMessage[]
+  usage     JackUsage[]
 
   @@index([archivedAt, updatedAt])
+}
+
+/// Claude calls whose cost isn't saved on a message: Stand's side jobs (naming a room), one row per
+/// call whatever came of it (named, declined, unusable, the room already had a title). Replies keep
+/// their cost on their own JackMessage row. The spend meter adds both up
+model JackUsage {
+  id              String      @id @default(uuid())
+  /// Null once the room is deleted; the spend stays
+  roomId          String?
+  persona         JackPersona
+  /// What the call was for, e.g. "name_room"
+  job             String
+  /// How it went, e.g. "named", "declined", "unusable", "already_titled"
+  outcome         String
+  model           String
+  /// Everything not read from the cache, as on JackMessage
+  inputTokens     Int
+  outputTokens    Int
+  cacheReadTokens Int
+  costUsd         Decimal     @db.Decimal(12, 6)
+  createdAt       DateTime    @default(now())
+
+  room JackRoom? @relation(fields: [roomId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
 }
 
 /// One message in a room. `kind` says who it's from; a check constraint keeps `persona` set exactly

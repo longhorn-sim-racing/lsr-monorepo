@@ -2,8 +2,10 @@
  * Test helper: a scripted stand-in for the Anthropic SDK, shaped like JackModelClient. Each call takes
  * the next turn of the script (or asks a function for it) and streams it as the real API would:
  * message_start, a thinking block, text deltas, tool_use blocks with input_json_delta, message_delta,
- * message_stop; finalMessage() resolves with the assembled message. No network. Not used by the app.
+ * message_stop; finalMessage() resolves with the assembled message. An aborted signal stops it the way
+ * the SDK does (APIUserAbortError). No network. Not used by the app; scripts use it for dry runs.
  */
+import Anthropic from "@anthropic-ai/sdk"
 import type {
   BetaContentBlock,
   BetaMessage,
@@ -116,7 +118,7 @@ export function fakeClaude(script: Script, createScript: Script = () => ({ text:
   const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
   const client: JackModelClient = {
-    stream(params) {
+    stream(params, streamOptions) {
       const index = calls.length
       calls.push(structuredClone(params))
       const turn = turnFor(script, params, index)
@@ -130,6 +132,10 @@ export function fakeClaude(script: Script, createScript: Script = () => ({ text:
               throw turn.error
             }
             if (options.chunkDelayMs && event.type === "content_block_delta") await sleep(options.chunkDelayMs)
+            if (streamOptions?.signal?.aborted) {
+              failed = new Anthropic.APIUserAbortError()
+              throw failed
+            }
             yield event
           }
         },

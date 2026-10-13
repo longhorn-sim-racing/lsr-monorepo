@@ -120,3 +120,18 @@ export class UsageTally {
     return models.length ? models.sort((a, b) => Number(b === this.requestedModel) - Number(a === this.requestedModel)) : [this.requestedModel]
   }
 }
+
+/**
+ * A tally as JackMessage and JackUsage save it. `inputTokens` there is everything not read from the
+ * cache (uncached input plus cache writes); the whole prompt is that plus `cacheReadTokens`
+ */
+export function savedUsage(tally: UsageTally) {
+  const tokens = tally.tokens
+  return {
+    model: tally.models.join(","),
+    inputTokens: tokens.inputTokens + tokens.cacheWriteTokens,
+    outputTokens: tokens.outputTokens,
+    cacheReadTokens: tokens.cacheReadTokens,
+    costUsd: tally.costUsd,
+  }
+}

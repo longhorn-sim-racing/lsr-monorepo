@@ -29,27 +29,34 @@ export function chicagoMonth(now: Date): { start: Date; end: Date; label: string
   }
 }
 
-type CostRow = { kind: "user" | "assistant" | "system"; persona: JackPersonaKey | null; costUsd: number }
+type CostRow = { persona: JackPersonaKey; costUsd: number }
 
-/** Replies count for their persona; system rows with a cost are Stand's side jobs */
+/** Adds up what each persona cost */
 export function summarizeSpend(rows: CostRow[], month: string, budgetUsd: number): JackSpend {
   const byPersona: Record<JackPersonaKey, number> = { jack: 0, lift: 0, stand: 0 }
-  for (const row of rows) {
-    const persona: JackPersonaKey = row.kind === "assistant" && row.persona ? row.persona : "stand"
-    byPersona[persona] += row.costUsd
-  }
+  for (const row of rows) byPersona[row.persona] += row.costUsd
   for (const key of Object.keys(byPersona) as JackPersonaKey[]) byPersona[key] = roundUsd(byPersona[key])
   return { month, budgetUsd, byPersona, totalUsd: roundUsd(byPersona.jack + byPersona.lift + byPersona.stand) }
 }
 
-/** This month's spend, from the cost saved on each reply and side job */
+/**
+ * This month's spend: the cost saved on each reply (JackMessage, saved after every Claude call, so a
+ * reply cut off midway still counts what it used) plus Stand's side jobs (JackUsage). The eval's
+ * calls aren't in either; they only show in the Anthropic Console.
+ */
 export async function getMonthSpend(now = new Date()): Promise<JackSpend> {
   const { start, end, label } = chicagoMonth(now)
-  const groups = await prisma.jackMessage.groupBy({
-    by: ["kind", "persona"],
-    where: { createdAt: { gte: start, lt: end }, costUsd: { not: null } },
-    _sum: { costUsd: true },
-  })
-  const rows = groups.map((group) => ({ kind: group.kind, persona: group.persona, costUsd: Number(group._sum.costUsd ?? 0) }))
+  const inMonth = { createdAt: { gte: start, lt: end } }
+  const [replies, sideJobs] = await Promise.all([
+    prisma.jackMessage.groupBy({
+      by: ["persona"],
+      where: { ...inMonth, kind: "assistant", costUsd: { not: null } },
+      _sum: { costUsd: true },
+    }),
+    prisma.jackUsage.groupBy({ by: ["persona"], where: inMonth, _sum: { costUsd: true } }),
+  ])
+  const rows = [...replies, ...sideJobs]
+    .filter((group): group is typeof group & { persona: JackPersonaKey } => group.persona !== null)
+    .map((group) => ({ persona: group.persona, costUsd: Number(group._sum.costUsd ?? 0) }))
   return summarizeSpend(rows, label, jackMonthlyBudgetUsd())
 }

@@ -255,7 +255,16 @@ describe("runModelReply", () => {
     expect(result).toMatchObject({ status: "done", outcome: "refusal" })
     expect(result.text).not.toContain("Sure, here is how to")
     expect(result.text).toMatch(/^I can't help with that one/)
-    expect(streamed.join("")).toContain("Sure, here is how to") // it did stream; the done event replaces it
+    expect(streamed.join("")).toContain("Sure, here is how to") // it did stream; the reset takes it back
+  })
+
+  it("tells the caller to take back a declined partial", async () => {
+    const resets: string[] = []
+    const { run } = setup([{ text: "Sure, here is how to", stop: "refusal", refusalCategory: "cyber" }], undefined, { onReset: (text) => void resets.push(text) })
+
+    await run()
+
+    expect(resets).toEqual([""])
   })
 
   it("never runs a tool call cut off at max_tokens", async () => {
@@ -293,6 +302,44 @@ describe("runModelReply", () => {
     expect(result).toMatchObject({ status: "error", outcome: "api_error" })
     expect(result.text).toMatch(/^Partial answer\n\n/)
     expect(result.text).toMatch(message)
+  })
+
+  it("reports usage after each call, including one that failed partway, so it can be saved as it goes", async () => {
+    const seen: number[] = []
+    const { run } = setup(
+      [
+        { text: "Let me", tools: [{ name: "count_rows", input: { table: "x" } }], usage: { input: 500, output: 5 }, error: new Error("Unable to parse tool parameter JSON") },
+        { tools: [{ name: "count_rows", input: { table: "User" } }], usage: { input: 600, output: 10 } },
+        { text: "42.", usage: { input: 700, output: 20 } },
+      ],
+      [countTool()],
+      { onUsage: async (usage) => void seen.push(usage.tokens.inputTokens) }
+    )
+
+    const result = await run()
+
+    expect(seen).toEqual([500, 1_100, 1_800])
+    expect(result.usage.calls).toBe(3)
+  })
+
+  it("takes back the text of a garbled call (telling the caller) before the re-issued call writes its own", async () => {
+    const resets: string[] = []
+    const { run } = setup(
+      [
+        { text: "Before. ", tools: [{ name: "count_rows", input: { table: "x" } }] },
+        { text: "Let me", tools: [{ id: "garbled", name: "count_rows", input: { table: "y" } }], error: new Error("Unable to parse tool parameter JSON") },
+        { text: "Let me count.", tools: [{ name: "count_rows", input: { table: "User" } }] },
+        { text: "42." },
+      ],
+      [countTool()],
+      { onReset: (text) => void resets.push(text) }
+    )
+
+    const result = await run()
+
+    expect(resets).toEqual(["Before. "])
+    expect(result.text).toBe("Before. \n\nLet me count.\n\n42.")
+    expect(result.parts.find((p) => p.id === "garbled")).toMatchObject({ status: "error", at: "Before. ".length })
   })
 
   it("re-issues a call whose streamed tool input wasn't JSON, then carries on", async () => {

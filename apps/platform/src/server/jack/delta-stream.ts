@@ -21,6 +21,9 @@ export type DeltaStreamOptions = {
  * Batches a reply's text into numbered deltas: whatever was written in the last ~150 ms goes out as
  * one broadcast with the next seq (1, 2, 3, ...), and about once a second the text so far is saved
  * with its seq. Broadcasts and saves run one at a time, in order.
+ *
+ * A failed save is logged and the stream goes on: it's only there for viewers who open the room
+ * mid-answer, and the reply's final save writes the whole text anyway.
  */
 export class DeltaStream {
   private readonly flushMs: number
@@ -35,6 +38,8 @@ export class DeltaStream {
   private queue: Promise<void> = Promise.resolve()
   private failure: unknown = null
   private aborted = false
+  /** Set by reset(): the next delta replaces the text with this (plus whatever was written after it) */
+  private resetTo: string | null = null
 
   constructor(private readonly options: DeltaStreamOptions) {
     this.flushMs = options.flushMs ?? DELTA_FLUSH_MS
@@ -50,6 +55,20 @@ export class DeltaStream {
       this.timer = null
       this.enqueue(() => this.flush())
     }, this.flushMs)
+  }
+
+  /**
+   * Takes back text that already streamed: the reply's text is now `content` (what it was before the
+   * part being dropped, e.g. a declined partial or a call that came through garbled). The next delta
+   * carries the whole text with `replace: true`, so viewers swap it in rather than append, in seq order
+   * with everything else. Text written after this follows it.
+   */
+  reset(content: string): void {
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
+    this.buffer = ""
+    this.resetTo = content
+    this.enqueue(() => this.flush())
   }
 
   /**
@@ -75,12 +94,12 @@ export class DeltaStream {
     return { content: this.content, streamSeq: this.seq }
   }
 
-  /** Stops sending and returns what went out so far, for a reply that failed */
+  /** Stops sending and returns what went out so far (or what a pending reset() left), for a reply that failed */
   abort(): { content: string; streamSeq: number } {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     this.aborted = true
-    return { content: this.content, streamSeq: this.seq }
+    return { content: this.resetTo ?? this.content, streamSeq: this.seq }
   }
 
   private enqueue(step: () => Promise<void>) {
@@ -95,21 +114,28 @@ export class DeltaStream {
   }
 
   private async flush() {
-    if (!this.buffer) return
-    const text = this.buffer
+    const replace = this.resetTo !== null
+    if (!replace && !this.buffer) return
+    const text = replace ? this.resetTo + this.buffer : this.buffer
+    this.resetTo = null
     this.buffer = ""
-    this.content += text
+    this.content = replace ? text : this.content + text
     this.seq++
     await this.options.broadcast(this.options.roomId, {
       type: JACK_EVENT.delta,
       messageId: this.options.messageId,
       seq: this.seq,
       text,
+      ...(replace ? { replace: true as const } : {}),
     })
     if (this.now() - this.lastPersist >= this.persistMs && this.persistedSeq < this.seq) {
       this.lastPersist = this.now()
       this.persistedSeq = this.seq
-      await this.options.persist(this.content, this.seq)
+      try {
+        await this.options.persist(this.content, this.seq)
+      } catch (error) {
+        console.error(`[jack] Couldn't save the partial reply ${this.options.messageId} (seq ${this.seq}); it keeps streaming:`, error)
+      }
     }
   }
 }

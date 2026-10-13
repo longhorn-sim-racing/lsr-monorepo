@@ -5,11 +5,11 @@ import { formatUsd } from "@/lib/jack/spend"
 import { JACK_EVENT, JACK_PERSONA_NAME, type JackRoomPersonaKey } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
-import { UsageTally } from "./cost"
+import { savedUsage, UsageTally } from "./cost"
 import { DeltaStream } from "./delta-stream"
 import { buildHistory } from "./history"
 import { FORMER_OFFICER, jackMessageInclude, toMessageView, type JackMessageRow } from "./messages"
-import { anthropicJackClient, runModelReply, type JackModelClient, type ReplyLimits, type ReplyOutcome } from "./model-loop"
+import { anthropicJackClient, REPLY_LIMITS, runModelReply, type JackModelClient, type ReplyLimits, type ReplyOutcome } from "./model-loop"
 import { JACK_MODELS } from "./models"
 import { buildSystemPrompt } from "./prompt"
 import { releaseRoomLock, renewRoomLock, tryAcquireRoomLock } from "./room-lock"
@@ -26,6 +26,8 @@ export type ReplyLoopDeps = {
   /** This month's spend against JACK_MONTHLY_BUDGET_USD, checked before every reply */
   budget: () => Promise<{ month: string; spentUsd: number; budgetUsd: number }>
   limits?: Partial<ReplyLimits>
+  /** Overrides RUN_TIMING (tests) */
+  timing?: Partial<RunTiming>
 }
 
 let cachedClient: { key: string; client: JackModelClient } | null = null
@@ -51,11 +53,29 @@ export const defaultReplyDeps: ReplyLoopDeps = {
 const HISTORY_ROWS = 2_000
 
 /**
- * A reply that's still going after this is cancelled (its Claude call and any running tool are
- * aborted), so it ends with a message inside the function's 300 s maxDuration. Replies are told to
- * wrap up well before (REPLY_LIMITS.maxElapsedMs).
+ * How long a run and its answers may take. A run lives inside the function that started it (the
+ * room page's, maxDuration 300 s), which can be cut off with no warning, so it keeps well inside that:
  */
-const REPLY_DEADLINE_MS = 240_000
+export type RunTiming = {
+  /** From the start of runRoom: an answer still going then is cancelled, and no new one starts */
+  runDeadlineMs: number
+  /** A new answer starts only with at least this long left before the run deadline; otherwise the run lets go */
+  minAnswerMs: number
+  /** One answer is cancelled after this long, whatever's left of the run (its Claude call and any running tool are aborted) */
+  replyDeadlineMs: number
+}
+
+export const RUN_TIMING: RunTiming = { runDeadlineMs: 280_000, minAnswerMs: 150_000, replyDeadlineMs: 240_000 }
+
+/** An answer is told to wrap up (REPLY_LIMITS.maxElapsedMs) at least this long before it would be cancelled */
+const WRAP_UP_MARGIN_MS = 60_000
+
+/** A signal that fires after `ms`, on a timer that can be cleared (and that fake timers control in tests) */
+function deadline(ms: number, reason: string) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(new Error(reason)), Math.max(0, ms))
+  return { signal: controller.signal, clear: () => clearTimeout(timer) }
+}
 
 /** Officer messages nobody has answered yet, oldest first (system notes don't get answers) */
 function findUnanswered(roomId: string) {
@@ -76,13 +96,18 @@ async function hasUnanswered(roomId: string) {
 
 /**
  * Answers a room until nothing in it is left unanswered, unless another run already is. Runs on the
- * server, independent of any browser tab (posting starts it after the response).
+ * server, independent of any browser tab (posting starts it after the response, and so does an
+ * officer asking Jack to continue).
  *
  * Each pass answers every officer message that's waiting, together in one reply, so messages posted
  * mid-answer are picked up by the next pass. When nothing is waiting the run lets go of the lock,
  * then looks once more: a message posted just before that found the lock taken and left it to this
  * run, so if one is there the run takes the lock back (or sees that a newer run has it). That way
- * nothing is ever left unanswered.
+ * nothing is left unanswered while the run has time.
+ *
+ * A run has RUN_TIMING.runDeadlineMs in all. It doesn't start an answer with less than minAnswerMs
+ * left: it lets go of the lock instead and leaves the messages waiting, for the next post or for an
+ * officer to ask Jack to continue (the room shows that button when messages sit unanswered).
  *
  * Side jobs a reply starts (Stand naming the room) run alongside and are awaited before it returns,
  * so the function stays alive for them.
@@ -90,6 +115,9 @@ async function hasUnanswered(roomId: string) {
 export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultReplyDeps): Promise<void> {
   const runId = randomUUID()
   if (!(await tryAcquireRoomLock(roomId, runId))) return
+  const timing = { ...RUN_TIMING, ...deps.timing }
+  const startedAt = Date.now()
+  const run = deadline(timing.runDeadlineMs, "the run reached its time limit")
   const sideJobs: Promise<void>[] = []
   let holding = true
   try {
@@ -97,11 +125,21 @@ export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultReply
     for (;;) {
       const waiting = await findUnanswered(roomId)
       if (waiting.length) {
+        const leftMs = startedAt + timing.runDeadlineMs - Date.now()
+        if (leftMs < timing.minAnswerMs) {
+          console.warn(
+            `[jack] Run in room ${roomId} has ${Math.round(leftMs / 1000)} s left, too little for another answer; ` +
+              `letting go with ${waiting.length} message(s) waiting (the next post or "continue" answers them)`
+          )
+          await releaseRoomLock(roomId, runId)
+          holding = false
+          return
+        }
         if (!(await renewRoomLock(roomId, runId))) {
           holding = false // a newer run took over a lock it thought was stale; it answers from here
           return
         }
-        await answer(roomId, waiting, deps, sideJobs)
+        await answer(roomId, waiting, deps, sideJobs, { runSignal: run.signal, leftMs, replyDeadlineMs: timing.replyDeadlineMs })
         continue
       }
 
@@ -112,6 +150,7 @@ export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultReply
       holding = true
     }
   } finally {
+    run.clear()
     if (holding) await releaseRoomLock(roomId, runId).catch((error) => console.error("[jack] Couldn't release the room lock:", error))
     await Promise.allSettled(sideJobs)
   }
@@ -138,8 +177,11 @@ type Produced = {
   toolCalls: number
 }
 
+/** The time an answer has: the run's deadline signal, what's left of the run, and its own cap */
+type AnswerTiming = { runSignal: AbortSignal; leftMs: number; replyDeadlineMs: number }
+
 /** One reply to every message in `waiting`, from the room's persona as it is now */
-async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoopDeps, sideJobs: Promise<void>[]) {
+async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoopDeps, sideJobs: Promise<void>[], timing: AnswerTiming) {
   const reply = await prisma.$transaction(async (tx) => {
     const room = await tx.jackRoom.findUnique({ where: { id: roomId }, select: { persona: true } })
     const created = await tx.jackMessage.create({
@@ -159,6 +201,15 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   const startedAt = Date.now()
   let parts: JackToolPart[] = []
 
+  // Cancelled at its own cap or the run's deadline, whichever comes first; told to wrap up a minute before
+  const ownDeadline = deadline(timing.replyDeadlineMs, "the answer reached its time limit")
+  const signal = AbortSignal.any([ownDeadline.signal, timing.runSignal])
+  const availableMs = Math.min(timing.replyDeadlineMs, timing.leftMs)
+  const limits: Partial<ReplyLimits> = {
+    ...deps.limits,
+    maxElapsedMs: Math.min(deps.limits?.maxElapsedMs ?? REPLY_LIMITS.maxElapsedMs, Math.max(0, availableMs - WRAP_UP_MARGIN_MS)),
+  }
+
   const stream = new DeltaStream({
     roomId,
     messageId: reply.id,
@@ -172,19 +223,21 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   let status: "done" | "error"
   let result: { content: string; streamSeq: number }
   try {
-    produced = await produce(roomId, reply, persona, waiting, deps, stream, usage, (latest) => {
+    produced = await produce(roomId, reply, persona, waiting, deps, stream, usage, { signal, limits }, (latest) => {
       parts = latest
     })
     status = produced.status
     parts = produced.parts
     const ended = await stream.end()
-    // The reply's own text, not what streamed: a declined partial is dropped from it
+    // The reply's own text, which is what streamed once any reset is applied
     result = { content: produced.text, streamSeq: ended.streamSeq }
   } catch (error) {
     console.error(`[jack] Reply ${reply.id} in room ${roomId} failed:`, error)
     status = "error"
     const sent = stream.abort()
     result = { content: produced?.text ?? sent.content, streamSeq: sent.streamSeq }
+  } finally {
+    ownDeadline.clear()
   }
 
   const tokens = usage.tokens
@@ -205,16 +258,8 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
         streamSeq: result.streamSeq,
         status,
         ...(parts.length ? { toolCalls: parts as unknown as Prisma.InputJsonValue } : {}),
-        ...(usage.calls
-          ? {
-              model: usage.models.join(","),
-              // Everything not read from the cache; the whole prompt is this plus cacheReadTokens
-              inputTokens: tokens.inputTokens + tokens.cacheWriteTokens,
-              outputTokens: tokens.outputTokens,
-              cacheReadTokens: tokens.cacheReadTokens,
-              costUsd: usage.costUsd,
-            }
-          : {}),
+        // Saved after every call too (produce's onUsage); this is the same total, once more
+        ...(usage.calls ? savedUsage(usage) : {}),
       },
       include: jackMessageInclude,
     })
@@ -246,6 +291,7 @@ async function produce(
   deps: ReplyLoopDeps,
   stream: DeltaStream,
   usage: UsageTally,
+  run: { signal: AbortSignal; limits: Partial<ReplyLimits> },
   onParts: (parts: JackToolPart[]) => void
 ): Promise<Produced> {
   const name = JACK_PERSONA_NAME[persona]
@@ -281,9 +327,10 @@ async function produce(
     system: buildSystemPrompt(persona),
     tools: deps.tools,
     history,
-    // Tools run as the officer whose message is newest
+    // Tools run as the officer whose message started this reply: the newest one it answers
     ctx: { roomId, actor: { userId: latest.authorUserId, displayName: latest.author?.displayName ?? FORMER_OFFICER } },
     onText: (text) => stream.write(text),
+    onReset: (text) => stream.reset(text),
     onPart: (part, all) => {
       onParts(all)
       return stream.sendInOrder(async () => {
@@ -295,9 +342,14 @@ async function produce(
         await deps.broadcast(roomId, { type: JACK_EVENT.tool, messageId: reply.id, part })
       })
     },
+    // The spend so far goes on the reply after every call, so a reply cut off midway (or a function
+    // that dies) still counts toward the meter and the budget
+    onUsage: async (tally) => {
+      await prisma.jackMessage.update({ where: { id: reply.id }, data: savedUsage(tally) })
+    },
     usage,
-    limits: deps.limits,
-    signal: AbortSignal.timeout(REPLY_DEADLINE_MS),
+    limits: run.limits,
+    signal: run.signal,
   })
   return { text: out.text, status: out.status, outcome: out.outcome, parts: out.parts, toolCalls: out.toolCalls }
 }

@@ -30,12 +30,13 @@ describe("jackMonthlyBudgetUsd", () => {
 })
 
 describe("summarizeSpend", () => {
-  it("splits by persona, counting costed system notes as Stand", () => {
+  it("splits by persona, Stand's side jobs included", () => {
     const spend = summarizeSpend(
       [
-        { kind: "assistant", persona: "jack", costUsd: 2.25 },
-        { kind: "assistant", persona: "lift", costUsd: 0.9 },
-        { kind: "system", persona: null, costUsd: 0.05 },
+        { persona: "jack", costUsd: 2.0 },
+        { persona: "lift", costUsd: 0.9 },
+        { persona: "stand", costUsd: 0.05 },
+        { persona: "jack", costUsd: 0.25 },
       ],
       "October",
       200
@@ -47,7 +48,7 @@ describe("summarizeSpend", () => {
   })
 
   it("leaves Lift out of the line until it has cost something", () => {
-    const spend = summarizeSpend([{ kind: "assistant", persona: "jack", costUsd: 0.004 }], "November", 12.5)
+    const spend = summarizeSpend([{ persona: "jack", costUsd: 0.004 }], "November", 12.5)
     expect(spendLine(spend)).toBe("November: <$0.01 of $12.50")
     expect(isOverBudget({ totalUsd: 12.5, budgetUsd: 12.5 })).toBe(true)
   })

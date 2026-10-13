@@ -34,9 +34,23 @@ export type FakeMessage = {
   inputTokens: number | null
   outputTokens: number | null
   cacheReadTokens: number | null
-  costUsd: null
+  costUsd: number | null
   createdAt: Date
   updatedAt: Date
+}
+
+export type FakeUsage = {
+  id: string
+  roomId: string | null
+  persona: "jack" | "lift" | "stand"
+  job: string
+  outcome: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  costUsd: number
+  createdAt: Date
 }
 
 type Hook = (op: string, args: { where?: Where; data?: Row }) => Promise<void> | void
@@ -84,6 +98,7 @@ export function createFakeJackDb() {
   const state = {
     rooms: [] as FakeRoom[],
     messages: [] as FakeMessage[],
+    usage: [] as FakeUsage[],
     users: new Map<string, string>(), // id -> displayName
     /** Runs before each call (awaited), to step in at an exact moment */
     hook: null as Hook | null,
@@ -104,6 +119,7 @@ export function createFakeJackDb() {
     reset() {
       state.rooms = []
       state.messages = []
+      state.usage = []
       state.users = new Map()
       state.hook = null
     },
@@ -214,6 +230,15 @@ export function createFakeJackDb() {
         const hits = state.messages.filter((m) => matches(m, where))
         for (const message of hits) Object.assign(message, data, { updatedAt: tick() })
         return { count: hits.length }
+      },
+    },
+
+    jackUsage: {
+      async create({ data }: { data: Omit<FakeUsage, "id" | "createdAt"> }) {
+        await step("jackUsage.create", { data })
+        const row: FakeUsage = { id: `usage-${++ids}`, createdAt: tick(), ...data }
+        state.usage.push(row)
+        return { ...row }
       },
     },
 

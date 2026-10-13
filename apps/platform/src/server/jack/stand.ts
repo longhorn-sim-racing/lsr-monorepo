@@ -2,7 +2,7 @@ import type { BetaMessage } from "@anthropic-ai/sdk/resources/beta/messages/mess
 import { JACK_EVENT } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
 import type { RoomBroadcaster } from "./broadcast"
-import { UsageTally } from "./cost"
+import { savedUsage, UsageTally } from "./cost"
 import { jackMessageInclude, jackRoomViewSelect, toMessageView, toRoomView } from "./messages"
 import type { JackModelClient } from "./model-loop"
 import { JACK_MODELS } from "./models"
@@ -12,6 +12,9 @@ const STAND_SYSTEM =
   "You name chat rooms in the officer console of a university sim racing club. Reply with only a title of 2 to 5 words, in Title Case, for the conversation you're given: no quotes, no trailing punctuation, nothing else."
 
 const EXCERPT_CHARS = 1_500
+
+/** How a naming call went, as its JackUsage row says */
+export type StandOutcome = "named" | "declined" | "unusable" | "already_titled"
 
 export type NameRoomInput = {
   roomId: string
@@ -25,8 +28,9 @@ export type NameRoomInput = {
 /**
  * Names an untitled room after its first reply, with Haiku (Stand). Runs in the background: any
  * failure is logged and the room just stays untitled. The title is only set if the room still has
- * none (an officer may have named it meanwhile). Stand's cost is saved on a system note in the room,
- * "Stand named this room “…”", which is what the spend meter counts.
+ * none (another run's Stand may have named it meanwhile); then a note says so, "Stand named this room
+ * “…”". Every call's cost is saved as a JackUsage row, whatever came of it (named, declined, an
+ * unusable name, a room that already had one), and the spend meter counts those.
  */
 export async function nameRoom({ roomId, client, broadcast, question, answer }: NameRoomInput): Promise<void> {
   try {
@@ -42,13 +46,16 @@ export async function nameRoom({ roomId, client, broadcast, question, answer }: 
     const usage = new UsageTally(config.model)
     usage.add(message)
     const cost = usage.costUsd
+    const spent = (outcome: StandOutcome) => ({ roomId, persona: "stand" as const, job: "name_room", outcome, ...savedUsage(usage) })
 
     if (message.stop_reason === "refusal") {
+      await prisma.jackUsage.create({ data: spent("declined") })
       console.warn(`[jack] Stand declined to name room ${roomId} ($${cost})`)
       return
     }
     const title = cleanTitle(textOf(message))
     if (!title) {
+      await prisma.jackUsage.create({ data: spent("unusable") })
       console.warn(`[jack] Stand's name for room ${roomId} wasn't usable ($${cost}):`, JSON.stringify(textOf(message)))
       return
     }
@@ -56,24 +63,18 @@ export async function nameRoom({ roomId, client, broadcast, question, answer }: 
     const tokens = usage.tokens
     const saved = await prisma.$transaction(async (tx) => {
       const { count } = await tx.jackRoom.updateMany({ where: { id: roomId, title: null }, data: { title } })
+      await tx.jackUsage.create({ data: spent(count ? "named" : "already_titled") })
       if (!count) return null
       const room = await tx.jackRoom.findUniqueOrThrow({ where: { id: roomId }, select: jackRoomViewSelect })
       const note = await tx.jackMessage.create({
-        data: {
-          roomId,
-          kind: "system",
-          content: `Stand named this room “${title}”`,
-          model: usage.models.join(","),
-          inputTokens: tokens.inputTokens + tokens.cacheWriteTokens,
-          outputTokens: tokens.outputTokens,
-          cacheReadTokens: tokens.cacheReadTokens,
-          costUsd: cost,
-        },
+        data: { roomId, kind: "system", content: `Stand named this room “${title}”` },
         include: jackMessageInclude,
       })
       return { room, note }
     })
-    console.info(`[jack] Stand named room ${roomId} "${title}": $${cost} (${tokens.inputTokens} in, ${tokens.outputTokens} out)`)
+    console.info(
+      `[jack] Stand ${saved ? "named" : "had a name for (but it was already named)"} room ${roomId} "${title}": $${cost} (${tokens.inputTokens} in, ${tokens.outputTokens} out)`
+    )
     if (!saved) return
 
     await broadcast(roomId, { type: JACK_EVENT.room, room: toRoomView(saved.room) })

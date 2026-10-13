@@ -46,18 +46,22 @@ describe("nameRoom", () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
   })
 
-  it("doesn't overwrite a title an officer set meanwhile, and posts no note", async () => {
+  it("doesn't overwrite a title set meanwhile, and posts no note, but still counts what it cost", async () => {
     const room = db.addRoom({ title: "Officer's title" })
-    const claude = fakeClaude([], [{ text: "Stand's Title" }])
+    const claude = fakeClaude([], [{ text: "Stand's Title", usage: { input: 200, output: 30 } }])
 
     await nameRoom({ roomId: room.id, client: claude.client, broadcast, question: "Gray: Hi", answer: "Hello" })
 
     expect(db.room(room.id).title).toBe("Officer's title")
     expect(db.state.messages).toHaveLength(0)
     expect(events).toHaveLength(0)
+    expect(db.state.usage).toEqual([
+      expect.objectContaining({ roomId: room.id, persona: "stand", job: "name_room", outcome: "already_titled", inputTokens: 200, outputTokens: 30 }),
+    ])
+    expect(db.state.usage[0].costUsd).toBeCloseTo((200 * 0.1 + 30 * 0.5) / 1e6, 9)
   })
 
-  it("gives up quietly on a refusal or an unusable name", async () => {
+  it("gives up quietly on a refusal or an unusable name, counting each call's cost", async () => {
     const room = db.addRoom()
     const claude = fakeClaude([], [{ stop: "refusal" }, { text: "I'd call this room something like a discussion of entries and payments" }])
 
@@ -66,6 +70,19 @@ describe("nameRoom", () => {
 
     expect(db.room(room.id).title).toBeNull()
     expect(events).toHaveLength(0)
+    expect(db.state.messages).toHaveLength(0)
+    expect(db.state.usage.map((u) => u.outcome)).toEqual(["declined", "unusable"])
+    expect(db.state.usage.every((u) => u.costUsd > 0 && u.model === "claude-haiku-5-5")).toBe(true)
+  })
+
+  it("records nothing when the call itself fails (there's no usage to count)", async () => {
+    const room = db.addRoom()
+    const claude = fakeClaude([], [{ error: new Error("overloaded") }])
+
+    await nameRoom({ roomId: room.id, client: claude.client, broadcast, question: "Gray: Hi", answer: "Hello" })
+
+    expect(db.state.usage).toHaveLength(0)
+    expect(console.error).toHaveBeenCalled()
   })
 
   it("sends Stand a short excerpt of a long exchange", async () => {

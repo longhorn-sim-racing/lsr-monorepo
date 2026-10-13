@@ -70,8 +70,19 @@ export type ModelReplyOptions = {
   ctx: JackToolContext
   /** Streams text to the room as it's written */
   onText: (text: string) => void
+  /**
+   * The reply took back text that already streamed (a declined partial, or a call that came through
+   * garbled and is asked again): its text is now `text`, which viewers should show instead. Parts placed
+   * past the new end follow as part updates
+   */
+  onReset?: (text: string) => void
   /** A tool call started or changed. Calls arrive in order; the caller saves and broadcasts the part */
   onPart: (part: JackToolPart, parts: JackToolPart[]) => Promise<void>
+  /**
+   * After each Claude call is added to `usage` (one that failed partway counts what it reported before
+   * failing), so the caller can save the spend as it goes rather than only at the end
+   */
+  onUsage?: (usage: UsageTally) => Promise<void>
   limits?: Partial<ReplyLimits>
   /** Cancels the reply: aborts the Claude call in flight and any tool that's running */
   signal?: AbortSignal
@@ -124,6 +135,22 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
     text += piece
     onText(piece)
   }
+  /** Drops the text after `length` and tells the room; parts placed past the new end move to it */
+  const takeBack = (length: number) => {
+    if (text.length <= length) return
+    text = text.slice(0, length)
+    options.onReset?.(text)
+    for (const part of parts) if (part.at > text.length) upsertPart({ ...part, at: text.length })
+  }
+  /** Counts a call's tokens and lets the caller save them. Never throws */
+  const countUsage = async (message: Pick<BetaMessage, "model" | "usage">) => {
+    usage.add(message)
+    try {
+      await options.onUsage?.(usage)
+    } catch (error) {
+      console.error(`[jack] Couldn't record usage in room ${ctx.roomId}:`, error)
+    }
+  }
   const finishWith = (note: string) => say(`${text.trim() ? "\n\n" : ""}${note}`)
   const upsertPart = (part: JackToolPart) => {
     const index = parts.findIndex((p) => p.id === part.id)
@@ -135,7 +162,9 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
     )
   }
   const closeOpenParts = (label: string) => {
-    for (const part of parts) if (part.status === "running") upsertPart({ ...part, status: "error", label, error: label })
+    for (const part of parts) {
+      if (part.status === "running") upsertPart({ ...part, status: "error", label, error: label, at: Math.min(part.at, text.length) })
+    }
   }
   const result = async (status: "done" | "error", outcome: ReplyOutcome): Promise<ModelReplyResult> => {
     await partChain
@@ -145,9 +174,12 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
   for (let call = 0; call < limits.maxToolCalls + 4; call++) {
     const textBefore = text.length
     let message: BetaMessage
+    // What the call has reported about its usage so far, for a call that fails partway
+    const seen = new PartialUsage()
     try {
       const stream = client.stream(buildParams(config, system, toolDefs, messages, wrapUp), { signal: options.signal })
       for await (const event of stream) {
+        seen.track(event)
         if (event.type === "content_block_start") {
           const block = event.content_block
           if (block.type === "text") {
@@ -164,6 +196,9 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
       }
       message = await stream.finalMessage()
     } catch (error) {
+      // The call is billed for what it got through, so count what it reported
+      const partial = seen.message()
+      if (partial) await countUsage(partial)
       if (error instanceof Anthropic.APIError) {
         console.error(`[jack] Claude call failed in room ${ctx.roomId}:`, error)
         closeOpenParts("Didn't run: Claude stopped answering")
@@ -172,15 +207,16 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
       }
       // With eager input streaming the SDK parses each tool input when its block closes; input that
       // isn't JSON at all fails the stream. There's no tool_use id to answer, so re-issue the call.
+      // The call's text goes too, for viewers as well: the re-issued call writes its own
       console.error(`[jack] A streamed tool input wasn't valid JSON in room ${ctx.roomId}:`, error)
+      takeBack(textBefore)
       closeOpenParts("Didn't run: the call came through garbled")
-      text = text.slice(0, textBefore)
       if (jsonRetries++ < limits.maxJsonRetries) continue
       finishWith(`${name} couldn't finish this answer: Claude kept sending tool calls that weren't readable. Ask again.`)
       return result("error", "bad_tool_input")
     }
     jsonRetries = 0
-    usage.add(message)
+    await countUsage(message)
     reportDroppedThinking(message, ctx.roomId)
 
     // After a refusal fallback mid-answer, the declined model's thinking and tool calls before the
@@ -196,8 +232,8 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
 
     if (message.stop_reason === "refusal") {
       console.warn(`[jack] Claude declined in room ${ctx.roomId} (${message.stop_details?.category ?? "no category"})`)
-      // A partial before the decline isn't a complete answer, so it goes
-      text = text.slice(0, textBefore)
+      // A partial before the decline isn't a complete answer, so it goes, for viewers too
+      takeBack(textBefore)
       closeOpenParts("Didn't run: the request was declined")
       finishWith(`I can't help with that one: Claude's safety checks declined the request. Try asking it a different way.`)
       return result("done", "refusal")
@@ -298,6 +334,35 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
     const label = "Skipped: tool limit reached"
     upsertPart({ ...base, label, input: use.input, status: "error", error: label, displays: [] })
     return { type: "tool_result", tool_use_id: use.id, is_error: true, content: `Not run: this reply already used its ${limits.maxToolCalls} tool calls.` }
+  }
+}
+
+/**
+ * The usage a streamed call reports as it goes: message_start has the input side, each message_delta
+ * the output so far. For a call that fails partway; a finished call's final message has the full count
+ */
+class PartialUsage {
+  private model: string | null = null
+  private usage: BetaMessage["usage"] | null = null
+
+  track(event: BetaRawMessageStreamEvent) {
+    if (event.type === "message_start") {
+      this.model = event.message.model
+      this.usage = { ...event.message.usage }
+    } else if (event.type === "message_delta" && this.usage) {
+      const delta = event.usage
+      this.usage = {
+        ...this.usage,
+        output_tokens: delta.output_tokens,
+        input_tokens: delta.input_tokens ?? this.usage.input_tokens,
+        cache_creation_input_tokens: delta.cache_creation_input_tokens ?? this.usage.cache_creation_input_tokens,
+        cache_read_input_tokens: delta.cache_read_input_tokens ?? this.usage.cache_read_input_tokens,
+      }
+    }
+  }
+
+  message(): Pick<BetaMessage, "model" | "usage"> | null {
+    return this.model !== null && this.usage ? { model: this.model, usage: this.usage } : null
   }
 }
 

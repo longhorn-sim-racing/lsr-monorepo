@@ -80,10 +80,17 @@ export const JACK_EVENT = {
 
 /** A new message: an officer's, a system note, or a model reply that's about to stream */
 export type JackCreatedEvent = { type: typeof JACK_EVENT.created; message: JackMessageView }
-/** The next piece of a streaming reply. `seq` counts up from 1 per message with no gaps */
-export type JackDeltaEvent = { type: typeof JACK_EVENT.delta; messageId: string; seq: number; text: string }
-/** A reply finished (status done or error), with its full text */
-export type JackDoneEvent = { type: typeof JACK_EVENT.done; message: JackMessageView }
+/**
+ * The next piece of a streaming reply. `seq` counts up from 1 per message with no gaps. With `replace`
+ * the text is the reply's whole text so far, replacing what streamed before (the server took some back,
+ * e.g. a partial answer the model then declined)
+ */
+export type JackDeltaEvent = { type: typeof JACK_EVENT.delta; messageId: string; seq: number; text: string; replace?: true }
+/**
+ * A reply finished (status done or error), with its full text and tools. `trimmed` when it was too big
+ * for Realtime: its tool displays (and maybe its text) were left out, and viewers load it from a snapshot
+ */
+export type JackDoneEvent = { type: typeof JACK_EVENT.done; message: JackMessageView; trimmed?: true }
 /** A tool call in a streaming reply started or finished; replaces the part with the same id */
 export type JackToolEvent = { type: typeof JACK_EVENT.tool; messageId: string; part: JackToolPart }
 /** The room's settings changed (e.g. its persona) */

@@ -4,7 +4,7 @@ import { prisma } from "@/server/db"
 import { runAfterResponse } from "@/server/after-response"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
 import { jackMessageInclude, jackRoomViewSelect, toMessageView, toRoomView } from "./messages"
-import { runRoom } from "./reply-loop"
+import { defaultReplyDeps, runRoom, type ReplyLoopDeps } from "./reply-loop"
 
 /** How much of a room a snapshot loads: the latest messages */
 const SNAPSHOT_LIMIT = 500
@@ -58,9 +58,14 @@ export async function getRoomSnapshot(roomId: string): Promise<RoomSnapshot | nu
 /**
  * Saves an officer's message, then (after the response) shows it to the room and gets the room's
  * persona answering: if a run is already going, it picks this message up on its next pass.
- * Null when the room doesn't exist or is archived.
+ * Null when the room doesn't exist or is archived. `replyDeps` is for checks that swap in a fake Claude.
  */
-export async function postOfficerMessage(roomId: string, authorUserId: string, content: string): Promise<JackMessageView | null> {
+export async function postOfficerMessage(
+  roomId: string,
+  authorUserId: string,
+  content: string,
+  replyDeps: ReplyLoopDeps = defaultReplyDeps
+): Promise<JackMessageView | null> {
   const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: { id: true } })
   if (!room) return null
 
@@ -71,11 +76,24 @@ export async function postOfficerMessage(roomId: string, authorUserId: string, c
   const message = toMessageView(row)
 
   await runAfterResponse(async () => {
-    await broadcastRoomEvent(roomId, { type: JACK_EVENT.created, message })
-    await runRoom(roomId)
+    await replyDeps.broadcast(roomId, { type: JACK_EVENT.created, message })
+    await runRoom(roomId, replyDeps)
   }, `[jack] Answering room ${roomId} failed:`)
 
   return message
+}
+
+/**
+ * Starts a run in a room (after the response), for when messages sit unanswered: a run that ran out
+ * of time and let go, or one that died. Runs as usual: if a live run holds the room it does nothing,
+ * and a dead run's lock is taken over once it's stale, closing its half-written reply. False when the
+ * room doesn't exist or is archived.
+ */
+export async function resumeRoom(roomId: string, replyDeps: ReplyLoopDeps = defaultReplyDeps): Promise<boolean> {
+  const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: { id: true } })
+  if (!room) return false
+  await runAfterResponse(() => runRoom(roomId, replyDeps), `[jack] Continuing room ${roomId} failed:`)
+  return true
 }
 
 export type PersonaSwitch =
