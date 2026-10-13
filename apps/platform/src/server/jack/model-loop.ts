@@ -238,7 +238,10 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
       // A partial before the decline isn't a complete answer, so it goes, for viewers too
       takeBack(textBefore)
       closeOpenParts("Didn't run: the request was declined")
-      finishWith(`I can't help with that one: Claude's safety checks declined the request. Try asking it a different way.`)
+      // Haiku has no server-side fallback, so from Stand the way past a false refusal is Jack, which has one
+      finishWith(
+        `I can't help with that one: Claude's safety checks declined the request. Try asking it a different way${config.persona === "stand" ? ", or switch the room to Jack" : ""}.`
+      )
       return result("done", "refusal")
     }
     if (message.stop_reason === "max_tokens" || message.stop_reason === "model_context_window_exceeded") {
@@ -246,7 +249,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
       closeOpenParts("Didn't run: the reply hit its length limit")
       finishWith(
         toolUses.length
-          ? `(${name} ran out of room before finishing. Ask a narrower question, or switch the room to Lift.)`
+          ? `(${name} ran out of room before finishing. Ask a narrower question${config.persona === "stand" ? ", or switch the room to Jack" : config.persona === "jack" ? ", or switch the room to Lift" : ""}.)`
           : `(This answer hit the length limit and was cut off.)`
       )
       return result("done", "cut_off")

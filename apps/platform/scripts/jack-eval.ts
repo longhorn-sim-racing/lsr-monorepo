@@ -1,10 +1,10 @@
 /**
  * Jack's test set (#161): about 15 questions officers really ask, each with its right answer worked
  * out from the database when the eval runs, asked through the same reply code the rooms use (the
- * room's system prompt, history format, tools and model loop) on Jack (Sonnet 5.5) and Lift (Opus
- * 5.5). Prints accuracy, cost and latency per model, to pick the default.
+ * room's system prompt, history format, tools and model loop) on Stand (Haiku 5.5), Jack (Sonnet 5.5)
+ * and Lift (Opus 5.5). Prints accuracy, cost and latency per model, to pick the default.
  *
- *   pnpm --filter @lsr/platform exec tsx scripts/jack-eval.ts              # both models
+ *   pnpm --filter @lsr/platform exec tsx scripts/jack-eval.ts              # all three models
  *   pnpm --filter @lsr/platform exec tsx scripts/jack-eval.ts --only=jack  # one model (jack, lift or stand)
  *   pnpm --filter @lsr/platform exec tsx scripts/jack-eval.ts --dry-run    # plumbing check: fake model, no API calls
  *
@@ -646,7 +646,7 @@ function dryRunClient(
 function report(result: Result) {
   const mark = result.status === "pass" ? "PASS" : result.status === "fail" ? "FAIL" : "skip";
   const stats = result.status === "skip" ? "" : `  $${result.costUsd.toFixed(4)}  ${result.seconds.toFixed(1)} s  ${result.toolCalls} tools`;
-  console.log(`  ${result.persona.padEnd(4)} ${mark}  ${result.id.padEnd(22)}${stats}${result.reason ? `  (${result.reason})` : ""}`);
+  console.log(`  ${result.persona.padEnd(5)} ${mark}  ${result.id.padEnd(22)}${stats}${result.reason ? `  (${result.reason})` : ""}`);
   if (result.status !== "skip" && (VERBOSE || result.status === "fail")) {
     console.log(`         expected: ${result.expected}`);
     console.log(`         answer:   ${(result.answer ?? "").replace(/\s+/g, " ").slice(0, VERBOSE ? 2_000 : 400)}`);

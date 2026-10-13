@@ -15,6 +15,7 @@ import {
   type JackRoomView as JackRoomSettings,
 } from "@/lib/jack/types"
 import { replyPieces } from "@/lib/jack/reply-pieces"
+import { JACK_TITLE_MAX } from "@/schemas/jack.schema"
 import type { JackSpend } from "@/lib/jack/spend"
 import { JackToolPartView } from "./parts/tool-part"
 import { PersonaAvatar } from "./persona-avatar"
@@ -98,6 +99,21 @@ function RoomTitle({ title, saved, onRename }: { title: string; saved: string | 
   const [draft, setDraft] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const pencil = useRef<HTMLButtonElement>(null)
+  // After Save, Cancel or Escape, focus goes back to the pencil instead of the page
+  const refocus = useRef(false)
+
+  useEffect(() => {
+    if (!editing && refocus.current) {
+      refocus.current = false
+      pencil.current?.focus()
+    }
+  }, [editing])
+
+  function stop() {
+    refocus.current = true
+    setEditing(false)
+  }
 
   function start() {
     setDraft(saved ?? "")
@@ -107,13 +123,13 @@ function RoomTitle({ title, saved, onRename }: { title: string; saved: string | 
 
   async function save() {
     if (saving) return
-    if (draft.trim() === (saved ?? "")) return setEditing(false)
+    if (draft.trim() === (saved ?? "")) return stop()
     setSaving(true)
     setError(null)
     const problem = await onRename(draft)
     setSaving(false)
     if (problem) setError(problem)
-    else setEditing(false)
+    else stop()
   }
 
   if (!editing)
@@ -121,6 +137,7 @@ function RoomTitle({ title, saved, onRename }: { title: string; saved: string | 
       <div className="group flex min-w-0 items-center gap-1">
         <h1 className="truncate font-display text-lg font-semibold leading-tight">{title}</h1>
         <button
+          ref={pencil}
           type="button"
           onClick={start}
           aria-label="Rename room"
@@ -148,10 +165,10 @@ function RoomTitle({ title, saved, onRename }: { title: string; saved: string | 
           id="jack-room-rename"
           autoFocus
           value={draft}
-          maxLength={120}
+          maxLength={JACK_TITLE_MAX}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Escape") setEditing(false)
+            if (e.key === "Escape" && !saving) stop()
           }}
           // 16px on phones so iOS doesn't zoom in on focus
           className="h-8 w-64 max-w-full text-base font-semibold md:h-7 md:text-sm"
@@ -159,7 +176,7 @@ function RoomTitle({ title, saved, onRename }: { title: string; saved: string | 
         <Button type="submit" size="sm" variant="primary" pending={saving}>
           Save
         </Button>
-        <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={saving}>
+        <Button type="button" size="sm" variant="ghost" onClick={stop} disabled={saving}>
           Cancel
         </Button>
       </div>

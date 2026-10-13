@@ -20,9 +20,15 @@ Code paths below are relative to `apps/platform/`.
 |---|---|---|---|
 | Jack | Claude Sonnet 5.5 (`claude-sonnet-5-5`) | medium | Every answer, by default |
 | Lift | Claude Opus 5.5 (`claude-opus-5-5`) | high | Harder questions. Set per room with **Answered by** ("Lift (higher cost)"); it stays until someone switches back, and the switch is posted in the room. About twice Jack's price per token |
-| Stand | Claude Haiku 5.5 (`claude-haiku-5-5`) | low | Side jobs: naming a new room after its first answer |
+| Stand | Claude Haiku 5.5 (`claude-haiku-5-5`) | medium (low for side jobs) | Quick, simple questions, set per room with **Answered by** ("Stand (simple tasks)"), at about a twentieth of Jack's price per token. Also the side job of naming a new room after its first answer (`STAND_SIDE_JOB`) |
 
 The names are the joke; the answers stay plain. Models and effort live in `src/server/jack/models.ts`. These models always think before answering (adaptive thinking can't be turned off); effort is the dial for how much.
+
+## Renaming rooms
+
+Any officer can rename a room at any time with the pencil next to its name (`renameJackRoom` in `src/app/admin/jack/actions.ts`, `renameRoom` in `src/server/jack/rooms.ts`). The room gets a note ("Alex renamed this room “GM 1 planning”"), everyone in it sees the new name live, and the change is in the audit log. Stand only names rooms that are still untitled, so it never overwrites a name an officer gave.
+
+If a deploy has to be rolled back to a version from before Stand could answer rooms, first move those rooms back to Jack, or the older code fails reading them: `UPDATE "JackRoom" SET persona = 'jack' WHERE persona = 'stand';`
 
 ## How a reply works
 
@@ -33,7 +39,7 @@ The names are the joke; the answers stay plain. Models and effort live in `src/s
    - the **system prompt** (`src/server/jack/prompt.ts`): who Jack is, who he's talking to, the club, and the rules (read-only except drafts, never move money, say where numbers came from, Central Time, emails and EIDs only when asked, concise plain text, typed tools first, `run_sql` for the rest, `describe_schema` when unsure, charts through the chart tool), then the notes on the club's tables (`JACK_SCHEMA_NOTES` in `src/server/jack/tools/schema-notes.ts`);
    - the **room history** (`src/server/jack/history.ts`): each exchange as an officer turn ("Name: message" lines under a Central Time timestamp, room notes included) and the reply's text with a one-line note of the tools it used. Several officers' messages answered together are one turn, and notices that never reached Claude ("isn't connected yet") are left out so their questions carry over. The last 40 exchanges are sent.
 4. Claude streams. Text goes out in ~150 ms batches. Each tool call is checked against the tool's schema, run for the officer whose message started this reply (the newest message it answers; when one reply answers several officers, it's the last one who posted), saved on the reply (`JackMessage.toolCalls`) and broadcast (`message.tool`), and its result goes back to Claude. This repeats until Claude answers.
-5. Limits per reply: 12 tool calls, then Claude is told to answer with what it has (and can't call more tools); the same after 64K output tokens, or after 150 s (sooner when the run has less time left; see [Function duration](#function-duration)); 16K output tokens per call for Jack, 32K for Lift.
+5. Limits per reply: 12 tool calls, then Claude is told to answer with what it has (and can't call more tools); the same after 64K output tokens, or after 150 s (sooner when the run has less time left; see [Function duration](#function-duration)); 16K output tokens per call for Jack and Stand, 32K for Lift.
 6. After every Claude call the reply's tokens and cost so far are saved on it, so a reply that's cut off, or whose function dies, still counts. The finished reply is saved with its model, tokens and cost, and its cost is logged (`[jack] Reply … $0.0123, … in + … cache write + … cache read, … out`).
 7. The `message.done` event carries the whole reply. If it's over about 200 KB (Realtime drops messages over its limit, about 256 KB on the Free plan) it goes out `trimmed`, without its tool displays (or its text, if that's still too big), and the page loads the full reply from the database.
 8. If the room has no title yet, Stand names it in 2 to 5 words in the background and posts "Stand named this room “…”".
@@ -52,7 +58,7 @@ What the room sees when something goes wrong:
 
 ### Refusals
 
-Sonnet 5.5 and Opus 5.5 run safety classifiers that can decline a request (cyber, bio and a few other categories), occasionally on harmless club questions. Replies opt into Anthropic's server-side fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`): a declined request is retried on the model Anthropic recommends for that category, inside the same call. The fallback attempt is billed at that model's rates, and the cost math prices each attempt by the model that ran it. Not every category is retried (from Sonnet 5.5, only cyber and frontier_llm declines are); then, or when the fallback model declines too, the room sees the refusal message. Haiku has no server-side fallback, so Stand just leaves the room untitled.
+Sonnet 5.5 and Opus 5.5 run safety classifiers that can decline a request (cyber, bio and a few other categories), occasionally on harmless club questions. Replies opt into Anthropic's server-side fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`): a declined request is retried on the model Anthropic recommends for that category, inside the same call. The fallback attempt is billed at that model's rates, and the cost math prices each attempt by the model that ran it. Not every category is retried (from Sonnet 5.5, only cyber and frontier_llm declines are); then, or when the fallback model declines too, the room sees the refusal message. Haiku has no server-side fallback: a declined room answer from Stand shows the refusal message, which suggests switching the room to Jack, and a declined room name just leaves the room untitled.
 
 ### Prompt caching
 
@@ -137,11 +143,11 @@ A typical answer takes 5 to 60 seconds, so one run usually answers several round
 
 ## The eval
 
-`scripts/jack-eval.ts` is the test set from #161: 16 questions officers ask (LSC applications and paid entries, rounds missing results, unpaid checkouts, charges this month, accounts, officers, upcoming events, GM 1, check-ins, a chart, drafting an event). The right answers are worked out from the database when it runs, and each question goes through the same code a room reply does, on Jack and on Lift. It prints pass or fail per question, then accuracy, cost and latency per model.
+`scripts/jack-eval.ts` is the test set from #161: 16 questions officers ask (LSC applications and paid entries, rounds missing results, unpaid checkouts, charges this month, accounts, officers, upcoming events, GM 1, check-ins, a chart, drafting an event). The right answers are worked out from the database when it runs, and each question goes through the same code a room reply does, on Stand, Jack and Lift. It prints pass or fail per question, then accuracy, cost and latency per model.
 
 ```bash
 # from apps/platform, with DATABASE_URL, JACK_DATABASE_URL and ANTHROPIC_API_KEY in .env.local
-pnpm exec tsx scripts/jack-eval.ts              # both models, a few dollars
+pnpm exec tsx scripts/jack-eval.ts              # all three models, a few dollars
 pnpm exec tsx scripts/jack-eval.ts --only=jack  # one model
 pnpm exec tsx scripts/jack-eval.ts --filter=lsc # some questions
 pnpm exec tsx scripts/jack-eval.ts --verbose    # print every answer

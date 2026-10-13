@@ -13,11 +13,20 @@ const price = (input: number, output: number, cacheRead: number): ModelPrice => 
 export const MODEL_PRICES: Record<string, ModelPrice> = {
   "claude-sonnet-5-5": price(2, 10, 0.2), // Jack
   "claude-opus-5-5": price(4, 20, 0.2), // Lift
-  "claude-haiku-5-5": price(0.1, 0.5, 0.01), // Stand (prompts up to 100K tokens; ours are tiny)
+  "claude-haiku-5-5": price(0.1, 0.5, 0.01), // Stand, for prompts up to 100K tokens (see LONG_PROMPT_PRICES)
   // A refused request can be answered by a fallback model, billed at that model's rates
   "claude-sonnet-5": price(2, 10, 0.2),
   "claude-opus-5": price(5, 25, 0.5),
   "claude-opus-4-8": price(5, 25, 0.5),
+}
+
+/**
+ * Models whose rates go up when one request's prompt is long: above `overTokens` (uncached input plus
+ * cache writes and reads), that whole request is billed at `price`. Stand answers rooms, so a long room
+ * with a few tool results can pass Haiku's 100K line by its second or third call.
+ */
+export const LONG_PROMPT_PRICES: Record<string, { overTokens: number; price: ModelPrice }> = {
+  "claude-haiku-5-5": { overTokens: 100_000, price: price(0.5, 2.5, 0.05) },
 }
 
 /**
@@ -37,10 +46,16 @@ export function addTokens(a: TokenUsage, b: TokenUsage): TokenUsage {
   }
 }
 
-/** What `usage` cost on `model`. An unknown model is priced as `fallbackModel` (the one we asked for) */
+/**
+ * What one request's `usage` cost on `model`. Price each request on its own: the long-prompt rates
+ * depend on that request's prompt size. An unknown model is priced as `fallbackModel` (the one we asked for)
+ */
 export function costUsd(model: string, usage: TokenUsage, fallbackModel?: string): number {
-  const rates = MODEL_PRICES[model] ?? (fallbackModel ? MODEL_PRICES[fallbackModel] : undefined)
-  if (!rates) throw new Error(`No price for model ${model}`)
+  const priced = MODEL_PRICES[model] ? model : fallbackModel && MODEL_PRICES[fallbackModel] ? fallbackModel : null
+  if (!priced) throw new Error(`No price for model ${model}`)
+  const long = LONG_PROMPT_PRICES[priced]
+  const prompt = usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens
+  const rates = long && prompt > long.overTokens ? long.price : MODEL_PRICES[priced]
   const dollars =
     (usage.inputTokens * rates.input +
       usage.cacheWriteTokens * rates.cacheWrite +
@@ -88,9 +103,10 @@ export function usageByModel(message: Pick<BetaMessage, "model" | "usage">, requ
   return out
 }
 
-/** Adds up a reply's API calls: tokens per model, and what they cost */
+/** Adds up a reply's API calls: tokens per model, and what they cost (each request priced on its own) */
 export class UsageTally {
   private readonly byModel = new Map<string, TokenUsage>()
+  private dollars = 0
   calls = 0
 
   constructor(private readonly requestedModel: string) {}
@@ -99,6 +115,7 @@ export class UsageTally {
     this.calls++
     for (const [model, usage] of usageByModel(message, this.requestedModel)) {
       this.byModel.set(model, addTokens(this.byModel.get(model) ?? NO_TOKENS, usage))
+      this.dollars += costUsd(model, usage, this.requestedModel)
     }
   }
 
@@ -109,9 +126,7 @@ export class UsageTally {
   }
 
   get costUsd(): number {
-    let total = 0
-    for (const [model, usage] of this.byModel) total += costUsd(model, usage, this.requestedModel)
-    return roundUsd(total)
+    return roundUsd(this.dollars)
   }
 
   /** The models that answered, the one we asked for first (several when a refusal fell back) */

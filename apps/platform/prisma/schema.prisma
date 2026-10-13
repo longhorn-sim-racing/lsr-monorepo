@@ -894,7 +894,8 @@ model SystemSetting {
 // ---------- Jack (officer chat agent, #161) ----------
 
 /// Which model wrote a Jack message. Jack = Sonnet (every answer by default), Lift = Opus (hard
-/// questions), Stand = Haiku (side jobs like naming rooms; never a room's persona)
+/// questions), Stand = Haiku (quick, simple questions when a room is set to it, and side jobs like
+/// naming rooms)
 enum JackPersona {
   jack
   lift

@@ -85,6 +85,15 @@ describe("nameRoom", () => {
     expect(console.error).toHaveBeenCalled()
   })
 
+  it("names rooms with the small side-job settings, not the ones Stand answers rooms with", async () => {
+    const room = db.addRoom()
+    const claude = fakeClaude([], [{ text: "Quick Room" }])
+
+    await nameRoom({ roomId: room.id, client: claude.client, broadcast, question: "Gray: hi", answer: "Hello." })
+
+    expect(claude.creates[0]).toMatchObject({ model: "claude-haiku-5-5", max_tokens: 1_024, output_config: { effort: "low" } })
+  })
+
   it("sends Stand a short excerpt of a long exchange", async () => {
     const room = db.addRoom()
     const claude = fakeClaude([], [{ text: "Long Room" }])
