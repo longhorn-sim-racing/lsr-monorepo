@@ -1,404 +1,304 @@
-"use client";
+"use client"
 
-import { useState, useTransition } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import { useState, useTransition } from "react"
+import { fromZonedTime } from "date-fns-tz"
+import { Bell, Send } from "lucide-react"
+import { toast } from "sonner"
 import {
+  Button,
+  CheckboxField,
+  Field,
+  FieldGrid,
+  FormActions,
+  FormSection,
+  Input,
+  Notice,
+  Panel,
+  PanelBody,
+  PanelFooter,
+  PanelHeader,
   Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Send, User, Users, Search, Loader2, X, UserPlus } from "lucide-react";
-import { sendCustomNotification, searchUsers } from "../actions";
-import { toast } from "sonner";
-import { unexpectedError } from "@/lib/action-result";
+  SplitLayout,
+  SwitchField,
+  Textarea,
+  UserMultiPicker,
+  UserPicker,
+  useConfirm,
+  type AdminUserOption,
+} from "@/components/admin/kit"
+import { searchUsersForAdmin } from "@/server/actions/admin-user-search"
+import { unexpectedError } from "@/lib/action-result"
+import { DEFAULT_TIMEZONE } from "@/lib/dates"
+import { sendCustomNotification } from "../actions"
+import { centralTime, plural } from "./format"
 
-type UserResult = {
-  id: string;
-  displayName: string;
-  email: string;
-  handle: string;
-};
+type RecipientType = "single" | "multiple" | "all"
+
+/** Announcements only go to active members, like "All active members" */
+const searchActiveMembers = (query: string) => searchUsersForAdmin(query, { activeOnly: true })
 
 export function NotificationComposer({
   emailUsage,
   keptForReceipts,
 }: {
-  emailUsage: { sentToday: number; dailyLimit: number | null };
-  keptForReceipts: number;
+  emailUsage: { sentToday: number; dailyLimit: number | null }
+  keptForReceipts: number
 }) {
-  const [scheduled, setScheduled] = useState(false);
-  const [isPending, startTransition] = useTransition();
-  const [recipientType, setRecipientType] = useState<"single" | "multiple" | "all">("single");
-  const [selectedUsers, setSelectedUsers] = useState<UserResult[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<UserResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
+  const confirm = useConfirm()
+  const [isPending, startTransition] = useTransition()
+  const [recipientType, setRecipientType] = useState<RecipientType>("single")
+  const [selectedUsers, setSelectedUsers] = useState<AdminUserOption[]>([])
+  const [sendInApp, setSendInApp] = useState(true)
+  const [sendEmail, setSendEmail] = useState(true)
+  const [sendAnyway, setSendAnyway] = useState(false)
+  const [title, setTitle] = useState("")
+  const [body, setBody] = useState("")
+  const [actionUrl, setActionUrl] = useState("")
+  const [actionText, setActionText] = useState("")
+  const [scheduled, setScheduled] = useState(false)
+  const [scheduledFor, setScheduledFor] = useState("")
 
-  const [sendInApp, setSendInApp] = useState(true);
-  const [sendEmail, setSendEmail] = useState(true);
+  const { sentToday, dailyLimit } = emailUsage
+  const emailsLeft = dailyLimit === null ? null : Math.max(0, dailyLimit - sentToday - keptForReceipts)
+  const showSendAnyway = sendEmail && dailyLimit !== null && !scheduled
 
-  const handleSearch = async (query: string) => {
-    setSearchQuery(query);
-    if (query.length >= 2) {
-      setIsSearching(true);
-      const results = await searchUsers(query);
-      // Filter out already selected users
-      const filtered = results.filter(
-        (user) => !selectedUsers.some((s) => s.id === user.id)
-      );
-      setSearchResults(filtered);
-      setIsSearching(false);
-    } else {
-      setSearchResults([]);
+  // datetime-local has no zone; it's read as Central, like the server does
+  const scheduledDate = scheduled && scheduledFor ? fromZonedTime(scheduledFor, DEFAULT_TIMEZONE) : null
+  const scheduleError = scheduled && scheduledDate && scheduledDate.getTime() <= Date.now() ? "Pick a time in the future." : undefined
+
+  const needsMembers = recipientType === "single" || recipientType === "multiple"
+  const blockedReason =
+    !sendInApp && !sendEmail
+      ? "Pick at least one channel."
+      : needsMembers && selectedUsers.length === 0
+        ? "Add at least one recipient."
+        : !title.trim() || !body.trim()
+          ? "Write a title and a message."
+          : scheduled && !scheduledFor
+            ? "Pick when to send it."
+            : scheduleError
+
+  const changeRecipientType = (next: RecipientType) => {
+    setRecipientType(next)
+    // Clear selection when switching types
+    if (next === "all") setSelectedUsers([])
+    if (next === "single" && selectedUsers.length > 1) setSelectedUsers(selectedUsers.slice(0, 1))
+  }
+
+  const reset = () => {
+    setSelectedUsers([])
+    setTitle("")
+    setBody("")
+    setActionUrl("")
+    setActionText("")
+    setScheduled(false)
+    setScheduledFor("")
+    setSendAnyway(false)
+  }
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (blockedReason || isPending) return
+
+    if (recipientType === "all") {
+      const channels = [sendInApp && "in-app", sendEmail && "email"].filter(Boolean).join(" and ")
+      const ok = await confirm({
+        title: scheduledDate ? "Schedule this for every active member?" : "Send this to every active member?",
+        description: scheduledDate
+          ? `It goes out by ${channels} on ${centralTime(scheduledDate, "MMM d 'at' h:mm a")}. You can cancel it from Scheduled until then.`
+          : `It goes out by ${channels} right away and can't be unsent.`,
+        confirmLabel: scheduledDate ? "Schedule" : "Send to everyone",
+      })
+      if (!ok) return
     }
-  };
 
-  const addUser = (user: UserResult) => {
-    if (recipientType === "single") {
-      setSelectedUsers([user]);
-    } else {
-      setSelectedUsers((prev) => [...prev, user]);
-    }
-    setSearchQuery("");
-    setSearchResults([]);
-  };
-
-  const removeUser = (userId: string) => {
-    setSelectedUsers((prev) => prev.filter((u) => u.id !== userId));
-  };
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const form = e.currentTarget;
-    const formData = new FormData(form);
-    formData.set("recipientType", recipientType);
-    if (selectedUsers.length > 0) {
-      formData.set("userIds", JSON.stringify(selectedUsers.map((u) => u.id)));
-    }
+    const formData = new FormData()
+    formData.set("recipientType", recipientType)
+    if (needsMembers && selectedUsers.length > 0) formData.set("userIds", JSON.stringify(selectedUsers.map((u) => u.id)))
+    formData.set("title", title)
+    formData.set("body", body)
+    if (actionUrl.trim()) formData.set("actionUrl", actionUrl.trim())
+    if (actionText.trim()) formData.set("actionText", actionText.trim())
+    if (sendInApp) formData.set("sendInApp", "on")
+    if (sendEmail) formData.set("sendEmail", "on")
+    if (scheduled && scheduledFor) formData.set("scheduledFor", scheduledFor)
+    if (showSendAnyway && sendAnyway) formData.set("sendAnyway", "on")
 
     startTransition(async () => {
       try {
-        const result = await sendCustomNotification(formData);
+        const result = await sendCustomNotification(formData)
         if (!result.ok) {
-          toast.error(result.error);
-          return;
+          toast.error(result.error)
+          return
         }
-        const { scheduled: wasScheduled, recipients, emailsSent, emailsFailed } = result.data;
-        const who = recipientType === "all" ? "all members" : `${recipients} ${recipients === 1 ? "member" : "members"}`;
-        if (wasScheduled) toast.success(`Scheduled for ${who}`);
+        const { scheduled: wasScheduled, recipients, emailsSent, emailsFailed } = result.data
+        const who = recipientType === "all" ? "all members" : `${recipients} ${recipients === 1 ? "member" : "members"}`
+        if (wasScheduled) toast.success(`Scheduled for ${who}`)
         else if (emailsFailed > 0) {
-          toast.warning(`Sent to ${who}, but ${emailsFailed} of ${emailsSent + emailsFailed} emails failed. Check Activity before resending.`);
-        } else toast.success(`Sent to ${who}${emailsSent ? ` (${emailsSent} ${emailsSent === 1 ? "email" : "emails"})` : ""}`);
-        form.reset();
-        setScheduled(false);
-        setSelectedUsers([]);
-        setSearchQuery("");
+          toast.warning(`Sent to ${who}, but ${emailsFailed} of ${emailsSent + emailsFailed} emails failed. Check Activity before resending.`)
+        } else toast.success(`Sent to ${who}${emailsSent ? ` (${emailsSent} ${emailsSent === 1 ? "email" : "emails"})` : ""}`)
+        reset()
       } catch (error) {
-        console.error(error);
-        toast.error(unexpectedError(error, "Couldn't send the notification"));
+        console.error(error)
+        toast.error(unexpectedError(error, "Couldn't send the notification"))
       }
-    });
-  };
+    })
+  }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="border border-white/10 bg-white/[0.02] p-6 space-y-6">
-        {/* Recipient Selection */}
-        <div className="space-y-4">
-          <Label className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60">
-            Recipients
-          </Label>
-
-          <Select
-            value={recipientType}
-            onValueChange={(v) => {
-              setRecipientType(v as "single" | "multiple" | "all");
-              // Clear selection when switching types
-              if (v === "all") setSelectedUsers([]);
-              if (v === "single" && selectedUsers.length > 1) {
-                setSelectedUsers(selectedUsers.slice(0, 1));
-              }
-            }}
-          >
-            <SelectTrigger className="rounded-none bg-white/5 border-white/10 text-white">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="rounded-none bg-lsr-charcoal border-white/10">
-              <SelectItem value="single" className="rounded-none">
-                <div className="flex items-center gap-2">
-                  <User className="h-4 w-4" />
-                  Single User
-                </div>
-              </SelectItem>
-              <SelectItem value="multiple" className="rounded-none">
-                <div className="flex items-center gap-2">
-                  <UserPlus className="h-4 w-4" />
-                  Multiple Users
-                </div>
-              </SelectItem>
-              <SelectItem value="all" className="rounded-none">
-                <div className="flex items-center gap-2">
-                  <Users className="h-4 w-4" />
-                  All Active Members
-                </div>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* User Search */}
-          {(recipientType === "single" || recipientType === "multiple") && (
-            <div className="space-y-3">
-              {/* Selected Users */}
-              {selectedUsers.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {selectedUsers.map((user) => (
-                    <div
-                      key={user.id}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-lsr-orange/10 border border-lsr-orange/30"
-                    >
-                      <div className="flex flex-col">
-                        <span className="text-sm text-white leading-tight">
-                          {user.displayName}
-                        </span>
-                        <span className="text-[10px] text-white/50 leading-tight">
-                          {user.email}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeUser(user.id)}
-                        className="text-white/50 hover:text-red-500 transition-colors"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Search Input - show if multiple or if single with no selection */}
-              {(recipientType === "multiple" || selectedUsers.length === 0) && (
-                <div className="relative">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40" />
-                    <Input
-                      type="text"
-                      placeholder={
-                        recipientType === "multiple"
-                          ? "Search to add users..."
-                          : "Search by name, email, or handle..."
-                      }
-                      value={searchQuery}
-                      onChange={(e) => handleSearch(e.target.value)}
-                      className="rounded-none bg-white/5 border-white/10 text-white pl-10"
+    <form onSubmit={handleSubmit} noValidate>
+      <SplitLayout
+        main={
+          <Panel>
+            <PanelHeader title="New notification" description="A custom message to members, in the site's notification bell, by email, or both." />
+            <PanelBody className="flex flex-col gap-6">
+              <FormSection title="Recipients">
+                <Field label="Send to" htmlFor="compose-recipient-type">
+                  <Select id="compose-recipient-type" value={recipientType} onChange={(e) => changeRecipientType(e.target.value as RecipientType)}>
+                    <option value="single">One member</option>
+                    <option value="multiple">Several members</option>
+                    <option value="all">All active members</option>
+                  </Select>
+                </Field>
+                {recipientType === "single" && (
+                  <Field label="Member" htmlFor="compose-member" hint="Active members only. Search by name, handle, email or EID.">
+                    <UserPicker
+                      id="compose-member"
+                      value={selectedUsers[0] ?? null}
+                      onChange={(user) => setSelectedUsers(user ? [user] : [])}
+                      search={searchActiveMembers}
+                      placeholder="Find a member"
                     />
-                    {isSearching && (
-                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40 animate-spin" />
-                    )}
-                  </div>
+                  </Field>
+                )}
+                {recipientType === "multiple" && (
+                  <Field
+                    label="Members"
+                    hint={selectedUsers.length ? `${plural(selectedUsers.length, "member")} chosen` : "Active members only. Search by name, handle, email or EID."}
+                  >
+                    <UserMultiPicker value={selectedUsers} onChange={setSelectedUsers} search={searchActiveMembers} placeholder="Add members" />
+                  </Field>
+                )}
+                {recipientType === "all" && <Notice tone="warning">This goes to every active member.</Notice>}
+              </FormSection>
 
-                  {/* Search Results Dropdown */}
-                  {searchResults.length > 0 && (
-                    <div className="absolute z-10 w-full mt-1 bg-lsr-charcoal border border-white/10 max-h-48 overflow-y-auto">
-                      {searchResults.map((user) => (
-                        <button
-                          key={user.id}
-                          type="button"
-                          onClick={() => addUser(user)}
-                          className="w-full px-4 py-2 text-left hover:bg-white/5 flex flex-col"
-                        >
-                          <span className="text-sm text-white">{user.displayName}</span>
-                          <span className="text-xs text-white/40">
-                            {user.email} &bull; @{user.handle}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
+              <FormSection title="Channels">
+                <div className="flex flex-wrap gap-x-6 gap-y-2">
+                  <CheckboxField label="In-app" description="The bell on the site" checked={sendInApp} onChange={(e) => setSendInApp(e.target.checked)} />
+                  <CheckboxField
+                    label="Email"
+                    description="Skips members who turned announcement emails off"
+                    checked={sendEmail}
+                    onChange={(e) => setSendEmail(e.target.checked)}
+                  />
+                </div>
+                {sendEmail && (
+                  <Notice
+                    tone={emailsLeft !== null && emailsLeft < 20 ? "warning" : "neutral"}
+                    title={emailsLeft === null ? `${plural(sentToday, "email")} sent today` : `${plural(emailsLeft, "email")} left for announcements today`}
+                  >
+                    {dailyLimit === null ? (
+                      "This email plan has no daily limit."
+                    ) : (
+                      <>
+                        {sentToday} of {dailyLimit} daily emails sent today; the limit resets at 7 pm Central (6 pm in winter). An immediate send that
+                        would go over is stopped first, keeping {keptForReceipts} for confirmations and receipts. Scheduled sends aren&apos;t checked.
+                      </>
+                    )}
+                  </Notice>
+                )}
+                {showSendAnyway && (
+                  <CheckboxField
+                    label="Send anyway, even if it goes over"
+                    description="Resend refuses emails past the limit, so some members may not get it, and confirmations and receipts won't go out until the reset."
+                    checked={sendAnyway}
+                    onChange={(e) => setSendAnyway(e.target.checked)}
+                  />
+                )}
+              </FormSection>
+
+              <FormSection title="Message">
+                <Field label="Title" htmlFor="compose-title" required>
+                  <Input id="compose-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="GM 1 is Monday" />
+                </Field>
+                <Field label="Message" htmlFor="compose-body" required>
+                  <Textarea id="compose-body" rows={4} value={body} onChange={(e) => setBody(e.target.value)} placeholder="What members need to know" />
+                </Field>
+                <FieldGrid>
+                  <Field label="Link" htmlFor="compose-action-url" hint="Optional. Where the email button and the bell go.">
+                    <Input id="compose-action-url" value={actionUrl} onChange={(e) => setActionUrl(e.target.value)} placeholder="/events/general-meeting-1" />
+                  </Field>
+                  <Field label="Button text" htmlFor="compose-action-text" hint="Optional. Defaults to View Details.">
+                    <Input id="compose-action-text" value={actionText} onChange={(e) => setActionText(e.target.value)} placeholder="View Details" />
+                  </Field>
+                </FieldGrid>
+              </FormSection>
+
+              <FormSection title="Delivery">
+                <SwitchField
+                  label="Schedule for later"
+                  description="Off sends it as soon as you press Send."
+                  checked={scheduled}
+                  onCheckedChange={(on) => {
+                    setScheduled(on)
+                    if (!on) setScheduledFor("")
+                  }}
+                />
+                {scheduled && (
+                  <Field label="Send at (Central)" htmlFor="compose-scheduled-for" error={scheduleError} hint={scheduledDate ? centralTime(scheduledDate, "EEEE, MMM d 'at' h:mm a") : undefined}>
+                    <Input
+                      id="compose-scheduled-for"
+                      type="datetime-local"
+                      value={scheduledFor}
+                      onChange={(e) => setScheduledFor(e.target.value)}
+                      aria-invalid={!!scheduleError}
+                      className="sm:max-w-64"
+                    />
+                  </Field>
+                )}
+              </FormSection>
+            </PanelBody>
+            <PanelFooter>
+              <FormActions className="w-full" note={blockedReason}>
+                <Button type="submit" variant="primary" pending={isPending} disabled={!!blockedReason}>
+                  {!isPending && <Send aria-hidden />}
+                  {scheduled ? "Schedule" : "Send now"}
+                </Button>
+              </FormActions>
+            </PanelFooter>
+          </Panel>
+        }
+        side={
+          <Panel>
+            <PanelHeader title="Preview" description="Roughly how it reads in the bell and the email." />
+            <PanelBody>
+              <div className="flex gap-3 rounded-md border bg-admin-surface p-3">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full border bg-card text-admin-subtle">
+                  <Bell className="size-4" aria-hidden />
+                </span>
+                <div className="flex min-w-0 flex-col gap-1">
+                  <p className={title.trim() ? "break-words font-semibold" : "font-semibold text-admin-subtle"}>{title.trim() || "Title"}</p>
+                  <p className={body.trim() ? "whitespace-pre-wrap break-words text-muted-foreground" : "text-admin-subtle"}>{body.trim() || "Message"}</p>
+                  {actionUrl.trim() && (
+                    <span className="mt-1 w-fit rounded-md border bg-card px-2.5 py-1 text-xs font-semibold">{actionText.trim() || "View Details"}</span>
                   )}
                 </div>
-              )}
-
-              {recipientType === "multiple" && selectedUsers.length > 0 && (
-                <p className="text-xs text-white/40">
-                  {selectedUsers.length} user{selectedUsers.length !== 1 ? "s" : ""} selected
-                </p>
-              )}
-            </div>
-          )}
-
-          {recipientType === "all" && (
-            <div className="p-3 bg-yellow-500/10 border border-yellow-500/30">
-              <p className="text-sm text-yellow-500">
-                This will send a notification to all active members.
+              </div>
+              <p className="mt-3 text-xs text-admin-subtle">
+                {recipientType === "all"
+                  ? "To every active member"
+                  : selectedUsers.length
+                    ? `To ${selectedUsers.map((u) => u.displayName).join(", ")}`
+                    : "No recipients yet"}
+                {" · "}
+                {[sendInApp && "In-app", sendEmail && "Email"].filter(Boolean).join(" and ") || "No channel"}
+                {" · "}
+                {scheduledDate ? centralTime(scheduledDate, "MMM d, h:mm a") : "Sends right away"}
               </p>
-            </div>
-          )}
-        </div>
-
-        {/* Channels */}
-        <div className="space-y-4">
-          <Label className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60">
-            Channels
-          </Label>
-          <div className="flex gap-6">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="sendInApp"
-                name="sendInApp"
-                checked={sendInApp}
-                onCheckedChange={(c) => setSendInApp(c === true)}
-                className="rounded-none border-white/30 data-[state=checked]:bg-lsr-orange data-[state=checked]:border-lsr-orange"
-              />
-              <Label htmlFor="sendInApp" className="text-sm text-white cursor-pointer">
-                In-App
-              </Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="sendEmail"
-                name="sendEmail"
-                checked={sendEmail}
-                onCheckedChange={(c) => setSendEmail(c === true)}
-                className="rounded-none border-white/30 data-[state=checked]:bg-lsr-orange data-[state=checked]:border-lsr-orange"
-              />
-              <Label htmlFor="sendEmail" className="text-sm text-white cursor-pointer">
-                Email
-              </Label>
-            </div>
-          </div>
-          {sendEmail && (
-            <div className="space-y-2 text-xs text-white/50">
-              {emailUsage.dailyLimit === null ? (
-                <p>{emailUsage.sentToday} emails sent today. This email plan has no daily limit.</p>
-              ) : (
-                <p>
-                  {emailUsage.sentToday} of {emailUsage.dailyLimit} daily emails sent today; the limit resets at 7 pm Central (6 pm
-                  in winter). An immediate send that would go over is stopped first, keeping {keptForReceipts} for confirmations and receipts.
-                  Scheduled sends aren&apos;t checked.
-                </p>
-              )}
-              {emailUsage.dailyLimit !== null && !scheduled && (
-                <div className="flex items-start gap-2">
-                  <Checkbox
-                    id="sendAnyway"
-                    name="sendAnyway"
-                    className="mt-0.5 rounded-none border-white/30 data-[state=checked]:bg-lsr-orange data-[state=checked]:border-lsr-orange"
-                  />
-                  <Label htmlFor="sendAnyway" className="cursor-pointer text-xs leading-relaxed text-white/70">
-                    Send anyway, even if it goes over. Resend refuses emails past the limit, so some members may not get it, and
-                    confirmations and receipts won&apos;t go out until the reset.
-                  </Label>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Title */}
-        <div className="space-y-2">
-          <Label
-            htmlFor="title"
-            className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60"
-          >
-            Title
-          </Label>
-          <Input
-            id="title"
-            name="title"
-            required
-            placeholder="Notification title..."
-            className="rounded-none bg-white/5 border-white/10 text-white"
-          />
-        </div>
-
-        {/* Body */}
-        <div className="space-y-2">
-          <Label
-            htmlFor="body"
-            className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60"
-          >
-            Body
-          </Label>
-          <textarea
-            id="body"
-            name="body"
-            required
-            rows={4}
-            placeholder="Notification body..."
-            className="w-full rounded-none bg-white/5 border border-white/10 text-white p-3 focus:outline-none focus:border-lsr-orange"
-          />
-        </div>
-
-        {/* Action URL */}
-        <div className="space-y-2">
-          <Label
-            htmlFor="actionUrl"
-            className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60"
-          >
-            Action URL (Optional)
-          </Label>
-          <div className="grid md:grid-cols-2 gap-4">
-            <Input
-              id="actionUrl"
-              name="actionUrl"
-              placeholder="/events/my-event"
-              className="rounded-none bg-white/5 border-white/10 text-white"
-            />
-            <Input
-              id="actionText"
-              name="actionText"
-              placeholder="Button text (default: View Details)"
-              className="rounded-none bg-white/5 border-white/10 text-white"
-            />
-          </div>
-          <p className="text-xs text-white/40">
-            Link and button text for the email call-to-action
-          </p>
-        </div>
-
-        {/* Schedule */}
-        <div className="space-y-2">
-          <Label
-            htmlFor="scheduledFor"
-            className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60"
-          >
-            Schedule For, Central Time (Optional)
-          </Label>
-          <Input
-            id="scheduledFor"
-            name="scheduledFor"
-            onChange={(e) => setScheduled(e.target.value !== "")}
-            type="datetime-local"
-            className="rounded-none bg-white/5 border-white/10 text-white"
-          />
-          <p className="text-xs text-white/40">
-            Leave empty to send immediately
-          </p>
-        </div>
-      </div>
-
-      {/* Submit */}
-      <Button
-        type="submit"
-        disabled={
-          isPending ||
-          (!sendInApp && !sendEmail) ||
-          ((recipientType === "single" || recipientType === "multiple") && selectedUsers.length === 0)
+            </PanelBody>
+          </Panel>
         }
-        className="rounded-none bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal font-bold uppercase tracking-widest text-[10px] h-12 px-8"
-      >
-        {isPending ? (
-          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-        ) : (
-          <Send className="h-4 w-4 mr-2" />
-        )}
-        Send Notification
-      </Button>
+      />
     </form>
-  );
+  )
 }
