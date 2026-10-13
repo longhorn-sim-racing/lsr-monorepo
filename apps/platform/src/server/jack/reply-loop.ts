@@ -1,24 +1,58 @@
 import { randomUUID } from "node:crypto"
-import { JACK_EVENT, JACK_PERSONA_NAME, type JackPersonaKey } from "@/lib/jack/types"
+import type { Prisma } from "@prisma/client"
+import type { JackToolPart } from "@/lib/jack/parts"
+import { formatUsd } from "@/lib/jack/spend"
+import { JACK_EVENT, JACK_PERSONA_NAME, type JackRoomPersonaKey } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
+import { UsageTally } from "./cost"
 import { DeltaStream } from "./delta-stream"
+import { buildHistory } from "./history"
 import { FORMER_OFFICER, jackMessageInclude, toMessageView, type JackMessageRow } from "./messages"
+import { anthropicJackClient, runModelReply, type JackModelClient, type ReplyLimits, type ReplyOutcome } from "./model-loop"
+import { JACK_MODELS } from "./models"
+import { buildSystemPrompt } from "./prompt"
 import { releaseRoomLock, renewRoomLock, tryAcquireRoomLock } from "./room-lock"
+import { getMonthSpend } from "./spend"
+import { nameRoom } from "./stand"
+import { JACK_TOOLS } from "./tools"
+import type { AnyJackTool } from "./tools/types"
 
 export type ReplyLoopDeps = {
   broadcast: RoomBroadcaster
-  /** Paces the placeholder reply; tests skip the wait */
-  sleep: (ms: number) => Promise<void>
+  /** Claude, or null when ANTHROPIC_API_KEY isn't set (Jack then says so in the room) */
+  getClient: () => JackModelClient | null
+  tools: AnyJackTool[]
+  /** This month's spend against JACK_MONTHLY_BUDGET_USD, checked before every reply */
+  budget: () => Promise<{ month: string; spentUsd: number; budgetUsd: number }>
+  limits?: Partial<ReplyLimits>
 }
 
-const defaultDeps: ReplyLoopDeps = {
+let cachedClient: { key: string; client: JackModelClient } | null = null
+
+function claudeFromEnv(): JackModelClient | null {
+  const key = process.env.ANTHROPIC_API_KEY?.trim()
+  if (!key) return null
+  if (cachedClient?.key !== key) cachedClient = { key, client: anthropicJackClient(key) }
+  return cachedClient.client
+}
+
+export const defaultReplyDeps: ReplyLoopDeps = {
   broadcast: broadcastRoomEvent,
-  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  getClient: claudeFromEnv,
+  tools: JACK_TOOLS,
+  budget: async () => {
+    const spend = await getMonthSpend()
+    return { month: spend.month, spentUsd: spend.totalUsd, budgetUsd: spend.budgetUsd }
+  },
 }
 
-/** The placeholder reply takes about this long to stream, so viewers can watch it arrive */
-const PLACEHOLDER_STREAM_MS = 3_000
+// TODO(after the tools branch merges): pass JACK_SCHEMA_NOTES from "./tools/schema-notes" here, so
+// the notes on tricky tables sit in the cached system prompt
+const SCHEMA_NOTES: string | undefined = undefined
+
+/** How much of a room the history is built from (it keeps the last 40 exchanges of that) */
+const HISTORY_ROWS = 2_000
 
 /** Officer messages nobody has answered yet, oldest first (system notes don't get answers) */
 function findUnanswered(roomId: string) {
@@ -46,10 +80,14 @@ async function hasUnanswered(roomId: string) {
  * then looks once more: a message posted just before that found the lock taken and left it to this
  * run, so if one is there the run takes the lock back (or sees that a newer run has it). That way
  * nothing is ever left unanswered.
+ *
+ * Side jobs a reply starts (Stand naming the room) run alongside and are awaited before it returns,
+ * so the function stays alive for them.
  */
-export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultDeps): Promise<void> {
+export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultReplyDeps): Promise<void> {
   const runId = randomUUID()
   if (!(await tryAcquireRoomLock(roomId, runId))) return
+  const sideJobs: Promise<void>[] = []
   let holding = true
   try {
     await closeInterruptedReplies(roomId, deps)
@@ -60,7 +98,7 @@ export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultDeps)
           holding = false // a newer run took over a lock it thought was stale; it answers from here
           return
         }
-        await answer(roomId, waiting, deps)
+        await answer(roomId, waiting, deps, sideJobs)
         continue
       }
 
@@ -72,6 +110,7 @@ export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultDeps)
     }
   } finally {
     if (holding) await releaseRoomLock(roomId, runId).catch((error) => console.error("[jack] Couldn't release the room lock:", error))
+    await Promise.allSettled(sideJobs)
   }
 }
 
@@ -87,8 +126,17 @@ async function closeInterruptedReplies(roomId: string, deps: ReplyLoopDeps) {
   }
 }
 
+/** What a reply came to: Claude's answer, or a notice that Claude wasn't asked (no key, budget used up) */
+type Produced = {
+  text: string
+  status: "done" | "error"
+  outcome: ReplyOutcome | "no_api_key" | "over_budget"
+  parts: JackToolPart[]
+  toolCalls: number
+}
+
 /** One reply to every message in `waiting`, from the room's persona as it is now */
-async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoopDeps) {
+async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoopDeps, sideJobs: Promise<void>[]) {
   const reply = await prisma.$transaction(async (tx) => {
     const room = await tx.jackRoom.findUnique({ where: { id: roomId }, select: { persona: true } })
     const created = await tx.jackMessage.create({
@@ -103,6 +151,11 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   })
   await deps.broadcast(roomId, { type: JACK_EVENT.created, message: toMessageView(reply) })
 
+  const persona: JackRoomPersonaKey = reply.persona === "lift" ? "lift" : "jack"
+  const usage = new UsageTally(JACK_MODELS[persona].model)
+  const startedAt = Date.now()
+  let parts: JackToolPart[] = []
+
   const stream = new DeltaStream({
     roomId,
     messageId: reply.id,
@@ -112,48 +165,140 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
     },
   })
 
-  let status: "done" | "error" = "done"
+  let produced: Produced | null = null
+  let status: "done" | "error"
   let result: { content: string; streamSeq: number }
   try {
-    const pieces = chunkForStreaming(placeholderReply(reply.persona ?? "jack", waiting))
-    const pause = Math.max(10, Math.round(PLACEHOLDER_STREAM_MS / pieces.length))
-    for (const piece of pieces) {
-      stream.write(piece)
-      await deps.sleep(pause)
-    }
-    result = await stream.end()
+    produced = await produce(roomId, reply, persona, waiting, deps, stream, usage, (latest) => {
+      parts = latest
+    })
+    status = produced.status
+    parts = produced.parts
+    const ended = await stream.end()
+    // The reply's own text, not what streamed: a declined partial is dropped from it
+    result = { content: produced.text, streamSeq: ended.streamSeq }
   } catch (error) {
     console.error(`[jack] Reply ${reply.id} in room ${roomId} failed:`, error)
     status = "error"
-    result = stream.abort()
+    const sent = stream.abort()
+    result = { content: produced?.text ?? sent.content, streamSeq: sent.streamSeq }
+  }
+
+  const tokens = usage.tokens
+  if (usage.calls) {
+    console.info(
+      `[jack] Reply ${reply.id} in room ${roomId}: ${JACK_PERSONA_NAME[persona]} (${usage.models.join(", ")}) $${usage.costUsd}, ` +
+        `${tokens.inputTokens} in + ${tokens.cacheWriteTokens} cache write + ${tokens.cacheReadTokens} cache read, ${tokens.outputTokens} out, ` +
+        `${usage.calls} calls, ${produced?.toolCalls ?? 0} tool calls, ${((Date.now() - startedAt) / 1000).toFixed(1)} s, ${produced?.outcome ?? "failed"}`
+    )
   }
 
   let final: JackMessageRow
   try {
     final = await prisma.jackMessage.update({
       where: { id: reply.id },
-      data: { content: result.content, streamSeq: result.streamSeq, status },
+      data: {
+        content: result.content,
+        streamSeq: result.streamSeq,
+        status,
+        ...(parts.length ? { toolCalls: parts as unknown as Prisma.InputJsonValue } : {}),
+        ...(usage.calls
+          ? {
+              model: usage.models.join(","),
+              // Everything not read from the cache; the whole prompt is this plus cacheReadTokens
+              inputTokens: tokens.inputTokens + tokens.cacheWriteTokens,
+              outputTokens: tokens.outputTokens,
+              cacheReadTokens: tokens.cacheReadTokens,
+              costUsd: usage.costUsd,
+            }
+          : {}),
+      },
       include: jackMessageInclude,
     })
   } catch (error) {
     // Viewers still get the ending; the next run closes the row as interrupted
     console.error(`[jack] Couldn't save reply ${reply.id}:`, error)
-    final = { ...reply, ...result, status: "error" }
+    final = { ...reply, ...result, status: "error", toolCalls: parts as unknown as Prisma.JsonValue }
   }
   await deps.broadcast(roomId, { type: JACK_EVENT.done, message: toMessageView(final) })
+
+  // Stand names an untitled room after its first real answer, in the background
+  if (status === "done" && produced?.outcome === "answered" && !sideJobs.length) {
+    const room = await prisma.jackRoom.findUnique({ where: { id: roomId }, select: { title: true } })
+    const claude = deps.getClient()
+    if (room?.title === null && claude) {
+      const budget = await deps.budget()
+      if (budget.spentUsd < budget.budgetUsd) {
+        sideJobs.push(nameRoom({ roomId, client: claude, broadcast: deps.broadcast, question: officerLines(waiting), answer: result.content }))
+      }
+    }
+  }
 }
 
-/** What the persona says until there's a model behind it: the question(s), with who asked */
-export function placeholderReply(persona: JackPersonaKey, waiting: Pick<JackMessageRow, "content" | "author">[]): string {
-  const asked = waiting.map((m) => `${m.author?.displayName ?? FORMER_OFFICER}: ${m.content}`).join("\n")
-  return `${JACK_PERSONA_NAME[persona]} here (placeholder, no AI yet). You asked:\n${asked}`
+async function produce(
+  roomId: string,
+  reply: JackMessageRow,
+  persona: JackRoomPersonaKey,
+  waiting: JackMessageRow[],
+  deps: ReplyLoopDeps,
+  stream: DeltaStream,
+  usage: UsageTally,
+  onParts: (parts: JackToolPart[]) => void
+): Promise<Produced> {
+  const name = JACK_PERSONA_NAME[persona]
+  const notice = (text: string, outcome: Produced["outcome"]): Produced => {
+    stream.write(text)
+    return { text, status: "done", outcome, parts: [], toolCalls: 0 }
+  }
+
+  const claude = deps.getClient()
+  if (!claude) return notice(`${name} isn't connected yet: an admin needs to add the Anthropic API key.`, "no_api_key")
+
+  const budget = await deps.budget()
+  if (budget.spentUsd >= budget.budgetUsd) {
+    return notice(
+      `${name}'s monthly budget is used up: ${formatUsd(budget.spentUsd)} of ${formatUsd(budget.budgetUsd, { wholeIfRound: true })} spent in ${budget.month}. ` +
+        `${name} answers again next month, or an admin can raise JACK_MONTHLY_BUDGET_USD.`,
+      "over_budget"
+    )
+  }
+
+  const rows = await prisma.jackMessage.findMany({
+    where: { roomId },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: HISTORY_ROWS,
+    include: jackMessageInclude,
+  })
+  const history = buildHistory(rows.reverse(), reply.id)
+  const latest = waiting[waiting.length - 1]
+
+  const out = await runModelReply({
+    client: claude,
+    config: JACK_MODELS[persona],
+    system: buildSystemPrompt(persona, { schemaNotes: SCHEMA_NOTES }),
+    tools: deps.tools,
+    history,
+    // Tools run as the officer whose message is newest
+    ctx: { roomId, actor: { userId: latest.authorUserId, displayName: latest.author?.displayName ?? FORMER_OFFICER } },
+    onText: (text) => stream.write(text),
+    onPart: (part, all) => {
+      onParts(all)
+      return stream.sendInOrder(async () => {
+        try {
+          await prisma.jackMessage.update({ where: { id: reply.id }, data: { toolCalls: all as unknown as Prisma.InputJsonValue } })
+        } catch (error) {
+          console.error(`[jack] Couldn't save tool calls on reply ${reply.id}:`, error)
+        }
+        await deps.broadcast(roomId, { type: JACK_EVENT.tool, messageId: reply.id, part })
+      })
+    },
+    usage,
+    limits: deps.limits,
+  })
+  return { text: out.text, status: out.status, outcome: out.outcome, parts: out.parts, toolCalls: out.toolCalls }
 }
 
-/** Splits text into at most `maxPieces` runs of whole words, in order (joined back, they're the text) */
-export function chunkForStreaming(text: string, maxPieces = 60): string[] {
-  const words = text.match(/\s*\S+\s*/g) ?? [text]
-  const perPiece = Math.ceil(words.length / maxPieces)
-  const pieces: string[] = []
-  for (let i = 0; i < words.length; i += perPiece) pieces.push(words.slice(i, i + perPiece).join(""))
-  return pieces
+/** The messages a reply answered, as Stand reads them */
+function officerLines(waiting: JackMessageRow[]): string {
+  return waiting.map((m) => `${m.author?.displayName ?? FORMER_OFFICER}: ${m.content}`).join("\n")
 }
