@@ -78,9 +78,7 @@ export function CarsConsole({ cars }: { cars: CarRow[] }) {
   return (
     <SplitLayout
       main={
-        // The kit DataTable's sr-only "Actions" header is absolutely positioned and escapes its scroll box, which makes phones
-        // scroll sideways. Clip it here until the kit contains it.
-        <div className="relative -mx-0.5 min-w-0 overflow-x-clip px-0.5">
+        <>
           <DataTable
             rows={visible}
             columns={columns}
@@ -119,7 +117,7 @@ export function CarsConsole({ cars }: { cars: CarRow[] }) {
               </RowActions>
             )}
           />
-        </div>
+        </>
       }
       side={
         cars.length === 0 ? undefined : selected ? (

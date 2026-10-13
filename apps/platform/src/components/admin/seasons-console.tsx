@@ -83,10 +83,8 @@ export function SeasonsConsole({ seasons }: { seasons: SeasonRow[] }) {
     { id: "entries", header: "Standings", align: "right", hideBelow: "sm", sortValue: (s) => s.entries, cell: (s) => plural(s.entries, "driver") },
   ]
 
-  // The kit DataTable's sr-only "Actions" header is absolutely positioned and escapes its scroll box, which makes phones
-  // scroll sideways. Clip it here until the kit contains it.
   return (
-    <div className="relative -mx-0.5 min-w-0 overflow-x-clip px-0.5">
+    <>
       <DataTable
         rows={seasons}
         columns={columns}
@@ -140,6 +138,6 @@ export function SeasonsConsole({ seasons }: { seasons: SeasonRow[] }) {
           )
         }}
       />
-    </div>
+    </>
   )
 }

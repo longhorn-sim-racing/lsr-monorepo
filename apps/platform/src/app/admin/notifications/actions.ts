@@ -290,30 +290,6 @@ export async function updateEmailSettings(formData: FormData) {
   revalidatePath("/admin/notifications");
 }
 
-export async function searchUsers(query: string) {
-  await requireOfficer();
-
-  if (!query || query.length < 2) return [];
-
-  return prisma.user.findMany({
-    where: {
-      OR: [
-        { displayName: { contains: query, mode: "insensitive" } },
-        { email: { contains: query, mode: "insensitive" } },
-        { handle: { contains: query, mode: "insensitive" } },
-      ],
-      status: "active",
-    },
-    select: {
-      id: true,
-      displayName: true,
-      email: true,
-      handle: true,
-    },
-    take: 10,
-  });
-}
-
 export async function deleteNotificationAdmin(notificationId: string) {
   const user = await requireOfficer();
 

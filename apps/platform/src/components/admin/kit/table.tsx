@@ -11,7 +11,7 @@ import { EmptyState } from "./surface"
 
 export function Table({ className, minWidth = 640, children }: { className?: string; minWidth?: number; children: React.ReactNode }) {
   return (
-    <div className={cn("min-w-0 overflow-x-auto rounded-lg border bg-card", className)}>
+    <div className={cn("relative min-w-0 overflow-x-auto rounded-lg border bg-card", className)}>
       <table className="w-full border-collapse text-[13px] tabular-nums" style={{ minWidth }}>
         {children}
       </table>
@@ -169,7 +169,7 @@ export function DataTable<T>({
         </Toolbar>
       )}
       <div className="min-w-0 overflow-hidden rounded-lg border bg-card">
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full border-collapse text-[13px] tabular-nums" style={{ minWidth: minWidth ?? 640 }}>
             <thead className="border-b bg-admin-surface text-left">
               <tr>

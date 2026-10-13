@@ -67,6 +67,10 @@ export async function previewParseResult(uploadId: string) {
   if (!upload) {
     return { ok: false as const, error: "That upload no longer exists. Go back to the results list." };
   }
+  // Re-parsing would reset the status and allow a second ingest of the same race
+  if (upload.status === "INGESTED") {
+    return { ok: false as const, error: "These results are already ingested. Delete them with their race records to parse the file again." };
+  }
 
   const { rawJson } = upload;
 
