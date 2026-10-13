@@ -186,6 +186,9 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
       (block, i) => block.type !== "fallback" && (i > switchedAt || !DROPPED_BEFORE_FALLBACK.has(block.type))
     ) as BetaContentBlockParam[]
     const toolUses = message.content.slice(switchedAt + 1).filter((block): block is BetaToolUseBlock => block.type === "tool_use")
+    for (const part of parts) {
+      if (part.status === "running" && !toolUses.some((use) => use.id === part.id)) upsertPart({ ...part, status: "error", label: "Didn't run", error: "Didn't run" })
+    }
 
     if (message.stop_reason === "refusal") {
       console.warn(`[jack] Claude declined in room ${ctx.roomId} (${message.stop_details?.category ?? "no category"})`)

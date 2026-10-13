@@ -349,7 +349,10 @@ describe("runModelReply", () => {
       "tool_use",
     ])
     expect(toolResults(fake.calls[1].messages.at(-1)!).map((r) => r.tool_use_id)).toEqual(["toolu_after"])
-    expect(result.parts.find((p) => p.id === "toolu_declined")?.status).toBe("error")
+    expect(result.parts.find((p) => p.id === "toolu_declined")).toMatchObject({ status: "error", label: "Didn't run" })
+    // closed as soon as the switch was seen, before the tools after it ran
+    const events = partEvents().map((p) => `${p.id}:${p.status}`)
+    expect(events.indexOf("toolu_declined:error")).toBeLessThan(events.indexOf("toolu_after:done"))
     // each attempt is priced at the rate of the model that ran it
     expect(result.usage.models).toEqual(["claude-sonnet-5-5", "claude-sonnet-5"])
   })
