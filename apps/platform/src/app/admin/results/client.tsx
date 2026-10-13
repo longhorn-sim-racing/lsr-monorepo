@@ -103,50 +103,53 @@ export function ResultsAdminClient({ results, openUpload = false }: { results: R
         actions={uploadButton("primary")}
       />
 
-      <DataTable
-        rows={rows}
-        columns={columns}
-        getRowId={(r) => r.id}
-        search={{ placeholder: "Search files and events", text: (r) => `${r.filename} ${r.event?.title ?? ""} ${r.uploadedBy.displayName} ${STATUS_LABEL[r.status]}` }}
-        filters={
-          <Segmented
-            label="Show"
-            value={view}
-            onChange={setView}
-            options={[
-              { value: "all", label: "All", count: counts.all },
-              { value: "open", label: "Not ingested", count: counts.open },
-              { value: "ingested", label: "Ingested", count: counts.ingested },
-              { value: "failed", label: "Failed", count: counts.failed },
-            ]}
-          />
-        }
-        initialSort={{ id: "uploadedAt", desc: true }}
-        rowHref={(r) => `/admin/results/${r.id}`}
-        noun={{ one: "upload", many: "uploads" }}
-        minWidth={720}
-        empty={
-          results.length === 0 ? (
-            <EmptyState title="No results uploaded" description="Upload a results .json file from the race server to add one." action={uploadButton("secondary")} />
-          ) : (
-            <EmptyState title="Nothing here" description="No uploads have this status." />
-          )
-        }
-        rowActions={(r) => (
-          <RowActions>
-            <IconButton label={`Download ${r.filename}`} asChild>
-              <a href={`/admin/results/${r.id}/raw`} download={r.filename}>
-                <Download />
-              </a>
-            </IconButton>
-            <IconButton label={`Open ${r.filename}`} asChild>
-              <Link href={`/admin/results/${r.id}`}>
-                <ChevronRight />
-              </Link>
-            </IconButton>
-          </RowActions>
-        )}
-      />
+      {/* The kit DataTable's sr-only "Actions" header is absolutely positioned and escapes its scroll box, which makes phones scroll sideways. Clip it here until the kit contains it. */}
+      <div className="relative -mx-0.5 min-w-0 overflow-x-clip px-0.5">
+        <DataTable
+          rows={rows}
+          columns={columns}
+          getRowId={(r) => r.id}
+          search={{ placeholder: "Search files and events", text: (r) => `${r.filename} ${r.event?.title ?? ""} ${r.uploadedBy.displayName} ${STATUS_LABEL[r.status]}` }}
+          filters={
+            <Segmented
+              label="Show"
+              value={view}
+              onChange={setView}
+              options={[
+                { value: "all", label: "All", count: counts.all },
+                { value: "open", label: "Not ingested", count: counts.open },
+                { value: "ingested", label: "Ingested", count: counts.ingested },
+                { value: "failed", label: "Failed", count: counts.failed },
+              ]}
+            />
+          }
+          initialSort={{ id: "uploadedAt", desc: true }}
+          rowHref={(r) => `/admin/results/${r.id}`}
+          noun={{ one: "upload", many: "uploads" }}
+          minWidth={720}
+          empty={
+            results.length === 0 ? (
+              <EmptyState title="No results uploaded" description="Upload a results .json file from the race server to add one." action={uploadButton("secondary")} />
+            ) : (
+              <EmptyState title="Nothing here" description="No uploads have this status." />
+            )
+          }
+          rowActions={(r) => (
+            <RowActions>
+              <IconButton label={`Download ${r.filename}`} asChild>
+                <a href={`/admin/results/${r.id}/raw`} download={r.filename}>
+                  <Download />
+                </a>
+              </IconButton>
+              <IconButton label={`Open ${r.filename}`} asChild>
+                <Link href={`/admin/results/${r.id}`}>
+                  <ChevronRight />
+                </Link>
+              </IconButton>
+            </RowActions>
+          )}
+        />
+      </div>
 
       <UploadDialog
         open={uploadOpen}

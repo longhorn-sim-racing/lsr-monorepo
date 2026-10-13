@@ -78,47 +78,51 @@ export function CarsConsole({ cars }: { cars: CarRow[] }) {
   return (
     <SplitLayout
       main={
-        <DataTable
-          rows={visible}
-          columns={columns}
-          getRowId={(c) => c.gameCarName}
-          search={{ placeholder: "Search cars", text: (c) => `${c.gameCarName} ${c.displayName} ${c.secondaryDisplayName ?? ""}` }}
-          filters={
-            <Segmented
-              label="Show"
-              value={view}
-              onChange={setView}
-              options={[
-                { value: "all", label: "All", count: counts.all },
-                { value: "unmapped", label: "Unmapped", count: counts.unmapped },
-                { value: "mapped", label: "Mapped", count: counts.mapped },
-              ]}
-            />
-          }
-          // Unmapped first; within each group the server's order (by name) holds
-          initialSort={{ id: "status" }}
-          onRowClick={(c) => setSelectedName(c.gameCarName)}
-          selectedId={selectedName ?? undefined}
-          noun={{ one: "car", many: "cars" }}
-          minWidth={560}
-          empty={
-            cars.length === 0 ? (
-              <EmptyState title="No cars yet" description="Cars appear here once results that use them are ingested." />
-            ) : (
-              <EmptyState title={view === "unmapped" ? "Every car is mapped" : "No cars here"} />
-            )
-          }
-          rowActions={(c) => (
-            <RowActions>
-              <IconButton label={c.id ? `Edit ${c.gameCarName}` : `Map ${c.gameCarName}`} onClick={() => setSelectedName(c.gameCarName)}>
-                <Pencil />
-              </IconButton>
-            </RowActions>
-          )}
-        />
+        // The kit DataTable's sr-only "Actions" header is absolutely positioned and escapes its scroll box, which makes phones
+        // scroll sideways. Clip it here until the kit contains it.
+        <div className="relative -mx-0.5 min-w-0 overflow-x-clip px-0.5">
+          <DataTable
+            rows={visible}
+            columns={columns}
+            getRowId={(c) => c.gameCarName}
+            search={{ placeholder: "Search cars", text: (c) => `${c.gameCarName} ${c.displayName} ${c.secondaryDisplayName ?? ""}` }}
+            filters={
+              <Segmented
+                label="Show"
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: "all", label: "All", count: counts.all },
+                  { value: "unmapped", label: "Unmapped", count: counts.unmapped },
+                  { value: "mapped", label: "Mapped", count: counts.mapped },
+                ]}
+              />
+            }
+            // Unmapped first; within each group the server's order (by name) holds
+            initialSort={{ id: "status" }}
+            onRowClick={(c) => setSelectedName(c.gameCarName)}
+            selectedId={selectedName ?? undefined}
+            noun={{ one: "car", many: "cars" }}
+            minWidth={560}
+            empty={
+              cars.length === 0 ? (
+                <EmptyState title="No cars yet" description="Cars appear here once results that use them are ingested." />
+              ) : (
+                <EmptyState title={view === "unmapped" ? "Every car is mapped" : "No cars here"} />
+              )
+            }
+            rowActions={(c) => (
+              <RowActions>
+                <IconButton label={c.id ? `Edit ${c.gameCarName}` : `Map ${c.gameCarName}`} onClick={() => setSelectedName(c.gameCarName)}>
+                  <Pencil />
+                </IconButton>
+              </RowActions>
+            )}
+          />
+        </div>
       }
       side={
-        selected ? (
+        cars.length === 0 ? undefined : selected ? (
           <CarEditor
             key={selected.gameCarName}
             car={selected}

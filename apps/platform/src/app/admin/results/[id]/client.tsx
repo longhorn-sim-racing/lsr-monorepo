@@ -377,16 +377,13 @@ export function ResultDetailClient({
                     Creating the race records. This can take up to 20 seconds; keep this page open.
                   </span>
                 </Notice>
-              ) : (
+              ) : readyToIngest ? (
                 <p className="text-[13px] text-muted-foreground">
-                  {readyToIngest
-                    ? `Ready: ${upload.eventTitle} · ${SESSION_LABEL[session] ?? session} · ${POINTS_LABEL[effectivePoints] ?? effectivePoints}.`
-                    : "Finish the steps above first."}
-                  {readyToIngest &&
-                    unmapped > 0 &&
+                  Ready: {upload.eventTitle} · {SESSION_LABEL[session] ?? session} · {POINTS_LABEL[effectivePoints] ?? effectivePoints}.
+                  {unmapped > 0 &&
                     ` ${unmapped === 1 ? "1 driver isn't" : `${unmapped} drivers aren't`} mapped to a member yet, so their results won't count for anyone until you map them.`}
                 </p>
-              )}
+              ) : undefined}
             </StepPanel>
 
             {drivers.length > 0 && (

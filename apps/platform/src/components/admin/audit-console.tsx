@@ -260,7 +260,7 @@ export function AuditConsole({ actionTypes, entityTypes, initialEntry }: { actio
                     {log.targetUser && <span className="text-admin-subtle"> → {log.targetUser.displayName}</span>}
                   </span>
                 </TD>
-                <TD>
+                <TD className="whitespace-nowrap">
                   <ToneText tone={actionTone(log.actionType)}>{humanizeCode(log.actionType)}</ToneText>
                 </TD>
                 <TD className="whitespace-nowrap text-muted-foreground">{humanizeCode(log.entityType)}</TD>

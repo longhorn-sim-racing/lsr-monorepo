@@ -83,59 +83,63 @@ export function SeasonsConsole({ seasons }: { seasons: SeasonRow[] }) {
     { id: "entries", header: "Standings", align: "right", hideBelow: "sm", sortValue: (s) => s.entries, cell: (s) => plural(s.entries, "driver") },
   ]
 
+  // The kit DataTable's sr-only "Actions" header is absolutely positioned and escapes its scroll box, which makes phones
+  // scroll sideways. Clip it here until the kit contains it.
   return (
-    <DataTable
-      rows={seasons}
-      columns={columns}
-      getRowId={(s) => s.id}
-      search={{ placeholder: "Search seasons", text: (s) => `${s.name} ${s.slug} ${s.seriesTitle ?? ""} ${s.leagueName ?? ""} ${s.year}` }}
-      initialSort={{ id: "dates", desc: true }}
-      rowHref={(s) => `/admin/seasons/${s.id}/edit`}
-      noun={{ one: "season", many: "seasons" }}
-      minWidth={720}
-      empty={
-        <EmptyState
-          title="No seasons yet"
-          description="Create a season to start tracking standings for a series."
-          action={
-            <Button variant="primary" asChild>
-              <Link href="/admin/seasons/new">New season</Link>
-            </Button>
-          }
-        />
-      }
-      rowActions={(s) => {
-        const items: RowMenuItem[] = [{ label: "Edit", href: `/admin/seasons/${s.id}/edit` }]
-        if (s.applications > 0) items.push({ label: "LSC applications", href: `/admin/league-entries?season=${encodeURIComponent(s.slug)}` })
-        items.push("separator", {
-          label: "Delete",
-          destructive: {
-            title: `Delete ${s.name}?`,
-            description:
-              s.entries || s.applications
-                ? `This also deletes its ${plural(s.entries, "standings row")} and ${plural(s.applications, "LSC application")}. Race results stay. This can't be undone.`
-                : "Race results stay. This can't be undone.",
-          },
-          onSelect: () => remove(s),
-        })
-        return (
-          <RowActions>
-            <IconButton
-              label={s.hasSeries ? `Recompute standings for ${s.name}` : "Assign a series to recompute standings"}
-              disabled={!s.hasSeries || pendingId !== null}
-              onClick={() => recompute(s)}
-            >
-              <RefreshCw className={cn(pendingId === s.id && "animate-spin")} />
-            </IconButton>
-            <IconButton label={`Edit ${s.name}`} asChild>
-              <Link href={`/admin/seasons/${s.id}/edit`}>
-                <Pencil />
-              </Link>
-            </IconButton>
-            <RowMenu label={`More actions for ${s.name}`} items={items} />
-          </RowActions>
-        )
-      }}
-    />
+    <div className="relative -mx-0.5 min-w-0 overflow-x-clip px-0.5">
+      <DataTable
+        rows={seasons}
+        columns={columns}
+        getRowId={(s) => s.id}
+        search={{ placeholder: "Search seasons", text: (s) => `${s.name} ${s.slug} ${s.seriesTitle ?? ""} ${s.leagueName ?? ""} ${s.year}` }}
+        initialSort={{ id: "dates", desc: true }}
+        rowHref={(s) => `/admin/seasons/${s.id}/edit`}
+        noun={{ one: "season", many: "seasons" }}
+        minWidth={720}
+        empty={
+          <EmptyState
+            title="No seasons yet"
+            description="Create a season to start tracking standings for a series."
+            action={
+              <Button variant="primary" asChild>
+                <Link href="/admin/seasons/new">New season</Link>
+              </Button>
+            }
+          />
+        }
+        rowActions={(s) => {
+          const items: RowMenuItem[] = [{ label: "Edit", href: `/admin/seasons/${s.id}/edit` }]
+          if (s.applications > 0) items.push({ label: "LSC applications", href: `/admin/league-entries?season=${encodeURIComponent(s.slug)}` })
+          items.push("separator", {
+            label: "Delete",
+            destructive: {
+              title: `Delete ${s.name}?`,
+              description:
+                s.entries || s.applications
+                  ? `This also deletes its ${plural(s.entries, "standings row")} and ${plural(s.applications, "LSC application")}. Race results stay. This can't be undone.`
+                  : "Race results stay. This can't be undone.",
+            },
+            onSelect: () => remove(s),
+          })
+          return (
+            <RowActions>
+              <IconButton
+                label={s.hasSeries ? `Recompute standings for ${s.name}` : "Assign a series to recompute standings"}
+                disabled={!s.hasSeries || pendingId !== null}
+                onClick={() => recompute(s)}
+              >
+                <RefreshCw className={cn(pendingId === s.id && "animate-spin")} />
+              </IconButton>
+              <IconButton label={`Edit ${s.name}`} asChild>
+                <Link href={`/admin/seasons/${s.id}/edit`}>
+                  <Pencil />
+                </Link>
+              </IconButton>
+              <RowMenu label={`More actions for ${s.name}`} items={items} />
+            </RowActions>
+          )
+        }}
+      />
+    </div>
   )
 }
