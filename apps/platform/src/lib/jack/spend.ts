@@ -15,7 +15,7 @@ export function formatUsd(amount: number, { wholeIfRound = false } = {}): string
   return `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-/** "October: $3.20 of $200 · Lift $0.90" (Lift only when it has cost something) */
+/** "October: $3.20 of $50 · Lift $0.90" (Lift only when it has cost something) */
 export function spendLine(spend: JackSpend): string {
   const total = `${spend.month}: ${formatUsd(spend.totalUsd)} of ${formatUsd(spend.budgetUsd, { wholeIfRound: true })}`
   return spend.byPersona.lift > 0 ? `${total} · Lift ${formatUsd(spend.byPersona.lift)}` : total

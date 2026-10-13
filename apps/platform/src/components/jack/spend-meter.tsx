@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils"
 import { isOverBudget, spendBreakdown, spendLine, type JackSpend } from "@/lib/jack/spend"
 
-/** "October: $3.20 of $200 · Lift $0.90", with the full split on hover */
+/** "October: $3.20 of $50 · Lift $0.90", with the full split on hover */
 export function SpendMeter({ spend, className }: { spend: JackSpend; className?: string }) {
   const over = isOverBudget(spend)
   return (

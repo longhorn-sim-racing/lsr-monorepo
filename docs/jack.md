@@ -101,9 +101,9 @@ Each reply's cost is the sum over its Claude calls (one per tool round) of uncac
 
 Every Stand call is saved as a `JackUsage` row, whatever came of it: named the room, declined, gave an unusable name, or found the room already named.
 
-The **spend meter** on the rooms page and in each room's header shows this calendar month (Central Time): "October: $3.20 of $200 · Lift $0.90", with Jack, Lift and Stand split out on hover (`src/server/jack/spend.ts`). It adds up the replies and the `JackUsage` rows, as of page load. The eval's calls aren't in it (they show only in the Anthropic Console).
+The **spend meter** on the rooms page and in each room's header shows this calendar month (Central Time): "October: $3.20 of $50 · Lift $0.90", with Jack, Lift and Stand split out on hover (`src/server/jack/spend.ts`). It adds up the replies and the `JackUsage` rows, as of page load. The eval's calls aren't in it (they show only in the Anthropic Console).
 
-When the month's total reaches `JACK_MONTHLY_BUDGET_USD` (default $200), Jack stops calling Claude and says the budget is used up until the 1st, Central Time. Set a spend limit in the Anthropic Console as well, a little above it, as the hard backstop; it also covers eval runs.
+When the month's total reaches `JACK_MONTHLY_BUDGET_USD` (default $50), Jack stops calling Claude and says the budget is used up until the 1st, Central Time. Set a spend limit in the Anthropic Console as well, a little above it, as the hard backstop; it also covers eval runs.
 
 ## Environment variables
 
@@ -111,7 +111,7 @@ When the month's total reaches `JACK_MONTHLY_BUDGET_USD` (default $200), Jack st
 |---|---|
 | `ANTHROPIC_API_KEY` | The Claude API key. Without it Jack answers "isn't connected yet". Server only; never `NEXT_PUBLIC_`. |
 | `JACK_DATABASE_URL` | The connection string for `jack_readonly`, the read-only Postgres role that `run_sql` and `describe_schema` run as (the typed tools and `draft_event` use the app's `DATABASE_URL`; see [Tools and the database](#tools-and-the-database)). Locally `scripts/jack-local-sql-role.ts` sets the role up and prints it. |
-| `JACK_MONTHLY_BUDGET_USD` | Optional. Spend cap per calendar month, in dollars. Default 200. |
+| `JACK_MONTHLY_BUDGET_USD` | Optional. Spend cap per calendar month, in dollars. Default 50. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server only. Jack broadcasts replies to the private room channels with it. Locally, `SERVICE_ROLE_KEY` from `npx supabase status -o env`. |
 
 ## Production setup
@@ -121,7 +121,7 @@ When the month's total reaches `JACK_MONTHLY_BUDGET_USD` (default $200), Jack st
    `ALTER ROLE jack_readonly LOGIN PASSWORD '…';`
    Then build `JACK_DATABASE_URL` from the transaction pooler string with the username `jack_readonly.<project-ref>` and `?pgbouncer=true`.
 3. **No secrets in database settings.** Any role can read them, so check (names only) that nothing secret is set at the database or role level: `SELECT split_part(s, '=', 1) FROM pg_db_role_setting, unnest(setconfig) AS s;`. `run_sql` refuses these reads by name, but that's defense in depth, not a permission; the secret shouldn't be there at all.
-4. **Vercel** (Production): add `ANTHROPIC_API_KEY`, `JACK_DATABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and `JACK_MONTHLY_BUDGET_USD` if the cap isn't $200. Add them to Preview only if previews should answer too (they share whatever database they point at). Redeploy.
+4. **Vercel** (Production): add `ANTHROPIC_API_KEY`, `JACK_DATABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and `JACK_MONTHLY_BUDGET_USD` if the cap isn't $50. Add them to Preview only if previews should answer too (they share whatever database they point at). Redeploy.
 5. **Check it.** Open a room, ask "How many members are there?", and watch the answer stream with a query part. The function log shows a `[jack] Reply …` line with the cost; the room gets a name from Stand.
 
 ### Function duration

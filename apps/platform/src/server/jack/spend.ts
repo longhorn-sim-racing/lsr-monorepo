@@ -6,8 +6,8 @@ import { roundUsd } from "./cost"
 
 const TZ = "America/Chicago"
 
-/** What Jack may spend in a calendar month before he stops calling Claude: JACK_MONTHLY_BUDGET_USD, default $200 */
-export const DEFAULT_MONTHLY_BUDGET_USD = 200
+/** What Jack may spend in a calendar month before he stops calling Claude: JACK_MONTHLY_BUDGET_USD, default $50 */
+export const DEFAULT_MONTHLY_BUDGET_USD = 50
 
 export function jackMonthlyBudgetUsd(env: Record<string, string | undefined> = process.env): number {
   const raw = env.JACK_MONTHLY_BUDGET_USD?.trim()

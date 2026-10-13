@@ -19,13 +19,13 @@ describe("chicagoMonth", () => {
 })
 
 describe("jackMonthlyBudgetUsd", () => {
-  it("reads JACK_MONTHLY_BUDGET_USD, defaulting to $200", () => {
-    expect(jackMonthlyBudgetUsd({})).toBe(200)
-    expect(jackMonthlyBudgetUsd({ JACK_MONTHLY_BUDGET_USD: "50" })).toBe(50)
+  it("reads JACK_MONTHLY_BUDGET_USD, defaulting to $50", () => {
+    expect(jackMonthlyBudgetUsd({})).toBe(50)
+    expect(jackMonthlyBudgetUsd({ JACK_MONTHLY_BUDGET_USD: "200" })).toBe(200)
     expect(jackMonthlyBudgetUsd({ JACK_MONTHLY_BUDGET_USD: " 12.5 " })).toBe(12.5)
     expect(jackMonthlyBudgetUsd({ JACK_MONTHLY_BUDGET_USD: "0" })).toBe(0)
-    expect(jackMonthlyBudgetUsd({ JACK_MONTHLY_BUDGET_USD: "lots" })).toBe(200)
-    expect(jackMonthlyBudgetUsd({ JACK_MONTHLY_BUDGET_USD: "-5" })).toBe(200)
+    expect(jackMonthlyBudgetUsd({ JACK_MONTHLY_BUDGET_USD: "lots" })).toBe(50)
+    expect(jackMonthlyBudgetUsd({ JACK_MONTHLY_BUDGET_USD: "-5" })).toBe(50)
   })
 })
 
