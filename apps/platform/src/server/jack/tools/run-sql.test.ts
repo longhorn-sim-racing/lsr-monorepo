@@ -8,7 +8,18 @@ vi.mock("@/server/jack/sql-client", () => ({
 }))
 
 import { fitRows, toCell, toGrid } from "./cells"
-import { describeSqlError, MAX_SQL_MODEL_CHARS, MAX_SQL_ROWS, prepareSql, runSqlTool, shapeSqlResult, SQL_TABLE_DISPLAY_ROWS, wrapSql } from "./run-sql"
+import {
+  describeSqlError,
+  findOffLimits,
+  MAX_SQL_MODEL_CHARS,
+  MAX_SQL_ROWS,
+  prepareSql,
+  runSqlTool,
+  shapeSqlResult,
+  SQL_TABLE_DISPLAY_ROWS,
+  sqlIdentifiers,
+  wrapSql,
+} from "./run-sql"
 
 const ctx = { roomId: "room-1", actor: { userId: "u1", displayName: "Alex" } }
 
@@ -50,6 +61,63 @@ describe("prepareSql", () => {
       expect(result.ok, text).toBe(false)
     }
     expect(prepareSql(" ; ")).toEqual({ ok: false, error: expect.stringContaining("empty") })
+  })
+
+  it("turns away catalog, settings and server-function access, whatever the case or quoting", () => {
+    const blocked: [string, string][] = [
+      ["SELECT current_setting('app.settings.jwt_secret')", "current_setting"],
+      ["SELECT pg_catalog.CURRENT_SETTING('app.settings.jwt_secret', true)", "current_setting"],
+      ["SELECT set_config('statement_timeout', '0', false)", "set_config"],
+      ["SELECT name, setting FROM pg_settings", "pg_settings"],
+      ['SELECT * FROM pg_catalog."pg_settings"', "pg_settings"],
+      ["SELECT * FROM pg_show_all_settings()", "pg_show_all_settings"],
+      ["SELECT setconfig FROM pg_db_role_setting", "setconfig"],
+      ["SELECT * FROM pg_file_settings", "pg_file_settings"],
+      ["SELECT rolname, rolconfig FROM pg_roles", "rolconfig"],
+      ["SELECT tgargs FROM pg_trigger", "pg_trigger"],
+      ["SELECT pg_get_triggerdef(oid) FROM pg_trigger", "pg_get_triggerdef"],
+      ["SELECT prosrc FROM pg_proc", "prosrc"],
+      ["SELECT pg_get_functiondef('jack_private.is_officer'::regproc)", "pg_get_functiondef"],
+      ["SELECT pg_advisory_lock(1)", "pg_advisory_lock"],
+      ["SELECT pg_advisory_xact_lock(1)", "pg_advisory_xact_lock"],
+      ["SELECT pg_try_advisory_lock(1)", "pg_try_advisory_lock"],
+      ["SELECT pg_notify('room', 'hi')", "pg_notify"],
+      ["SELECT pg_read_file('postgresql.conf')", "pg_read_file"],
+      ["SELECT pg_read_binary_file('postgresql.conf')", "pg_read_binary_file"],
+      ["SELECT * FROM pg_ls_dir('.')", "pg_ls_dir"],
+      ["SELECT pg_stat_file('postgresql.conf')", "pg_stat_file"],
+      ["SELECT lo_import('/etc/passwd')", "lo_import"],
+      ["SELECT * FROM dblink('host=x', 'select 1') AS t(a int)", "dblink"],
+      ["SELECT pg_terminate_backend(1)", "pg_terminate_backend"],
+      ["SELECT pg_cancel_backend(1)", "pg_cancel_backend"],
+      ["SELECT query_to_xml('select current_setting(''x'')', true, true, '')", "query_to_xml"],
+      ['WITH s AS (SELECT "current_setting"(\'x\') AS v) SELECT v FROM s', "current_setting"],
+      ['SELECT U&"\\0063urrent_setting"(\'x\')', 'a Unicode-escaped identifier (U&"…")'],
+    ]
+    for (const [sql, name] of blocked) {
+      const result = prepareSql(sql)
+      expect(result.ok, sql).toBe(false)
+      if (!result.ok) {
+        expect(result.error, sql).toContain("off-limits")
+        expect(result.error, sql).toContain(name)
+      }
+    }
+  })
+
+  it("doesn't mistake strings, comments, aliases or the club's own names for off-limits ones", () => {
+    const fine = [
+      "SELECT 'current_setting' AS s",
+      "SELECT 1 -- pg_settings\n",
+      "SELECT 1 /* pg_proc /* nested */ prosrc */",
+      "SELECT E'it\\'s pg_settings' AS s",
+      "SELECT $$pg_read_file('x')$$ AS s",
+      "SELECT $q$ lo_import $q$ AS s",
+      'SELECT count(*) AS listens FROM "Notification" n JOIN "NotificationPreference" p ON p."userId" = n."userId"',
+      'SELECT "User"."displayName" AS "pg_note" FROM "User"',
+    ]
+    for (const sql of fine) expect(prepareSql(sql).ok, sql).toBe(true)
+    expect(findOffLimits('SELECT "Event"."title" FROM "Event"')).toBeNull()
+    expect(sqlIdentifiers('SELECT "a""b" FROM x')).toEqual(["select", 'a"b', "from", "x"])
   })
 })
 
@@ -169,12 +237,24 @@ describe("describeSqlError", () => {
 })
 
 describe("run_sql", () => {
-  it("runs the query in a read-only transaction with a 5s timeout, wrapped with the row cap", async () => {
+  it("runs the query in a read-only transaction with a 5s timeout, wrapped with the row cap, then drops any advisory locks", async () => {
     sql.query.mockResolvedValue([{ n: BigInt(4) }])
     const result = await runSqlTool.run({ sql: 'SELECT count(*) AS n FROM "User";' }, ctx)
     expect(result.isError).toBeUndefined()
-    expect(sql.executed).toEqual(["SET TRANSACTION READ ONLY", "SET LOCAL statement_timeout = '5s'", wrapSql('SELECT count(*) AS n FROM "User"')])
+    expect(sql.executed).toEqual([
+      "SET TRANSACTION READ ONLY",
+      "SET LOCAL statement_timeout = '5s'",
+      wrapSql('SELECT count(*) AS n FROM "User"'),
+      "SELECT pg_advisory_unlock_all()",
+    ])
     expect(JSON.parse(result.forModel).rows).toEqual([[4]])
+  })
+
+  it("refuses a settings read before it reaches the database", async () => {
+    const result = await runSqlTool.run({ sql: "SELECT current_setting('app.settings.jwt_secret') AS s" }, ctx)
+    expect(result).toMatchObject({ isError: true, label: "Query not run" })
+    expect(result.forModel).toMatch(/^Catalog and settings access is off-limits/)
+    expect(sql.executed).toEqual([])
   })
 
   it("rejects a write before it reaches the database", async () => {

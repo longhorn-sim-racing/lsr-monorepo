@@ -6,8 +6,9 @@ import type { JackTool, JackToolResult } from "./types"
 
 /**
  * run_sql: Jack writes his own SELECT (#161). It runs as `jack_readonly`, whose grants are the real
- * guard (read-only, public tables only, no SystemSetting). The checks here only catch obvious
- * mistakes early and keep the result small.
+ * guard (read-only, public tables only, no SystemSetting). The checks here catch obvious mistakes
+ * early, keep the result small, and turn away the catalog and settings reads every Postgres role is
+ * allowed by default (see OFF_LIMITS_NAMES).
  */
 
 export const MAX_SQL_ROWS = 200
@@ -30,7 +31,147 @@ export function prepareSql(raw: string): { ok: true; sql: string } | { ok: false
       error: "Only a single read-only query is allowed: it must start with SELECT or WITH. Jack can't change data with SQL (draft_event is the one write).",
     }
   }
+  const offLimits = findOffLimits(sql)
+  if (offLimits) {
+    return {
+      ok: false,
+      error: `Catalog and settings access is off-limits to Jack: ${offLimits} isn't allowed in run_sql (server settings, function and trigger source, files, large objects, locks, notifications and other databases can hold secrets or reach outside the query). Query the club's tables in schema public instead; describe_schema lists them.`,
+    }
+  }
   return { ok: true, sql }
+}
+
+/**
+ * Names run_sql refuses outright. Postgres lets every role read the system catalogs and call these
+ * functions, so jack_readonly's grants don't stop them: settings (a database can hold secrets in its
+ * settings, e.g. Supabase's local JWT secret in app.settings.jwt_secret, readable through
+ * current_setting and pg_db_role_setting), function and trigger source and arguments, server files,
+ * large objects, advisory locks, notifications, other databases, other sessions, and functions that
+ * run a query given as text (which would hide any of the above inside a string).
+ */
+export const OFF_LIMITS_NAMES = new Set([
+  // settings
+  "current_setting",
+  "set_config",
+  "pg_settings",
+  "pg_show_all_settings",
+  "pg_db_role_setting",
+  "pg_file_settings",
+  "pg_show_all_file_settings",
+  "rolconfig",
+  "useconfig",
+  "setconfig",
+  // function and trigger source and arguments
+  "pg_trigger",
+  "pg_get_triggerdef",
+  "pg_proc",
+  "prosrc",
+  "probin",
+  "pg_get_functiondef",
+  // notifications
+  "pg_notify",
+  "notify",
+  "listen",
+  "unlisten",
+  // server files and other sessions
+  "pg_stat_file",
+  "pg_terminate_backend",
+  "pg_cancel_backend",
+  // a query passed as text runs unchecked
+  "query_to_xml",
+  "query_to_xmlschema",
+  "query_to_xml_and_xmlschema",
+  "cursor_to_xml",
+  "cursor_to_xmlschema",
+  "ts_stat",
+])
+/** Families of the same, by prefix: advisory locks, file reads and listings, large objects, dblink */
+export const OFF_LIMITS_PREFIXES = ["pg_advisory", "pg_try_advisory", "pg_read_", "pg_ls_", "lo_", "dblink"]
+
+const IDENT_START = /[A-Za-z_\u0080-￿]/
+const IDENT_PART = /[A-Za-z0-9_$\u0080-￿]/
+
+/**
+ * The identifiers in a query, lowercased, outside string literals and comments. Quoted identifiers
+ * count by their name ("pg_settings" is pg_settings). Null when the query uses a Unicode-escaped
+ * identifier (U&"…"), which can spell any name, so it's refused rather than decoded.
+ */
+export function sqlIdentifiers(sql: string): string[] | null {
+  const names: string[] = []
+  const n = sql.length
+  const atWordStart = (i: number) => i === 0 || !IDENT_PART.test(sql[i - 1])
+  /** Index just past a quoted string starting at `quote`. Backslash escapes only in E'…' strings */
+  const skipString = (quote: number, backslashes: boolean) => {
+    let j = quote + 1
+    while (j < n) {
+      if (backslashes && sql[j] === "\\") j += 2
+      else if (sql[j] === "'") {
+        if (sql[j + 1] === "'") j += 2
+        else return j + 1
+      } else j++
+    }
+    return n
+  }
+
+  let i = 0
+  while (i < n) {
+    const ch = sql[i]
+    const next = sql[i + 1]
+    if (ch === "-" && next === "-") {
+      const end = sql.indexOf("\n", i)
+      i = end === -1 ? n : end + 1
+    } else if (ch === "/" && next === "*") {
+      // Block comments nest in Postgres
+      let depth = 1
+      i += 2
+      while (i < n && depth > 0) {
+        if (sql[i] === "/" && sql[i + 1] === "*") {
+          depth++
+          i += 2
+        } else if (sql[i] === "*" && sql[i + 1] === "/") {
+          depth--
+          i += 2
+        } else i++
+      }
+    } else if ((ch === "U" || ch === "u") && next === "&" && sql[i + 2] === '"' && atWordStart(i)) {
+      return null
+    } else if (ch === "'") {
+      i = skipString(i, false)
+    } else if (/[EeBbXxNn]/.test(ch) && next === "'" && atWordStart(i)) {
+      i = skipString(i + 1, ch === "E" || ch === "e")
+    } else if (ch === "$" && atWordStart(i)) {
+      const tag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))
+      if (tag) {
+        const close = sql.indexOf(tag[0], i + tag[0].length)
+        i = close === -1 ? n : close + tag[0].length
+      } else i++
+    } else if (ch === '"') {
+      let j = i + 1
+      let name = ""
+      while (j < n) {
+        if (sql[j] === '"') {
+          if (sql[j + 1] !== '"') break
+          name += '"'
+          j += 2
+        } else name += sql[j++]
+      }
+      names.push(name.toLowerCase())
+      i = j + 1
+    } else if (IDENT_START.test(ch)) {
+      let j = i + 1
+      while (j < n && IDENT_PART.test(sql[j])) j++
+      names.push(sql.slice(i, j).toLowerCase())
+      i = j
+    } else i++
+  }
+  return names
+}
+
+/** The first off-limits name a query uses (lowercased), or null when it uses none */
+export function findOffLimits(sql: string): string | null {
+  const names = sqlIdentifiers(sql)
+  if (names === null) return 'a Unicode-escaped identifier (U&"…")'
+  return names.find((name) => OFF_LIMITS_NAMES.has(name) || OFF_LIMITS_PREFIXES.some((prefix) => name.startsWith(prefix))) ?? null
 }
 
 /** Caps the rows in the database: one more than the cap, to tell whether more matched. The newline keeps a trailing -- comment from swallowing the wrapper. */
@@ -140,6 +281,7 @@ export const runSqlTool: JackTool<z.infer<typeof input>> = {
     `At most ${MAX_SQL_ROWS} rows come back, and long results are trimmed: aggregate (COUNT, SUM, GROUP BY) rather than listing when you can.`,
     `Queries stop after ${STATEMENT_TIMEOUT}. Duplicate column names collapse, so alias them. Cast unusual types (interval, regclass, point) to text.`,
     "Money is stored in cents (amountCents): divide by 100 for dollars. The room sees the SQL and a table of the rows.",
+    "Server settings (current_setting, pg_settings), function and trigger source, files, locks and other catalog internals are off-limits.",
   ].join(" "),
   input,
   async run({ sql, purpose }, ctx) {
@@ -158,7 +300,11 @@ export const runSqlTool: JackTool<z.infer<typeof input>> = {
           // set_config, so every query gets its own read-only transaction and timeout
           await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY")
           await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT}'`)
-          return tx.$queryRawUnsafe<Record<string, unknown>[]>(wrapSql(prepared.sql))
+          const rows = await tx.$queryRawUnsafe<Record<string, unknown>[]>(wrapSql(prepared.sql))
+          // Session advisory locks outlive the transaction on a pooled connection. prepareSql refuses
+          // pg_advisory*, so there shouldn't be any; this lets go of any that got through anyway
+          await tx.$executeRawUnsafe("SELECT pg_advisory_unlock_all()")
+          return rows
         },
         { maxWait: 5_000, timeout: 9_000 },
       )

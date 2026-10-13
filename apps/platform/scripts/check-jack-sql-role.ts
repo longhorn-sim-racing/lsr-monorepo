@@ -13,6 +13,13 @@
  *   - set_config('role', 'postgres', true) and SET ROLE can't escalate
  *   - the 5s statement timeout stops pg_sleep(6), even after set_config tries to lift it
  *   - run_sql (the tool) rejects or maps each of these the way the model should see them
+ *   - run_sql refuses catalog and settings access the role itself is allowed (current_setting,
+ *     pg_settings, pg_db_role_setting, pg_trigger, pg_proc, advisory locks, NOTIFY, file reads, large
+ *     objects, dblink, ending other sessions), and the check shows which of them the role could reach
+ *
+ * Warns (doesn't fail) when the database keeps secret-looking settings in pg_db_role_setting, which any
+ * role can read. Local Supabase does by design (its well-known local JWT secret in
+ * app.settings.jwt_secret); production shouldn't. Only setting names are printed, never values.
  *
  * Refuses unless DATABASE_URL and JACK_DATABASE_URL point at 127.0.0.1 or localhost. Writes nothing.
  */
@@ -61,9 +68,12 @@ function errorOf(error: unknown): { code: string; message: string } {
 }
 
 async function main() {
-  // One connection, so a session setting made by one call applies to the next
+  // One connection, so a session setting made by one call applies to the next. The tool's own client
+  // (sql-client.ts) gets one connection too, so a setting changed on it is there for the tool's next query
   const url = process.env.JACK_DATABASE_URL!;
-  const jack = new PrismaClient({ datasourceUrl: `${url}${url.includes("?") ? "&" : "?"}connection_limit=1`, log: [], errorFormat: "minimal" });
+  const singleConnection = `${url}${url.includes("?") ? "&" : "?"}connection_limit=1`;
+  process.env.JACK_DATABASE_URL = singleConnection;
+  const jack = new PrismaClient({ datasourceUrl: singleConnection, log: [], errorFormat: "minimal" });
   const { runSqlTool } = await import("../src/server/jack/tools/run-sql");
   const { getJackSqlClient } = await import("../src/server/jack/sql-client");
 
@@ -155,6 +165,39 @@ async function main() {
   const lift = await attempt(`SELECT set_config('statement_timeout', '0', false) AS t, pg_sleep(6)::text AS s`);
   seconds = (Date.now() - started) / 1000;
   report(!lift.ok && lift.code === "57014" && seconds < 6, "lifting the timeout with set_config mid-query doesn't help", lift.ok ? "it finished" : `${lift.code} after ${seconds.toFixed(1)}s`);
+
+  // What Postgres itself lets the role read in the catalog (every role can, by default). run_sql
+  // refuses all of these below; this only shows what that refusal is standing in front of. Counts and
+  // yes/no only, never the values
+  const reachable: [string, string][] = [
+    ["current_setting('app.settings.jwt_secret')", `SELECT (current_setting('app.settings.jwt_secret', true) IS NOT NULL) AS present`],
+    ["pg_settings", `SELECT count(*)::int AS n FROM pg_settings`],
+    ["pg_db_role_setting", `SELECT count(*)::int AS n FROM pg_db_role_setting`],
+    ["pg_trigger.tgargs", `SELECT count(tgargs)::int AS n FROM pg_trigger`],
+    ["pg_proc.prosrc", `SELECT count(prosrc)::int AS n FROM pg_proc`],
+  ];
+  for (const [name, sql] of reachable) {
+    const outcome = await attempt(sql);
+    console.log(`INFO  as jack_readonly directly, ${name}: ${outcome.ok ? `readable ${JSON.stringify(outcome.rows)}` : `denied (${outcome.code})`}`);
+  }
+
+  // Secrets kept in database or role settings are readable by every role (pg_db_role_setting,
+  // current_setting). Local Supabase keeps its well-known local JWT secret there by design; production
+  // shouldn't keep anything there. Names only
+  const settingNames = await attempt(`SELECT DISTINCT split_part(s, '=', 1) AS name FROM pg_db_role_setting, unnest(setconfig) AS s ORDER BY 1`);
+  if (settingNames.ok) {
+    const secretLooking = (settingNames.rows as { name: string }[]).map((r) => r.name).filter((name) => /secret|passw|token|jwt|key|credential/i.test(name));
+    if (secretLooking.length) {
+      console.log(
+        `WARN  this database keeps secret-looking settings any role can read: ${secretLooking.join(", ")}. ` +
+          "Expected on local Supabase (its local JWT secret); run_sql refuses current_setting and pg_db_role_setting, but don't keep secrets in database settings in production."
+      );
+    } else {
+      console.log("INFO  no secret-looking settings in pg_db_role_setting");
+    }
+  } else {
+    console.log(`INFO  couldn't list pg_db_role_setting (${settingNames.code}); nothing to warn about`);
+  }
   await jack.$disconnect();
 
   // The tool itself
@@ -172,10 +215,49 @@ async function main() {
   report(!!r.isError && r.forModel.startsWith("Permission denied") && r.forModel.includes("off-limits"), "run_sql: SystemSetting reads as off-limits", r.forModel.slice(0, 80));
   r = await tool(`SELECT generate_series(1, 500) AS n`);
   report(!r.isError && r.forModel.includes('"rowCount":200') && r.forModel.includes('"truncated":true'), "run_sql: 500 rows come back capped at 200 and flagged", r.label);
-  r = await tool(`SELECT set_config('statement_timeout', '0', false) AS t`);
-  r = await tool(`SELECT current_setting('statement_timeout') AS t, current_setting('transaction_read_only') AS ro`);
-  report(r.forModel.includes('["5s","on"]'), "run_sql: each query gets its own 5s, read-only transaction even after set_config", r.forModel.slice(-30));
-  await getJackSqlClient()?.$disconnect();
+
+  // Catalog and settings access, refused before it reaches the database
+  const offLimits: [string, string][] = [
+    ["current_setting (the JWT secret)", `SELECT current_setting('app.settings.jwt_secret', true) AS s`],
+    ["set_config", `SELECT set_config('statement_timeout', '0', false) AS s`],
+    ["pg_settings", `SELECT name, setting FROM pg_settings`],
+    ['pg_catalog."pg_settings" (quoted)', `SELECT name, setting FROM pg_catalog."pg_settings"`],
+    ["pg_db_role_setting", `SELECT setconfig FROM pg_db_role_setting`],
+    ["pg_file_settings", `SELECT * FROM pg_file_settings`],
+    ["pg_roles.rolconfig", `SELECT rolname, rolconfig FROM pg_roles`],
+    ["pg_trigger.tgargs", `SELECT tgname, tgargs FROM pg_trigger`],
+    ["pg_proc.prosrc", `SELECT proname, prosrc FROM pg_proc`],
+    ["pg_advisory_lock", `SELECT pg_advisory_lock(42)::text AS l`],
+    ["pg_try_advisory_lock", `SELECT pg_try_advisory_lock(42) AS l`],
+    ["pg_notify", `SELECT pg_notify('jack', 'hi')::text AS n`],
+    ["pg_read_file", `SELECT pg_read_file('postgresql.conf') AS f`],
+    ["pg_ls_dir", `SELECT * FROM pg_ls_dir('.') AS f`],
+    ["pg_stat_file", `SELECT * FROM pg_stat_file('postgresql.conf')`],
+    ["lo_import", `SELECT lo_import('/etc/passwd')::text AS o`],
+    ["dblink", `SELECT * FROM dblink('dbname=postgres', 'select 1') AS t(a int)`],
+    ["pg_terminate_backend", `SELECT pg_terminate_backend(pg_backend_pid()) AS t`],
+    ["pg_cancel_backend", `SELECT pg_cancel_backend(1) AS t`],
+    ["query_to_xml (a query hidden in a string)", `SELECT query_to_xml('select current_setting(''app.settings.jwt_secret'', true)', true, true, '')::text AS x`],
+  ];
+  for (const [name, sql] of offLimits) {
+    r = await tool(sql);
+    report(!!r.isError && r.forModel.startsWith("Catalog and settings access is off-limits"), `run_sql refuses ${name}`, r.isError ? "" : `it ran: ${r.label}`);
+  }
+  r = await tool(`SELECT 'current_setting' AS s -- pg_settings`);
+  report(!r.isError, "run_sql: off-limits names inside strings and comments don't count", r.forModel.slice(0, 80));
+
+  // A setting changed on the tool's pooled connection (outside run_sql, which refuses set_config)
+  // doesn't carry into run_sql's next query: each gets its own 5s, read-only transaction
+  const pool = getJackSqlClient()!;
+  await pool.$queryRawUnsafe(`SELECT set_config('statement_timeout', '0', false) AS t`);
+  await pool.$executeRawUnsafe("SET default_transaction_read_only = off");
+  started = Date.now();
+  r = await tool(`SELECT pg_sleep(6)::text AS s`);
+  seconds = (Date.now() - started) / 1000;
+  report(!!r.isError && r.forModel.includes("longer than 5s") && seconds < 6, "run_sql: the 5s timeout holds after the session's was lifted", `${seconds.toFixed(1)}s: ${r.forModel.slice(0, 60)}`);
+  r = await tool(`SELECT id FROM "Event" LIMIT 1 FOR UPDATE`);
+  report(!!r.isError && r.forModel.includes("read-only transaction"), "run_sql: read-only holds after the session's default was turned off", r.forModel.slice(0, 80));
+  await pool.$disconnect();
 
   console.log(failures.length ? `\n${failures.length} check(s) failed: ${failures.join("; ")}` : "\nAll checks passed.");
   process.exit(failures.length ? 1 : 0);
