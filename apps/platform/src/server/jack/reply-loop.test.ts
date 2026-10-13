@@ -621,6 +621,32 @@ describe("Stand names untitled rooms", () => {
     expect(db.room(room.id).title).toBeNull()
   })
 
+  it("gives Stand a timeout and the run's deadline signal", async () => {
+    claude = fakeClaude([{ text: "An answer." }], [{ text: "A Name" }])
+    ask("A question")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const [options] = claude.createOptions
+    expect(options?.signal).toBeInstanceOf(AbortSignal)
+    expect(options?.timeoutMs).toBeLessThanOrEqual(15_000)
+    expect(options?.maxRetries).toBe(1)
+    expect(db.room(room.id).title).toBe("A Name")
+  })
+
+  it("leaves naming for a later answer when the run is close to its deadline", async () => {
+    deps.timing = { runDeadlineMs: 30_000, minAnswerMs: 1_000, replyDeadlineMs: 30_000 }
+    // About 15 s of streaming, so under 20 s are left when the answer ends
+    claude = fakeClaude([{ text: "w".repeat(300) }], [{ text: "A Name" }], { chunkSize: 2, chunkDelayMs: 100 })
+    ask("A question")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(replies()[0].status).toBe("done")
+    expect(claude.creates).toHaveLength(0)
+    expect(db.room(room.id).title).toBeNull()
+  })
+
   it("doesn't run when the budget is used up", async () => {
     let calls = 0
     deps.budget = async () => ({ month: "October", spentUsd: calls++ === 0 ? 199.99 : 200, budgetUsd: 200 })
@@ -782,15 +808,36 @@ describe("run deadline", () => {
     expect(db.room(room.id).runId).toBeNull()
   })
 
-  it("stops at the run's deadline even when the answer's own cap is later", async () => {
+  it("stops at the run's deadline even when the answer's own cap is later, sending no deltas after it", async () => {
     deps.timing = { runDeadlineMs: 3_000, minAnswerMs: 1_000, replyDeadlineMs: 60_000 }
     claude = fakeClaude([{ text: "z".repeat(400) }], undefined, { chunkSize: 2, chunkDelayMs: 100 })
+    const sentAt: { type: string; at: number }[] = []
+    const record = deps.broadcast
+    deps.broadcast = async (roomId, event) => {
+      sentAt.push({ type: event.type, at: Date.now() })
+      await record(roomId, event)
+    }
     ask("Another slow one")
+    const deadlineAt = Date.now() + 3_000
 
     await onFakeTimers(() => runRoom(room.id, deps))
 
     expect(replies()[0]).toMatchObject({ status: "error" })
     expect(replies()[0].content).toMatch(/stopped before it finished/)
+    // Past the deadline only the done event goes out; it carries the whole text
+    expect(sentAt.filter((s) => s.at >= deadlineAt).map((s) => s.type)).toEqual(["message.done"])
+    expect(radio.of("message.done")[0].message.content).toBe(replies()[0].content)
+  })
+
+  it("counts the run's time from the request's start, not from when it got the lock", async () => {
+    ask("Posted a while ago")
+
+    // The request started 200 s ago: 80 s of the 280 s are left, less than an answer needs
+    await onFakeTimers(() => runRoom(room.id, deps, { startedAt: Date.now() - 200_000 }))
+
+    expect(replies()).toHaveLength(0)
+    expect(unanswered()).toHaveLength(1)
+    expect(db.room(room.id).runId).toBeNull()
   })
 
   it("tells an answer to wrap up a minute before it would be cancelled", async () => {
@@ -832,12 +879,12 @@ describe("resumeRoom", () => {
     db.room(room.id).runId = "live-run"
     db.room(room.id).runStartedAt = new Date()
 
-    expect(await onFakeTimers(() => resumeRoom(room.id, deps))).toBe("busy")
+    expect(await onFakeTimers(() => resumeRoom(room.id, { replyDeps: deps }))).toBe("busy")
     expect(replies()).toHaveLength(0)
 
     db.room(room.id).runId = null
     db.room(room.id).runStartedAt = null
-    expect(await onFakeTimers(() => resumeRoom(room.id, deps))).toBe("started")
+    expect(await onFakeTimers(() => resumeRoom(room.id, { replyDeps: deps }))).toBe("started")
     expect(replies()).toHaveLength(1)
     expect(unanswered()).toHaveLength(0)
   })
@@ -849,7 +896,7 @@ describe("resumeRoom", () => {
     db.room(room.id).runId = "dead-run"
     db.room(room.id).runStartedAt = new Date(Date.now() - ROOM_LOCK_STALE_MS - MINUTE)
 
-    expect(await onFakeTimers(() => resumeRoom(room.id, deps))).toBe("started")
+    expect(await onFakeTimers(() => resumeRoom(room.id, { replyDeps: deps }))).toBe("started")
 
     expect(db.state.messages.find((m) => m.id === stuck.id)?.status).toBe("error")
     expect(unanswered()).toHaveLength(0)
@@ -857,6 +904,6 @@ describe("resumeRoom", () => {
 
   it("is false for a room that doesn't exist", async () => {
     const { resumeRoom } = await import("./rooms")
-    expect(await resumeRoom("room-missing", deps)).toBeNull()
+    expect(await resumeRoom("room-missing", { replyDeps: deps })).toBeNull()
   })
 })

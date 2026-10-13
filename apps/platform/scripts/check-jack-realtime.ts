@@ -231,7 +231,7 @@ async function main() {
       budget: async () => ({ month: "check", spentUsd: 0, budgetUsd: 1 }),
     };
     // Outside a request, the after-response work runs inline: this returns once the reply is done
-    const question = await postOfficerMessage(room.id, officerA.id!, "Check: how many LSC applications are there?", replyDeps);
+    const question = await postOfficerMessage(room.id, officerA.id!, "Check: how many LSC applications are there?", { replyDeps });
     if (!question) throw new Error("Posting the question failed");
     await wait(SETTLE_MS);
 

@@ -57,15 +57,22 @@ export async function getRoomSnapshot(roomId: string): Promise<RoomSnapshot | nu
 }
 
 /**
+ * How a run started from a request goes: `startedAt` is when the request's function started (the run's
+ * time limit counts from there, since the function's does), and `replyDeps` is for checks that swap
+ * in a fake Claude
+ */
+export type RunRequest = { startedAt?: number; replyDeps?: ReplyLoopDeps }
+
+/**
  * Saves an officer's message, then (after the response) shows it to the room and gets the room's
  * persona answering: if a run is already going, it picks this message up on its next pass.
- * Null when the room doesn't exist or is archived. `replyDeps` is for checks that swap in a fake Claude.
+ * Null when the room doesn't exist or is archived.
  */
 export async function postOfficerMessage(
   roomId: string,
   authorUserId: string,
   content: string,
-  replyDeps: ReplyLoopDeps = defaultReplyDeps
+  { startedAt = Date.now(), replyDeps = defaultReplyDeps }: RunRequest = {}
 ): Promise<JackMessageView | null> {
   const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: { id: true } })
   if (!room) return null
@@ -78,7 +85,7 @@ export async function postOfficerMessage(
 
   await runAfterResponse(async () => {
     await replyDeps.broadcast(roomId, { type: JACK_EVENT.created, message })
-    await runRoom(roomId, replyDeps)
+    await runRoom(roomId, replyDeps, { startedAt })
   }, `[jack] Answering room ${roomId} failed:`)
 
   return message
@@ -91,11 +98,14 @@ export async function postOfficerMessage(
  * started (that run answers, or its lock goes stale within ROOM_LOCK_STALE_MS). Null when the room
  * doesn't exist or is archived.
  */
-export async function resumeRoom(roomId: string, replyDeps: ReplyLoopDeps = defaultReplyDeps): Promise<"started" | "busy" | null> {
+export async function resumeRoom(
+  roomId: string,
+  { startedAt = Date.now(), replyDeps = defaultReplyDeps }: RunRequest = {}
+): Promise<"started" | "busy" | null> {
   const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: { id: true, runId: true, runStartedAt: true } })
   if (!room) return null
   if (isRoomLockHeld(room)) return "busy"
-  await runAfterResponse(() => runRoom(roomId, replyDeps), `[jack] Continuing room ${roomId} failed:`)
+  await runAfterResponse(() => runRoom(roomId, replyDeps, { startedAt }), `[jack] Continuing room ${roomId} failed:`)
   return "started"
 }
 

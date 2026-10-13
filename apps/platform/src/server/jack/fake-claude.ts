@@ -14,7 +14,7 @@ import type {
   BetaStopReason,
   MessageCreateParamsNonStreaming,
 } from "@anthropic-ai/sdk/resources/beta/messages/messages"
-import type { JackModelClient, JackModelStream } from "./model-loop"
+import type { JackCreateOptions, JackModelClient, JackModelStream } from "./model-loop"
 
 export type FakeToolCall = { id?: string; name: string; input: unknown }
 
@@ -47,6 +47,8 @@ export type FakeClaudeOptions = {
 export function fakeClaude(script: Script, createScript: Script = () => ({ text: "Fake Room Name" }), options: FakeClaudeOptions = {}) {
   const calls: BetaMessageStreamParams[] = []
   const creates: MessageCreateParamsNonStreaming[] = []
+  /** The options each create call got (signal, timeout, retries) */
+  const createOptions: (JackCreateOptions | undefined)[] = []
   let toolIds = 0
 
   const turnFor = (s: Script, params: BetaMessageStreamParams, index: number): FakeTurn => {
@@ -146,16 +148,18 @@ export function fakeClaude(script: Script, createScript: Script = () => ({ text:
       }
       return stream
     },
-    async create(params) {
+    async create(params, createOptions_) {
+      if (createOptions_?.signal?.aborted) throw new Anthropic.APIUserAbortError()
       const index = creates.length
       creates.push(structuredClone(params))
+      createOptions.push(createOptions_)
       const turn = turnFor(createScript, params as BetaMessageStreamParams, index)
       if (turn.error) throw turn.error
       return build(turn, params as BetaMessageStreamParams).message
     },
   }
 
-  return { client, calls, creates }
+  return { client, calls, creates, createOptions }
 }
 
 /** The text of the last user turn a request sent (string content or its text blocks) */

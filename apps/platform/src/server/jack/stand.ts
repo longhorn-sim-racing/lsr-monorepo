@@ -13,6 +13,9 @@ const STAND_SYSTEM =
 
 const EXCERPT_CHARS = 1_500
 
+/** Most a naming call may take by default (per attempt; the SDK may retry once) */
+export const STAND_TIMEOUT_MS = 15_000
+
 /** How a naming call went, as its JackUsage row says */
 export type StandOutcome = "named" | "declined" | "unusable" | "already_titled"
 
@@ -23,6 +26,10 @@ export type NameRoomInput = {
   /** The officer messages the first reply answered, as "Name: text" lines */
   question: string
   answer: string
+  /** Cancels the call (the run hit its deadline) */
+  signal?: AbortSignal
+  /** Longest the call may take; Stand gives up (the room stays untitled) rather than hold the function open */
+  timeoutMs?: number
 }
 
 /**
@@ -32,7 +39,7 @@ export type NameRoomInput = {
  * “…”". Every call's cost is saved as a JackUsage row, whatever came of it (named, declined, an
  * unusable name, a room that already had one), and the spend meter counts those.
  */
-export async function nameRoom({ roomId, client, broadcast, question, answer }: NameRoomInput): Promise<void> {
+export async function nameRoom({ roomId, client, broadcast, question, answer, signal, timeoutMs = STAND_TIMEOUT_MS }: NameRoomInput): Promise<void> {
   try {
     const config = JACK_MODELS.stand
     const message = await client.create({
@@ -42,7 +49,7 @@ export async function nameRoom({ roomId, client, broadcast, question, answer }: 
       output_config: { effort: config.effort },
       system: STAND_SYSTEM,
       messages: [{ role: "user", content: `Officer messages:\n${clip(question)}\n\nReply:\n${clip(answer)}` }],
-    })
+    }, { signal, timeoutMs, maxRetries: 1 })
     const usage = new UsageTally(config.model)
     usage.add(message)
     const cost = usage.costUsd

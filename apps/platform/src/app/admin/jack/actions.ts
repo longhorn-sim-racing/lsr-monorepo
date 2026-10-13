@@ -33,12 +33,14 @@ export async function createJackRoom(formData: FormData): Promise<ActionResult<{
 
 /** Posts an officer's message to a room. Jack answers on the server; the reply streams to everyone in the room */
 export async function postJackMessage(roomId: string, content: string): Promise<ActionResult<JackMessageView>> {
+  // The answer runs in this function after the response; its time limit counts from here
+  const startedAt = Date.now()
   const officer = await requireOfficer()
 
   const parsed = jackMessageSchema.safeParse({ roomId, content })
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message }
 
-  const message = await postOfficerMessage(parsed.data.roomId, officer.id, parsed.data.content)
+  const message = await postOfficerMessage(parsed.data.roomId, officer.id, parsed.data.content, { startedAt })
   if (!message) return { ok: false, error: ROOM_GONE }
 
   // No revalidatePath: it would re-render this room for nothing (the page is live), and the
@@ -52,12 +54,13 @@ export async function postJackMessage(roomId: string, content: string): Promise<
  * room it says so instead. Not audited: it only answers messages officers already posted.
  */
 export async function resumeJackRoom(roomId: string): Promise<ActionResult> {
+  const startedAt = Date.now()
   await requireOfficer()
 
   const id = jackRoomIdSchema.safeParse(roomId)
   if (!id.success) return { ok: false, error: ROOM_GONE }
 
-  const resumed = await resumeRoom(id.data)
+  const resumed = await resumeRoom(id.data, { startedAt })
   if (!resumed) return { ok: false, error: ROOM_GONE }
   if (resumed === "busy") {
     return { ok: false, error: "Jack is still working in this room. If nothing comes through, try again in a few minutes." }

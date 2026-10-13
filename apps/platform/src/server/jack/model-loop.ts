@@ -21,9 +21,11 @@ import type { AnyJackTool, JackToolContext } from "./tools/types"
 
 /** What the loop needs from the Anthropic SDK: a streamed call (replies) and a plain one (Stand). Tests pass a fake */
 export type JackModelStream = AsyncIterable<BetaRawMessageStreamEvent> & { finalMessage(): Promise<BetaMessage> }
+/** For a plain call: cancel it, cap each attempt's time, and how many times the SDK may retry it */
+export type JackCreateOptions = { signal?: AbortSignal; timeoutMs?: number; maxRetries?: number }
 export type JackModelClient = {
   stream(params: BetaMessageStreamParams, options?: { signal?: AbortSignal }): JackModelStream
-  create(params: MessageCreateParamsNonStreaming): Promise<BetaMessage>
+  create(params: MessageCreateParamsNonStreaming, options?: JackCreateOptions): Promise<BetaMessage>
 }
 
 /** The real client. The SDK retries 429s, 5xx and dropped connections twice before a call fails */
@@ -31,7 +33,8 @@ export function anthropicJackClient(apiKey: string): JackModelClient {
   const client = new Anthropic({ apiKey })
   return {
     stream: (params, options) => client.beta.messages.stream(params, { signal: options?.signal }),
-    create: (params) => client.beta.messages.create(params),
+    create: (params, options) =>
+      client.beta.messages.create(params, { signal: options?.signal, timeout: options?.timeoutMs, maxRetries: options?.maxRetries }),
   }
 }
 
