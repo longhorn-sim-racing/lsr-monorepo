@@ -17,7 +17,7 @@
  *   --fresh               ignore results already saved for this variant (otherwise finished ones are skipped)
  *   --no-judge            script checks only (no judge calls)
  *   --regrade             grade the saved answers again after a grader fix: text checks rerun, and the judge
- *                         looks again at answers it failed (no model calls for the answers themselves)
+ *                         looks again at answers it failed or never graded (no model calls for the answers themselves)
  *   --concurrency=<n>     questions in flight at once (default 5)
  *   --as=<email|handle>   the officer asking (default the first officer or admin)
  *   --verbose             print every answer
@@ -551,8 +551,8 @@ async function regrade(c: Ctx, personas: JackRoomPersonaKey[]) {
       }
       // With the judge on, an answer it never graded can't pass: it's ungraded if the script checks pass, a fail if not
       const graded = grade.meets !== undefined;
-      const judgeOk = graded ? Boolean(grade.meets && grade.facts && grade.honest) : !c.judge;
-      const ungraded = c.judge && !graded && scriptOk ? (judgeProblem ?? "the judge never graded it") : undefined;
+      const judgeOk = graded ? Boolean(grade.meets && grade.facts && grade.honest) : !c.judge && !row.meta.ungraded;
+      const ungraded = !graded && scriptOk && (c.judge || row.meta.ungraded) ? (judgeProblem ?? "the judge never graded it") : undefined;
       const next: Row = { ...row, ...extra, grade: { ...grade, check: Number(scriptOk), pass: Number(scriptOk && judgeOk) } };
       next.meta = { ...next.meta, failures, ungraded };
       if (next.grade.pass !== row.grade.pass || extra.judge_model || next.meta.ungraded !== row.meta.ungraded) {
