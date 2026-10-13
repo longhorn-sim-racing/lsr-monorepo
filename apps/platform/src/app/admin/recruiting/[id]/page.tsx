@@ -6,7 +6,7 @@ import { requireOfficerPage } from "@/server/auth/guards";
 import { findCycleById } from "@/server/repos/application.repo";
 import { getApplicationDetail, recordApplicationViewed } from "@/server/services/recruiting.service";
 import { genericQuestions, getTrack, questionsForTrack } from "@/schemas/recruiting.schema";
-import { answerEntries, readPortfolioLinks } from "@/lib/recruiting/answers";
+import { answerEntries } from "@/lib/recruiting/answers";
 import { formatCentral } from "@/lib/recruiting/labels";
 import { AnswerList } from "@/components/admin/recruiting/answer-list";
 import { SafeLink } from "@/components/admin/recruiting/safe-link";
@@ -39,7 +39,6 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
 
   const isOwn = app.userId === officer.id;
   const name = app.fullName?.trim() || app.user.displayName;
-  const portfolio = readPortfolioLinks(app.portfolioLinks);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 font-mono text-sm text-white">
@@ -72,25 +71,12 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
       </header>
 
       <section className="rounded-lg border border-white/10 bg-black/40 p-4">
-        <h2 className="mb-3 text-[11px] uppercase tracking-wider text-lsr-orange">Resume and portfolio</h2>
+        <h2 className="mb-3 text-[11px] uppercase tracking-wider text-lsr-orange">Resume</h2>
         <p className="mb-3 text-[11px] text-white/40">
-          These are links the applicant typed. Open them like any link from a stranger; if one doesn&apos;t open, ask the applicant to share it with &ldquo;anyone with the link&rdquo;.
+          This is a link the applicant typed. Open them like any link from a stranger; if one doesn&apos;t open, ask the applicant to share it with &ldquo;anyone with the link&rdquo;.
         </p>
         <dl className="space-y-3 text-xs">
           <Fact label="Resume">{app.resumeUrl ? <SafeLink url={app.resumeUrl} /> : "—"}</Fact>
-          <Fact label="Portfolio">
-            {portfolio.length === 0 ? (
-              "—"
-            ) : (
-              <ul className="space-y-1">
-                {portfolio.map((l) => (
-                  <li key={l.url}>
-                    <SafeLink url={l.url} label={l.label} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Fact>
         </dl>
       </section>
 

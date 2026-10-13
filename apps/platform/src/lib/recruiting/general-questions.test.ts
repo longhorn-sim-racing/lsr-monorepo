@@ -51,7 +51,6 @@ describe("when general questions exist", () => {
       reviewCount: 0,
       averageScore: null,
       resumeUrl: null,
-      portfolioLinks: [],
       genericAnswers: { why_join: "=1+1", sim_experience: 4 },
       trackAnswers: {},
     });

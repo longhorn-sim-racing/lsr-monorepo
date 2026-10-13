@@ -28,7 +28,6 @@ export type FormState = {
   teams: string[];
   trackAnswers: Record<string, Record<string, unknown>>;
   resumeUrl: string;
-  portfolioLinks: Array<{ label: string; url: string }>;
 };
 
 export function emptyFormState(): FormState {
@@ -38,7 +37,6 @@ export function emptyFormState(): FormState {
     teams: [],
     trackAnswers: {},
     resumeUrl: "",
-    portfolioLinks: [],
   };
 }
 
@@ -53,7 +51,7 @@ export function buildSteps(selectedTeams: readonly string[], hasGeneral: boolean
     ...(hasGeneral ? [{ key: "general", label: "General questions" } satisfies Step] : []),
     { key: "teams", label: "Choose teams" },
     ...chosen.map((t): Step => ({ key: `team:${t.key}`, label: t.label })),
-    { key: "links", label: "Resume & portfolio" },
+    { key: "links", label: "Resume" },
     { key: "review", label: "Review & submit" },
   ];
 }
@@ -96,27 +94,13 @@ export function answersPayload(questions: readonly GenericQuestion[], answers: R
   return Object.fromEntries(questions.map((q) => [q.id, isBlank(answers[q.id]) ? null : answers[q.id]]));
 }
 
-/** Rows with both fields blank are ignored; a row with only one filled in is a mistake the applicant should fix. */
-function filledLinks(links: FormState["portfolioLinks"]) {
-  return links.map((l) => ({ label: l.label.trim(), url: l.url.trim() })).filter((l) => l.label !== "" || l.url !== "");
-}
-
-/** Problems with the resume link and portfolio rows that would stop them being saved (keyed like the server's field errors). */
-export function validateLinks(state: Pick<FormState, "resumeUrl" | "portfolioLinks">): Record<string, string> {
+/** Problems with the resume link that would stop it being saved (keyed like the server's field errors). */
+export function validateLinks(state: Pick<FormState, "resumeUrl">): Record<string, string> {
   const errors: Record<string, string> = {};
   const resume = state.resumeUrl.trim();
   if (resume !== "" && (!isSafeHttpsUrl(resume) || resume.length > RECRUITING_LIMITS.urlMax)) {
     errors.resumeUrl = "Enter a full link that starts with https://";
   }
-  const rows = filledLinks(state.portfolioLinks);
-  if (rows.length > RECRUITING_LIMITS.maxPortfolioLinks) errors.portfolioLinks = `Add at most ${RECRUITING_LIMITS.maxPortfolioLinks} links.`;
-  rows.forEach((row, i) => {
-    if (row.label === "") errors[`portfolioLinks.${i}.label`] = "Add a short label, like GitHub.";
-    else if (row.label.length > RECRUITING_LIMITS.portfolioLabelMax) errors[`portfolioLinks.${i}.label`] = "Keep the label short.";
-    if (row.url === "" || !isSafeHttpsUrl(row.url) || row.url.length > RECRUITING_LIMITS.urlMax) {
-      errors[`portfolioLinks.${i}.url`] = "Enter a full link that starts with https://";
-    }
-  });
   return errors;
 }
 
@@ -149,7 +133,7 @@ export function patchForStep(step: StepKey, state: FormState): StepPatch {
     case "links": {
       const errors = validateLinks(state);
       if (Object.keys(errors).length) return { ok: false, errors };
-      return { ok: true, patch: { step, resumeUrl: state.resumeUrl.trim(), portfolioLinks: filledLinks(state.portfolioLinks) } };
+      return { ok: true, patch: { step, resumeUrl: state.resumeUrl.trim() } };
     }
     case "teams":
     case "review":
@@ -173,7 +157,6 @@ export function toSnapshot(state: FormState, accountEmail: string): DraftSnapsho
     major: state.profile.major,
     resumeUrl: state.resumeUrl.trim() || null,
     genericAnswers: state.genericAnswers,
-    portfolioLinks: filledLinks(state.portfolioLinks),
     tracks: state.teams.map((team) => ({ track: team, answers: state.trackAnswers[team] ?? {} })),
   };
 }
@@ -210,11 +193,9 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 export function formStateFromSaved(saved: {
   profile: { fullName: string | null; eid: string | null; gradYear: number | null; major: string | null };
   resumeUrl: string | null;
-  portfolioLinks: unknown;
   genericAnswers: unknown;
   tracks: Array<{ track: string; answers: unknown }>;
 }): FormState {
-  const links = Array.isArray(saved.portfolioLinks) ? saved.portfolioLinks : [];
   return {
     profile: {
       fullName: saved.profile.fullName ?? "",
@@ -226,9 +207,5 @@ export function formStateFromSaved(saved: {
     teams: saved.tracks.map((t) => t.track),
     trackAnswers: Object.fromEntries(saved.tracks.map((t) => [t.track, asRecord(t.answers)])),
     resumeUrl: saved.resumeUrl ?? "",
-    portfolioLinks: links.flatMap((l) => {
-      const { label, url } = asRecord(l);
-      return typeof url === "string" ? [{ label: typeof label === "string" ? label : "", url }] : [];
-    }),
   };
 }

@@ -49,12 +49,11 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
     );
   }
 
-  const saved = { profile: app.profile, resumeUrl: app.resumeUrl, portfolioLinks: app.portfolioLinks, genericAnswers: app.genericAnswers, tracks: app.tracks };
+  const saved = { profile: app.profile, resumeUrl: app.resumeUrl, genericAnswers: app.genericAnswers, tracks: app.tracks };
   const summary = (
     <ApplicationSummary
       profile={{ ...app.profile, email: user.email }}
       resumeUrl={app.resumeUrl}
-      portfolioLinks={app.portfolioLinks}
       genericAnswers={app.genericAnswers}
       teams={app.tracks.map((t) => ({ key: t.track, answers: t.answers }))}
     />

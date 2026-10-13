@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { genericQuestions, questionsForTrack, tracks } from "@/schemas/recruiting.schema";
-import { answerEntries, formatAnswer, parsePortfolioLinks, readPortfolioLinks } from "./answers";
+import { answerEntries, formatAnswer } from "./answers";
 import { buildExportCsv, exportFilename, type ExportRow } from "./export";
 import { BOOKING_LINK_HOSTS, domainOf, formatCentral, isGoogleBookingHost, parseTrackStatus, TRACK_STATUS_LABEL } from "./labels";
 
@@ -23,7 +23,6 @@ function row(over: Partial<ExportRow> = {}): ExportRow {
     reviewCount: 0,
     averageScore: null,
     resumeUrl: "https://example.com/resume.pdf",
-    portfolioLinks: [],
     genericAnswers: {},
     trackAnswers: {},
     ...over,
@@ -93,21 +92,9 @@ describe("buildExportCsv", () => {
     expect(r[col(header, "Admin link")]).toBe("https://example.org/admin/recruiting/app-1");
   });
 
-  it("joins portfolio links as 'label: url'", () => {
-    const links = [{ label: "GitHub", url: "https://github.com/ada" }, { label: "Site", url: "https://ada.dev" }];
-    const [header, r] = parse(buildExportCsv([row({ portfolioLinks: links })], { adminBaseUrl: BASE }));
-    expect(r[col(header, "Portfolio links")]).toBe("GitHub: https://github.com/ada; Site: https://ada.dev");
-  });
-
-  it("exports the valid portfolio entries even when another entry is bad", () => {
-    const links = [{ label: "Bad", url: "javascript:alert(1)" }, { label: "Good", url: "https://ada.dev" }];
-    const [header, r] = parse(buildExportCsv([row({ portfolioLinks: links })], { adminBaseUrl: BASE }));
-    expect(r[col(header, "Portfolio links")]).toBe("Good: https://ada.dev");
-  });
-
-  it("drops malformed portfolio data instead of exporting it", () => {
-    const [header, r] = parse(buildExportCsv([row({ portfolioLinks: [{ label: "x", url: "javascript:alert(1)" }] })], { adminBaseUrl: BASE }));
-    expect(r[col(header, "Portfolio links")]).toBe("");
+  it("has no portfolio column (teams that want one ask in their own questions)", () => {
+    const [header] = parse(buildExportCsv([row()], { adminBaseUrl: BASE }));
+    expect(header).not.toContain("Portfolio links");
   });
 
   it("neutralizes formulas an applicant typed, in every text column", () => {
@@ -206,28 +193,6 @@ describe("answers", () => {
   it("copes with answers that aren't an object", () => {
     expect(answerEntries(genericQuestions, null).every((e) => e.text === "")).toBe(true);
     expect(answerEntries(genericQuestions, ["x"]).every((e) => e.known)).toBe(true);
-  });
-
-  it("parses portfolio links for the export, checking each entry on its own", () => {
-    expect(parsePortfolioLinks([{ label: "Site", url: "https://ada.dev" }])).toEqual([{ label: "Site", url: "https://ada.dev" }]);
-    expect(parsePortfolioLinks("nope")).toEqual([]);
-    expect(parsePortfolioLinks([{ label: "x", url: "http://insecure.test" }])).toEqual([]);
-  });
-
-  it("keeps the valid portfolio entries when another one is bad (one bad entry must not hide the rest)", () => {
-    const mixed = [{ label: "Bad", url: "http://insecure.test" }, { label: "Good", url: "https://ada.dev" }, "junk", null, { label: "No url" }];
-    expect(parsePortfolioLinks(mixed)).toEqual([{ label: "Good", url: "https://ada.dev" }]);
-  });
-
-  it("shows every portfolio entry to an officer, leaving the link-or-not decision to the display", () => {
-    const mixed = [{ label: "Bad", url: "javascript:alert(1)" }, { label: "Good", url: "https://ada.dev" }, "junk", null, { label: "No url" }, { url: "https://nolabel.dev" }];
-    expect(readPortfolioLinks(mixed)).toEqual([
-      { label: "Bad", url: "javascript:alert(1)" },
-      { label: "Good", url: "https://ada.dev" },
-      { label: "https://nolabel.dev", url: "https://nolabel.dev" },
-    ]);
-    expect(readPortfolioLinks("nope")).toEqual([]);
-    expect(readPortfolioLinks([{ label: "x".repeat(500), url: "https://a.dev/" + "y".repeat(5000) }])[0].label).toHaveLength(100);
   });
 });
 

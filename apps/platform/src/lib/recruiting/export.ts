@@ -2,7 +2,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import type { TrackStatus } from "@prisma/client";
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import { genericQuestions, getTrack, questionsForTrack, tracks } from "@/schemas/recruiting.schema";
-import { formatAnswer, parsePortfolioLinks } from "@/lib/recruiting/answers";
+import { formatAnswer } from "@/lib/recruiting/answers";
 import { TRACK_STATUS_LABEL } from "@/lib/recruiting/labels";
 import { toCsv, uniqueHeaders } from "@/lib/recruiting/csv";
 
@@ -22,7 +22,6 @@ export type ExportRow = {
   reviewCount: number;
   averageScore: number | null;
   resumeUrl: string | null;
-  portfolioLinks: unknown;
   genericAnswers: unknown;
   trackAnswers: unknown;
 };
@@ -34,7 +33,7 @@ const asRecord = (v: unknown): Record<string, unknown> => (typeof v === "object"
  * One row per applicant per team (someone who applied to three teams appears three times, with
  * their general answers repeated so every row stands alone; the Email column groups them).
  * Question columns: the general questions, then each team's questions for the teams present in
- * `rows`, left blank on rows for other teams. The resume and portfolio columns hold the links the
+ * `rows`, left blank on rows for other teams. The resume column holds the link the
  * applicant gave, so access to them is controlled by the applicant's own sharing settings.
  */
 export function buildExportCsv(rows: readonly ExportRow[], options: { adminBaseUrl: string }): string {
@@ -55,7 +54,6 @@ export function buildExportCsv(rows: readonly ExportRow[], options: { adminBaseU
     "Reviews",
     "Average score",
     "Resume link",
-    "Portfolio links",
     "Admin link",
     ...genericQuestions.map((q) => q.label),
     ...teamColumns.map((c) => c.header),
@@ -77,9 +75,6 @@ export function buildExportCsv(rows: readonly ExportRow[], options: { adminBaseU
       r.reviewCount,
       r.averageScore === null ? "" : Math.round(r.averageScore * 100) / 100,
       r.resumeUrl ?? "",
-      parsePortfolioLinks(r.portfolioLinks)
-        .map((l) => `${l.label}: ${l.url}`)
-        .join("; "),
       `${options.adminBaseUrl.replace(/\/+$/, "")}/admin/recruiting/${r.applicationId}`,
       ...genericQuestions.map((q) => formatAnswer(q, general[q.id])),
       ...teamColumns.map((c) => (c.team === r.track ? formatAnswer(c.q, own[c.q.id]) : "")),

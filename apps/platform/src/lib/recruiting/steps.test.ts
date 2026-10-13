@@ -58,7 +58,6 @@ function completeState(teams: string[] = [firstTeam]): FormState {
     teams,
     trackAnswers: Object.fromEntries(teams.map((t) => [t, answerAll(questionsForTrack(t))])),
     resumeUrl: "https://example.com/resume.pdf",
-    portfolioLinks: [{ label: "Site", url: "https://ada.dev" }],
   };
 }
 
@@ -204,10 +203,10 @@ describe("patchForStep: questions", () => {
 });
 
 describe("links", () => {
-  const withLinks = (resumeUrl: string, rows: Array<{ label: string; url: string }> = []) => ({ ...emptyFormState(), resumeUrl, portfolioLinks: rows });
+  const withLinks = (resumeUrl: string) => ({ ...emptyFormState(), resumeUrl });
 
-  it("accepts a clean resume link and clean portfolio rows", () => {
-    expect(validateLinks(withLinks("https://example.com/r.pdf", [{ label: "GitHub", url: "https://github.com/ada" }]))).toEqual({});
+  it("accepts a clean resume link", () => {
+    expect(validateLinks(withLinks("https://example.com/r.pdf"))).toEqual({});
   });
 
   it("allows a blank resume while drafting", () => {
@@ -224,30 +223,9 @@ describe("links", () => {
     expect(validateLinks(withLinks(url))).toHaveProperty("resumeUrl");
   });
 
-  it("ignores completely blank portfolio rows", () => {
-    expect(validateLinks(withLinks("", [{ label: "", url: "" }, { label: "  ", url: " " }]))).toEqual({});
-  });
-
-  it("points at the row that is half filled in", () => {
-    const errors = validateLinks(withLinks("", [{ label: "Fine", url: "https://ok.dev" }, { label: "No link", url: "" }, { label: "", url: "https://nolabel.dev" }]));
-    expect(errors).toEqual({
-      "portfolioLinks.1.url": expect.any(String),
-      "portfolioLinks.2.label": expect.any(String),
-    });
-  });
-
-  it("allows five portfolio links and not six", () => {
-    const five = Array.from({ length: 5 }, (_, i) => ({ label: `L${i}`, url: "https://example.com" }));
-    expect(validateLinks(withLinks("", five))).toEqual({});
-    expect(validateLinks(withLinks("", [...five, { label: "L5", url: "https://example.com" }]))).toHaveProperty("portfolioLinks");
-  });
-
-  it("saves the trimmed resume and only the filled rows", () => {
-    const state = withLinks("  https://example.com/r.pdf ", [{ label: " Site ", url: " https://ada.dev " }, { label: "", url: "" }]);
-    expect(patchForStep("links", state)).toEqual({
-      ok: true,
-      patch: { step: "links", resumeUrl: "https://example.com/r.pdf", portfolioLinks: [{ label: "Site", url: "https://ada.dev" }] },
-    });
+  it("saves the trimmed resume link, and nothing else (there are no portfolio links)", () => {
+    const state = withLinks("  https://example.com/r.pdf ");
+    expect(patchForStep("links", state)).toEqual({ ok: true, patch: { step: "links", resumeUrl: "https://example.com/r.pdf" } });
   });
 
   it("won't save a bad link", () => {
@@ -363,18 +341,16 @@ describe("formStateFromSaved", () => {
     const state = formStateFromSaved({
       profile: { fullName: "A", eid: "abc1", gradYear: 2028, major: "CS" },
       resumeUrl: "https://example.com/r",
-      portfolioLinks: [{ label: "GH", url: "https://github.com/x" }, "junk", { label: 3, url: 4 }],
       genericAnswers: { a: "b" },
       tracks: [{ track: "team-a", answers: { q: "x" } }, { track: "team-b", answers: null }],
     });
     expect(state.profile.gradYear).toBe("2028");
     expect(state.teams).toEqual(["team-a", "team-b"]);
     expect(state.trackAnswers).toEqual({ "team-a": { q: "x" }, "team-b": {} });
-    expect(state.portfolioLinks).toEqual([{ label: "GH", url: "https://github.com/x" }]);
   });
 
   it("turns an empty draft into empty strings", () => {
-    const state = formStateFromSaved({ profile: { fullName: null, eid: null, gradYear: null, major: null }, resumeUrl: null, portfolioLinks: null, genericAnswers: null, tracks: [] });
+    const state = formStateFromSaved({ profile: { fullName: null, eid: null, gradYear: null, major: null }, resumeUrl: null, genericAnswers: null, tracks: [] });
     expect(state).toEqual(emptyFormState());
   });
 });

@@ -12,7 +12,7 @@
 //   - only these types: short_text, long_text, single_choice, multi_choice, link
 //   - every question says whether it is required
 //   - choice questions list 2 to 8 options of at most 100 characters
-//   - no file uploads anywhere: the resume and portfolio are links
+//   - no file uploads anywhere: the resume is a link (a team that wants a portfolio asks for one in its own questions)
 // See docs/recruiting-build-plan.md and docs/recruiting-system-design.md (local docs).
 
 import { z } from 'zod';
@@ -26,8 +26,6 @@ export const RECRUITING_LIMITS = {
   shortTextMax: 200,
   longTextMax: 1500,
   urlMax: 2000,
-  maxPortfolioLinks: 5,
-  portfolioLabelMax: 60,
 } as const;
 
 /** Bump when a question is removed or changes meaning (copied onto each application). */
@@ -298,13 +296,6 @@ export const httpsUrl = z
   .max(RECRUITING_LIMITS.urlMax, 'That link is too long.')
   .refine(isSafeHttpsUrl, { error: 'Enter a full link that starts with https://' });
 
-export const portfolioLinkSchema = z.object({
-  label: z.string().trim().min(1, 'Add a short label.').max(RECRUITING_LIMITS.portfolioLabelMax),
-  url: httpsUrl,
-});
-
-export const portfolioLinksSchema = z.array(portfolioLinkSchema).max(RECRUITING_LIMITS.maxPortfolioLinks);
-
 /** Profile fields, pre-filled from the account and copied onto the application. All required at submit. */
 export const profileSchema = z.object({
   fullName: z.string().trim().min(1, 'Enter your name.').max(120),
@@ -408,7 +399,6 @@ export const draftPatchSchema = z
     genericAnswers: z.record(z.string(), z.unknown()).optional(),
     trackAnswers: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
     resumeUrl: z.union([z.literal(''), httpsUrl]).optional(),
-    portfolioLinks: portfolioLinksSchema.optional(),
   })
   .strict();
 
@@ -427,7 +417,6 @@ export type DraftSnapshot = {
   major?: string | null;
   resumeUrl?: string | null;
   genericAnswers?: unknown;
-  portfolioLinks?: unknown;
   tracks: ReadonlyArray<{ track: string; answers: unknown }>;
 };
 
@@ -497,13 +486,11 @@ export function checkCompleteness(draft: DraftSnapshot): CompletenessReport {
     );
   }
 
-  // Resume and portfolio links
+  // Resume link
   const linkProblems: string[] = [];
   if (isBlank(draft.resumeUrl)) linkProblems.push('Missing: link to your resume');
   else if (!httpsUrl.safeParse(draft.resumeUrl).success) linkProblems.push('Resume link: enter a full link that starts with https://');
-  const portfolio = portfolioLinksSchema.safeParse(draft.portfolioLinks ?? []);
-  if (!portfolio.success) linkProblems.push(`Portfolio links: ${portfolio.error.issues[0]?.message ?? 'invalid'}`);
-  add('links', 'Resume & portfolio', linkProblems);
+  add('links', 'Resume', linkProblems);
 
   return { complete: sections.every((s) => s.complete), sections };
 }

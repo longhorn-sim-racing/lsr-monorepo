@@ -210,7 +210,6 @@ export async function listSubmittedTracksForExport(
           submittedAt: true,
           autoSubmitted: true,
           resumeUrl: true,
-          portfolioLinks: true,
           genericAnswers: true,
           user: { select: { email: true } },
         },
@@ -234,7 +233,6 @@ export async function listSubmittedTracksForExport(
       reviewCount: r.reviews.length,
       averageScore: scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null,
       resumeUrl: r.application.resumeUrl,
-      portfolioLinks: r.application.portfolioLinks,
       genericAnswers: r.application.genericAnswers,
       trackAnswers: r.answers,
     };

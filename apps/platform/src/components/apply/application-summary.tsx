@@ -1,4 +1,4 @@
-import { answerEntries, readPortfolioLinks } from "@/lib/recruiting/answers";
+import { answerEntries } from "@/lib/recruiting/answers";
 import { genericQuestions, questionsForTrack } from "@/schemas/recruiting.schema";
 import { teamLabel } from "@/lib/recruiting/steps";
 import { SafeLink } from "@/components/admin/recruiting/safe-link";
@@ -6,14 +6,12 @@ import { SafeLink } from "@/components/admin/recruiting/safe-link";
 type Props = {
   profile: { fullName: string | null; email: string | null; eid: string | null; gradYear: number | string | null; major: string | null };
   resumeUrl: string | null;
-  portfolioLinks: unknown;
   genericAnswers: unknown;
   teams: Array<{ key: string; answers: unknown }>;
 };
 
 /** Everything the applicant entered, read-only. Used on the review page and on their status page. */
-export function ApplicationSummary({ profile, resumeUrl, portfolioLinks, genericAnswers, teams }: Props) {
-  const links = readPortfolioLinks(portfolioLinks);
+export function ApplicationSummary({ profile, resumeUrl, genericAnswers, teams }: Props) {
   return (
     <div className="space-y-8">
       <Block title="About you">
@@ -36,24 +34,10 @@ export function ApplicationSummary({ profile, resumeUrl, portfolioLinks, generic
         </Block>
       ))}
 
-      <Block title="Resume and portfolio">
+      <Block title="Resume">
         <div className="space-y-1">
           <Label>Resume</Label>
           <div className="font-sans text-sm text-white/85">{resumeUrl ? <SafeLink url={resumeUrl} /> : <span className="text-white/30">Not added</span>}</div>
-        </div>
-        <div className="space-y-1">
-          <Label>Portfolio</Label>
-          {links.length === 0 ? (
-            <div className="font-sans text-sm text-white/30">None</div>
-          ) : (
-            <ul className="space-y-1 font-sans text-sm text-white/85">
-              {links.map((l) => (
-                <li key={l.url}>
-                  <SafeLink url={l.url} label={l.label} />
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
       </Block>
     </div>

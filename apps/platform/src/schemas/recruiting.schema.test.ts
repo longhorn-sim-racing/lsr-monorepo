@@ -187,7 +187,6 @@ describe("parseAnswers", () => {
 });
 
 describe("draftPatchSchema", () => {
-  const links = (n: number) => Array.from({ length: n }, (_, i) => ({ label: `L${i}`, url: "https://example.com" }));
 
   it("accepts an empty patch and a partial profile", () => {
     expect(draftPatchSchema.safeParse({}).success).toBe(true);
@@ -204,9 +203,8 @@ describe("draftPatchSchema", () => {
     expect(draftPatchSchema.safeParse({ resumeUrl: "http://x.com/a" }).success).toBe(false);
   });
 
-  it("allows 5 portfolio links and rejects 6", () => {
-    expect(draftPatchSchema.safeParse({ portfolioLinks: links(5) }).success).toBe(true);
-    expect(draftPatchSchema.safeParse({ portfolioLinks: links(6) }).success).toBe(false);
+  it("no longer accepts portfolio links at all", () => {
+    expect(draftPatchSchema.safeParse({ portfolioLinks: [{ label: "GitHub", url: "https://github.com/ada" }] }).success).toBe(false);
   });
 
   it("rejects an impossible graduation year", () => {
@@ -222,7 +220,6 @@ describe("checkCompleteness", () => {
     ...profile,
     genericAnswers: generic,
     resumeUrl: resume,
-    portfolioLinks: [],
     tracks: [{ track: "team-b", answers: {} }],
     ...over,
   });
@@ -319,7 +316,7 @@ describe("lookups and shipped content", () => {
 
   it("completes with real answers for both real teams", () => {
     const profile = { fullName: "Ada Lovelace", email: "ada@example.com", eid: "al123", gradYear: 2028, major: "Math" };
-    const draft = (over: Partial<DraftSnapshot>): DraftSnapshot => ({ ...profile, genericAnswers: {}, resumeUrl: "https://example.com/r.pdf", portfolioLinks: [], tracks: [], ...over });
+    const draft = (over: Partial<DraftSnapshot>): DraftSnapshot => ({ ...profile, genericAnswers: {}, resumeUrl: "https://example.com/r.pdf", tracks: [], ...over });
     const incompleteKeys = (d: DraftSnapshot) => checkCompleteness(d).sections.filter((s) => !s.complete).map((s) => s.key);
     const d = draft({
       tracks: [

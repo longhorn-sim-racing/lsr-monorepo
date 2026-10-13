@@ -121,7 +121,6 @@ function toSnapshot(app: ApplicationWithTracks): DraftSnapshot {
     major: app.major,
     resumeUrl: app.resumeUrl,
     genericAnswers: app.genericAnswers,
-    portfolioLinks: app.portfolioLinks,
     tracks: app.tracks.map((t) => ({ track: t.track, answers: t.answers })),
   };
 }
@@ -170,7 +169,6 @@ export type ApplicantStatusView = {
     expiredUnsubmitted: boolean;
     profile: { fullName: string | null; email: string | null; eid: string | null; gradYear: number | null; major: string | null };
     resumeUrl: string | null;
-    portfolioLinks: unknown;
     genericAnswers: unknown;
     tracks: Array<{
       track: string;
@@ -209,7 +207,6 @@ export async function getApplicantStatus(userId: string, now: Date = new Date())
       expiredUnsubmitted: app.state === "DRAFT" && window === "closed",
       profile: { fullName: app.fullName, email: app.email, eid: app.eid, gradYear: app.gradYear, major: app.major },
       resumeUrl: app.resumeUrl,
-      portfolioLinks: app.portfolioLinks,
       genericAnswers: app.genericAnswers,
       tracks: app.tracks.map((t) => {
         const def = getTrack(t.track);
@@ -331,7 +328,6 @@ export async function saveDraft(userId: string, input: unknown, now: Date = new 
     }
 
     if (patch.resumeUrl !== undefined) data.resumeUrl = patch.resumeUrl === "" ? null : patch.resumeUrl;
-    if (patch.portfolioLinks !== undefined) data.portfolioLinks = patch.portfolioLinks;
 
     if (Object.keys(fieldErrors).length > 0) {
       throw new RecruitingError("INVALID", "Some answers need attention.", { fieldErrors });

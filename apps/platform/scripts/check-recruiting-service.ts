@@ -7,7 +7,10 @@
 //
 // (NODE_ENV=production only quiets Prisma's per-query logging.) It needs `npx supabase start`,
 // a migrated + seeded database (`pnpm db:reset`: it uses the seeded active round `fall-2026`),
-// and it refuses to run unless DATABASE_URL points at localhost. It creates its own users and
+// and it refuses to run unless DATABASE_URL points at localhost.
+// It assumes a database with NO demo or mail-test data: two checks (the daily email quota and "a new round
+// copies the previous round's booking links") count what is already there, so run it after `pnpm db:reset`
+// or after `npx tsx scripts/seed-recruiting-demo.ts clean`. It creates its own users and
 // deletes everything it created when it finishes, pass or fail.
 //
 // It also covers recruiting-email.service.ts, but NEVER sends real mail: RESEND_API_KEY is cleared
@@ -159,7 +162,7 @@ async function main() {
   await expectError("general answers are rejected: there are no general questions", () => saveDraft(u1.id, { genericAnswers: { why_join: "x" } }, IN), "INVALID");
   await expectError("answers for a team that isn't chosen rejected", () => saveDraft(u1.id, { trackAnswers: { "team-a": { a_experience: "x" } } }, IN), "INVALID");
   await expectError("http resume link rejected", () => saveDraft(u1.id, { resumeUrl: "http://example.com/r.pdf" }, IN), "INVALID");
-  await expectError("6 portfolio links rejected", () => saveDraft(u1.id, { portfolioLinks: Array.from({ length: 6 }, (_, i) => ({ label: `L${i}`, url: "https://example.com" })) }, IN), "INVALID");
+  await expectError("portfolio links are no longer accepted", () => saveDraft(u1.id, { portfolioLinks: [{ label: "GitHub", url: "https://github.com/ada" }] }, IN), "INVALID");
   {
     // all-or-nothing: one valid change + one invalid change writes nothing
     const before = await getMyApplication(u1.id);

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, Circle, Plus, X } from "lucide-react";
+import { Check, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -454,8 +454,6 @@ function TeamsStep({ teams, selected, onToggle }: { teams: TeamDef[]; selected: 
 }
 
 function LinksStep({ state, set, errors }: { state: FormState; set: (p: Partial<FormState>) => void; errors: Record<string, string> }) {
-  const rows = state.portfolioLinks;
-  const update = (i: number, patch: Partial<{ label: string; url: string }>) => set({ portfolioLinks: rows.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
   return (
     <>
       <div className="space-y-2">
@@ -475,33 +473,6 @@ function LinksStep({ state, set, errors }: { state: FormState; set: (p: Partial<
         <p className="font-sans text-xs leading-relaxed text-white/50">
           Upload your resume somewhere you control (for example Google Drive) and paste the link. <strong className="text-white/70">Make sure anyone with the link can view it</strong>: officers who can&apos;t open it can&apos;t consider your application. Open the link in a private window to check.
         </p>
-      </div>
-
-      <div className="space-y-3">
-        <p className={labelClass}>Portfolio links <span className="ml-2 text-[10px] tracking-widest text-white/35">Optional, up to {RECRUITING_LIMITS.maxPortfolioLinks}</span></p>
-        {rows.map((row, i) => (
-          <div key={i} className="space-y-2 border border-white/10 bg-white/[0.02] p-3">
-            <div className="grid gap-2 sm:grid-cols-[10rem_1fr_auto]">
-              <div>
-                <Input aria-label={`Link ${i + 1} label`} placeholder="GitHub" value={row.label} maxLength={RECRUITING_LIMITS.portfolioLabelMax} onChange={(e) => update(i, { label: e.target.value })} className={inputClass} />
-                {errors[`portfolioLinks.${i}.label`] && <p role="alert" className={`${errorClass} mt-1`}>{errors[`portfolioLinks.${i}.label`]}</p>}
-              </div>
-              <div>
-                <Input aria-label={`Link ${i + 1} address`} type="url" inputMode="url" placeholder="https://" value={row.url} maxLength={RECRUITING_LIMITS.urlMax} onChange={(e) => update(i, { url: e.target.value })} className={inputClass} />
-                {errors[`portfolioLinks.${i}.url`] && <p role="alert" className={`${errorClass} mt-1`}>{errors[`portfolioLinks.${i}.url`]}</p>}
-              </div>
-              <Button type="button" variant="ghost" aria-label={`Remove link ${i + 1}`} onClick={() => set({ portfolioLinks: rows.filter((_, j) => j !== i) })} className="h-12 rounded-none px-3 text-white/50 hover:text-white">
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        ))}
-        {errors.portfolioLinks && <p role="alert" className={errorClass}>{errors.portfolioLinks}</p>}
-        {rows.length < RECRUITING_LIMITS.maxPortfolioLinks && (
-          <Button type="button" variant="outline" onClick={() => set({ portfolioLinks: [...rows, { label: "", url: "" }] })} className="h-10 rounded-none border-white/20 bg-transparent font-sans text-xs font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal">
-            <Plus className="mr-2 h-4 w-4" /> Add a link
-          </Button>
-        )}
       </div>
     </>
   );
@@ -571,7 +542,6 @@ function ReviewStep({
           <ApplicationSummary
             profile={{ fullName: state.profile.fullName, email: accountEmail, eid: state.profile.eid, gradYear: state.profile.gradYear || null, major: state.profile.major }}
             resumeUrl={state.resumeUrl.trim() || null}
-            portfolioLinks={state.portfolioLinks.filter((l) => l.url.trim() !== "")}
             genericAnswers={state.genericAnswers}
             teams={state.teams.map((key) => ({ key, answers: state.trackAnswers[key] ?? {} }))}
           />
