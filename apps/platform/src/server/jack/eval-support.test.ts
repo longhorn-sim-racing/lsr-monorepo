@@ -105,6 +105,11 @@ describe("mentionsNumber", () => {
     expect(mentionsNumber("12 people have paid. There's no fee waiver this season.", 0, ["paid", "driver", "entr", "fee", "people"])).toBe(false)
     expect(mentionsNumber("None of the applicants have paid yet; 14 forms are in.", 0, ["paid", "applicant"])).toBe(true)
     expect(mentionsNumber("Nobody's paid yet.", 0, ["paid", "driver"])).toBe(true)
+    expect(mentionsNumber("No one has paid yet.", 0, ["paid", "driver", "entr", "fee", "people"])).toBe(true)
+    expect(mentionsNumber("No one's paid yet.", 0, ["paid", "driver"])).toBe(true)
+    expect(mentionsNumber("Nothing has been paid yet.", 0, ["paid", "driver"])).toBe(true)
+    expect(mentionsNumber("None of them have paid.", 0, ["paid", "driver"])).toBe(true)
+    expect(mentionsNumber("I don't know. No drivers?", 0, ["paid", "driver"])).toBe(false)
     expect(mentionsNumber("There are no paid entries.", 0, ["paid", "entr"])).toBe(true)
     // "no" about something else, near the noun, isn't the count
     const lsc = ["paid", "driver", "entr", "fee", "people"]

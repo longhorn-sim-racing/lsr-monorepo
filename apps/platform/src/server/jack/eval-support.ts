@@ -156,7 +156,7 @@ function numberForms(n: number): string[] {
 }
 
 /** Ways of saying none, which count as zero only right before what they count ("No drivers have paid") */
-const NONE_WORDS = ["no", "none", "nobody", "nothing"]
+const NONE_WORDS = ["no one", "no-one", "nobody", "nothing", "none", "no"]
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
@@ -204,16 +204,17 @@ export function mentionsNumber(text: string, n: number, nouns: string[] = []): b
   const said = NONE_WORDS.some((word) =>
     nouns.some((noun) =>
       new RegExp(
-        `(?<![\\w'’-])${word}(?:['’]s)?(?:\\s+(?:of|the|our|other|new|more|lsc|club|current|this|season's|paid|unpaid|active|confirmed|completed))*\\s+(?:(?:has|have|had|is|are|was|were)\\s+)?\\b${escapeRegExp(noun)}[\\w'’-]*(?=\\s+(?:have|has|had|are|were|is|was|yet|so|paid|entered|signed|registered|applied|on|in|this|for|at)\\b|\\s*[.,;:!?)]|\\s*$)`,
+        `(?<![\\w'’-])${word}(?:['’]s)?(?:\\s+(?:of|the|them|our|other|new|more|lsc|club|current|this|season's|paid|unpaid|active|confirmed|completed))*\\s+(?:(?:has|have|had|is|are|was|were)(?:\\s+been)?\\s+)?\\b${escapeRegExp(noun)}[\\w'’-]*(?=\\s+(?:have|has|had|are|were|is|was|yet|so|paid|entered|signed|registered|applied|on|in|this|for|at)\\b|\\s*[.,;:!)]|\\s*$)`,
         "i",
       ).test(clean),
     ),
   )
   if (!said) return false
-  // Another count by the same nouns, in digits or words, means the "no" isn't the answer
-  const wordCounts = WORDS.slice(1).filter((w) => new RegExp(standalone(w), "i").test(clean))
+  // Another count by the same nouns, in digits or words, means the "no" isn't the answer ("no one" isn't a one)
+  const counted = clean.replace(/\bno[ -]one\b/gi, "nobody")
+  const wordCounts = WORDS.slice(1).filter((w) => new RegExp(standalone(w), "i").test(counted))
   const others = [...new Set([...otherNumbers(clean, 0).map(String), ...wordCounts])]
-  return !(others.length && nextToNoun(clean, others, nouns))
+  return !(others.length && nextToNoun(counted, others, nouns))
 }
 
 /** "$45", "$45.00" or "45.00" for 4,500 cents */
