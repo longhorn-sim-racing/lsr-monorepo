@@ -41,6 +41,7 @@ describe("buildSystemPrompt", () => {
       // Added after the eval: the commonest slip was adding background no tool gave
       /Say only what the tools returned/,
       /Give links exactly as a tool returns them/,
+      /name them in your reply/,
     ]) {
       expect(text).toMatch(rule)
     }

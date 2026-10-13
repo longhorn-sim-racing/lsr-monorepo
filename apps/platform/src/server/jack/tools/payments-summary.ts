@@ -204,7 +204,8 @@ export const paymentsSummaryTool: JackTool<z.infer<typeof input>> = {
 
 /** unpaidCheckouts: the people, what they started, and when */
 async function runUnpaidCheckouts({ from, to, now }: { from?: string; to?: string; now: Date }) {
-  const range = from || to ? centralRange({ from, to }, { fromDaysAgo: 0, toDaysAhead: 0 }, now) : null
+  // All time unless bounded; an end date alone means everything up to it
+  const range = from || to ? centralRange({ from: from ?? "2020-01-01", to }, { fromDaysAgo: 0, toDaysAhead: 0 }, now) : null
   if (range && !range.ok) return { isError: true, forModel: range.error, label: "Payments lookup failed", displays: [] }
   const select = {
     userId: true,

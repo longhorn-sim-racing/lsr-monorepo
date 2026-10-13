@@ -7,7 +7,7 @@ vi.mock("@/server/jack/sql-client", () => ({ getJackSqlClient: () => null, JACK_
 
 import type { SeasonEntrant } from "@/server/services/league-entry.service"
 import { auditWhere } from "./audit-log"
-import { bucketSignups, monthsBefore, tierCounts } from "./club-members"
+import { bucketSignups, compactRow, monthsBefore, tierCounts } from "./club-members"
 import { forModelWithList, forModelWithLists, MAX_MODEL_CHARS } from "./display"
 import { formatSchema, parseConstraints, typeName } from "./describe-schema"
 import { summarizeEvent, searchWhere, type EventRow } from "./events-overview"
@@ -122,7 +122,7 @@ describe("events_overview shaping", () => {
       takesCheckIns: false,
       registration: { registered: 30, waitlisted: 4, notAttending: 2, capacity: 50, filled: "30/50" },
       attendance: { basis: "assumed: everyone registered", attended: 30, checkedIn: 0 },
-      manageUrl: "/admin/events/e1/manage",
+      manageLink: expect.stringMatching(/^https?:\/\/[^/]+\/admin\/events\/e1\/manage$/),
     })
   })
 
@@ -136,8 +136,9 @@ describe("events_overview shaping", () => {
   it("shows drafts as hidden, and fees and results", () => {
     const row = summarizeEvent(event({ status: "DRAFT", registrationFeeCents: 1250, _count: { rawResultUploads: 1, ingestedSessions: 0 } }), {}, now)
     expect(row).toMatchObject({ effectiveStatus: "DRAFT", public: false, registration: { feeDollars: 12.5 }, results: "uploaded, no race results yet" })
-    // A past round of a series with nothing uploaded says so; a one-off event says nothing
-    expect(summarizeEvent(event({ series: { title: "LSC S3" } }), {}, now).results).toBe("none uploaded")
+    // A past round of a league's race series with nothing uploaded says so; a general meeting or a one-off says nothing
+    expect(summarizeEvent(event({ series: { title: "LSC S3", _count: { seasons: 1 } } }), {}, now).results).toBe("none uploaded")
+    expect(summarizeEvent(event({ series: { title: "General Meetings", _count: { seasons: 0 } } }), {}, now).results).toBeNull()
     expect(summarizeEvent(event(), {}, now).results).toBeNull()
   })
 
@@ -492,5 +493,38 @@ describe("an entry form's school", () => {
     expect(schoolOf({ school: "  " })).toBe("UT Austin")
     expect(schoolOf({ school: "Clemson" })).toBe("Clemson")
     expect(schoolOf(null)).toBeNull()
+  })
+})
+
+describe("club_members roster", () => {
+  it("leaves empty fields out of the model's copy", () => {
+    expect(compactRow({ name: "Ana", eid: null, roles: [], checkIns: 0, races: 3, lsc: null, paidDollars: 0 })).toEqual({ name: "Ana", races: 3 })
+  })
+
+  it("fits a whole club with its definitions, and says how to page when it doesn't", () => {
+    const members = Array.from({ length: 110 }, (_, i) =>
+      compactRow({
+        name: `Member Number ${i}`,
+        email: `member.number.${i}@utexas.edu`,
+        eid: i % 9 === 0 ? `ab${10000 + i}` : null,
+        joined: "2026-02-14",
+        roles: i < 21 ? ["officer"] : [],
+        eventsRegistered: i % 4,
+        checkIns: 0,
+        racesDriven: i % 7,
+        lsc: i < 14 ? "form only" : null,
+        paidDollars: i % 5 === 0 ? 25 : 0,
+      }),
+    )
+    const text = forModelWithLists({ rosterDefinitions: "what the fields mean" }, [{ key: "roster", items: members, whenTrimmed: "Page with joinedFrom." }])
+    const body = JSON.parse(text)
+    expect(text.length).toBeLessThanOrEqual(MAX_MODEL_CHARS)
+    expect(body.roster).toHaveLength(110)
+    expect(body.rosterDefinitions).toBe("what the fields mean")
+
+    const many = Array.from({ length: 400 }, (_, i) => ({ name: `Member ${i}`, email: `m${i}@utexas.edu`, joined: "2026-02-14", note: "x".repeat(40) }))
+    const trimmed = JSON.parse(forModelWithLists({ rosterDefinitions: "kept" }, [{ key: "roster", items: many, whenTrimmed: "Page with joinedFrom." }]))
+    expect(trimmed.rosterDefinitions).toBe("kept")
+    expect(trimmed.rosterNote).toMatch(/^Only the first \d+ of 400 roster fit in this reply\. Page with joinedFrom\.$/)
   })
 })

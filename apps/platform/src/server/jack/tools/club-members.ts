@@ -129,15 +129,16 @@ export const clubMembersTool: JackTool<z.infer<typeof input>> = {
     const newestList = newestRows.map((u) => ({ name: u.displayName, handle: u.handle, email: u.email, eid: u.eid, status: u.status, joined: ct(u.createdAt) }))
     const people = roster === "none" ? null : await buildRoster(roster, { joinedFrom, joinedTo, now })
     if (people && "error" in people) return { isError: true, forModel: people.error, label: "Members lookup failed", displays: [] }
+    // A roster goes first and takes the room it needs; the newest-members list would only repeat it
     const lists: ModelList[] = [
-      ...(people ? [{ key: "roster", items: people.rows }] : []),
-      { key: "newest", items: newestList },
+      ...(people ? [{ key: "roster", items: people.rows, whenTrimmed: "Ask again with joinedFrom and joinedTo to get the rest, a few months at a time." }] : []),
+      ...(people ? [] : [{ key: "newest", items: newestList }]),
       { key: "signupPeriods", items: signups, keep: "last" as const },
     ]
 
     return {
       // A roster first, then the newest members (at most 50); a long signup range keeps its most recent periods
-      forModel: forModelWithLists(people ? { ...result, rosterNote: people.note } : result, lists),
+      forModel: forModelWithLists(people ? { ...result, rosterDefinitions: people.note } : result, lists),
       label: people
         ? `Listed ${roster === "officers" ? plural(people.rows.length, "officer") : plural(people.rows.length, "member")}`
         : `Looked up members (${plural(members.length, "member")}, ${joined.length} joined since ${start})`,
@@ -155,6 +156,14 @@ export const clubMembersTool: JackTool<z.infer<typeof input>> = {
 /** Officers and admins with titles, or every member (optionally by join date) with what they've done */
 type Roster = { rows: Record<string, unknown>[]; note: string; display: JackToolDisplay }
 
+/** Said with every roster: the room has the table, the reply has the point */
+const SUMMARIZE = "The room shows the whole list as a table, so don't repeat its rows in your reply: summarize, and name people only when asked who (up to about 20)."
+
+/** A roster row without its empty fields: null, an empty list, zero */
+export function compactRow(row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(row).filter(([, v]) => v !== null && v !== undefined && v !== 0 && !(Array.isArray(v) && v.length === 0)))
+}
+
 async function buildRoster(
   kind: "officers" | "members",
   { joinedFrom, joinedTo, now }: { joinedFrom?: string; joinedTo?: string; now: Date },
@@ -168,7 +177,7 @@ async function buildRoster(
     const rows = officers.map((u) => ({ name: u.displayName, title: u.officerTitle, roles: u.roles.map((r) => r.role.key), email: u.email, eid: u.eid }))
     return {
       rows,
-      note: "Everyone with the officer or admin role (both open the admin console). title is the board title shown on the site.",
+      note: `Everyone with the officer or admin role (both open the admin console). title is the board title shown on the site. ${SUMMARIZE}`,
       display: tableDisplay(rows, [
         { header: "Officer", value: (r) => r.name },
         { header: "Title", value: (r) => r.title },
@@ -202,10 +211,9 @@ async function buildRoster(
     const a = activity.get(u.id)
     return {
       name: u.displayName,
-      handle: u.handle,
       email: u.email,
       eid: u.eid,
-      joined: ct(u.createdAt),
+      joined: centralDate(u.createdAt),
       roles: u.roles.map((r) => r.role.key),
       eventsRegistered: a?.registrations ?? 0,
       checkIns: a?.checkIns ?? 0,
@@ -215,11 +223,12 @@ async function buildRoster(
     }
   })
   return {
-    rows,
+    // The model's copy leaves out empty fields (no EID, no roles, zero counts), so a whole club fits
+    rows: rows.map(compactRow),
     note:
       `Every member${joinedFrom || joinedTo ? ` who joined ${joinedFrom ?? "any time"} to ${joinedTo ?? "now"} (Central)` : ""}, oldest account first. ` +
-      `eventsRegistered = REGISTERED seats (all time); checkIns = event check-ins; racesDriven = race sessions with a linked result; ` +
-      `lsc = entry status for ${season.ok ? season.season.name : "the open LSC season"} (paid, manual, ended, form only; null = no form); paidDollars = succeeded payments, all time.`,
+      `A field that's left out is empty or zero. joined = Central date the account was made; eventsRegistered = REGISTERED seats (all time); checkIns = event check-ins; racesDriven = race sessions with a linked result; ` +
+      `lsc = entry status for ${season.ok ? season.season.name : "the open LSC season"} (paid, manual, ended, form only; left out = no form); paidDollars = succeeded payments, all time. ${SUMMARIZE}`,
     display: tableDisplay(rows, [
       { header: "Member", value: (r) => r.name },
       { header: "Email", value: (r) => r.email },

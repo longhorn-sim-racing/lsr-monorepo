@@ -22,7 +22,8 @@ export async function activityByMember(window: { from?: Date; to?: Date } = {}, 
   const [registrations, checkIns, races] = await Promise.all([
     prisma.eventRegistration.groupBy({
       by: ["userId"],
-      where: { ...who, status: "REGISTERED", ...(range ? { event: { startsAtUtc: range } } : {}) },
+      // Seats on events that happened or will; a cancelled event doesn't count
+      where: { ...who, status: "REGISTERED", event: { status: { not: "CANCELLED" }, ...(range ? { startsAtUtc: range } : {}) } },
       _count: { _all: true },
       _max: { createdAt: true },
     }),
@@ -101,10 +102,10 @@ export const memberActivityTool: JackTool<z.infer<typeof input>> = {
       lastRegisteredOrCheckedIn: ct(r.lastActive),
     }))
     const result = {
-      window: { from: from ?? "all time", to: to ?? "today", timeZone: "America/Chicago" },
+      window: { from: from ?? "the start", to: to ?? "no end (upcoming events' registrations count)", timeZone: "America/Chicago" },
       rankedBy: sortBy,
       definitions:
-        "registrations = REGISTERED seats at events in the window; checkIns = event check-ins; races = race sessions with a result linked to the member; total = the three added up.",
+        "registrations = REGISTERED seats at events in the window (not cancelled ones); checkIns = event check-ins; races = race sessions with a result linked to the member; total = the three added up.",
       membersWithAnyActivity: ranked.length,
       members: rows,
     }

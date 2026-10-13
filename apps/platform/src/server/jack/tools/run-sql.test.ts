@@ -150,7 +150,10 @@ describe("prepareSql", () => {
 describe("wrapSql", () => {
   it("caps rows at one past the limit and keeps a trailing comment from eating the wrapper", () => {
     const wrapped = wrapSql("SELECT 1 -- note")
-    expect(wrapped).toBe(`SELECT jack_q.*, row_to_json(jack_q)::text AS "__jack_row" FROM (\nSELECT 1 -- note\n) AS jack_q LIMIT ${MAX_SQL_ROWS + 1}`)
+    // OFFSET 0 keeps Postgres from merging the query in (which would compute each row twice)
+    expect(wrapped).toBe(
+      `SELECT jack_q.*, row_to_json(jack_q.*)::text AS "__jack_row" FROM (SELECT * FROM (\nSELECT 1 -- note\n) AS jack_inner OFFSET 0) AS jack_q LIMIT ${MAX_SQL_ROWS + 1}`,
+    )
   })
 })
 
@@ -177,7 +180,7 @@ describe("times in run_sql results", () => {
     )
     const body = JSON.parse(result.forModel)
     expect(body.columns).toEqual(["startsAtUtc", "day"])
-    expect(body.rows).toEqual([["Fri 2026-10-09 19:00 CT", "2026-10-09"]])
+    expect(body.rows).toEqual([["Fri 2026-10-09 19:00 CT", "Fri 2026-10-09"]])
     expect(body.note).toBe("Times are shown in Central time (CT) with the weekday.")
     expect(result.displays?.find((d) => d.kind === "table")).toMatchObject({ columns: ["startsAtUtc", "day"], rows: [["2026-10-10T00:00:00.000Z", "2026-10-09"]] })
   })
@@ -199,6 +202,24 @@ describe("times in run_sql results", () => {
     ]) {
       const result = shapeSqlResult(sql, [row({ startsAtUtc: new Date("2026-10-10T00:00:00Z") }, { startsAtUtc: "2026-10-10T00:00:00" })], 4)
       expect(JSON.parse(result.forModel).note, sql).toBe("Times are shown in Central time (CT) with the weekday.")
+    }
+  })
+
+  it("passes a time of day through as written, not as a 1970 timestamp", () => {
+    // Prisma returns a time column as a Date on 1970-01-01
+    const result = shapeSqlResult("SELECT starts", [row({ starts: new Date("1970-01-01T10:00:00Z") }, { starts: "10:00:00" })], 2)
+    expect(JSON.parse(result.forModel).rows).toEqual([["10:00:00"]])
+    expect(result.displays?.find((d) => d.kind === "table")).toMatchObject({ rows: [["10:00:00"]] })
+  })
+
+  it("warns for a converted time left in the select list, or the timezone() form", () => {
+    for (const sql of [
+      "SELECT \"createdAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago', \"displayName\" FROM x",
+      "SELECT max(\"createdAt\" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago'), count(*) FROM x",
+      "SELECT timezone('America/Chicago', \"createdAt\" AT TIME ZONE 'UTC') AS at FROM x",
+    ]) {
+      const result = shapeSqlResult(sql, [row({ at: new Date("2026-10-09T16:49:00Z") }, { at: "2026-10-09T16:49:00" })], 4)
+      expect(JSON.parse(result.forModel).note, sql).toContain("This query converts times with AT TIME ZONE")
     }
   })
 

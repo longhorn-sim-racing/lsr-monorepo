@@ -1,3 +1,4 @@
+import { formatInTimeZone } from "date-fns-tz"
 import { z } from "zod"
 import type { JackToolDisplay } from "@/lib/jack/parts"
 import { getJackSqlClient, JACK_SQL_MISSING } from "@/server/jack/sql-client"
@@ -195,48 +196,78 @@ export function findOffLimits(sql: string): string | null {
   return names.find(isOffLimitsName) ?? null
 }
 
-/** Caps the rows in the database: one more than the cap, to tell whether more matched. The newline keeps a trailing -- comment from swallowing the wrapper. */
 /**
- * The extra column wrapSql adds: each row as Postgres writes it in JSON. Prisma returns date,
- * timestamp and timestamptz columns all as Dates; the JSON tells them apart ("2026-10-09",
- * "2026-10-09T21:49:00", "2026-10-09T21:49:00+00:00")
+ * The extra column wrapSql adds: each row as Postgres writes it in JSON. Prisma returns date, time,
+ * timestamp and timestamptz columns all as Dates (a time as one on 1970-01-01); the JSON tells them
+ * apart ("2026-10-09", "10:00:00", "2026-10-09T21:49:00", "2026-10-09T21:49:00+00:00")
  */
 export const ROW_JSON = "__jack_row"
 
+/**
+ * Caps the rows in the database (one more than the cap, to tell whether more matched) and adds
+ * ROW_JSON. OFFSET 0 keeps Postgres from merging the query into the wrapper, which would work out each
+ * row's expressions twice (once more for ROW_JSON); the inner alias keeps a column named jack_q from
+ * clashing. The newline keeps a trailing -- comment from swallowing the wrapper.
+ */
 export function wrapSql(sql: string): string {
-  return `SELECT jack_q.*, row_to_json(jack_q)::text AS "${ROW_JSON}" FROM (\n${sql}\n) AS jack_q LIMIT ${MAX_SQL_ROWS + 1}`
+  return `SELECT jack_q.*, row_to_json(jack_q.*)::text AS "${ROW_JSON}" FROM (SELECT * FROM (\n${sql}\n) AS jack_inner OFFSET 0) AS jack_q LIMIT ${MAX_SQL_ROWS + 1}`
 }
 
-export type TimeKind = "date" | "timestamp" | "timestamptz"
+export type TimeKind = "date" | "time" | "timestamp" | "timestamptz"
 
-/** What each Date column really is, from how Postgres wrote it in ROW_JSON (when it's there) */
-export function timeKinds(raw: Record<string, unknown>[]): Map<string, TimeKind> {
-  const kinds = new Map<string, TimeKind>()
-  for (const row of raw) {
+/** Each row as Postgres wrote it in ROW_JSON (an empty object when it isn't there) */
+export function writtenRows(raw: Record<string, unknown>[]): Record<string, unknown>[] {
+  return raw.map((row) => {
     const json = row[ROW_JSON]
-    if (typeof json !== "string") continue
-    let written: Record<string, unknown>
+    if (typeof json !== "string") return {}
     try {
-      written = JSON.parse(json) as Record<string, unknown>
+      return JSON.parse(json) as Record<string, unknown>
     } catch {
-      continue
+      return {}
     }
+  })
+}
+
+/** What each Date column really is, from how Postgres wrote it (the first row where it isn't null) */
+export function timeKinds(raw: Record<string, unknown>[], written = writtenRows(raw)): Map<string, TimeKind> {
+  const kinds = new Map<string, TimeKind>()
+  raw.forEach((row, i) => {
     for (const [column, value] of Object.entries(row)) {
       if (!(value instanceof Date) || kinds.has(column)) continue
-      const text = written[column]
+      const text = written[i]?.[column]
       if (typeof text !== "string") continue
-      kinds.set(column, /^\d{4}-\d{2}-\d{2}$/.test(text) ? "date" : /(Z|[+-]\d{2}(:?\d{2})?)$/.test(text) ? "timestamptz" : "timestamp")
+      kinds.set(
+        column,
+        /^\d{4}-\d{2}-\d{2}$/.test(text)
+          ? "date"
+          : /^\d{2}:\d{2}(:\d{2}(\.\d+)?)?([+-]\d{2}(:?\d{2})?)?$/.test(text)
+            ? "time"
+            : /(Z|[+-]\d{2}(:?\d{2})?)$/.test(text)
+              ? "timestamptz"
+              : "timestamp",
+      )
     }
-  }
+  })
   return kinds
 }
 
+/** "Fri 2026-10-09" for a calendar date */
+function dateWithWeekday(date: string): string {
+  return formatInTimeZone(new Date(`${date}T12:00:00Z`), "UTC", "EEE yyyy-MM-dd")
+}
+
+const CENTRAL_ZONE = String.raw`(?:America\/Chicago|US\/Central|CST6CDT|CST|CDT)`
+
 /**
  * SQL that converts a time to Central and leaves it a timestamp, which run_sql then can't tell from
- * stored UTC. A conversion cast to date or text, compared in a filter, or formatted (to_char's next
- * argument) comes out as something else, so it doesn't count
+ * stored UTC. A conversion cast to date or text, compared in a filter, or formatted by to_char (a
+ * format string comes next) comes out as something else, so it doesn't count. timezone('America/Chicago', x)
+ * is the same conversion as a function
  */
-const CONVERTS_TO_CENTRAL = /AT\s+TIME\s+ZONE\s+'(?:America\/Chicago|US\/Central|CST6CDT|CST|CDT)'(?!\s*\)*\s*(?:::\s*(?:date|text)|,|[<>=!]|BETWEEN\b|IN\b))/i
+const CONVERTS_TO_CENTRAL = new RegExp(
+  String.raw`AT\s+TIME\s+ZONE\s+'${CENTRAL_ZONE}'(?!\s*\)*\s*(?:::\s*(?:date|text)|,\s*'|[<>=!]|BETWEEN\b|IN\b))|\btimezone\s*\(\s*'${CENTRAL_ZONE}'`,
+  "i",
+)
 
 type PrismaLikeError = { code?: string; errorCode?: string; meta?: { code?: string; message?: string }; message?: string; name?: string }
 
@@ -281,7 +312,8 @@ function rowsLabel(count: number, truncated: boolean) {
 /** Turns the raw rows into the model's compact JSON and the room's displays */
 export function shapeSqlResult(sql: string, raw: Record<string, unknown>[], ms: number, purpose?: string): JackToolResult {
   const truncated = raw.length > MAX_SQL_ROWS
-  const kinds = timeKinds(raw)
+  const written = writtenRows(raw.slice(0, MAX_SQL_ROWS))
+  const kinds = timeKinds(raw.slice(0, MAX_SQL_ROWS), written)
   const rows = raw.slice(0, MAX_SQL_ROWS).map((row) => {
     const copy = { ...row }
     delete copy[ROW_JSON]
@@ -290,18 +322,23 @@ export function shapeSqlResult(sql: string, raw: Record<string, unknown>[], ms: 
   const grid = toGrid(rows)
   const rowCount = grid.rows.length
 
-  // Times: the model gets each one in Central time with its weekday, and dates as dates; the room's
-  // table keeps UTC ISO (it shows those in Central itself) and plain dates
+  // Times: the model gets each in Central time with its weekday, dates with their weekday, and a time
+  // of day as written; the room's table keeps UTC ISO for times (it shows those in Central itself),
+  // plain dates, and times of day as written
   const dateColumns = new Set(grid.columns.filter((column) => rows.some((row) => row[column] instanceof Date)))
   const kindOf = (column: string): TimeKind | null => (dateColumns.has(column) ? (kinds.get(column) ?? "timestamp") : null)
   const columnKinds = grid.columns.map(kindOf)
-  const forDisplay = (cell: unknown, kind: TimeKind | null) => (kind === "date" && typeof cell === "string" ? cell.slice(0, 10) : cell)
-  const forModelCell = (cell: unknown, kind: TimeKind | null) => {
+  const asWritten = (r: number, column: string, cell: unknown) => (typeof written[r]?.[column] === "string" ? (written[r][column] as string) : cell)
+  const forDisplay = (cell: unknown, kind: TimeKind | null, r: number, column: string) =>
+    typeof cell !== "string" ? cell : kind === "date" ? cell.slice(0, 10) : kind === "time" ? asWritten(r, column, cell) : cell
+  const forModelCell = (cell: unknown, kind: TimeKind | null, r: number, column: string) => {
     if (!kind || typeof cell !== "string") return cell
-    return kind === "date" ? cell.slice(0, 10) : ct(new Date(cell))
+    if (kind === "date") return dateWithWeekday(cell.slice(0, 10))
+    if (kind === "time") return asWritten(r, column, cell)
+    return ct(new Date(cell))
   }
-  const modelRows = grid.rows.map((row) => row.map((cell, i) => forModelCell(cell, columnKinds[i])))
-  const displayRows = grid.rows.map((row) => row.map((cell, i) => forDisplay(cell, columnKinds[i])))
+  const modelRows = grid.rows.map((row, r) => row.map((cell, i) => forModelCell(cell, columnKinds[i], r, grid.columns[i])))
+  const displayRows = grid.rows.map((row, r) => row.map((cell, i) => forDisplay(cell, columnKinds[i], r, grid.columns[i])))
 
   const notes: string[] = []
   if (truncated) notes.push(`More than ${MAX_SQL_ROWS} rows matched; only the first ${MAX_SQL_ROWS} came back. Aggregate, or ORDER BY and LIMIT.`)
@@ -362,7 +399,7 @@ export const runSqlTool: JackTool<z.infer<typeof input>> = {
     "Run one read-only SQL query (PostgreSQL) on the club database and get the rows back as JSON.",
     "Use it for questions the typed tools don't answer, or to dig deeper. Call describe_schema first if you haven't seen the tables.",
     'Rules: a single SELECT or WITH … SELECT; tables and columns are case-sensitive and must be double-quoted ("User"."displayName").',
-    "Times are stored in UTC; run_sql shows every time column in Central time with the weekday, so select time columns as they are and don't convert them in SELECT. To group or filter by Central day, week or month, convert inside the expression and cast the bucket to date: date_trunc('week', col AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::date.",
+    "Times are stored in UTC. run_sql shows each column that is a time in Central time with the weekday (and dates with their weekday), so select times as their own columns, as stored, and don't convert them in SELECT. Times inside text, JSON or arrays come back as stored (UTC). To group or filter by Central day, week or month, convert inside the expression and cast the bucket to date: date_trunc('week', col AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago')::date.",
     `At most ${MAX_SQL_ROWS} rows come back, and long results are trimmed: aggregate (COUNT, SUM, GROUP BY) rather than listing when you can.`,
     `Queries stop after ${STATEMENT_TIMEOUT}. Duplicate column names collapse, so alias them. Cast unusual types (interval, regclass, point) to text.`,
     "Money is stored in cents (amountCents): divide by 100 for dollars. The room sees the SQL and a table of the rows.",

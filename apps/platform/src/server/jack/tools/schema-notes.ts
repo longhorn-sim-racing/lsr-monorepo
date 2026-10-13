@@ -8,7 +8,7 @@
 export const JACK_SCHEMA_NOTES = `How the club's data fits together:
 
 Time and money
-- Every timestamp is stored in UTC without a time zone. The club runs on Central time (America/Chicago). The tools already give times in Central time with the weekday ("Fri 2026-10-09 16:49 CT"), run_sql included, so select time columns as stored. To group or filter by Central day, week or month, convert inside the expression (col AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago') and cast a bucket to date; turn Central dates into UTC bounds before filtering. Say "CT" when you give a time, and use the weekday the tool gives.
+- Every timestamp is stored in UTC without a time zone. The club runs on Central time (America/Chicago). The tools already give times in Central time with the weekday ("Fri 2026-10-09 16:49 CT"), run_sql included for columns that are times, so select time columns as stored, as their own columns (a time inside text, JSON or an array stays UTC). To group or filter by Central day, week or month, convert inside the expression (col AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago') and cast a bucket to date; turn Central dates into UTC bounds before filtering. Say "CT" when you give a time, and use the weekday the tool gives.
 - Money is integer cents (amountCents, registrationFeeCents). Divide by 100 for dollars.
 
 Members and roles
