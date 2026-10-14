@@ -18,13 +18,6 @@ class NotAuthorizedError extends Error {
   }
 }
 
-function emailIsAllowlisted(email?: string | null): boolean {
-  const env = process.env.ADMIN_EMAILS || '';
-  if (!email || !env) return false;
-  const list = env.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-  return list.includes(email.toLowerCase());
-}
-
 export async function requireUser(): Promise<User> {
   const { user } = await getSessionUser();
   if (!user) {
@@ -39,11 +32,6 @@ export async function requireRole(role: RoleKey | RoleKey[]): Promise<User> {
   const { user, roles } = await getSessionUser();
   if (!user) {
     throw new NotAuthenticatedError();
-  }
-
-  // Email allowlist grants admin-level access
-  if (emailIsAllowlisted(user.email)) {
-    return user;
   }
 
   const requiredRoles = Array.isArray(role) ? role : [role];
@@ -74,7 +62,7 @@ export async function requireOfficerPage(): Promise<User> {
 }
 
 /**
- * True when the signed-in viewer is an officer or admin (allowlist included). Never
+ * True when the signed-in viewer is an officer or admin. Never
  * throws; for public pages and routes that show officers more, like draft previews.
  */
 export const isViewerOfficer = cache(async (): Promise<boolean> => {

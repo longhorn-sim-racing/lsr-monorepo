@@ -1,384 +1,257 @@
-"use client";
+"use client"
 
-import { useState, useMemo } from "react";
-import { Event, EventStatus } from "@prisma/client";
-import { Search, Plus, Calendar, ArrowUpDown, MoreVertical, Edit, Settings, Trash2, Eye, ChevronUp, ChevronDown, Filter } from "lucide-react";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { useMemo, useState } from "react"
+import Link from "next/link"
+import type { EventStatus } from "@prisma/client"
+import { ClipboardCheck, ExternalLink, Pencil, Plus } from "lucide-react"
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { deleteEvent } from "@/app/admin/events/actions";
-import { cn } from "@/lib/utils";
-import { getEffectiveEventStatus } from "@/lib/events";
-import { StatusOverrideDialog } from "@/components/admin/status-override-dialog";
+  Button,
+  CellStack,
+  DataTable,
+  EmptyState,
+  FilterMenu,
+  IconButton,
+  RowActions,
+  RowMenu,
+  Segmented,
+  type Column,
+} from "@/components/admin/kit"
+import { deleteEvent } from "@/app/admin/events/actions"
+import { useAction } from "@/app/admin/events/_components/use-action"
+import { EVENT_STATUS, EVENT_STATUSES, EventStatusBadge } from "@/app/admin/events/_components/event-status"
+import { central, centralDateTime, centralDay, centralTimeRange } from "@/app/admin/events/_components/format"
+import { StatusOverrideDialog } from "./status-override-dialog"
 
-type EventsConsoleProps = {
-  initialEvents: Event[];
-};
+/** One event in the admin list. Statuses and past/public are worked out on the server for this request. */
+export type AdminEventRow = {
+  id: string
+  slug: string
+  title: string
+  series: string | null
+  venue: string | null
+  startsAt: Date
+  endsAt: Date
+  /** What's saved */
+  status: EventStatus
+  /** What the public sees right now (e.g. a published event that has ended is Completed) */
+  effectiveStatus: EventStatus
+  publishedAt: Date | null
+  isPublic: boolean
+  past: boolean
+  registrationEnabled: boolean
+  registrationMax: number | null
+  registered: number
+  waitlisted: number
+}
 
-type SortField = "startsAtUtc" | "title";
-type SortDirection = "asc" | "desc";
+type View = "all" | "upcoming" | "past" | "drafts"
 
-export function EventsConsole({ initialEvents }: EventsConsoleProps) {
-  const [search, setSearch] = useState("");
-  const [sortField, setSortField] = useState<SortField>("startsAtUtc");
-  const [sortDir, setSortDir] = useState<SortDirection>("desc");
-  const [statusFilters, setStatusFilters] = useState<EventStatus[]>([]);
+const IN_VIEW: Record<View, (row: AdminEventRow) => boolean> = {
+  all: () => true,
+  upcoming: (row) => !row.past,
+  past: (row) => row.past,
+  drafts: (row) => row.status === "DRAFT",
+}
 
-  const SortIndicator = ({ field }: { field: SortField }) => {
-    if (sortField !== field) return <ArrowUpDown size={10} className="ml-1.5 opacity-20" />;
-    return sortDir === "asc" ? <ChevronUp size={10} className="ml-1.5 text-lsr-orange" /> : <ChevronDown size={10} className="ml-1.5 text-lsr-orange" />;
-  };
+const byStart = (a: AdminEventRow, b: AdminEventRow) => a.startsAt.getTime() - b.startsAt.getTime()
 
-  const filteredAndSortedEvents = useMemo(() => {
-    let result = [...initialEvents];
+const EMPTY: Record<View, { title: string; description: string }> = {
+  all: { title: "No events yet", description: "Create the first one; it stays a draft until you publish it." },
+  upcoming: { title: "Nothing coming up", description: "Every event has ended. Create the next one, or look under Past." },
+  past: { title: "No past events", description: "Events show up here once they end." },
+  drafts: { title: "No drafts", description: "Every event has been published or scheduled." },
+}
 
-    // Search Filter
-    if (search) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (e) =>
-          e.title.toLowerCase().includes(q) ||
-          e.slug.toLowerCase().includes(q) ||
-          e.status.toLowerCase().includes(q)
-      );
-    }
+function Registered({ row }: { row: AdminEventRow }) {
+  if (!row.registrationEnabled && row.registered === 0 && row.waitlisted === 0) {
+    return <span className="text-admin-subtle">Off</span>
+  }
+  const full = row.registrationMax != null && row.registered >= row.registrationMax
+  return (
+    <div className="flex flex-col items-end">
+      <span className={full ? "font-semibold" : undefined}>
+        {row.registered}
+        {row.registrationMax != null && <span className="text-admin-subtle"> / {row.registrationMax}</span>}
+      </span>
+      {row.waitlisted > 0 && <span className="text-xs text-admin-subtle">+{row.waitlisted} waitlist</span>}
+    </div>
+  )
+}
 
-    // Status Filter
-    if (statusFilters.length > 0) {
-      result = result.filter((e) => {
-        const effectiveStatus = getEffectiveEventStatus(e);
-        return statusFilters.includes(effectiveStatus);
-      });
-    }
+export function EventsConsole({ events }: { events: AdminEventRow[] }) {
+  const [view, setView] = useState<View>(() => (events.some((row) => !row.past) ? "upcoming" : "all"))
+  const [statuses, setStatuses] = useState<EventStatus[]>([])
+  const [overriding, setOverriding] = useState<AdminEventRow | null>(null)
+  const { run, busyKey } = useAction()
 
-    // Sort
-    result.sort((a, b) => {
-      const fieldA = a[sortField];
-      const fieldB = b[sortField];
+  const rows = useMemo(() => {
+    const list = events.filter(IN_VIEW[view]).filter((row) => statuses.length === 0 || statuses.includes(row.effectiveStatus))
+    // Coming up: soonest first. Everything else: newest first.
+    return view === "upcoming" || view === "drafts" ? list.sort(byStart) : list.sort((a, b) => byStart(b, a))
+  }, [events, view, statuses])
 
-      if (fieldA === fieldB) return 0;
-      
-      const comparison = fieldA > fieldB ? 1 : -1;
-      return sortDir === "asc" ? comparison : -comparison;
-    });
+  const columns: Column<AdminEventRow>[] = [
+    {
+      id: "event",
+      header: "Event",
+      sortValue: (row) => row.title,
+      className: "max-w-[13rem] sm:max-w-[22rem]",
+      cell: (row) => (
+        <CellStack
+          primary={
+            <Link href={`/admin/events/${row.id}/manage`} className="hover:underline">
+              {row.title}
+            </Link>
+          }
+          secondary={row.series ?? undefined}
+        />
+      ),
+    },
+    {
+      id: "date",
+      header: "Date · time",
+      sortValue: (row) => row.startsAt,
+      className: "whitespace-nowrap",
+      cell: (row) => (
+        <div className="flex flex-col">
+          <span>{centralDay(row.startsAt)}</span>
+          <span className="text-xs text-admin-subtle">{centralTimeRange(row.startsAt, row.endsAt)}</span>
+        </div>
+      ),
+    },
+    {
+      id: "venue",
+      header: "Venue",
+      hideBelow: "md",
+      sortValue: (row) => row.venue,
+      className: "max-w-[14rem]",
+      cell: (row) => (row.venue ? <span className="block truncate">{row.venue}</span> : <span className="text-admin-subtle">None</span>),
+    },
+    {
+      id: "status",
+      header: "Status",
+      sortValue: (row) => EVENT_STATUSES.indexOf(row.effectiveStatus),
+      cell: (row) => (
+        <div className="flex flex-col items-start gap-0.5">
+          <EventStatusBadge status={row.effectiveStatus} />
+          {row.effectiveStatus === "SCHEDULED" && row.publishedAt && (
+            <span className="whitespace-nowrap text-xs text-admin-subtle">Goes public {central(row.publishedAt, "MMM d, h:mm a")}</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: "registered",
+      header: "Registered",
+      align: "right",
+      hideBelow: "sm",
+      sortValue: (row) => row.registered,
+      cell: (row) => <Registered row={row} />,
+    },
+  ]
 
-    return result;
-  }, [initialEvents, search, sortField, sortDir, statusFilters]);
+  const remove = (row: AdminEventRow) =>
+    run(() => deleteEvent(row.id), { success: `Deleted ${row.title}`, error: "Couldn't delete the event" }, row.id)
 
-  const toggleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDir(sortDir === "asc" ? "desc" : "asc");
-    } else {
-      setSortField(field);
-      setSortDir("asc");
-      if (field === "startsAtUtc") setSortDir("desc");
-    }
-  };
+  const deleteText = (row: AdminEventRow) => {
+    const people = row.registered + row.waitlisted
+    const registrations = people > 0 ? `Its ${people} ${people === 1 ? "registration" : "registrations"} and any check-ins are deleted too. ` : "Any registrations and check-ins are deleted too. "
+    return `${registrations}Uploaded results, photos and payments are kept but lose the link to it. This can't be undone.`
+  }
 
-  const toggleStatusFilter = (status: EventStatus) => {
-    setStatusFilters((prev) =>
-      prev.includes(status)
-        ? prev.filter((s) => s !== status)
-        : [...prev, status]
-    );
-  };
-
-  const clearStatusFilters = () => setStatusFilters([]);
-
-  const statusColors: Record<string, string> = {
-    DRAFT: "text-white/40 border-white/20 bg-white/5",
-    PUBLISHED: "text-purple-400 border-purple-400/20 bg-purple-400/10",
-    SCHEDULED: "text-blue-400 border-blue-400/20 bg-blue-400/10",
-    IN_PROGRESS: "text-lsr-orange border-lsr-orange/20 bg-lsr-orange/10 animate-pulse",
-    COMPLETED: "text-green-400 border-green-400/20 bg-green-400/10",
-    CANCELLED: "text-red-400 border-red-400/20 bg-red-400/10",
-    POSTPONED: "text-yellow-400 border-yellow-400/20 bg-yellow-400/10",
-  };
+  const count = (v: View) => events.filter(IN_VIEW[v]).length
 
   return (
-    <div className="flex flex-col h-[calc(100vh-6rem)] border border-white/10 bg-black/40 rounded-lg overflow-hidden font-mono text-sm">
-      {/* Toolbar */}
-      <div className="bg-white/5 p-3 border-b border-white/10 flex items-center gap-4 flex-wrap">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger>
-              <div className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded border border-white/10 cursor-help">
-                <Calendar size={14} className="text-lsr-orange" />
-                <span className="font-bold text-white/80 tracking-wider uppercase">Events</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-xs bg-black/90 border-white/10 text-white p-3">
-              <p className="font-bold mb-1 text-lsr-orange">Events Console</p>
-              <p className="text-xs text-white/80">
-                Manage all club events including races, meetings, and social gatherings.
-              </p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-
-        <div className="h-6 w-px bg-white/10 mx-2" />
-
-        <div className="flex items-center gap-2 relative flex-1 max-w-md">
-          <Search size={14} className="absolute left-3 text-white/40" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search events..."
-            className="w-full bg-black/50 border border-white/10 rounded pl-9 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-lsr-orange transition-colors"
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-            <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => toggleSort("startsAtUtc")}
-                className={cn("text-xs uppercase tracking-wider h-8", sortField === "startsAtUtc" ? "text-lsr-orange bg-lsr-orange/10" : "text-white/60")}
-            >
-                Date <SortIndicator field="startsAtUtc" />
-            </Button>
-            <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => toggleSort("title")}
-                className={cn("text-xs uppercase tracking-wider h-8", sortField === "title" ? "text-lsr-orange bg-lsr-orange/10" : "text-white/60")}
-            >
-                Title <SortIndicator field="title" />
-            </Button>
-            
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className={cn(
-                      "text-xs uppercase tracking-wider h-8 border border-transparent", 
-                      statusFilters.length > 0 ? "text-lsr-orange bg-lsr-orange/10 border-lsr-orange/20" : "text-white/60"
-                    )}
-                >
-                    <Filter size={10} className="mr-1.5" />
-                    Status {statusFilters.length > 0 && `(${statusFilters.length})`}
+    <>
+      <DataTable
+        rows={rows}
+        columns={columns}
+        getRowId={(row) => row.id}
+        rowHref={(row) => `/admin/events/${row.id}/manage`}
+        noun={{ one: "event", many: "events" }}
+        minWidth={600}
+        search={{ placeholder: "Search events", text: (row) => `${row.title} ${row.slug} ${row.series ?? ""} ${row.venue ?? ""}` }}
+        filters={
+          <>
+            <Segmented
+              label="Show"
+              value={view}
+              onChange={setView}
+              options={[
+                { value: "upcoming", label: "Upcoming", count: count("upcoming") },
+                { value: "past", label: "Past", count: count("past") },
+                { value: "drafts", label: "Drafts", count: count("drafts") },
+                { value: "all", label: "All", count: events.length },
+              ]}
+            />
+            <FilterMenu
+              label="Status"
+              selected={statuses}
+              onChange={setStatuses}
+              options={EVENT_STATUSES.map((status) => ({ value: status, label: EVENT_STATUS[status].label }))}
+            />
+          </>
+        }
+        empty={
+          statuses.length > 0 ? (
+            <EmptyState
+              title="No events with that status"
+              description="Clear the status filter or pick another view."
+              action={<Button onClick={() => setStatuses([])}>Clear status filter</Button>}
+            />
+          ) : (
+            <EmptyState
+              title={EMPTY[view].title}
+              description={EMPTY[view].description}
+              action={
+                <Button variant="primary" asChild>
+                  <Link href="/admin/events/new">
+                    <Plus aria-hidden />
+                    New event
+                  </Link>
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-black border-white/10 text-white w-48">
-                <DropdownMenuLabel className="text-xs text-white/40 uppercase tracking-widest font-bold">Filter by Status</DropdownMenuLabel>
-                <DropdownMenuSeparator className="bg-white/10" />
-                {Object.values(EventStatus).map((status) => (
-                  <DropdownMenuCheckboxItem
-                    key={status}
-                    checked={statusFilters.includes(status)}
-                    onCheckedChange={() => toggleStatusFilter(status)}
-                    className="text-xs font-mono uppercase focus:bg-white/10 focus:text-white"
-                  >
-                    {status.replace("_", " ")}
-                  </DropdownMenuCheckboxItem>
-                ))}
-                {statusFilters.length > 0 && (
-                  <>
-                    <DropdownMenuSeparator className="bg-white/10" />
-                    <DropdownMenuItem 
-                      onSelect={clearStatusFilters}
-                      className="text-xs text-lsr-orange uppercase tracking-widest font-bold justify-center cursor-pointer focus:bg-lsr-orange/10 focus:text-lsr-orange"
-                    >
-                      Clear Filters
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-        </div>
-
-        <div className="flex-1" />
-
-        <Button asChild size="sm" className="bg-lsr-orange hover:bg-lsr-orange/90 text-white border-0 font-bold uppercase tracking-wider text-xs h-8">
-          <Link href="/admin/events/new">
-            <Plus size={14} className="mr-2" /> New Event
-          </Link>
-        </Button>
-      </div>
-
-            {/* Header Labels */}
-            <div className="bg-white/5 border-b border-white/10 px-5 py-2 flex items-center gap-4 text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">
-              <div className="w-24 shrink-0 text-left">Date</div>
-              <div className="w-32 shrink-0 text-left">Time</div>
-              <div className="w-40 shrink-0">Slug</div>
-              <div className="flex-1 max-w-md">Title</div>
-              <div className="w-24 shrink-0 text-center flex items-center justify-center gap-1">
-                  Status
-                  <TooltipProvider>
-                      <Tooltip>
-                          <TooltipTrigger className="cursor-help text-lsr-orange font-bold text-xs">*</TooltipTrigger>
-                          <TooltipContent className="bg-black border border-white/10 text-white p-4 max-w-xs space-y-3">
-                              <div className="space-y-1">
-                                  <p className="text-[10px] font-black text-lsr-orange uppercase tracking-widest">Visibility States</p>
-                                  <p className="text-[10px] leading-relaxed"><span className="text-white font-bold">DRAFT:</span> Completely private/hidden.</p>
-                                  <p className="text-[10px] leading-relaxed"><span className="text-white font-bold">SCHEDULED:</span> Hidden until the publication time is reached.</p>
-                                  <p className="text-[10px] leading-relaxed"><span className="text-white font-bold">PUBLISHED:</span> Publicly visible immediately.</p>
-                              </div>
-                              <div className="space-y-1">
-                                  <p className="text-[10px] font-black text-lsr-orange uppercase tracking-widest">Time-Based (Derived)</p>
-                                  <p className="text-[10px] leading-relaxed"><span className="text-white font-bold">IN PROGRESS:</span> Event is happening right now.</p>
-                                  <p className="text-[10px] leading-relaxed"><span className="text-white font-bold">COMPLETED:</span> Event has passed its end time.</p>
-                              </div>
-                              <div className="space-y-1">
-                                  <p className="text-[10px] font-black text-lsr-orange uppercase tracking-widest">Overrides</p>
-                                  <p className="text-[10px] leading-relaxed"><span className="text-white font-bold">CANCELLED:</span> Publicly marked as will not happen.</p>
-                                  <p className="text-[10px] leading-relaxed"><span className="text-white font-bold">POSTPONED:</span> Publicly marked as delayed.</p>
-                              </div>
-                          </TooltipContent>
-                      </Tooltip>
-                  </TooltipProvider>
-              </div>
-              <div className="w-40 shrink-0 text-right">Actions</div>
-            </div>
-      
-            {/* List */}
-            <div className="flex-1 overflow-auto p-2 space-y-1">
-              {filteredAndSortedEvents.length === 0 ? (
-                  <div className="flex items-center justify-center h-full text-white/40">
-                      No events found matching your search.
-                  </div>
-              ) : (
-                  filteredAndSortedEvents.map((event) => {
-                      const start = new Date(event.startsAtUtc);
-                      const end = new Date(event.endsAtUtc);
-                      const isSameDay = start.toDateString() === end.toDateString();
-                      const formatTime = (d: Date) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-                      const effectiveStatus = getEffectiveEventStatus(event);
-      
-                      return (
-                      <div
-                          key={event.id}
-                          className="flex items-center gap-4 p-3 hover:bg-white/5 rounded border border-transparent hover:border-white/10 transition-all group"
-                      >
-                          {/* Date Column */}
-                          <div className="w-24 shrink-0 text-xs text-white/60 font-mono">
-                              {start.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })}
-                          </div>
-      
-                          {/* Time Column */}
-                          <div className="w-32 shrink-0 text-[10px] text-white/40 font-mono flex items-center gap-1">
-                              <span>{formatTime(start)} - {formatTime(end)}</span>
-                              {!isSameDay && (
-                                  <TooltipProvider>
-                                      <Tooltip>
-                                          <TooltipTrigger className="cursor-help text-lsr-orange font-bold">*</TooltipTrigger>
-                                          <TooltipContent className="bg-black border border-white/10 text-white text-xs">
-                                              Ends on {end.toLocaleDateString()}
-                                          </TooltipContent>
-                                      </Tooltip>
-                                  </TooltipProvider>
-                              )}
-                          </div>
-      
-                          {/* Slug Column */}
-                          <div className="w-40 shrink-0">
-                              <span className="text-[10px] text-white/20 font-mono truncate block">/{event.slug}</span>
-                          </div>
-      
-                          {/* Title */}
-                          <div className="flex-1 max-w-md min-w-0">
-                              <span className="font-bold text-white text-sm truncate tracking-tight">{event.title}</span>
-                          </div>
-      
-                          {/* Status Column */}
-                          <div className="w-24 shrink-0">
-                              <Badge variant="outline" className={cn("rounded-sm px-2 py-0.5 text-[9px] uppercase tracking-widest font-bold w-full justify-center", statusColors[effectiveStatus] || statusColors.DRAFT)}>
-                                  {effectiveStatus.replace("_", " ")}
-                              </Badge>
-                          </div>
-      
-                                                                                      {/* Actions */}
-      
-                                                                                      <div className="w-40 shrink-0 flex items-center justify-end gap-1">
-      
-                                                                                          <div className="flex items-center">
-                                                                                            <Button asChild size="icon" variant="ghost" className="h-7 w-7 text-white/20 group-hover:text-white/70 hover:!text-lsr-orange hover:bg-white/10 transition-colors">
-                                                                                                <Link href={`/events/${event.slug}`} target="_blank" title="View Public Page">
-                                                                                                    <Eye size={14} />
-                                                                                                </Link>
-                                                                                            </Button>
-                                                                                            {event.status === "DRAFT" && (
-                                                                                              <TooltipProvider>
-                                                                                                <Tooltip>
-                                                                                                  <TooltipTrigger className="cursor-help text-lsr-orange font-bold text-[10px] ml-[-4px] z-10">*</TooltipTrigger>
-                                                                                                  <TooltipContent className="bg-black border border-white/10 text-white text-[10px] uppercase tracking-widest font-bold p-2">
-                                                                                                    This event is a DRAFT and is not listed on the public events page.
-                                                                                                  </TooltipContent>
-                                                                                                </Tooltip>
-                                                                                              </TooltipProvider>
-                                                                                            )}
-                                                                                            {event.status === "SCHEDULED" && (
-                                                                                              <TooltipProvider>
-                                                                                                <Tooltip>
-                                                                                                  <TooltipTrigger className="cursor-help text-lsr-orange font-bold text-[10px] ml-[-4px] z-10">*</TooltipTrigger>
-                                                                                                  <TooltipContent className="bg-black border border-white/10 text-white text-[10px] uppercase tracking-widest font-bold p-2">
-                                                                                                    Not visible until {event.publishedAt ? new Date(event.publishedAt).toLocaleString() : 'TBD'} because it is SCHEDULED.
-                                                                                                  </TooltipContent>
-                                                                                                </Tooltip>
-                                                                                              </TooltipProvider>
-                                                                                            )}
-                                                                                          </div>
-      
-                                                                                          <Button asChild size="icon" variant="ghost" className="h-7 w-7 text-white/20 group-hover:text-white/70 hover:!text-lsr-orange hover:bg-white/10 transition-colors">
-      
-                                                                                              <Link href={`/admin/events/${event.id}/manage`} title="Manage Check-in & Registration">
-      
-                                                                                                  <Settings size={14} />
-      
-                                                                                              </Link>
-      
-                                                                                          </Button>
-      
-                                                                                          <Button asChild size="icon" variant="ghost" className="h-7 w-7 text-white/20 group-hover:text-white/70 hover:!text-blue-400 hover:bg-white/10 transition-colors">
-      
-                                                                                              <Link href={`/admin/events/${event.id}/edit`} title="Edit Details">
-      
-                                                                                                  <Edit size={14} />
-      
-                                                                                              </Link>
-      
-                                                                                          </Button>
-      
-                                                                                          <StatusOverrideDialog event={event} />
-      
-                                                                                          <DropdownMenu>
-      
-                                                                                              <DropdownMenuTrigger asChild>
-      
-                                                                                                  <Button size="icon" variant="ghost" className="h-7 w-7 text-white/20 group-hover:text-white/70 hover:bg-white/10 transition-colors">
-      
-                                                                                                      <MoreVertical size={14} />
-      
-                                                                                                  </Button>
-      
-                                                                                              </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="bg-black border-white/10 text-white rounded-none p-1">
-                            <form action={deleteEvent.bind(null, event.id)}>
-                                <DropdownMenuItem asChild className="text-red-400 focus:text-red-400 focus:bg-red-400/10 cursor-pointer rounded-none text-[10px] uppercase font-bold tracking-widest">
-                                    <button type="submit" className="w-full flex items-center p-2">
-                                        <Trash2 size={12} className="mr-2" /> Delete Event
-                                    </button>
-                                </DropdownMenuItem>
-                            </form>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                </div>
-            </div>
-            );
-            })
+              }
+            />
+          )
+        }
+        rowActions={(row) => (
+          <RowActions>
+            <IconButton label={row.isPublic ? "View public page" : "Preview public page"} asChild>
+              <a href={`/events/${row.slug}`} target="_blank" rel="noreferrer">
+                <ExternalLink />
+              </a>
+            </IconButton>
+            <IconButton label="Registration and check-in" asChild>
+              <Link href={`/admin/events/${row.id}/manage`}>
+                <ClipboardCheck />
+              </Link>
+            </IconButton>
+            <IconButton label="Edit details" asChild>
+              <Link href={`/admin/events/${row.id}/edit`}>
+                <Pencil />
+              </Link>
+            </IconButton>
+            <RowMenu
+              label={`More actions for ${row.title}`}
+              items={[
+                { label: "Override status", onSelect: () => setOverriding(row) },
+                "separator",
+                {
+                  label: busyKey === row.id ? "Deleting…" : "Delete event",
+                  disabled: busyKey === row.id,
+                  destructive: { title: `Delete ${row.title}?`, description: deleteText(row), confirmLabel: "Delete event" },
+                  onSelect: () => remove(row),
+                },
+              ]}
+            />
+          </RowActions>
         )}
-      </div>
-    </div>
-  );
+      />
+      <StatusOverrideDialog
+        event={overriding}
+        onOpenChange={(open) => !open && setOverriding(null)}
+        scheduledNote={overriding?.publishedAt ? centralDateTime(overriding.publishedAt) : null}
+      />
+    </>
+  )
 }

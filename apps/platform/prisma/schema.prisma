@@ -122,22 +122,22 @@ enum NotificationStatus {
 
 // ---------- Identity & Access ----------
 model User {
-  id             String     @id @default(uuid())
-  email          String     @unique
-  handle         String     @unique
-  displayName    String
-  avatarUrl      String?
-  bio            String?
-  iRating        Int?
-  socials        Json?
-  officerTitle   String?
-  racingNumber      Int?     @unique
-  racingNumberColor String   @default("#FFFFFF")
-  racingNumberFont  String   @default("sans-serif")
-  racingNumberItalic Boolean @default(false)
-  racingNumberBorder Boolean @default(false)
-  marketingOptIn Boolean    @default(true)
-  status         UserStatus @default(active)
+  id                 String     @id @default(uuid())
+  email              String     @unique
+  handle             String     @unique
+  displayName        String
+  avatarUrl          String?
+  bio                String?
+  iRating            Int?
+  socials            Json?
+  officerTitle       String?
+  racingNumber       Int?       @unique
+  racingNumberColor  String     @default("#FFFFFF")
+  racingNumberFont   String     @default("sans-serif")
+  racingNumberItalic Boolean    @default(false)
+  racingNumberBorder Boolean    @default(false)
+  marketingOptIn     Boolean    @default(true)
+  status             UserStatus @default(active)
 
   major      String?
   gradYear   Int?
@@ -145,23 +145,23 @@ model User {
   signedUpAt DateTime @default(now())
 
   // Relations
-  roles                  UserRole[]
-  payments               Payment[]
-  entitlements           Entitlement[]
-  memberships            UserMembership[]
-  posts                  Post[]           @relation("PostAuthor")
-  pages                  Page[]           @relation("PageAuthor")
-    registrations          EventRegistration[] // Renamed from RSVPs
-    attendances            EventAttendance[]   @relation("UserAttendance")
-    checkedInAttendances   EventAttendance[]   @relation("AttendanceChecker")
-    entries                Entry[]             @relation("EntryUser")
-  
-  auditLogs              AuditLog[]       @relation("AuditActor")
-  auditLogsTargeted      AuditLog[]       @relation("AuditTarget")
-  rawResultUploads       RawResultUpload[]
-  driverIdentities       DriverIdentity[]
-  raceParticipants       RaceParticipant[]
-  leagueApplications     LeagueApplication[]
+  roles                UserRole[]
+  payments             Payment[]
+  entitlements         Entitlement[]
+  memberships          UserMembership[]
+  posts                Post[]              @relation("PostAuthor")
+  pages                Page[]              @relation("PageAuthor")
+  registrations        EventRegistration[] // Renamed from RSVPs
+  attendances          EventAttendance[]   @relation("UserAttendance")
+  checkedInAttendances EventAttendance[]   @relation("AttendanceChecker")
+  entries              Entry[]             @relation("EntryUser")
+
+  auditLogs          AuditLog[]          @relation("AuditActor")
+  auditLogsTargeted  AuditLog[]          @relation("AuditTarget")
+  rawResultUploads   RawResultUpload[]
+  driverIdentities   DriverIdentity[]
+  raceParticipants   RaceParticipant[]
+  leagueApplications LeagueApplication[]
 
   // Recruiting relations
   applications             Application[]       @relation("ApplicationApplicant")
@@ -169,8 +169,12 @@ model User {
   applicationReviews       ApplicationReview[] @relation("ApplicationReviewer")
 
   // Notification relations
-  notifications          Notification[]
-  notificationPrefs      NotificationPreference?
+  notifications     Notification[]
+  notificationPrefs NotificationPreference?
+
+  // Jack (officer chat agent)
+  jackRoomsCreated JackRoom[]    @relation("JackRoomCreator")
+  jackMessages     JackMessage[] @relation("JackMessageAuthor")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -181,7 +185,7 @@ model Role {
   key         String @unique // "admin" | "officer" | "member"
   description String
 
-  users                 UserRole[]
+  users UserRole[]
 }
 
 model UserRole {
@@ -198,22 +202,22 @@ model UserRole {
 }
 
 model AuditLog {
-  id          String   @id @default(uuid())
-  createdAt   DateTime @default(now())
-  actorUserId String?
-  actionType  String
-  entityType  String
-  entityId    String
+  id           String   @id @default(uuid())
+  createdAt    DateTime @default(now())
+  actorUserId  String?
+  actionType   String
+  entityType   String
+  entityId     String
   targetUserId String?
 
-  summary     String
-  before      Json?
-  after       Json?
-  metadata    Json?
-  
-  requestId   String?
-  ip          String?
-  userAgent   String?
+  summary  String
+  before   Json?
+  after    Json?
+  metadata Json?
+
+  requestId String?
+  ip        String?
+  userAgent String?
 
   actor      User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
   targetUser User? @relation("AuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
@@ -313,9 +317,9 @@ model League {
   descriptionMd String?
   visibility    Visibility @default(public)
 
-  seasons              Season[]
-  products             Product[]          @relation("EntitlementLeague")
-  entitlements         Entitlement[]      @relation("EntitlementLeague") // <-- back-relation
+  seasons      Season[]
+  products     Product[]     @relation("EntitlementLeague")
+  entitlements Entitlement[] @relation("EntitlementLeague") // <-- back-relation
 }
 
 model Season {
@@ -371,21 +375,21 @@ model Entry {
   isEligiblePoints Boolean @default(true)
 
   // Aggregated Stats (Computed)
-  totalPoints   Int     @default(0)
-  totalCuts     Int     @default(0)
-  totalCollisions Int   @default(0)
-  totalPositionsGained Int @default(0)
-  starts        Int     @default(0)
-  wins          Int     @default(0)
-  podiums       Int     @default(0)
-  top5          Int     @default(0)
-  top10         Int     @default(0)
-  bestFinish    Int?
-  averageFinish Float?
-  dnfs          Int     @default(0)
-  rank          Int?
+  totalPoints          Int    @default(0)
+  totalCuts            Int    @default(0)
+  totalCollisions      Int    @default(0)
+  totalPositionsGained Int    @default(0)
+  starts               Int    @default(0)
+  wins                 Int    @default(0)
+  podiums              Int    @default(0)
+  top5                 Int    @default(0)
+  top10                Int    @default(0)
+  bestFinish           Int?
+  averageFinish        Float?
+  dnfs                 Int    @default(0)
+  rank                 Int?
 
-  carDisplay    String?
+  carDisplay String?
 
   season Season @relation(fields: [seasonId], references: [id], onDelete: Cascade)
   user   User?  @relation("EntryUser", fields: [userId], references: [id], onDelete: SetNull)
@@ -408,15 +412,15 @@ model EventSeries {
 }
 
 model Venue {
-  id           String  @id @default(uuid())
-  name         String
-  addressLine1 String?
-  addressLine2 String?
-  city         String?
-  state        String?
-  postalCode   String?
-  country      String?
-  room         String?
+  id            String  @id @default(uuid())
+  name          String
+  addressLine1  String?
+  addressLine2  String?
+  city          String?
+  state         String?
+  postalCode    String?
+  country       String?
+  room          String?
   googleMapsUrl String?
   appleMapsUrl  String?
 
@@ -450,18 +454,18 @@ model Event {
   registrationMax             Int?
   registrationWaitlistEnabled Boolean   @default(false)
   waitlistAutoPromote         Boolean   @default(true) // free events only; a paid waitlist is always promoted by an officer
-  registrationFeeCents        Int?      // null = free event; set to require Stripe payment
+  registrationFeeCents        Int? // null = free event; set to require Stripe payment
 
   // Attendance Config
-  attendanceEnabled       Boolean                  @default(false)
+  attendanceEnabled       Boolean                 @default(false)
   attendanceOpensAt       DateTime?
   attendanceClosesAt      DateTime?
-  attendanceReportingMode AttendanceReportingMode  @default(ASSUME_REGISTERED)
+  attendanceReportingMode AttendanceReportingMode @default(ASSUME_REGISTERED)
 
   // Removed old fields to avoid confusion: rsvpRequired, rsvpOpenAt, rsvpCloseAt, capacity, waitlistEnabled
 
-  meetingUrl         String?
-  streamUrl          String?
+  meetingUrl String?
+  streamUrl  String?
 
   series EventSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
   venue  Venue?       @relation(fields: [venueId], references: [id], onDelete: SetNull)
@@ -490,7 +494,7 @@ model EventRegistration {
   promotedAt      DateTime?
   promotionSource String? // e.g. "manual", "auto"
   statusReason    String? // e.g. "Admin demote", "Capacity increase"
-  sourcePaymentId String?  @unique // links to Payment for paid event registrations
+  sourcePaymentId String?            @unique // links to Payment for paid event registrations
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
@@ -523,16 +527,16 @@ model EventAttendance {
 
 // ---------- Content (light CMS) ----------
 model Post {
-  id          String     @id @default(uuid())
-  title       String
-  slug        String     @unique
-  excerpt     String?
-  bodyMd      String
+  id            String     @id @default(uuid())
+  title         String
+  slug          String     @unique
+  excerpt       String?
+  bodyMd        String
   /// Cloudinary URL of the cover photo shown on /news and the article page
   coverImageUrl String?
-  authorId    String? // <-- optional because onDelete: SetNull
-  publishedAt DateTime?
-  visibility  Visibility @default(public)
+  authorId      String? // <-- optional because onDelete: SetNull
+  publishedAt   DateTime?
+  visibility    Visibility @default(public)
 
   author    User?    @relation("PostAuthor", fields: [authorId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
@@ -581,19 +585,19 @@ model FeatureFlag {
 }
 
 model GalleryImage {
-  id        String   @id @default(uuid())
-  publicId  String   @unique
-  alt       String?
+  id         String        @id @default(uuid())
+  publicId   String        @unique
+  alt        String?
   creditName String?
   creditUrl  String?
-  order     Int      @default(0)
+  order      Int           @default(0)
   // Pixel size from Cloudinary, so the gallery can lay photos out before they load
-  width     Int?
-  height    Int?
-  albumId   String?
-  album     GalleryAlbum? @relation(fields: [albumId], references: [id], onDelete: SetNull)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  width      Int?
+  height     Int?
+  albumId    String?
+  album      GalleryAlbum? @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
 
   @@index([albumId, order])
 }
@@ -622,22 +626,22 @@ enum RawResultUploadStatus {
 }
 
 model RawResultUpload {
-  id               String                  @id @default(uuid())
+  id               String                @id @default(uuid())
   filename         String
   filesize         Int
   sha256           String
   rawJson          Json
   uploadedByUserId String
-  uploadedAt       DateTime                @default(now())
-  status           RawResultUploadStatus   @default(UPLOADED)
+  uploadedAt       DateTime              @default(now())
+  status           RawResultUploadStatus @default(UPLOADED)
   errorMessage     String?
   parseReport      ParseReport?
 
-  uploadedBy       User                    @relation(fields: [uploadedByUserId], references: [id])
-  eventId          String?
-  pointsSystem     String? // "F1", "NONE"
-  sessionLabel     String? // "PRACTICE", "QUALIFYING", "RACE"
-  event            Event?                  @relation(fields: [eventId], references: [id])
+  uploadedBy   User    @relation(fields: [uploadedByUserId], references: [id])
+  eventId      String?
+  pointsSystem String? // "F1", "NONE"
+  sessionLabel String? // "PRACTICE", "QUALIFYING", "RACE"
+  event        Event?  @relation(fields: [eventId], references: [id])
 
   ingestedSessions RaceSession[]
 
@@ -657,11 +661,11 @@ model DriverIdentity {
 }
 
 model CarMapping {
-  id                   String   @id @default(uuid())
-  gameCarName          String   @unique
+  id                   String  @id @default(uuid())
+  gameCarName          String  @unique
   displayName          String
   secondaryDisplayName String?
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -669,17 +673,17 @@ model CarMapping {
 }
 
 model RaceSession {
-  id          String   @id @default(uuid())
-  uploadId    String
-  eventId     String?
-  
+  id       String  @id @default(uuid())
+  uploadId String
+  eventId  String?
+
   // Session details from JSON
-  sessionType String // "RACE", "QUALIFYING", "PRACTICE"
-  trackName   String
-  trackConfig String?
-  startedAt   DateTime
+  sessionType  String // "RACE", "QUALIFYING", "PRACTICE"
+  trackName    String
+  trackConfig  String?
+  startedAt    DateTime
   pointsSystem String? // "F1", "NONE", etc.
-  
+
   upload RawResultUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
   event  Event?          @relation(fields: [eventId], references: [id])
 
@@ -687,37 +691,37 @@ model RaceSession {
   results      RaceResult[]
   laps         RaceLap[]
   events       RaceEvent[]
-  
+
   @@index([uploadId])
   @@index([eventId])
 }
 
 model RaceParticipant {
-  id            String @id @default(uuid())
-  sessionId     String
-  driverGuid    String
-  displayName   String
-  carName       String
-  carClass      String
-  teamName      String?
-  
+  id          String  @id @default(uuid())
+  sessionId   String
+  driverGuid  String
+  displayName String
+  carName     String
+  carClass    String
+  teamName    String?
+
   // New fields from "Cars"
-  carIdInSession Int?    // The "CarId" (0, 1, 2...)
+  carIdInSession Int? // The "CarId" (0, 1, 2...)
   nation         String?
   skin           String?
   ballastKg      Int?
   restrictor     Int?
-  
+
   session RaceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  userId        String?
-  user          User?           @relation(fields: [userId], references: [id])
-  
-  carMappingId  String?
-  carMapping    CarMapping?     @relation(fields: [carMappingId], references: [id])
-  
+  userId  String?
+  user    User?       @relation(fields: [userId], references: [id])
+
+  carMappingId String?
+  carMapping   CarMapping? @relation(fields: [carMappingId], references: [id])
+
   results RaceResult[]
   laps    RaceLap[]
-  
+
   eventsAsPrimary RaceEvent[] @relation("EventPrimary")
   eventsAsOther   RaceEvent[] @relation("EventOther")
 
@@ -728,15 +732,15 @@ model RaceResult {
   id            String @id @default(uuid())
   sessionId     String
   participantId String
-  
+
   position      Int
   classPosition Int
   bestLapTime   Int? // ms
   totalTime     Int? // ms
   lapsCompleted Int
   status        String // "Finished", "DNF", etc.
-  gap           String? 
-  
+  gap           String?
+
   // New fields from "Result"
   points         Int?
   totalCuts      Int?
@@ -744,7 +748,7 @@ model RaceResult {
   penaltyTime    Int?
   lapPenalty     Int?
   isDisqualified Boolean @default(false)
-  
+
   session     RaceSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   participant RaceParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
 
@@ -755,19 +759,19 @@ model RaceLap {
   id            String @id @default(uuid())
   sessionId     String
   participantId String
-  
-  lapNumber     Int
-  lapTime       Int // ms
-  sector1       Int? // ms
-  sector2       Int? // ms
-  sector3       Int? // ms
-  valid         Boolean @default(true)
-  
+
+  lapNumber Int
+  lapTime   Int // ms
+  sector1   Int? // ms
+  sector2   Int? // ms
+  sector3   Int? // ms
+  valid     Boolean @default(true)
+
   // New fields from "Laps"
   cuts      Int?
   tyre      String?
   timestamp Int? // Session timestamp
-  
+
   session     RaceSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   participant RaceParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
 
@@ -775,28 +779,28 @@ model RaceLap {
 }
 
 model RaceEvent {
-  id            String @id @default(uuid())
-  sessionId     String
-  type          String // "COLLISION_WITH_CAR", "COLLISION_WITH_ENV"
-  
+  id        String @id @default(uuid())
+  sessionId String
+  type      String // "COLLISION_WITH_CAR", "COLLISION_WITH_ENV"
+
   carId         Int?
   driverGuid    String?
   participantId String?
-  
-  otherCarId      Int?
-  otherDriverGuid String?
+
+  otherCarId         Int?
+  otherDriverGuid    String?
   otherParticipantId String?
-  
-  impactSpeed   Float
-  
-  worldPosX     Float?
-  worldPosY     Float?
-  worldPosZ     Float?
-  
-  relPosX       Float?
-  relPosY       Float?
-  relPosZ       Float?
-  
+
+  impactSpeed Float
+
+  worldPosX Float?
+  worldPosY Float?
+  worldPosZ Float?
+
+  relPosX Float?
+  relPosY Float?
+  relPosZ Float?
+
   session          RaceSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   participant      RaceParticipant? @relation("EventPrimary", fields: [participantId], references: [id])
   otherParticipant RaceParticipant? @relation("EventOther", fields: [otherParticipantId], references: [id])
@@ -805,42 +809,42 @@ model RaceEvent {
 }
 
 model ParseReport {
-  id              String          @id @default(uuid())
-  uploadId        String          @unique
-  drivers         Json
-  resultsCount    Int
-  lapsCount       Int
-  anomalies       String[]
-  createdAt       DateTime        @default(now())
+  id           String   @id @default(uuid())
+  uploadId     String   @unique
+  drivers      Json
+  resultsCount Int
+  lapsCount    Int
+  anomalies    String[]
+  createdAt    DateTime @default(now())
 
-  upload          RawResultUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  upload RawResultUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
 }
 
 // ---------- Notifications ----------
 model Notification {
-  id              String              @id @default(uuid())
-  userId          String
-  channel         NotificationChannel
-  type            String              // e.g., "REGISTRATION_CONFIRMED", "WAITLIST_PROMOTED"
-  title           String
-  body            String
-  actionUrl       String?             // Link to navigate to
-  metadata        Json?               // Extra data (eventId, etc.)
+  id        String              @id @default(uuid())
+  userId    String
+  channel   NotificationChannel
+  type      String // e.g., "REGISTRATION_CONFIRMED", "WAITLIST_PROMOTED"
+  title     String
+  body      String
+  actionUrl String? // Link to navigate to
+  metadata  Json? // Extra data (eventId, etc.)
 
-  status          NotificationStatus  @default(PENDING)
-  scheduledFor    DateTime?           // Null = send immediately
-  sentAt          DateTime?
-  readAt          DateTime?           // For in-app only
-  dismissedAt     DateTime?           // User dismissed/hid notification (soft delete)
+  status       NotificationStatus @default(PENDING)
+  scheduledFor DateTime? // Null = send immediately
+  sentAt       DateTime?
+  readAt       DateTime? // For in-app only
+  dismissedAt  DateTime? // User dismissed/hid notification (soft delete)
 
   // For email tracking
-  emailMessageId  String?             // Resend message ID
-  emailError      String?             // Error message if failed
+  emailMessageId String? // Resend message ID
+  emailError     String? // Error message if failed
 
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, channel, readAt])
   @@index([userId, channel, dismissedAt])
@@ -849,21 +853,21 @@ model Notification {
 }
 
 model NotificationPreference {
-  id                      String   @id @default(uuid())
-  userId                  String   @unique
+  id     String @id @default(uuid())
+  userId String @unique
 
   // Email notifications. New events and results also need marketingOptIn on User;
   // payment receipts ignore all of these (see notification.service.ts)
-  emailRegistration       Boolean  @default(true)
-  emailWaitlistPromotion  Boolean  @default(true)
-  emailEventReminder      Boolean  @default(false)  // Off by default
-  emailEventPosted        Boolean  @default(false)  // Off by default
-  emailResultsPosted      Boolean  @default(false)  // Off by default
+  emailRegistration      Boolean @default(true)
+  emailWaitlistPromotion Boolean @default(true)
+  emailEventReminder     Boolean @default(false) // Off by default
+  emailEventPosted       Boolean @default(false) // Off by default
+  emailResultsPosted     Boolean @default(false) // Off by default
 
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 /// Posts copied from the club Instagram account by the sync job (src/server/services/instagram.service.ts).
@@ -888,8 +892,134 @@ model InstagramPost {
 
 model SystemSetting {
   key       String   @id
-  value     String   // JSON-encoded value
+  value     String // JSON-encoded value
   updatedAt DateTime @updatedAt
+}
+
+// ---------- Jack (officer chat agent, #161) ----------
+
+/// Which model wrote a Jack message. Jack = Sonnet (every answer by default), Lift = Opus (hard
+/// questions), Stand = Haiku (quick, simple questions when a room is set to it, and side jobs like
+/// naming rooms)
+enum JackPersona {
+  jack
+  lift
+  stand
+}
+
+/// Which model answers in a room. A room setting rather than a per-message one, so the room's
+/// prompt cache isn't thrown away by switching back and forth
+enum JackRoomPersona {
+  jack
+  lift
+  stand
+}
+
+/// Who a message is from: an officer (user), a model (assistant), or the room itself (system,
+/// e.g. "Alex switched this room to Lift")
+enum JackMessageKind {
+  user
+  assistant
+  system
+}
+
+enum JackMessageStatus {
+  streaming
+  done
+  error
+}
+
+/// A shared chat room in the admin console. Rooms aren't per user: every officer sees every room
+/// and can post in it. Live text goes out over the private Realtime channel `jack:room:<id>`.
+model JackRoom {
+  id          String          @id @default(uuid())
+  title       String?
+  /// The model that answers here; officers switch it per room
+  persona     JackRoomPersona @default(jack)
+  /// Null once the officer who opened it deletes their account
+  createdById String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  archivedAt  DateTime?
+
+  /// The reply loop answering this room right now; one run per room at a time.
+  /// Taken with a conditional update; a lock older than ~6 minutes is from a run that died
+  /// and the next post (or "continue") takes it over (src/server/jack/room-lock.ts)
+  runId        String?
+  runStartedAt DateTime?
+
+  createdBy User?         @relation("JackRoomCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  messages  JackMessage[]
+  usage     JackUsage[]
+
+  @@index([archivedAt, updatedAt])
+}
+
+/// Claude calls whose cost isn't saved on a message: Stand's side jobs (naming a room), one row per
+/// call whatever came of it (named, declined, unusable, the room already had a title). Replies keep
+/// their cost on their own JackMessage row. The spend meter adds both up
+model JackUsage {
+  id              String      @id @default(uuid())
+  /// Null once the room is deleted; the spend stays
+  roomId          String?
+  persona         JackPersona
+  /// What the call was for, e.g. "name_room"
+  job             String
+  /// How it went, e.g. "named", "declined", "unusable", "already_titled"
+  outcome         String
+  model           String
+  /// Everything not read from the cache, as on JackMessage
+  inputTokens     Int
+  outputTokens    Int
+  cacheReadTokens Int
+  costUsd         Decimal     @db.Decimal(12, 6)
+  createdAt       DateTime    @default(now())
+
+  room JackRoom? @relation(fields: [roomId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+}
+
+/// One message in a room. `kind` says who it's from; a check constraint keeps `persona` set exactly
+/// on assistant messages, and `authorUserId` off them
+model JackMessage {
+  id           String            @id @default(uuid())
+  roomId       String
+  kind         JackMessageKind
+  /// user: the officer who wrote it. system: the officer whose action it records. Null for assistant
+  /// messages, and once the officer deletes their account
+  authorUserId String?
+  /// assistant: the model that wrote it. Null otherwise
+  persona      JackPersona?
+  content      String            @default("")
+  /// Tool calls and their results (later steps)
+  toolCalls    Json?
+  status       JackMessageStatus @default(done)
+  /// The last streamed delta whose text is saved in `content`. Viewers who open the room
+  /// mid-answer apply only the deltas after it
+  streamSeq    Int               @default(0)
+  /// user messages: the reply that answered it. Null until Jack picks it up, so a message posted
+  /// while he's answering waits for the next pass
+  answeredById String?
+
+  /// Assistant messages only (later steps)
+  model           String?
+  inputTokens     Int?
+  outputTokens    Int?
+  cacheReadTokens Int?
+  costUsd         Decimal? @db.Decimal(12, 6)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  room       JackRoom      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  author     User?         @relation("JackMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  answeredBy JackMessage?  @relation("JackAnswer", fields: [answeredById], references: [id], onDelete: SetNull)
+  answers    JackMessage[] @relation("JackAnswer")
+
+  @@index([roomId, createdAt])
+  @@index([roomId, kind, answeredById])
+  @@index([authorUserId])
 }
 
 

@@ -111,7 +111,7 @@ Prisma Client (src/server/db.ts)     ← Database access
 
 **Actions** -- Next.js Server Actions for mutations. Most are colocated with their route as `src/app/**/actions.ts` (e.g. `src/app/admin/events/actions.ts`); a few shared ones live in `src/server/actions/`. Each action checks auth with a guard, does the work (through a service or repo, or Prisma directly), writes an audit log for admin changes (`audit/log.ts`), and calls `revalidatePath`.
 
-**Auth (`auth/`)** -- Session management via `getSessionUser()` and `getCachedSessionUser()`. Guards in `guards.ts` (`requireUser`, `requireRole`, `requireOfficer`, and `requireOfficerPage` for admin pages) check role-based access. `requireRole` also admits emails in the `ADMIN_EMAILS` allowlist. Every admin page checks access itself, because the admin layout doesn't re-run when a client fetches just the page segment.
+**Auth (`auth/`)** -- Session management via `getSessionUser()` and `getCachedSessionUser()`. Guards in `guards.ts` (`requireUser`, `requireRole`, `requireOfficer`, and `requireOfficerPage` for admin pages) check role-based access. Every admin page checks access itself, because the admin layout doesn't re-run when a client fetches just the page segment.
 
 **Database (`db.ts`)** -- The shared Prisma client.
 
@@ -151,7 +151,7 @@ Migrations live in `prisma/migrations/`. Apply with `pnpm --filter @lsr/platform
 | **Supabase** | Auth + PostgreSQL database | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `DATABASE_URL` |
 | **Stripe** | Payment processing | Webhook at `/api/stripe/webhook`; see [payments.md](./payments.md) |
 | **Shopify** | Merchandise catalog and cart | Storefront API via `src/lib/shopify/` |
-| **Cloudinary** | Image hosting | Images referenced via `res.cloudinary.com` |
+| **Cloudinary** | Image and video hosting | Images, and videos uploaded for the home page, referenced via `res.cloudinary.com` |
 | **Resend** | Transactional email | Via `src/lib/email/` |
 | **Vercel** | Hosting and deployment | Auto-deploys from `main` |
 

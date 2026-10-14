@@ -2,6 +2,7 @@ import { Prisma, type LeagueApplicationSource } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { createAuditLog } from "@/server/audit/log";
 import { expireOpenCheckouts } from "@/server/services/checkout-sessions";
+import { assertEidAvailable } from "@/server/services/eid.service";
 import type { LeagueApplicationInput } from "@/schemas/league-application.schema";
 
 type Db = Prisma.TransactionClient | typeof prisma;
@@ -59,10 +60,7 @@ export async function saveLeagueApplication(params: {
 
   const { application, created } = await prisma.$transaction(async (tx) => {
     if (input.utStudent && input.eid) {
-      const owner = await tx.user.findUnique({ where: { eid: input.eid }, select: { id: true } });
-      if (owner && owner.id !== userId) {
-        throw new Error("That UT EID is already on another account.");
-      }
+      await assertEidAvailable(tx, input.eid, userId);
       await tx.user.update({ where: { id: userId }, data: { eid: input.eid } });
     }
 

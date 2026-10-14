@@ -1,10 +1,13 @@
-import { getAllGalleryImages } from "@/server/queries/gallery";
-import { GalleryAdminClient } from "@/app/admin/gallery/client";
-import { requireOfficerPage } from "@/server/auth/guards";
-import { prisma } from "@/server/db";
+import type { Metadata } from "next"
+import { getAllGalleryImages } from "@/server/queries/gallery"
+import { GalleryAdminClient } from "@/app/admin/gallery/client"
+import { requireOfficerPage } from "@/server/auth/guards"
+import { prisma } from "@/server/db"
+
+export const metadata: Metadata = { title: "Gallery" }
 
 export default async function GalleryAdminPage() {
-  await requireOfficerPage();
+  await requireOfficerPage()
   const [images, albums, events] = await Promise.all([
     getAllGalleryImages(),
     prisma.galleryAlbum.findMany({
@@ -16,15 +19,13 @@ export default async function GalleryAdminPage() {
       orderBy: { startsAtUtc: "desc" },
       take: 200,
     }),
-  ]);
+  ])
 
   return (
-    <div className="h-full">
-      <GalleryAdminClient
-        images={images}
-        albums={albums}
-        events={events.map((event) => ({ id: event.id, title: event.title, date: event.startsAtUtc.toISOString() }))}
-      />
-    </div>
-  );
+    <GalleryAdminClient
+      images={images}
+      albums={albums}
+      events={events.map((event) => ({ id: event.id, title: event.title, date: event.startsAtUtc.toISOString() }))}
+    />
+  )
 }

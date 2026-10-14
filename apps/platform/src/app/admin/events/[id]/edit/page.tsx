@@ -1,33 +1,47 @@
+import type { Metadata } from "next"
+import Link from "next/link"
+import { notFound } from "next/navigation"
+import { ClipboardCheck, ExternalLink } from "lucide-react"
+import { getEventForAdmin, getAllEventSeries } from "@/server/queries/events"
+import { getAllVenues } from "@/server/queries/venue"
+import { requireOfficerPage } from "@/server/auth/guards"
+import { isEventPublic } from "@/lib/events"
+import { Button, PageHeader } from "@/components/admin/kit"
+import { EventForm } from "@/components/admin/event-form"
 
-import { getEventForAdmin, getAllEventSeries } from "@/server/queries/events";
-import { EventForm } from "@/components/admin/event-form";
-import { getAllVenues } from "@/server/queries/venue";
-import { notFound } from "next/navigation";
-import { requireOfficerPage } from "@/server/auth/guards";
+export const metadata: Metadata = { title: "Edit event" }
 
-type EditEventArgs = {
-  params: Promise<{ id: string }>;
-};
+export default async function EditEventPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireOfficerPage()
+  const { id } = await params
+  const [event, series, venues] = await Promise.all([getEventForAdmin(id), getAllEventSeries(), getAllVenues()])
 
-export default async function EditEventPage({ params }: EditEventArgs) {
-  await requireOfficerPage();
-  const { id } = await params;
-  const [event, series, venues] = await Promise.all([
-    getEventForAdmin(id),
-    getAllEventSeries(),
-    getAllVenues(),
-  ]);
-
-  if (!event) {
-    return notFound();
-  }
+  if (!event) notFound()
 
   return (
-    <div className="mx-auto max-w-4xl p-8 pb-32">
-      <h1 className="text-3xl font-bold mb-6">Edit Event</h1>
-      <div className="overflow-x-auto space-y-12">
-        <EventForm event={event} series={series} venues={venues} />
-      </div>
-    </div>
-  );
+    <>
+      <PageHeader
+        title={event.title}
+        description="Edit details"
+        back={{ href: "/admin/events", label: "Events" }}
+        actions={
+          <>
+            <Button asChild>
+              <a href={`/events/${event.slug}`} target="_blank" rel="noreferrer">
+                <ExternalLink aria-hidden />
+                {isEventPublic(event) ? "View page" : "Preview page"}
+              </a>
+            </Button>
+            <Button asChild>
+              <Link href={`/admin/events/${event.id}/manage`}>
+                <ClipboardCheck aria-hidden />
+                Registration and check-in
+              </Link>
+            </Button>
+          </>
+        }
+      />
+      <EventForm event={event} series={series} venues={venues} />
+    </>
+  )
 }

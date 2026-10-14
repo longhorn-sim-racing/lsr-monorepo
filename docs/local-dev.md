@@ -67,8 +67,6 @@ DIRECT_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 # Base URL for links and redirects (keep it, or delete the line; don't leave it empty)
 NEXT_PUBLIC_SITE_URL="http://localhost:3000"
 
-# Admin email allowlist (comma-separated)
-ADMIN_EMAILS="your-email@utexas.edu"
 ```
 
 Prisma reads `.env` (not `.env.local`) by default, so also create `apps/platform/.env` with the database URLs:
@@ -115,6 +113,17 @@ pnpm dev
 
 The app will be available at **http://localhost:3000**.
 
+## 7. Make yourself an admin
+
+Sign in once so your account exists, then give it the admin role:
+
+```bash
+cd apps/platform
+pnpm set-role you@utexas.edu admin
+```
+
+`set-role` takes an email, a handle or a user id. Admin console access comes only from the `officer` and `admin` roles.
+
 ## Managing the local Supabase stack
 
 ```bash
@@ -141,7 +150,7 @@ Run these from the repo root using `pnpm --filter @lsr/platform <script>`, or fr
 | `db:migrate` | Create and apply a new migration |
 | `db:deploy` | Apply pending migrations (production) |
 | `db:reset` | Reset the database and re-seed |
-| `set-role <userId> <role>` | Assign a role to a user |
+| `set-role <email\|handle\|userId> <role>` | Assign a role to a user |
 
 ## Troubleshooting
 

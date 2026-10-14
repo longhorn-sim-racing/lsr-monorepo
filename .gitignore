@@ -26,6 +26,8 @@ package-lock.json
 *.pem
 .claude/settings.local.json
 .claude/worktrees/
+# Jack eval results: real member data from the database they ran on (scripts/jack-eval.ts)
+.claude/hillclimb/
 
 # debug
 npm-debug.log*

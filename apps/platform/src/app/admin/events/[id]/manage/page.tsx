@@ -1,122 +1,174 @@
-import { notFound } from "next/navigation";
-import { prisma } from "@/server/db";
-import { getEventAttendanceState } from "@/server/services/attendance.service";
-import { RegistrationConfigForm } from "@/components/admin/registration-config-form";
-import { RegistrationManager } from "@/components/admin/registration-manager";
-import { AttendanceConfigForm } from "@/components/admin/attendance-config-form";
-import { AttendanceManager } from "@/components/admin/attendance-manager";
-import { generateQrCodeDataUrl } from "@/lib/qr";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import Link from "next/link";
-import { LiveTailButton } from "@/components/admin/live-tail-button";
-import { requireOfficerPage } from "@/server/auth/guards";
-import { getSiteUrl } from "@/lib/site-url";
+import type { Metadata } from "next"
+import Link from "next/link"
+import { notFound } from "next/navigation"
+import { ExternalLink, Pencil } from "lucide-react"
+import { prisma } from "@/server/db"
+import { requireOfficerPage } from "@/server/auth/guards"
+import { getEventAttendanceState } from "@/server/services/attendance.service"
+import { generateQrCodeDataUrl } from "@/lib/qr"
+import { getSiteUrl } from "@/lib/site-url"
+import { getEffectiveEventStatus, isEventPublic } from "@/lib/events"
+import { Button, PageHeader, SplitLayout, Stat, StatRow, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/admin/kit"
+import { AttendanceManager, type GuestRow } from "@/components/admin/attendance-manager"
+import { AttendanceConfigForm } from "@/components/admin/attendance-config-form"
+import { RegistrationManager, type RegistrationRow } from "@/components/admin/registration-manager"
+import { RegistrationConfigForm } from "@/components/admin/registration-config-form"
+import { LiveTailButton } from "@/components/admin/live-tail-button"
+import { EventStatusBadge } from "@/app/admin/events/_components/event-status"
+import { centralDay, centralTimeRange } from "@/app/admin/events/_components/format"
+
+export const metadata: Metadata = { title: "Manage event" }
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
 export default async function ManageEventPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireOfficerPage();
-  const { id } = await params;
+  await requireOfficerPage()
+  const { id } = await params
 
-  // 1. Fetch Event & Registration Data (Combined logic or separate)
-  // We can use getEventAttendanceState for attendance stuff.
-  // RegistrationManager needs "registrations".
-  
-  const [attendanceState, allUsers] = await Promise.all([
+  const [attendanceState, registrations] = await Promise.all([
     getEventAttendanceState(id).catch(() => null),
-    prisma.user.findMany({
-        select: { id: true, displayName: true, handle: true },
-        orderBy: { displayName: 'asc' }
-    })
-  ]);
-
-  if (!attendanceState) return notFound();
-
-  const { event, lists } = attendanceState;
-
-  // 2. Prepare QR (needs an absolute URL)
-  const checkInUrl = `${getSiteUrl()}/check-in/${event.id}`;
-  const qrDataUrl = await generateQrCodeDataUrl(checkInUrl);
-
-  // 3. Prepare Registrations for RegistrationManager
-  // It expects "RegistrationWithUser".
-  // getEventAttendanceState uses "REGISTERED" status for stats, but RegistrationManager needs ALL (waitlisted etc).
-  // So we might need to fetch all registrations separately or modify getEventAttendanceState.
-  // Let's fetch all registrations here to be safe and compatible with RegistrationManager.
-  const allRegistrations = await prisma.eventRegistration.findMany({
+    // Every registration (waitlisted and cancelled ones too), oldest first
+    prisma.eventRegistration.findMany({
       where: { eventId: id },
-      include: { user: true },
-      orderBy: { createdAt: 'asc' }
-  });
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        waitlistOrder: true,
+        promotionSource: true,
+        sourcePaymentId: true,
+        createdAt: true,
+        updatedAt: true,
+        user: { select: { displayName: true, handle: true } },
+      },
+    }),
+  ])
+
+  if (!attendanceState) notFound()
+  const { event, lists } = attendanceState
+
+  // The QR needs an absolute URL
+  const checkInUrl = `${getSiteUrl()}/check-in/${event.id}`
+  const qrDataUrl = await generateQrCodeDataUrl(checkInUrl)
+
+  const walkInIds = new Set(lists.walkIns.map((attendance) => attendance.id))
+  const guests: GuestRow[] = [
+    ...lists.checkedIn.map((attendance) => ({
+      key: attendance.id,
+      userId: attendance.userId,
+      displayName: attendance.user.displayName,
+      handle: attendance.user.handle,
+      state: walkInIds.has(attendance.id) ? ("walk-in" as const) : ("checked-in" as const),
+      method: attendance.method,
+      checkedInAt: attendance.checkedInAt,
+    })),
+    ...lists.missing.map((registration) => ({
+      key: registration.id,
+      userId: registration.userId,
+      displayName: registration.user.displayName,
+      handle: registration.user.handle,
+      state: "missing" as const,
+      method: null,
+      checkedInAt: null,
+    })),
+  ]
+
+  const registrationRows: RegistrationRow[] = registrations.map((registration) => ({
+    id: registration.id,
+    userId: registration.userId,
+    displayName: registration.user.displayName,
+    handle: registration.user.handle,
+    status: registration.status,
+    waitlistOrder: registration.waitlistOrder,
+    promotionSource: registration.promotionSource,
+    paid: registration.sourcePaymentId != null,
+    createdAt: registration.createdAt,
+    updatedAt: registration.updatedAt,
+  }))
+
+  const registered = registrationRows.filter((r) => r.status === "REGISTERED").length
+  const waitlisted = registrationRows.filter((r) => r.status === "WAITLISTED").length
+  const max = event.registrationMax
+  const isPaid = (event.registrationFeeCents ?? 0) > 0
+  const started = new Date() >= event.startsAtUtc
 
   return (
-    <div className="mx-auto max-w-7xl p-6 md:p-12 pb-32">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-6">
-        <div>
-            <div className="flex items-center gap-3 mb-2">
-                <span className="bg-lsr-orange/10 text-lsr-orange px-2 py-0.5 text-[10px] font-black uppercase tracking-widest border border-lsr-orange/20">
-                    Event Management
-                </span>
-                <span className="text-white/40 text-xs font-mono">{event.slug}</span>
-            </div>
-            <h1 className="font-display font-black italic text-3xl md:text-5xl text-white uppercase tracking-tight leading-none">
-                {event.title}
-            </h1>
-        </div>
-        <div className="flex gap-3">
+    <>
+      <PageHeader
+        title={event.title}
+        back={{ href: "/admin/events", label: "Events" }}
+        description={
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+            <EventStatusBadge status={getEffectiveEventStatus(event)} />
+            <span>
+              {centralDay(event.startsAtUtc)} · {centralTimeRange(event.startsAtUtc, event.endsAtUtc)}
+            </span>
+          </span>
+        }
+        actions={
+          <>
             <LiveTailButton />
-            <Button asChild variant="outline" className="border-white/10 hover:bg-white/5 uppercase tracking-widest text-xs font-bold h-10">
-                <Link href="/admin/events">Exit</Link>
+            <Button asChild>
+              <a href={`/events/${event.slug}`} target="_blank" rel="noreferrer">
+                <ExternalLink aria-hidden />
+                {isEventPublic(event) ? "View page" : "Preview page"}
+              </a>
             </Button>
-        </div>
-      </div>
-      
-      <Tabs defaultValue="attendance" className="space-y-8">
-          <TabsList className="w-full justify-start bg-transparent border-b border-white/10 p-0 h-auto rounded-none">
-              <TabsTrigger 
-                value="attendance" 
-                className="rounded-none border-b-2 border-transparent px-6 py-3 font-sans font-bold text-sm uppercase tracking-widest text-white/40 data-[state=active]:border-lsr-orange data-[state=active]:bg-transparent data-[state=active]:text-white transition-all hover:text-white/70"
-              >
-                Attendance
-              </TabsTrigger>
-              <TabsTrigger 
-                value="registration" 
-                className="rounded-none border-b-2 border-transparent px-6 py-3 font-sans font-bold text-sm uppercase tracking-widest text-white/40 data-[state=active]:border-lsr-orange data-[state=active]:bg-transparent data-[state=active]:text-white transition-all hover:text-white/70"
-              >
-                Registration
-              </TabsTrigger>
-          </TabsList>
+            <Button asChild>
+              <Link href={`/admin/events/${event.id}/edit`}>
+                <Pencil aria-hidden />
+                Edit details
+              </Link>
+            </Button>
+          </>
+        }
+      />
 
-          <TabsContent value="attendance" className="space-y-8">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  <div className="lg:col-span-2">
-                      <AttendanceManager 
-                          eventId={event.id}
-                          eventTitle={event.title}
-                          checkInUrl={checkInUrl}
-                          qrDataUrl={qrDataUrl}
-                          checkedIn={lists.checkedIn}
-                          missing={lists.missing}
-                          walkIns={lists.walkIns}
-                          allUsers={allUsers}
-                      />
-                  </div>
-                  <div>
-                      <AttendanceConfigForm event={event} checkInCount={lists.checkedIn.length} />
-                  </div>
-              </div>
-          </TabsContent>
+      <StatRow>
+        <Stat
+          label="Registered"
+          value={max != null ? `${registered} / ${max}` : registered}
+          hint={!event.registrationEnabled ? "Registration is off" : max == null ? "No limit" : registered >= max ? "Full" : `${plural(max - registered, "spot", "spots")} left`}
+        />
+        <Stat
+          label="Waitlist"
+          value={waitlisted}
+          hint={!event.registrationWaitlistEnabled ? "Waitlist is off" : isPaid || !event.waitlistAutoPromote ? "Promoted by hand" : "Moves up automatically"}
+        />
+        <Stat label="Checked in" value={lists.checkedIn.length} hint={event.attendanceEnabled ? "Check-in is on" : "Check-in is off"} />
+        <Stat
+          label="Not checked in"
+          value={lists.missing.length}
+          hint={event.attendanceEnabled ? "Registered, not here yet" : "Counted as attended while check-in is off"}
+        />
+        <Stat label="Walk-ins" value={lists.walkIns.length} hint="Checked in without registering" />
+      </StatRow>
 
-          <TabsContent value="registration" className="space-y-8">
-               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  <div className="lg:col-span-2">
-                       <RegistrationManager eventId={event.id} registrations={allRegistrations} />
-                  </div>
-                  <div>
-                      <RegistrationConfigForm event={event} />
-                  </div>
-               </div>
-          </TabsContent>
+      <Tabs defaultValue={event.attendanceEnabled || started ? "attendance" : "registration"}>
+        <TabsList>
+          <TabsTrigger value="attendance">
+            Attendance <span className="text-xs font-normal tabular-nums text-admin-subtle">{lists.checkedIn.length}</span>
+          </TabsTrigger>
+          <TabsTrigger value="registration">
+            Registration <span className="text-xs font-normal tabular-nums text-admin-subtle">{registered}</span>
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="attendance">
+          <SplitLayout
+            main={<AttendanceManager eventId={event.id} eventTitle={event.title} checkInUrl={checkInUrl} qrDataUrl={qrDataUrl} guests={guests} />}
+            side={<AttendanceConfigForm event={event} checkInCount={lists.checkedIn.length} />}
+          />
+        </TabsContent>
+
+        <TabsContent value="registration">
+          <SplitLayout
+            main={<RegistrationManager eventId={event.id} registrations={registrationRows} registrationMax={max} isPaid={isPaid} />}
+            side={<RegistrationConfigForm event={event} />}
+          />
+        </TabsContent>
       </Tabs>
-    </div>
-  );
+    </>
+  )
 }

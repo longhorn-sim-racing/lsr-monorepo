@@ -1,88 +1,65 @@
-"use client";
+"use client"
 
-import { useState } from "react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import { updateEventAttendanceConfig } from "@/app/admin/events/actions";
-import { Event } from "@prisma/client";
-import { dateToZonedValue, DEFAULT_TIMEZONE } from "@/lib/dates";
-import { AlertCircle } from "lucide-react";
+import { useState } from "react"
+import type { Event } from "@prisma/client"
+import { Button, Field, Input, Notice, Panel, PanelBody, PanelFooter, PanelHeader, SwitchField } from "@/components/admin/kit"
+import { updateEventAttendanceConfig } from "@/app/admin/events/actions"
+import { useAction } from "@/app/admin/events/_components/use-action"
+import { DEFAULT_TIMEZONE, dateToZonedValue, zoneLabel } from "@/lib/dates"
 
 export function AttendanceConfigForm({ event, checkInCount = 0 }: { event: Event; checkInCount?: number }) {
-  const timezone = event.timezone || DEFAULT_TIMEZONE;
-  
-  const [enabled, setEnabled] = useState(event.attendanceEnabled);
-  const [opensAt, setOpensAt] = useState(dateToZonedValue(event.attendanceOpensAt, timezone));
-  const [closesAt, setClosesAt] = useState(dateToZonedValue(event.attendanceClosesAt, timezone));
+  const timezone = event.timezone || DEFAULT_TIMEZONE
+  const zone = zoneLabel(event.startsAtUtc, timezone)
+  const [enabled, setEnabled] = useState(event.attendanceEnabled)
+  const [opensAt, setOpensAt] = useState(dateToZonedValue(event.attendanceOpensAt, timezone))
+  const [closesAt, setClosesAt] = useState(dateToZonedValue(event.attendanceClosesAt, timezone))
+  const { run, pending } = useAction()
 
-  const handleToggle = (checked: boolean) => {
-      setEnabled(checked);
-      if (checked) {
-          if (!opensAt) setOpensAt(dateToZonedValue(event.startsAtUtc, timezone));
-          if (!closesAt) setClosesAt(dateToZonedValue(event.endsAtUtc, timezone));
-      }
-  };
+  const toggle = (checked: boolean) => {
+    setEnabled(checked)
+    // Turning it on with no window: default to the event's own times
+    if (checked) {
+      if (!opensAt) setOpensAt(dateToZonedValue(event.startsAtUtc, timezone))
+      if (!closesAt) setClosesAt(dateToZonedValue(event.endsAtUtc, timezone))
+    }
+  }
+
+  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const formData = new FormData(e.currentTarget)
+    run(() => updateEventAttendanceConfig(event.id, formData), { success: "Check-in settings saved", error: "Couldn't save the check-in settings" })
+  }
 
   return (
-    <form action={updateEventAttendanceConfig.bind(null, event.id)} className="space-y-6 border border-white/10 bg-white/[0.02] p-6 rounded-lg">
-      <h2 className="text-xl font-display font-black italic uppercase text-white">Attendance Settings</h2>
-      
-      <div className="p-4 border border-white/5 bg-white/5 rounded-md space-y-2">
-        <div className="flex items-center space-x-3">
-            <Switch 
-                id="attendanceEnabled" 
-                name="attendanceEnabled" 
-                checked={enabled} 
-                onCheckedChange={handleToggle}
-            />
-            <Label htmlFor="attendanceEnabled" className="font-sans font-bold uppercase tracking-widest text-xs cursor-pointer">Enable Check-in System</Label>
-        </div>
-        <p className="text-[10px] text-white/40 pl-12 leading-relaxed">
-            When enabled, users must scan a QR code to be marked as &ldquo;Attended&rdquo;. 
-            <br/>
-            When disabled, all registered users are automatically assumed to have attended once the event concludes.
-        </p>
-      </div>
-
-      {!enabled && event.attendanceEnabled && checkInCount > 0 && (
-          <div className="flex items-start p-3 bg-red-500/10 border border-red-500/20 rounded text-red-200 text-xs gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <div>
-                  Warning: Disabling attendance will hide the {checkInCount} existing check-ins from reports.
-              </div>
-          </div>
-      )}
-
-      <div className="space-y-4">
-        <div>
-          <Label htmlFor="attendanceOpensAt" className="text-[10px] uppercase tracking-widest text-white/40 mb-1.5 block">Check-in Opens ({timezone})</Label>
-          <Input 
-            id="attendanceOpensAt" 
-            name="attendanceOpensAt" 
-            type="datetime-local" 
-            value={opensAt}
-            onChange={(e) => setOpensAt(e.target.value)}
-            className="bg-black/20 border-white/10 text-xs font-mono"
+    <form onSubmit={onSubmit}>
+      <Panel>
+        <PanelHeader title="Check-in settings" description={`Times are in ${zone} (${timezone}).`} />
+        <PanelBody className="flex flex-col gap-4">
+          <SwitchField
+            name="attendanceEnabled"
+            checked={enabled}
+            onCheckedChange={toggle}
+            label="Check people in"
+            description="On: members scan the QR code to be marked as attended. Off: everyone registered counts as attended once the event ends."
           />
-        </div>
-        <div>
-          <Label htmlFor="attendanceClosesAt" className="text-[10px] uppercase tracking-widest text-white/40 mb-1.5 block">Check-in Closes ({timezone})</Label>
-          <Input 
-            id="attendanceClosesAt" 
-            name="attendanceClosesAt" 
-            type="datetime-local" 
-            value={closesAt}
-            onChange={(e) => setClosesAt(e.target.value)}
-            className="bg-black/20 border-white/10 text-xs font-mono"
-          />
-        </div>
-      </div>
-
-      <Button type="submit" className="w-full bg-lsr-orange hover:bg-lsr-orange/90 text-white uppercase tracking-widest text-xs font-bold h-10">
-        Update Configuration
-      </Button>
+          {!enabled && event.attendanceEnabled && checkInCount > 0 && (
+            <Notice tone="warning" title="Check-ins will be hidden">
+              Turning this off hides the {checkInCount} existing {checkInCount === 1 ? "check-in" : "check-ins"} from attendance reports.
+            </Notice>
+          )}
+          <Field label={`Opens (${zone})`} htmlFor="attendanceOpensAt" hint="Blank opens it whenever check-in is on">
+            <Input id="attendanceOpensAt" name="attendanceOpensAt" type="datetime-local" value={opensAt} onChange={(e) => setOpensAt(e.target.value)} />
+          </Field>
+          <Field label={`Closes (${zone})`} htmlFor="attendanceClosesAt" hint="Blank keeps it open">
+            <Input id="attendanceClosesAt" name="attendanceClosesAt" type="datetime-local" value={closesAt} onChange={(e) => setClosesAt(e.target.value)} />
+          </Field>
+        </PanelBody>
+        <PanelFooter className="justify-end">
+          <Button type="submit" pending={pending}>
+            Save settings
+          </Button>
+        </PanelFooter>
+      </Panel>
     </form>
-  );
+  )
 }

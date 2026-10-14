@@ -1,60 +1,78 @@
-import Link from "next/link";
-import { FileText, Plus } from "lucide-react";
-import { prisma } from "@/server/db";
-import { requireOfficerPage } from "@/server/auth/guards";
-import { Button } from "@/components/ui/button";
+import type { Metadata } from "next"
+import Link from "next/link"
+import { formatInTimeZone } from "date-fns-tz"
+import { Plus } from "lucide-react"
+import { prisma } from "@/server/db"
+import { requireOfficerPage } from "@/server/auth/guards"
+import { Badge, Button, EmptyState, PageHeader, Panel, Table, TD, TH, THead, TR } from "@/components/admin/kit"
+import { DEFAULT_TIMEZONE } from "@/lib/dates"
+import { PAGE_PUBLIC_PATHS } from "@/app/admin/pages/_components/public-paths"
+
+export const metadata: Metadata = { title: "Pages" }
 
 export default async function AdminPagesPage() {
-  await requireOfficerPage();
+  await requireOfficerPage()
   const pages = await prisma.page.findMany({
     orderBy: { updatedAt: "desc" },
     select: { id: true, title: true, slug: true, visibility: true, updatedAt: true },
-  });
+  })
+  const published = pages.filter((p) => p.visibility === "public").length
 
   return (
-    <div className="border border-white/10 bg-black/40 rounded-lg overflow-hidden font-mono text-sm">
-      <div className="bg-white/5 p-3 border-b border-white/10 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2 bg-black/50 px-3 py-1.5 rounded border border-white/10">
-          <FileText size={14} className="text-lsr-orange" />
-          <span className="font-bold text-white/80 tracking-wider uppercase">Pages</span>
-        </div>
-        <Button asChild size="sm" className="h-8 bg-lsr-orange text-white text-xs uppercase tracking-wider hover:bg-white hover:text-lsr-charcoal">
-          <Link href="/admin/pages/new"><Plus size={14} className="mr-1.5" /> New page</Link>
-        </Button>
-      </div>
-      <table className="w-full text-left text-xs">
-        <thead className="bg-white/5 text-[10px] uppercase tracking-wider text-white/40">
-          <tr>
-            <th className="px-3 py-2">Title</th>
-            <th className="px-3 py-2">Slug</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2">Updated</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-white/5">
-          {pages.map((p) => (
-            <tr key={p.id} className="hover:bg-white/[0.03]">
-              <td className="px-3 py-2">
-                <Link href={`/admin/pages/${p.id}`} className="font-bold text-white hover:text-lsr-orange">{p.title}</Link>
-              </td>
-              <td className="px-3 py-2 text-white/50">{p.slug}</td>
-              <td className="px-3 py-2">
-                {p.visibility === "public" ? (
-                  <span className="text-green-400 uppercase tracking-wider text-[10px]">Public</span>
-                ) : (
-                  <span className="text-amber-300 uppercase tracking-wider text-[10px]">Draft</span>
-                )}
-              </td>
-              <td className="px-3 py-2 text-white/40">{p.updatedAt.toLocaleDateString()}</td>
-            </tr>
-          ))}
-          {!pages.length && (
-            <tr>
-              <td colSpan={4} className="px-3 py-12 text-center text-white/30 uppercase tracking-widest">No pages yet</td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
+    <>
+      <PageHeader
+        title="Pages"
+        description={`Editable content pages, like the LSC rules · ${published} of ${pages.length} published`}
+        actions={
+          <Button variant="primary" asChild>
+            <Link href="/admin/pages/new">
+              <Plus aria-hidden />
+              New page
+            </Link>
+          </Button>
+        }
+      />
+
+      {pages.length === 0 ? (
+        <Panel>
+          <EmptyState
+            title="No pages yet"
+            description="Pages hold longer content the site shows, like the Lone Star Cup rules."
+            action={
+              <Button asChild>
+                <Link href="/admin/pages/new">New page</Link>
+              </Button>
+            }
+          />
+        </Panel>
+      ) : (
+        <Table minWidth={480}>
+          <THead>
+            <TH>Title</TH>
+            <TH>Shown at</TH>
+            <TH>Status</TH>
+            <TH className="text-right">Updated</TH>
+          </THead>
+          <tbody>
+            {pages.map((p) => {
+              const path = PAGE_PUBLIC_PATHS[p.slug]
+              return (
+                <TR key={p.id}>
+                  <TD>
+                    <Link href={`/admin/pages/${p.id}`} className="font-semibold hover:underline">
+                      {p.title}
+                    </Link>
+                    <div className="text-xs text-admin-subtle">{p.slug}</div>
+                  </TD>
+                  <TD className="text-muted-foreground">{path ?? <span className="text-admin-subtle">Not linked yet</span>}</TD>
+                  <TD>{p.visibility === "public" ? <Badge tone="success">Public</Badge> : <Badge>Draft</Badge>}</TD>
+                  <TD className="whitespace-nowrap text-right text-muted-foreground">{formatInTimeZone(p.updatedAt, DEFAULT_TIMEZONE, "MMM d, yyyy")}</TD>
+                </TR>
+              )
+            })}
+          </tbody>
+        </Table>
+      )}
+    </>
+  )
 }

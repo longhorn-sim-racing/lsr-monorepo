@@ -2,8 +2,11 @@
 
 import { useRef, useState } from "react"
 import Image from "next/image"
-import { Button } from "@/components/ui/button"
+import { ImageIcon } from "lucide-react"
+import { toast } from "sonner"
+import { Button } from "@/components/admin/kit"
 
+/** Uploads one image to Cloudinary and shows a preview. Used by admin forms (news posts, events). */
 export function ImageUploader({
   name,
   defaultValue,
@@ -22,30 +25,40 @@ export function ImageUploader({
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<string | null>(defaultValue ?? null)
+  const [uploading, setUploading] = useState(false)
 
   const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME!
   const preset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
+    // Let the same file be picked again after a failed upload
+    e.target.value = ""
     if (!file) return
 
     const fd = new FormData()
     fd.append("file", file)
     fd.append("upload_preset", preset)
 
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/upload`, {
-      method: "POST",
-      body: fd,
-    })
-    const json = await res.json()
-    if (!json.secure_url) {
-      alert("Upload failed.")
-      return
-    }
+    setUploading(true)
+    try {
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/upload`, {
+        method: "POST",
+        body: fd,
+      })
+      const json = await res.json()
+      if (!json.secure_url) {
+        toast.error("Upload failed.")
+        return
+      }
 
-    setPreview(json.secure_url as string)
-    onChange?.(json.secure_url as string)
+      setPreview(json.secure_url as string)
+      onChange?.(json.secure_url as string)
+    } catch {
+      toast.error("Upload failed.")
+    } finally {
+      setUploading(false)
+    }
   }
 
   function chooseFile() {
@@ -53,27 +66,29 @@ export function ImageUploader({
   }
 
   return (
-    <div className="flex items-center gap-4">
-      <div className="h-20 w-40 overflow-hidden rounded-md border bg-muted">
+    <div className="flex flex-wrap items-center gap-3">
+      <div className="h-20 w-40 shrink-0 overflow-hidden rounded-md border bg-admin-surface">
         {preview ? (
           <Image src={preview} alt="Preview" width={160} height={80} className="h-20 w-40 object-cover" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+          <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-xs text-admin-subtle">
+            <ImageIcon className="size-4" aria-hidden />
             No image
           </div>
         )}
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <input ref={inputRef} type="file" accept="image/*" hidden onChange={onFile} />
         {name && <input type="hidden" name={name} value={preview ?? ""} />}
-        <Button type="button" onClick={chooseFile} {...buttonProps}>
-          {preview ? "Change" : "Upload"} image
+        <Button type="button" onClick={chooseFile} pending={uploading} {...buttonProps}>
+          {uploading ? "Uploading" : `${preview ? "Change" : "Upload"} image`}
         </Button>
         {preview && (
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
+            disabled={uploading}
             onClick={() => {
               setPreview(null)
               onChange?.(null)

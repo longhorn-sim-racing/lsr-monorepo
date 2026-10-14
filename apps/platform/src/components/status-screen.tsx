@@ -22,7 +22,7 @@ export function StatusScreen({
   photo?: string
 }) {
   return (
-    <div className="relative flex min-h-[calc(100svh-5rem)] items-center overflow-hidden bg-lsr-charcoal text-white">
+    <div className="relative flex min-h-[calc(100svh-4rem)] md:min-h-[calc(100svh-5rem)] items-center overflow-hidden bg-lsr-charcoal text-white">
       {photo && (
         <div className="absolute inset-0 z-0">
           <CloudinaryImage publicId={photo} alt="" fill preload sizes="100vw" className="object-cover opacity-75" />

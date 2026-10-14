@@ -6,7 +6,7 @@ import { ArrowRight, ArrowUpRight, CalendarDays, Camera, Check, Flag, MessageSqu
 import { Button } from "@/components/ui/button"
 import { CloudinaryImage } from "@/components/cloudinary-image"
 import { LogoTile } from "@/components/logo-tile"
-import { HotlapVideo } from "@/components/hotlap-video"
+import { FeaturedVideo } from "@/components/featured-video"
 import { RacingNumber } from "@/components/racing-number"
 import { AgendaRow } from "@/components/events/agenda-row"
 import { NextUp } from "@/components/events/next-up"
@@ -16,7 +16,8 @@ import { InstagramFeed } from "@/app/news/instagram-feed"
 import { initials } from "@/app/drivers/names"
 import { getAllPosts } from "@/lib/news"
 import { GOLD_SPONSORS, sponsorHref } from "@/lib/sponsors"
-import { getSystemSetting, SETTINGS, type HotlapSettings } from "@/lib/email/settings"
+import { getFeaturedVideoSettings, type HotlapSettings } from "@/lib/email/settings"
+import { videoSource, type VideoSource } from "@/lib/featured-video"
 import { getCachedSessionUser } from "@/server/auth/cached-session"
 import { getClubStats } from "@/server/queries/club-stats"
 import { getSchedule } from "@/server/queries/schedule"
@@ -84,23 +85,12 @@ const HOTLAP_DEFAULTS: HotlapSettings = {
   track: "Daytona International",
   lapTime: "1:46.043",
 }
+const DEFAULT_HOTLAP_VIDEO: VideoSource = { kind: "youtube", id: "fbS2ExGupLU" }
 
 const ghostButton =
   "h-12 rounded-none border border-white/20 bg-lsr-charcoal/40 px-6 font-sans text-[10px] font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal"
 const primaryButton =
   "h-12 rounded-none bg-lsr-orange px-7 font-sans text-xs font-bold uppercase tracking-widest text-white hover:bg-white hover:text-lsr-charcoal"
-
-/** A YouTube video id from watch, youtu.be, embed, shorts and live links */
-function youTubeId(url: string) {
-  let id: string | null = null
-  try {
-    const u = new URL(url)
-    if (u.hostname.includes("youtube.com") && u.searchParams.has("v")) id = u.searchParams.get("v")
-    else if (u.hostname === "youtu.be") id = u.pathname.split("/")[1] ?? null
-    else if (/^\/(embed|shorts|live)\//.test(u.pathname)) id = u.pathname.split("/")[2] ?? null
-  } catch {}
-  return id && /^[\w-]{11}$/.test(id) ? id : null
-}
 
 /** Each loader fails on its own, so one bad query doesn't take the whole homepage down */
 async function safe<T>(label: string, load: () => Promise<T>, fallback: T): Promise<T> {
@@ -154,13 +144,13 @@ function Avatar({ name, src, size }: { name: string; src: string | null | undefi
 export default async function Home() {
   // Everything but the schedule starts right away; the schedule waits on the session for "You're in"
   const sessionLoad = safe("session", () => getCachedSessionUser(), { user: null, roles: [] as string[] })
-  const [schedule, viewer, stats, lsc, leaders, hotlap, posts, instagram, photos] = await Promise.all([
+  const [schedule, viewer, stats, lsc, leaders, featured, posts, instagram, photos] = await Promise.all([
     sessionLoad.then((session) => safe("events", () => getSchedule(session.user?.id ?? null), [])),
     sessionLoad.then((session) => session.user),
     safe("stats", () => getClubStats(), null),
     safe("Lone Star Cup", () => getLoneStarCupSnapshot(), null),
     safe("leaders", () => getAllTimeLeaders(5), []),
-    safe("hotlap", () => getSystemSetting<HotlapSettings>(SETTINGS.HOTLAP), null),
+    safe("featured video", () => getFeaturedVideoSettings(), null),
     safe("posts", () => getAllPosts(), []),
     safe("Instagram", () => getInstagramFeed(4), []),
     safe("gallery", () => getGalleryHighlights(5), []),
@@ -174,8 +164,14 @@ export default async function Home() {
   // The big-tile layout needs a full set of five photos
   const mosaic = photos.length === 5
 
-  const hot = hotlap ?? HOTLAP_DEFAULTS
-  const videoId = youTubeId(hot.videoUrl) ?? "fbS2ExGupLU"
+  // The hotlap of the week, or a competition clip when an officer switches to one (and its video works)
+  const hot = featured?.hotlap ?? HOTLAP_DEFAULTS
+  const clip = featured?.show === "clip" ? featured.clip : null
+  const clipSource = clip ? videoSource(clip.videoUrl) : null
+  const showClip = clipSource ? clip : null
+  const video = showClip && clipSource
+    ? { source: clipSource, title: `Competition clip: ${showClip.title}` }
+    : { source: videoSource(hot.videoUrl) ?? DEFAULT_HOTLAP_VIDEO, title: `Hotlap of the week: ${hot.driverName} at ${hot.track}` }
 
   const statItems = [
     stats && { value: stats.members, label: "Members" },
@@ -478,36 +474,64 @@ export default async function Home() {
           </div>
         </section>
 
-        {/* Hotlap of the week (set in Admin → Hotlap) */}
+        {/* Hotlap of the week or a competition clip (set in Admin → Hotlap and clips) */}
         <section id="hotlap" className="scroll-mt-24 grid overflow-hidden border border-white/10 bg-white/[0.02] lg:grid-cols-[3fr_2fr]">
           <div className="relative aspect-video bg-black">
-            <HotlapVideo videoId={videoId} title={`Hotlap of the week: ${hot.driverName} at ${hot.track}`} />
+            <FeaturedVideo source={video.source} title={video.title} />
           </div>
           <div className="relative flex flex-col justify-center p-6 md:p-10">
             <div className="absolute top-0 left-0 h-1 w-24 bg-lsr-orange" />
-            <h2 className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Hotlap of the week</h2>
-            <p className="mt-3 font-display font-black italic text-6xl md:text-7xl leading-none text-white">{hot.lapTime}</p>
-            <p className="mt-4 font-display font-black italic text-2xl md:text-3xl uppercase leading-tight">{hot.driverName}</p>
-            <dl className="mt-4 space-y-1 font-sans text-sm text-white/65">
-              <div className="flex gap-2">
-                <dt className="sr-only">Car</dt>
-                <dd>{hot.car}</dd>
-              </div>
-              <div className="flex gap-2">
-                <dt className="sr-only">Track</dt>
-                <dd>{hot.track}</dd>
-              </div>
-            </dl>
-            <a
-              href={`https://www.youtube.com/watch?v=${videoId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group mt-7 inline-flex w-fit items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/70 hover:text-lsr-orange transition-colors"
-            >
-              <Play className="h-3.5 w-3.5" />
-              Watch on YouTube
-              <ArrowUpRight className="h-3 w-3" />
-            </a>
+            {showClip ? (
+              <>
+                <h2 className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Competition clip</h2>
+                <p className="mt-3 font-display font-black italic text-4xl md:text-5xl uppercase leading-[0.95] text-white text-balance break-words">{showClip.title}</p>
+                {showClip.drivers && <p className="mt-4 font-display font-black italic text-xl md:text-2xl uppercase leading-tight">{showClip.drivers}</p>}
+                {(showClip.race || showClip.credit) && (
+                  <dl className="mt-4 space-y-1 font-sans text-sm text-white/65">
+                    {showClip.race && (
+                      <div className="flex gap-2">
+                        <dt className="sr-only">Race</dt>
+                        <dd>{showClip.race}</dd>
+                      </div>
+                    )}
+                    {showClip.credit && (
+                      <div className="flex gap-1.5">
+                        <dt className="text-white/45">Clip by</dt>
+                        <dd>{showClip.credit}</dd>
+                      </div>
+                    )}
+                  </dl>
+                )}
+              </>
+            ) : (
+              <>
+                <h2 className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Hotlap of the week</h2>
+                <p className="mt-3 font-display font-black italic text-6xl md:text-7xl leading-none text-white">{hot.lapTime}</p>
+                <p className="mt-4 font-display font-black italic text-2xl md:text-3xl uppercase leading-tight">{hot.driverName}</p>
+                <dl className="mt-4 space-y-1 font-sans text-sm text-white/65">
+                  <div className="flex gap-2">
+                    <dt className="sr-only">Car</dt>
+                    <dd>{hot.car}</dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="sr-only">Track</dt>
+                    <dd>{hot.track}</dd>
+                  </div>
+                </dl>
+              </>
+            )}
+            {video.source.kind === "youtube" && (
+              <a
+                href={`https://www.youtube.com/watch?v=${video.source.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group mt-7 inline-flex w-fit items-center gap-2 font-sans font-bold text-[10px] uppercase tracking-[0.2em] text-white/70 hover:text-lsr-orange transition-colors"
+              >
+                <Play className="h-3.5 w-3.5" />
+                Watch on YouTube
+                <ArrowUpRight className="h-3 w-3" />
+              </a>
+            )}
           </div>
         </section>
 
