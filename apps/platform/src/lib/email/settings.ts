@@ -63,10 +63,10 @@ export type ClipSettings = {
 };
 
 /** Which video the home page shows. */
-export type FeaturedVideo = "hotlap" | "clip";
+export type FeaturedVideoKind = "hotlap" | "clip";
 
 export type FeaturedVideoSettings = {
-  show: FeaturedVideo;
+  show: FeaturedVideoKind;
   /** Null until an officer saves one (the home page then shows its built-in hotlap) */
   hotlap: HotlapSettings | null;
   clip: ClipSettings | null;

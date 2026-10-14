@@ -166,9 +166,10 @@ export default async function Home() {
 
   // The hotlap of the week, or a competition clip when an officer switches to one (and its video works)
   const hot = featured?.hotlap ?? HOTLAP_DEFAULTS
-  const clipSource = featured?.show === "clip" && featured.clip ? videoSource(featured.clip.videoUrl) : null
-  const showClip = clipSource ? featured?.clip : null
-  const video = clipSource && showClip
+  const clip = featured?.show === "clip" ? featured.clip : null
+  const clipSource = clip ? videoSource(clip.videoUrl) : null
+  const showClip = clipSource ? clip : null
+  const video = showClip && clipSource
     ? { source: clipSource, title: `Competition clip: ${showClip.title}` }
     : { source: videoSource(hot.videoUrl) ?? DEFAULT_HOTLAP_VIDEO, title: `Hotlap of the week: ${hot.driverName} at ${hot.track}` }
 

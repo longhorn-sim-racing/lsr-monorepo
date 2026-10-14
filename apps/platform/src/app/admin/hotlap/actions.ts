@@ -8,7 +8,7 @@ import {
   setSystemSetting,
   SETTINGS,
   type ClipSettings,
-  type FeaturedVideo,
+  type FeaturedVideoKind,
   type FeaturedVideoSettings,
   type HotlapSettings,
 } from "@/lib/email/settings";
@@ -18,6 +18,10 @@ import { createAuditLog } from "@/server/audit/log";
 import type { ActionResult } from "@/lib/action-result";
 
 const BAD_VIDEO = "That video doesn't work here. Upload a video file, or paste a YouTube video link.";
+
+/** Longest a clip's title and its other lines can be */
+const TITLE_MAX = 80;
+const LINE_MAX = 120;
 
 function field(formData: FormData, name: string) {
   return ((formData.get(name) as string | null) ?? "").trim();
@@ -73,10 +77,12 @@ export async function updateClipSettings(formData: FormData): Promise<ActionResu
   const title = field(formData, "title");
   if (!videoUrl || !title) return { ok: false, error: "Add the video and a title." };
   if (!videoSource(videoUrl)) return { ok: false, error: BAD_VIDEO };
+  if (title.length > TITLE_MAX) return { ok: false, error: `Keep the title to ${TITLE_MAX} characters.` };
 
   const next: ClipSettings = { videoUrl, title };
   for (const key of ["drivers", "race", "credit"] as const) {
     const value = field(formData, key);
+    if (value.length > LINE_MAX) return { ok: false, error: `Keep each line to ${LINE_MAX} characters.` };
     if (value) next[key] = value;
   }
 
@@ -88,7 +94,7 @@ export async function updateClipSettings(formData: FormData): Promise<ActionResu
     actionType: "UPDATE",
     entityType: "SYSTEM_SETTING",
     entityId: SETTINGS.CLIP,
-    summary: `Updated the competition clip`,
+    summary: "Updated the competition clip",
     before: previous ?? null,
     after: next,
   });
@@ -98,7 +104,7 @@ export async function updateClipSettings(formData: FormData): Promise<ActionResu
 }
 
 /** Switch the home page between the hotlap of the week and the competition clip. */
-export async function setFeaturedVideo(show: FeaturedVideo): Promise<ActionResult> {
+export async function setFeaturedVideo(show: FeaturedVideoKind): Promise<ActionResult> {
   const user = await requireOfficer();
   if (show !== "hotlap" && show !== "clip") return { ok: false, error: "Pick the hotlap or the clip." };
 
@@ -127,7 +133,7 @@ export async function startVideoUpload(): Promise<ActionResult<NonNullable<Retur
   await requireOfficer();
   const signed = signVideoUpload();
   if (!signed) {
-    return { ok: false, error: "Video uploads aren't set up on this server (the Cloudinary API key is missing). Use a YouTube link instead." };
+    return { ok: false, error: "Video uploads aren't set up yet. Use a YouTube link, or ask the Tech Team." };
   }
   return { ok: true, data: signed };
 }

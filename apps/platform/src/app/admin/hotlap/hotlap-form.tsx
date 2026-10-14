@@ -22,7 +22,13 @@ export default function HotlapForm({ initial, showing }: { initial: HotlapSettin
           }
         />
         <PanelBody className="flex flex-col gap-6">
-          {!initial && <Notice tone="info">Nothing saved yet, so the home page shows its built-in hotlap until you save one.</Notice>}
+          {!initial && (
+            <Notice tone="info">
+              {showing
+                ? "Nothing saved yet, so the home page shows its built-in hotlap until you save one."
+                : "Nothing saved yet. If you switch back before saving one, the home page shows its built-in hotlap."}
+            </Notice>
+          )}
           <FormSection title="Video">
             <VideoField name="videoUrl" defaultValue={initial?.videoUrl} defaultKind="youtube" />
           </FormSection>

@@ -5,6 +5,8 @@ describe("youTubeId", () => {
   it("reads watch, youtu.be, embed, shorts and live links", () => {
     expect(youTubeId("https://www.youtube.com/watch?v=fbS2ExGupLU")).toBe("fbS2ExGupLU")
     expect(youTubeId("https://m.youtube.com/watch?v=fbS2ExGupLU&t=42s")).toBe("fbS2ExGupLU")
+    expect(youTubeId("https://music.youtube.com/watch?v=fbS2ExGupLU")).toBe("fbS2ExGupLU")
+    expect(youTubeId("https://WWW.YouTube.com/watch?v=fbS2ExGupLU")).toBe("fbS2ExGupLU")
     expect(youTubeId("https://youtu.be/fbS2ExGupLU?si=abc")).toBe("fbS2ExGupLU")
     expect(youTubeId("https://www.youtube.com/embed/fbS2ExGupLU")).toBe("fbS2ExGupLU")
     expect(youTubeId("https://www.youtube-nocookie.com/embed/fbS2ExGupLU")).toBe("fbS2ExGupLU")

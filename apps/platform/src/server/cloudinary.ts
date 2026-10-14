@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { UPLOAD_EAGER } from "@/lib/featured-video"
 
-/** True when the server can upload to Cloudinary (the browser uploads use an unsigned preset instead). */
+/** True when the server can upload to Cloudinary (browser image uploads use an unsigned preset instead). */
 export function cloudinaryUploadsConfigured() {
   return Boolean(
     process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET,

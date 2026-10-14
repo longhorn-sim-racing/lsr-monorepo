@@ -27,7 +27,11 @@ function upload(file: File, signed: { cloudName: string; apiKey: string; params:
         json = JSON.parse(xhr.responseText)
       } catch {}
       if (xhr.status === 200 && json.secure_url) resolve(json.secure_url)
-      else reject(new Error(json.error?.message ?? `Upload failed (${xhr.status})`))
+      else {
+        // Cloudinary's own message is technical; keep it for the console
+        console.error("[Video upload]", xhr.status, json.error?.message)
+        reject(new Error("That upload didn't work. Try again, or use a YouTube link."))
+      }
     }
     xhr.onerror = () => reject(new Error("Upload failed. Check your connection and try again."))
     xhr.send(form)
@@ -47,6 +51,7 @@ export function VideoField({ name, defaultValue, defaultKind }: { name: string; 
   const [posterFailed, setPosterFailed] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const youtubeId = useId()
+  const uploadId = useId()
 
   const uploading = progress !== null
   const preview = uploadUrl ? uploadedVideo(uploadUrl) : null
@@ -93,7 +98,7 @@ export function VideoField({ name, defaultValue, defaultKind }: { name: string; 
         className="w-fit"
       />
       {kind === "upload" ? (
-        <Field label="Video file" hint="MP4, MOV, MKV or WebM, up to 100 MB. A long video can take a minute to be ready to play after it uploads.">
+        <Field label="Video file" htmlFor={uploadId} required hint="MP4, MOV, MKV or WebM, up to 100 MB. A long video can take a minute to be ready to play after it uploads.">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex aspect-video w-40 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-admin-surface">
               {preview && !posterFailed ? (
@@ -107,13 +112,13 @@ export function VideoField({ name, defaultValue, defaultKind }: { name: string; 
               )}
             </div>
             <input ref={inputRef} type="file" accept="video/*,.mkv,.mov,.mp4,.webm" hidden onChange={onFile} />
-            <Button type="button" onClick={() => inputRef.current?.click()} pending={uploading}>
+            <Button id={uploadId} type="button" onClick={() => inputRef.current?.click()} pending={uploading}>
               {uploading ? `Uploading ${progress}%` : preview ? "Replace video" : "Upload video"}
             </Button>
           </div>
         </Field>
       ) : (
-        <Field label="YouTube link" htmlFor={youtubeId} hint="A youtube.com/watch?v=, youtu.be/ or youtube.com/embed/ link.">
+        <Field label="YouTube link" htmlFor={youtubeId} required hint="A youtube.com/watch?v=, youtu.be/ or youtube.com/embed/ link.">
           <Input
             id={youtubeId}
             type="url"

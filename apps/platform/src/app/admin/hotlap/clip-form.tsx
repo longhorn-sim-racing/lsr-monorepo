@@ -32,13 +32,13 @@ export default function ClipForm({ initial, showing }: { initial: ClipSettings |
             </Field>
             <FieldGrid>
               <Field label="Drivers" htmlFor="clip-drivers" hint="Who's in it.">
-                <Input id="clip-drivers" name="drivers" defaultValue={initial?.drivers ?? ""} />
+                <Input id="clip-drivers" name="drivers" maxLength={120} defaultValue={initial?.drivers ?? ""} />
               </Field>
               <Field label="Race" htmlFor="clip-race">
-                <Input id="clip-race" name="race" defaultValue={initial?.race ?? ""} placeholder="Lone Star Cup, Round 4 at Brands Hatch" />
+                <Input id="clip-race" name="race" maxLength={120} defaultValue={initial?.race ?? ""} placeholder="Lone Star Cup, Round 4 at Brands Hatch" />
               </Field>
               <Field label="Clip by" htmlFor="clip-credit" hint="Who recorded or edited it, for the credit.">
-                <Input id="clip-credit" name="credit" defaultValue={initial?.credit ?? ""} />
+                <Input id="clip-credit" name="credit" maxLength={120} defaultValue={initial?.credit ?? ""} />
               </Field>
             </FieldGrid>
           </FormSection>

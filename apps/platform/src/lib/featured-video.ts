@@ -15,7 +15,10 @@ export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 export type VideoSource = { kind: "youtube"; id: string } | { kind: "upload"; src: string; poster: string }
 
-const YOUTUBE_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "youtube-nocookie.com", "www.youtube-nocookie.com"])
+/** youtube.com and its subdomains (www, m, music…), and the no-cookie embed host */
+function isYouTubeHost(host: string) {
+  return host === "youtube.com" || host.endsWith(".youtube.com") || host === "youtube-nocookie.com" || host === "www.youtube-nocookie.com"
+}
 
 /** A YouTube video id from watch, youtu.be, embed, shorts and live links */
 export function youTubeId(url: string): string | null {
@@ -23,7 +26,7 @@ export function youTubeId(url: string): string | null {
   try {
     const u = new URL(url)
     if (u.hostname === "youtu.be") id = u.pathname.split("/")[1] ?? null
-    else if (!YOUTUBE_HOSTS.has(u.hostname)) return null
+    else if (!isYouTubeHost(u.hostname)) return null
     else if (u.searchParams.has("v")) id = u.searchParams.get("v")
     else if (/^\/(embed|shorts|live)\//.test(u.pathname)) id = u.pathname.split("/")[2] ?? null
   } catch {}
