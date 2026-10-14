@@ -193,6 +193,13 @@ Venues are locations where events take place.
 3. Add alt text and photographer credit
 4. Drag images to reorder them
 
+### The home page video
+
+The home page shows either the hotlap of the week or a competition clip (an overtake, a save, a finish). Both live in **Admin > Hotlap and clips**:
+1. Fill in the hotlap or the clip. The video can be a YouTube link or a file you upload (MP4, MOV, MKV or WebM, up to 100 MB). Cloudinary converts uploads for the web, so a long one can take a minute before it plays.
+2. Save.
+3. Use the switch at the top to pick which one the home page shows. Both stay saved, so you can switch back any time.
+
 ### Instagram on the News page
 
 New posts from the club Instagram show up on the News page within the hour, with nothing to do. In **Admin > Instagram** you can:

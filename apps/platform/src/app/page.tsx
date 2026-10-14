@@ -483,7 +483,7 @@ export default async function Home() {
             {showClip ? (
               <>
                 <h2 className="font-sans font-bold text-[10px] uppercase tracking-[0.3em] text-lsr-orange">Competition clip</h2>
-                <p className="mt-3 font-display font-black italic text-4xl md:text-5xl uppercase leading-[0.95] text-white text-balance">{showClip.title}</p>
+                <p className="mt-3 font-display font-black italic text-4xl md:text-5xl uppercase leading-[0.95] text-white text-balance break-words">{showClip.title}</p>
                 {showClip.drivers && <p className="mt-4 font-display font-black italic text-xl md:text-2xl uppercase leading-tight">{showClip.drivers}</p>}
                 {(showClip.race || showClip.credit) && (
                   <dl className="mt-4 space-y-1 font-sans text-sm text-white/65">

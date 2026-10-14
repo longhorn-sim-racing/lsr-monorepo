@@ -151,7 +151,7 @@ Migrations live in `prisma/migrations/`. Apply with `pnpm --filter @lsr/platform
 | **Supabase** | Auth + PostgreSQL database | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `DATABASE_URL` |
 | **Stripe** | Payment processing | Webhook at `/api/stripe/webhook`; see [payments.md](./payments.md) |
 | **Shopify** | Merchandise catalog and cart | Storefront API via `src/lib/shopify/` |
-| **Cloudinary** | Image hosting | Images referenced via `res.cloudinary.com` |
+| **Cloudinary** | Image and video hosting | Images, and videos uploaded for the home page, referenced via `res.cloudinary.com` |
 | **Resend** | Transactional email | Via `src/lib/email/` |
 | **Vercel** | Hosting and deployment | Auto-deploys from `main` |
 
