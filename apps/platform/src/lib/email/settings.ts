@@ -37,16 +37,53 @@ export const SETTINGS = {
   EMAIL_ENABLED: "notifications.email.enabled",
   EMAIL_FROM: "notifications.email.from",
   HOTLAP: "homepage.hotlap",
+  CLIP: "homepage.clip",
+  FEATURED_VIDEO: "homepage.featuredVideo",
 } as const;
 
 /** Shape of the hotlap-of-the-week setting stored in SystemSetting. */
 export type HotlapSettings = {
+  /** A YouTube link, or a video uploaded to Cloudinary (see lib/featured-video.ts) */
   videoUrl: string;
   driverName: string;
   car: string;
   track: string;
   lapTime: string;
 };
+
+/** A competition clip for the home page: a highlight from a race, like an overtake or a finish. */
+export type ClipSettings = {
+  /** A YouTube link, or a video uploaded to Cloudinary (see lib/featured-video.ts) */
+  videoUrl: string;
+  title: string;
+  drivers?: string;
+  race?: string;
+  /** Who recorded or edited it */
+  credit?: string;
+};
+
+/** Which video the home page shows. */
+export type FeaturedVideo = "hotlap" | "clip";
+
+export type FeaturedVideoSettings = {
+  show: FeaturedVideo;
+  /** Null until an officer saves one (the home page then shows its built-in hotlap) */
+  hotlap: HotlapSettings | null;
+  clip: ClipSettings | null;
+};
+
+/**
+ * The home page video: which one shows, and both saved videos. A clip only shows once one is saved;
+ * until then it's the hotlap.
+ */
+export async function getFeaturedVideoSettings(): Promise<FeaturedVideoSettings> {
+  const [show, hotlap, clip] = await Promise.all([
+    getSystemSetting<string>(SETTINGS.FEATURED_VIDEO),
+    getSystemSetting<HotlapSettings>(SETTINGS.HOTLAP),
+    getSystemSetting<ClipSettings>(SETTINGS.CLIP),
+  ]);
+  return { show: show === "clip" && clip ? "clip" : "hotlap", hotlap: hotlap ?? null, clip: clip ?? null };
+}
 
 /**
  * Check if email notifications are enabled globally.
