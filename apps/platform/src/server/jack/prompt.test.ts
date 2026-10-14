@@ -46,6 +46,7 @@ describe("buildSystemPrompt", () => {
       /name the admin console page that does it/,
       /Products: annual dues and the LSC entry fee/,
       /Only admins can give someone the officer or admin role/,
+      /Hotlap and clips: the home page video/,
     ]) {
       expect(text).toMatch(rule)
     }
