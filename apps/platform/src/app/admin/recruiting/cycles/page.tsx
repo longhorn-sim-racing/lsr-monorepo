@@ -5,7 +5,7 @@ import { tracks } from "@/schemas/recruiting.schema";
 import { DEFAULT_TIMEZONE, dateToZonedValue } from "@/lib/dates";
 import { CyclesConsole } from "@/components/admin/recruiting/cycles-console";
 
-export const metadata: Metadata = { title: "Recruiting rounds | LSR Admin" };
+export const metadata: Metadata = { title: "Recruiting rounds" };
 export const dynamic = "force-dynamic";
 
 export default async function RecruitingCyclesPage({ searchParams }: { searchParams: Promise<{ cycle?: string }> }) {

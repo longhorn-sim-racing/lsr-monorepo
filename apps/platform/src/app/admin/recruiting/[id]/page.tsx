@@ -1,6 +1,4 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
 import { requireOfficerPage } from "@/server/auth/guards";
 import { findCycleById } from "@/server/repos/application.repo";
@@ -8,12 +6,13 @@ import { getApplicationDetail, recordApplicationViewed } from "@/server/services
 import { genericQuestions, getTrack, questionsForTrack } from "@/schemas/recruiting.schema";
 import { answerEntries } from "@/lib/recruiting/answers";
 import { formatCentral } from "@/lib/recruiting/labels";
+import { Badge, DetailList, PageHeader, Panel, PanelBody, PanelHeader } from "@/components/admin/kit";
 import { AnswerList } from "@/components/admin/recruiting/answer-list";
 import { SafeLink } from "@/components/admin/recruiting/safe-link";
 import { StatusBadge } from "@/components/admin/recruiting/status-badge";
 import { EmailsSection, TrackPanel, type PanelEmail } from "@/components/admin/recruiting/track-panel";
 
-export const metadata: Metadata = { title: "Application | LSR Admin" };
+export const metadata: Metadata = { title: "Application" };
 export const dynamic = "force-dynamic";
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
@@ -41,50 +40,62 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
   const name = app.fullName?.trim() || app.user.displayName;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 font-mono text-sm text-white">
-      <Link href={`/admin/recruiting${cycle ? `?cycle=${cycle.slug}` : ""}`} className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wider text-white/50 hover:text-white">
-        <ArrowLeft size={14} /> All applications
-      </Link>
+    <div className="mx-auto max-w-4xl space-y-4">
+      <PageHeader
+        back={{ href: `/admin/recruiting${cycle ? `?cycle=${cycle.slug}` : ""}`, label: "All applications" }}
+        title={name}
+        description={
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {app.tracks.map((t) => (
+              <span key={t.id} className="flex items-center gap-1.5">
+                {getTrack(t.track)?.label ?? t.track} <StatusBadge status={t.status} />
+              </span>
+            ))}
+          </span>
+        }
+      />
 
-      <header className="rounded-lg border border-white/10 bg-black/40 p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-display text-2xl font-black uppercase italic">{name}</h1>
-          {app.tracks.map((t) => (
-            <span key={t.id} className="flex items-center gap-1.5 text-[11px] text-white/50">
-              {getTrack(t.track)?.label ?? t.track} <StatusBadge status={t.status} />
-            </span>
-          ))}
-        </div>
-        <dl className="mt-4 grid gap-x-8 gap-y-3 text-xs sm:grid-cols-2">
-          <Fact label="Account email">
-            <a href={`mailto:${app.user.email}`} className="text-lsr-orange hover:underline">{app.user.email}</a>
-          </Fact>
-          <Fact label="UT EID">{app.eid ?? "—"}</Fact>
-          <Fact label="Graduation year">{app.gradYear ?? "—"}</Fact>
-          <Fact label="Major">{app.major ?? "—"}</Fact>
-          <Fact label="Round">{cycle?.name ?? "—"}</Fact>
-          <Fact label="Submitted">
-            {formatCentral(app.submittedAt)}
-            {app.autoSubmitted && <span className="ml-2 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-amber-300">submitted automatically at the deadline</span>}
-          </Fact>
-        </dl>
-      </header>
+      <Panel>
+        <PanelBody>
+          <DetailList
+            className="sm:grid-cols-[minmax(96px,auto)_1fr_minmax(96px,auto)_1fr]"
+            items={[
+              { label: "Account email", value: <a href={`mailto:${app.user.email}`} className="font-medium underline underline-offset-2 hover:text-primary">{app.user.email}</a> },
+              { label: "UT EID", value: app.eid ?? "—" },
+              { label: "Graduation year", value: app.gradYear ?? "—" },
+              { label: "Major", value: app.major ?? "—" },
+              { label: "Round", value: cycle?.name ?? "—" },
+              {
+                label: "Submitted",
+                value: (
+                  <>
+                    {formatCentral(app.submittedAt)}
+                    {app.autoSubmitted && <Badge tone="warning" className="ml-2">submitted automatically at the deadline</Badge>}
+                  </>
+                ),
+              },
+            ]}
+          />
+        </PanelBody>
+      </Panel>
 
-      <section className="rounded-lg border border-white/10 bg-black/40 p-4">
-        <h2 className="mb-3 text-[11px] uppercase tracking-wider text-lsr-orange">Resume</h2>
-        <p className="mb-3 text-[11px] text-white/40">
-          This is a link the applicant typed. Open them like any link from a stranger; if one doesn&apos;t open, ask the applicant to share it with &ldquo;anyone with the link&rdquo;.
-        </p>
-        <dl className="space-y-3 text-xs">
-          <Fact label="Resume">{app.resumeUrl ? <SafeLink url={app.resumeUrl} /> : "—"}</Fact>
-        </dl>
-      </section>
+      <Panel>
+        <PanelHeader
+          title="Resume"
+          description="This is a link the applicant typed. Open it like any link from a stranger; if it doesn't open, ask the applicant to share it with “anyone with the link”."
+        />
+        <PanelBody>
+          <DetailList items={[{ label: "Resume", value: app.resumeUrl ? <SafeLink url={app.resumeUrl} tone="admin" /> : "—" }]} />
+        </PanelBody>
+      </Panel>
 
       {genericQuestions.length > 0 && (
-        <section className="rounded-lg border border-white/10 bg-black/40 p-4">
-          <h2 className="mb-3 text-[11px] uppercase tracking-wider text-lsr-orange">General answers</h2>
-          <AnswerList entries={answerEntries(genericQuestions, app.genericAnswers)} />
-        </section>
+        <Panel>
+          <PanelHeader title="General answers" />
+          <PanelBody>
+            <AnswerList entries={answerEntries(genericQuestions, app.genericAnswers)} />
+          </PanelBody>
+        </Panel>
       )}
 
       {app.tracks.map((t) => {
@@ -108,18 +119,11 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
         );
       })}
 
-      <section className="rounded-lg border border-white/10 bg-black/40 p-4">
-        <EmailsSection emails={app.emails.map(toPanelEmail)} canResend={!isOwn} title="Confirmation email" emptyText="No confirmation email was recorded." />
-      </section>
-    </div>
-  );
-}
-
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <dt className="text-[11px] uppercase tracking-wider text-white/40">{label}</dt>
-      <dd className="mt-0.5 text-white/90">{children}</dd>
+      <Panel>
+        <PanelBody>
+          <EmailsSection emails={app.emails.map(toPanelEmail)} canResend={!isOwn} title="Confirmation email" emptyText="No confirmation email was recorded." />
+        </PanelBody>
+      </Panel>
     </div>
   );
 }

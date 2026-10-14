@@ -11,12 +11,13 @@ export const TRACK_STATUS_LABEL: Record<TrackStatus, string> = {
   REJECTED: "Not moving forward",
 };
 
-export const TRACK_STATUS_BADGE: Record<TrackStatus, string> = {
-  SUBMITTED: "border-white/20 bg-white/5 text-white/70",
-  IN_REVIEW: "border-amber-500/30 bg-amber-500/10 text-amber-300",
-  INTERVIEW: "border-sky-500/30 bg-sky-500/10 text-sky-300",
-  ACCEPTED: "border-green-500/30 bg-green-500/10 text-green-400",
-  REJECTED: "border-red-500/30 bg-red-500/10 text-red-300",
+/** Badge tone for each status (the admin kit's tones follow the light/dark theme). */
+export const TRACK_STATUS_TONE: Record<TrackStatus, "neutral" | "success" | "warning" | "danger" | "info"> = {
+  SUBMITTED: "neutral",
+  IN_REVIEW: "warning",
+  INTERVIEW: "info",
+  ACCEPTED: "success",
+  REJECTED: "danger",
 };
 
 /** Every status in the order officers think of them (also the filter chips' order). */
@@ -28,11 +29,11 @@ export const STATUSES_WITH_EMAIL: TrackStatus[] = ["INTERVIEW", "ACCEPTED", "REJ
 /** The statuses an officer can set (a team starts at SUBMITTED, which is never set by hand). */
 export const OFFICER_SETTABLE: TrackStatus[] = ["IN_REVIEW", "INTERVIEW", "ACCEPTED", "REJECTED"];
 
-export const EMAIL_STATUS_BADGE: Record<string, string> = {
-  SENT: "border-green-500/30 bg-green-500/10 text-green-400",
-  FAILED: "border-red-500/30 bg-red-500/10 text-red-300",
-  PENDING: "border-amber-500/30 bg-amber-500/10 text-amber-300",
-  CANCELLED: "border-white/10 bg-white/5 text-white/40",
+export const EMAIL_STATUS_TONE: Record<string, "neutral" | "success" | "warning" | "danger"> = {
+  SENT: "success",
+  FAILED: "danger",
+  PENDING: "warning",
+  CANCELLED: "neutral",
 };
 
 export const EMAIL_TEMPLATE_LABEL: Record<string, string> = {

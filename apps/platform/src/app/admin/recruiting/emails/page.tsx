@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { Button, EmptyState, PageHeader, Panel } from "@/components/admin/kit";
 import type { Metadata } from "next";
 import { requireOfficerPage } from "@/server/auth/guards";
 import { getEmailQuota, listEmailsNeedingAttention } from "@/server/services/recruiting-email.service";
 import { listCycles } from "@/server/services/recruiting-cycle.service";
 import { EmailsConsole } from "@/components/admin/recruiting/emails-console";
 
-export const metadata: Metadata = { title: "Recruiting emails | LSR Admin" };
+export const metadata: Metadata = { title: "Recruiting emails" };
 export const dynamic = "force-dynamic";
 
 export default async function RecruitingEmailsPage({ searchParams }: { searchParams: Promise<{ cycle?: string }> }) {
@@ -16,11 +17,19 @@ export default async function RecruitingEmailsPage({ searchParams }: { searchPar
   const cycle = cycles.find((c) => c.slug === sp.cycle) ?? cycles.find((c) => c.isActive) ?? cycles[0];
   if (!cycle) {
     return (
-      <div className="mx-auto max-w-xl space-y-3 font-mono text-sm text-white/70">
-        <h1 className="font-display text-2xl font-black uppercase italic text-white">Recruiting emails</h1>
-        <p>There are no recruiting rounds yet.</p>
-        <Link href="/admin/recruiting/cycles" className="text-lsr-orange hover:underline">Create the first round</Link>
-      </div>
+      <>
+        <PageHeader title="Recruiting emails" back={{ href: "/admin/recruiting", label: "Applications" }} />
+        <Panel>
+          <EmptyState
+            title="There are no recruiting rounds yet"
+            action={
+              <Button variant="primary" asChild>
+                <Link href="/admin/recruiting/cycles">Create the first round</Link>
+              </Button>
+            }
+          />
+        </Panel>
+      </>
     );
   }
 

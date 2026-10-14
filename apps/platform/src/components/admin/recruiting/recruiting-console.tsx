@@ -3,17 +3,32 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ClipboardList, Download, Mail, Search, Settings2 } from "lucide-react";
+import { Download, Mail, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import type { TrackStatus } from "@prisma/client";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Badge,
+  Button,
+  CheckboxField,
+  Dialog,
+  EmptyState,
+  Input,
+  Notice,
+  Pager,
+  Segmented,
+  Select,
+  TD,
+  TH,
+  THead,
+  TR,
+  Table,
+  Toolbar,
+  type SegmentOption,
+} from "@/components/admin/kit";
 import { bulkDecideAction } from "@/app/admin/recruiting/actions";
 import { OFFICER_SETTABLE, STATUSES_WITH_EMAIL, TRACK_STATUS_LABEL, TRACK_STATUS_ORDER, formatCentral } from "@/lib/recruiting/labels";
 import type { CycleWindow } from "@/lib/recruiting/cycle";
 import type { BulkDecisionResult } from "@/server/services/recruiting-email.service";
-import { cn } from "@/lib/utils";
 import { StatusBadge } from "./status-badge";
 
 type Team = { key: string; label: string; interviewRequired: boolean };
@@ -80,13 +95,18 @@ export function RecruitingConsole({
     return `${base}?${params.toString()}`;
   }
 
-  // Counts for the status chips follow the team filter
+  // Counts for the status filter follow the team filter
   const statusCounts = useMemo(() => {
     const out = new Map<TrackStatus, number>();
     for (const c of counts) if (!filters.team || c.track === filters.team) out.set(c.status, (out.get(c.status) ?? 0) + c.count);
     return out;
   }, [counts, filters.team]);
   const everything = TRACK_STATUS_ORDER.reduce((n, s) => n + (statusCounts.get(s) ?? 0), 0);
+
+  const statusOptions: SegmentOption<TrackStatus | "ALL">[] = [
+    { value: "ALL", label: "All", count: everything },
+    ...TRACK_STATUS_ORDER.map((s) => ({ value: s, label: TRACK_STATUS_LABEL[s], count: statusCounts.get(s) ?? 0 })),
+  ];
 
   const selectedRows = rows.filter((r) => selected.has(r.id));
   const allOnPage = rows.length > 0 && rows.every((r) => selected.has(r.id));
@@ -104,18 +124,35 @@ export function RecruitingConsole({
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-lg border border-white/10 bg-black/40 font-mono text-sm">
-      <div className="flex flex-wrap items-center gap-3 border-b border-white/10 bg-white/5 p-3">
-        <div className="flex items-center gap-2 rounded border border-white/10 bg-black/50 px-3 py-1.5">
-          <ClipboardList size={14} className="text-lsr-orange" />
-          <span className="font-bold uppercase tracking-wider text-white/80">Recruiting</span>
-        </div>
-
-        <select
+    <>
+      <Toolbar
+        actions={
+          <>
+            <Button asChild>
+              <Link href={`/admin/recruiting/emails?cycle=${cycle.slug}`}>
+                <Mail /> Emails
+                {attentionCount > 0 && <Badge tone="danger">{attentionCount}</Badge>}
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href="/admin/recruiting/cycles">
+                <Settings2 /> Rounds
+              </Link>
+            </Button>
+            <Button asChild>
+              {/* A plain link: it is a file download, not a page */}
+              <a href={csvHref}>
+                <Download /> CSV
+              </a>
+            </Button>
+          </>
+        }
+      >
+        <Select
           aria-label="Round"
+          className="w-auto"
           value={cycle.slug}
           onChange={(e) => router.push(hrefFor({ cycle: e.target.value, team: undefined, status: undefined, q: undefined, auto: false }))}
-          className="rounded border border-white/10 bg-black/50 px-3 py-1.5 text-xs text-white focus:border-lsr-orange focus:outline-none"
         >
           {cycles.map((c) => (
             <option key={c.id} value={c.slug}>
@@ -123,74 +160,50 @@ export function RecruitingConsole({
               {c.isActive ? " (active)" : ""}
             </option>
           ))}
-        </select>
+        </Select>
 
-        <select
-          aria-label="Team"
-          value={filters.team ?? ""}
-          onChange={(e) => router.push(hrefFor({ team: e.target.value || undefined }))}
-          className="rounded border border-white/10 bg-black/50 px-3 py-1.5 text-xs text-white focus:border-lsr-orange focus:outline-none"
-        >
+        <Select aria-label="Team" className="w-auto" value={filters.team ?? ""} onChange={(e) => router.push(hrefFor({ team: e.target.value || undefined }))}>
           <option value="">All teams</option>
           {teams.map((t) => (
-            <option key={t.key} value={t.key}>{t.label}</option>
+            <option key={t.key} value={t.key}>
+              {t.label}
+            </option>
           ))}
-        </select>
+        </Select>
 
-        <form action="/admin/recruiting" method="get" className="relative min-w-48 max-w-md flex-1">
+        <form action="/admin/recruiting" method="get" className="min-w-48 max-w-sm flex-1">
           <input type="hidden" name="cycle" value={cycle.slug} />
           {filters.team && <input type="hidden" name="team" value={filters.team} />}
           {filters.status && <input type="hidden" name="status" value={filters.status} />}
           {filters.auto && <input type="hidden" name="auto" value="1" />}
-          <Search size={14} className="absolute left-3 top-2 text-white/40" />
-          <input
-            name="q"
-            defaultValue={filters.q ?? ""}
-            aria-label="Search by name or email"
-            placeholder="Search name or email..."
-            className="w-full rounded border border-white/10 bg-black/50 py-1.5 pl-9 pr-3 text-xs text-white focus:border-lsr-orange focus:outline-none"
-          />
+          <Input name="q" type="search" defaultValue={filters.q ?? ""} aria-label="Search by name or email" placeholder="Search name or email" />
         </form>
+      </Toolbar>
 
-        <div className="ml-auto flex items-center gap-2">
-          <Button asChild variant="outline" size="sm" className="h-8 border-white/10 text-xs uppercase tracking-wider">
-            <Link href={`/admin/recruiting/emails?cycle=${cycle.slug}`}>
-              <Mail size={14} className="mr-1.5" /> Emails
-              {attentionCount > 0 && <span className="ml-1.5 rounded bg-red-500/80 px-1.5 text-[10px] font-bold text-white">{attentionCount}</span>}
-            </Link>
-          </Button>
-          <Button asChild variant="outline" size="sm" className="h-8 border-white/10 text-xs uppercase tracking-wider">
-            <Link href="/admin/recruiting/cycles"><Settings2 size={14} className="mr-1.5" /> Rounds</Link>
-          </Button>
-          <Button asChild variant="outline" size="sm" className="h-8 border-white/10 text-xs uppercase tracking-wider">
-            {/* A plain link: it is a file download, not a page */}
-            <a href={csvHref}><Download size={14} className="mr-1.5" /> CSV</a>
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 border-b border-white/10 p-3 text-[11px]">
-        <Chip href={hrefFor({ status: undefined })} active={!filters.status}>All {everything}</Chip>
-        {TRACK_STATUS_ORDER.map((s) => (
-          <Chip key={s} href={hrefFor({ status: s })} active={filters.status === s}>
-            {TRACK_STATUS_LABEL[s]} {statusCounts.get(s) ?? 0}
-          </Chip>
-        ))}
-        <Chip href={hrefFor({ auto: !filters.auto })} active={filters.auto}>Submitted automatically</Chip>
-        <span className="ml-auto text-white/40">
+      <Toolbar>
+        <Segmented
+          label="Status"
+          options={statusOptions}
+          value={filters.status ?? "ALL"}
+          onChange={(v) => router.push(hrefFor({ status: v === "ALL" ? undefined : v }))}
+        />
+        <Button aria-pressed={filters.auto} variant={filters.auto ? "primary" : "secondary"} onClick={() => router.push(hrefFor({ auto: !filters.auto }))}>
+          Submitted automatically
+        </Button>
+        <span className="ml-auto text-xs text-muted-foreground">
           {cycle.name}: {WINDOW_LABEL[cycle.window]}, closes {formatCentral(cycle.closesAt)}
           {cycle.drafts > 0 && ` · ${cycle.drafts} unsubmitted draft${cycle.drafts === 1 ? "" : "s"}`}
         </span>
-      </div>
+      </Toolbar>
 
       {selected.size > 0 && (
-        <div className="flex flex-wrap items-center gap-3 border-b border-lsr-orange/30 bg-lsr-orange/10 p-3 text-xs">
-          <span className="font-bold text-lsr-orange">{selected.size} selected</span>
-          <select
+        <div className="mb-3 flex flex-wrap items-center gap-2.5 rounded-lg border bg-admin-selected px-3.5 py-2.5 text-[13px]">
+          <span className="font-semibold">{selected.size} selected</span>
+          <Select
             aria-label="Set status for the selected"
+            className="w-auto"
             value={bulkStatus}
             onChange={(e) => setBulkStatus(e.target.value as TrackStatus | "")}
-            className="rounded border border-white/10 bg-black/50 px-2 py-1.5 text-xs text-white focus:border-lsr-orange focus:outline-none"
           >
             <option value="">Set status to...</option>
             {OFFICER_SETTABLE.map((s) => (
@@ -199,82 +212,92 @@ export function RecruitingConsole({
                 {s === "INTERVIEW" && !interviewPossible ? " (a selected team has no interviews)" : ""}
               </option>
             ))}
-          </select>
-          <Button size="sm" disabled={!bulkStatus} onClick={() => setBulkOpen(true)} className="h-8 bg-lsr-orange text-xs uppercase tracking-wider text-white hover:bg-white hover:text-lsr-charcoal">
+          </Select>
+          <Button variant="primary" disabled={!bulkStatus} onClick={() => setBulkOpen(true)}>
             Review and apply
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())} className="h-8 text-xs uppercase tracking-wider text-white/60">Clear</Button>
+          <Button variant="ghost" onClick={() => setSelected(new Set())}>
+            Clear
+          </Button>
         </div>
       )}
 
-      <div className="flex-1 overflow-x-auto">
-        <table className="w-full text-left text-xs">
-          <thead className="bg-white/5 text-[10px] uppercase tracking-wider text-white/40">
-            <tr>
-              <th className="w-8 px-3 py-2">
-                <Checkbox
-                  aria-label="Select everyone on this page"
-                  checked={allOnPage}
-                  onCheckedChange={(v) => setSelected(v === true ? new Set(rows.map((r) => r.id)) : new Set())}
-                />
-              </th>
-              <th className="px-3 py-2">Applicant</th>
-              <th className="px-3 py-2">Team</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Year / major</th>
-              <th className="px-3 py-2">Reviews</th>
-              <th className="px-3 py-2">Submitted</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/5">
+      {rows.length === 0 ? (
+        <div className="rounded-lg border bg-card">
+          <EmptyState
+            title={everything === 0 ? "No submitted applications yet" : "Nothing matches these filters"}
+            description={everything === 0 ? "Applications appear here as soon as applicants submit. Drafts are never shown." : "Try a different team or status, or clear the search."}
+          />
+        </div>
+      ) : (
+        <Table minWidth={760}>
+          <THead>
+            <TH className="w-8">
+              <input
+                type="checkbox"
+                className="size-3.5 accent-primary"
+                aria-label="Select everyone on this page"
+                checked={allOnPage}
+                onChange={(e) => setSelected(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())}
+              />
+            </TH>
+            <TH>Applicant</TH>
+            <TH>Team</TH>
+            <TH>Status</TH>
+            <TH>Year / major</TH>
+            <TH>Reviews</TH>
+            <TH>Submitted</TH>
+          </THead>
+          <tbody>
             {rows.map((r) => (
-              <tr key={r.id} className={cn("align-top hover:bg-white/[0.03]", selected.has(r.id) && "bg-lsr-orange/5")}>
-                <td className="px-3 py-2">
-                  <Checkbox aria-label={`Select ${r.name ?? "applicant"}`} checked={selected.has(r.id)} onCheckedChange={() => toggle(r.id)} />
-                </td>
-                <td className="px-3 py-2">
-                  <Link href={`/admin/recruiting/${r.applicationId}`} className="font-bold text-white hover:text-lsr-orange">
+              <TR key={r.id} selected={selected.has(r.id)} className="align-top">
+                <TD>
+                  <input
+                    type="checkbox"
+                    className="size-3.5 accent-primary"
+                    aria-label={`Select ${r.name ?? "applicant"}`}
+                    checked={selected.has(r.id)}
+                    onChange={() => toggle(r.id)}
+                  />
+                </TD>
+                <TD>
+                  <Link href={`/admin/recruiting/${r.applicationId}`} className="font-semibold hover:text-primary hover:underline">
                     {r.name || "Unnamed applicant"}
                   </Link>
-                  {r.userId === viewerId && <span className="ml-2 rounded border border-amber-500/30 px-1.5 text-[10px] uppercase text-amber-300">you</span>}
-                  <div className="text-white/40">{r.email}</div>
-                </td>
-                <td className="px-3 py-2 text-white/80">{teamByKey.get(r.track)?.label ?? r.track}</td>
-                <td className="px-3 py-2"><StatusBadge status={r.status} /></td>
-                <td className="px-3 py-2 text-white/60">
+                  {r.userId === viewerId && (
+                    <Badge tone="warning" className="ml-2">
+                      you
+                    </Badge>
+                  )}
+                  <div className="text-xs text-admin-subtle">{r.email}</div>
+                </TD>
+                <TD>{teamByKey.get(r.track)?.label ?? r.track}</TD>
+                <TD>
+                  <StatusBadge status={r.status} />
+                </TD>
+                <TD>
                   {r.gradYear ?? "—"}
-                  <div className="text-white/40">{r.major ?? ""}</div>
-                </td>
-                <td className="px-3 py-2 text-white/60">
-                  {r.reviewCount === 0 ? <span className="text-white/25">none</span> : `${r.reviewCount}${r.averageScore !== null ? ` · avg ${r.averageScore.toFixed(1)}` : ""}`}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 text-white/50">
+                  <div className="text-xs text-admin-subtle">{r.major ?? ""}</div>
+                </TD>
+                <TD className="text-muted-foreground">
+                  {r.reviewCount === 0 ? <span className="text-admin-subtle">none</span> : `${r.reviewCount}${r.averageScore !== null ? ` · avg ${r.averageScore.toFixed(1)}` : ""}`}
+                </TD>
+                <TD className="whitespace-nowrap text-muted-foreground">
                   {formatCentral(r.submittedAt, "MMM d, h:mm a")}
-                  {r.autoSubmitted && <div className="text-amber-300/80">automatic</div>}
-                </td>
-              </tr>
+                  {r.autoSubmitted && <div className="text-xs text-tone-warning-foreground">automatic</div>}
+                </TD>
+              </TR>
             ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-3 py-12 text-center uppercase tracking-widest text-white/30">
-                  {everything === 0 ? "No submitted applications yet" : "Nothing matches these filters"}
-                </td>
-              </tr>
-            )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      )}
 
-      <div className="flex items-center gap-3 border-t border-white/10 p-3 text-xs text-white/50">
-        <span>{total} team application{total === 1 ? "" : "s"}</span>
-        {pages > 1 && (
-          <span className="ml-auto flex items-center gap-2">
-            {page > 1 && <Link className="hover:text-white" href={hrefFor({ page: page - 1 })}>Previous</Link>}
-            <span>Page {page} of {pages}</span>
-            {page < pages && <Link className="hover:text-white" href={hrefFor({ page: page + 1 })}>Next</Link>}
-          </span>
-        )}
-      </div>
+      <Pager
+        page={page}
+        pageCount={pages}
+        hrefFor={(p) => hrefFor({ page: p })}
+        summary={`${total} team application${total === 1 ? "" : "s"}${pages > 1 ? ` · page ${page} of ${pages}` : ""}`}
+      />
 
       {bulkOpen && bulkStatus && (
         <BulkDialog
@@ -291,18 +314,7 @@ export function RecruitingConsole({
           }}
         />
       )}
-    </div>
-  );
-}
-
-function Chip({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className={cn("rounded border px-3 py-1 uppercase tracking-wider transition-colors", active ? "border-lsr-orange bg-lsr-orange/10 text-lsr-orange" : "border-white/10 text-white/50 hover:text-white")}
-    >
-      {children}
-    </Link>
+    </>
   );
 }
 
@@ -350,65 +362,73 @@ function BulkDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && !pending && onClose(result !== null)}>
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto border-white/10 bg-lsr-charcoal text-white">
-        <DialogHeader>
-          <DialogTitle className="font-display text-xl font-black uppercase italic">Mark {rows.length} as {label}</DialogTitle>
-          <DialogDescription className="text-white/60">Each is decided separately, for the team shown.</DialogDescription>
-        </DialogHeader>
-
-        <ul className="max-h-40 space-y-1 overflow-y-auto rounded border border-white/10 bg-black/40 p-2 text-xs">
+    <Dialog
+      open
+      onOpenChange={(open) => !open && !pending && onClose(result !== null)}
+      title={`Mark ${rows.length} as ${label}`}
+      description="Each is decided separately, for the team shown."
+      footer={
+        <>
+          <Button disabled={pending} onClick={() => onClose(result !== null)}>
+            {result ? "Close" : "Cancel"}
+          </Button>
+          {!result && (
+            <Button variant="primary" pending={pending} disabled={limitHit && !ignoreLimit} onClick={apply}>
+              {sendEmail ? `Mark ${label} and email` : `Mark ${label}`}
+            </Button>
+          )}
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <ul className="max-h-40 space-y-1 overflow-y-auto rounded-md border bg-admin-surface p-2 text-xs">
           {rows.map((r) => (
             <li key={r.id} className="flex justify-between gap-3">
-              <span className="truncate text-white/80">{r.name ?? "Unnamed applicant"}</span>
-              <span className="shrink-0 text-white/40">{teamByKey.get(r.track)?.label ?? r.track}</span>
+              <span className="truncate">{r.name ?? "Unnamed applicant"}</span>
+              <span className="shrink-0 text-admin-subtle">{teamByKey.get(r.track)?.label ?? r.track}</span>
             </li>
           ))}
         </ul>
 
         {result ? (
-          <div className="space-y-2 text-xs">
-            <p className="text-white/80">{result.decided} of {result.total} were changed. These were not:</p>
-            <ul className="space-y-1 text-red-200">
+          <Notice tone="warning" title={`${result.decided} of ${result.total} were changed. These were not:`}>
+            <ul className="space-y-1">
               {result.failures.map((f) => {
                 const row = rows.find((r) => r.id === f.applicationTrackId);
-                return <li key={f.applicationTrackId}>{row?.name ?? "Applicant"}: {f.error}</li>;
+                return (
+                  <li key={f.applicationTrackId}>
+                    {row?.name ?? "Applicant"}: {f.error}
+                  </li>
+                );
               })}
             </ul>
-          </div>
+          </Notice>
         ) : (
-          <div className="space-y-3 text-xs">
+          <>
             {canEmail ? (
-              <label className="flex items-start gap-2 text-white/80">
-                <Checkbox checked={sendEmail} onCheckedChange={(v) => setSendEmail(v === true)} className="mt-0.5" />
-                <span>
-                  Email the applicants. <strong>{rows.length} email{rows.length === 1 ? "" : "s"}</strong> would go out using the default message for this status, with each person&apos;s name and team filled in. Emails can&apos;t be unsent. To write a custom message, open the application instead.
-                </span>
-              </label>
+              <CheckboxField
+                checked={sendEmail}
+                onChange={(e) => setSendEmail(e.target.checked)}
+                label="Email the applicants"
+                description={`${rows.length} email${rows.length === 1 ? "" : "s"} would go out using the default message for this status, with each person's name and team filled in. Emails can't be unsent. To write a custom message, open the application instead.`}
+              />
             ) : (
-              <p className="text-white/50">No email is sent for this status.</p>
+              <p className="text-xs text-admin-subtle">No email is sent for this status.</p>
             )}
             {limitHit && (
-              <label className="flex items-start gap-2 text-amber-200">
-                <Checkbox checked={ignoreLimit} onCheckedChange={(v) => setIgnoreLimit(v === true)} className="mt-0.5" />
-                <span>Send anyway. Emails over today&apos;s limit will fail and show up on the Emails page to resend later.</span>
-              </label>
+              <CheckboxField
+                checked={ignoreLimit}
+                onChange={(e) => setIgnoreLimit(e.target.checked)}
+                label="Send anyway"
+                description="Emails over today's limit will fail and show up on the Emails page to resend later."
+              />
             )}
-            {error && <p role="alert" className="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-red-200">{error}</p>}
-          </div>
+            {error && (
+              <Notice tone="danger">{error}</Notice>
+            )}
+          </>
         )}
-
-        <DialogFooter className="gap-2">
-          <Button type="button" variant="ghost" disabled={pending} onClick={() => onClose(result !== null)} className="text-white/60">
-            {result ? "Close" : "Cancel"}
-          </Button>
-          {!result && (
-            <Button type="button" disabled={pending || (limitHit && !ignoreLimit)} onClick={apply} className="bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal">
-              {pending ? "Working..." : sendEmail ? `Mark ${label} and email` : `Mark ${label}`}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
+      </div>
     </Dialog>
   );
 }

@@ -3,14 +3,10 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Mail } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Badge, Button, CheckboxField, Dialog, EmptyState, Notice, PageHeader, Select, TD, TH, THead, TR, Table, Toolbar } from "@/components/admin/kit";
 import { resendAllFailedAction, resendEmailAction } from "@/app/admin/recruiting/actions";
-import { EMAIL_STATUS_BADGE, EMAIL_TEMPLATE_LABEL, formatCentral } from "@/lib/recruiting/labels";
-import { cn } from "@/lib/utils";
+import { EMAIL_STATUS_TONE, EMAIL_TEMPLATE_LABEL, formatCentral } from "@/lib/recruiting/labels";
 
 type Row = {
   id: string;
@@ -54,88 +50,100 @@ export function EmailsConsole({
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5 font-mono text-sm text-white">
-      <Link href={`/admin/recruiting?cycle=${cycle.slug}`} className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wider text-white/50 hover:text-white">
-        <ArrowLeft size={14} /> Applications
-      </Link>
+    <div className="mx-auto max-w-5xl">
+      <PageHeader
+        back={{ href: `/admin/recruiting?cycle=${cycle.slug}`, label: "Applications" }}
+        title="Emails that need attention"
+        description="Failed emails, and ones stuck while sending."
+        actions={
+          <Button variant="primary" disabled={failed.length === 0 || pending} onClick={() => setBulkOpen(true)}>
+            Resend all failed ({failed.length})
+          </Button>
+        }
+      />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="flex items-center gap-2 font-display text-2xl font-black uppercase italic">
-          <Mail size={20} className="text-lsr-orange" /> Emails that need attention
-        </h1>
-        <select
-          aria-label="Round"
-          value={cycle.slug}
-          onChange={(e) => router.push(`/admin/recruiting/emails?cycle=${e.target.value}`)}
-          className="rounded border border-white/10 bg-black/50 px-3 py-1.5 text-xs text-white focus:border-lsr-orange focus:outline-none"
-        >
+      <Toolbar>
+        <Select aria-label="Round" className="w-auto" value={cycle.slug} onChange={(e) => router.push(`/admin/recruiting/emails?cycle=${e.target.value}`)}>
           {cycles.map((c) => (
-            <option key={c.slug} value={c.slug}>{c.name}{c.isActive ? " (active)" : ""}</option>
+            <option key={c.slug} value={c.slug}>
+              {c.name}
+              {c.isActive ? " (active)" : ""}
+            </option>
           ))}
-        </select>
-        <Button size="sm" disabled={failed.length === 0 || pending} onClick={() => setBulkOpen(true)} className="ml-auto h-8 bg-lsr-orange text-xs uppercase tracking-wider text-white hover:bg-white hover:text-lsr-charcoal">
-          Resend all failed ({failed.length})
-        </Button>
-      </div>
+        </Select>
+      </Toolbar>
 
-      <p className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs leading-relaxed text-white/60">
+      <Notice className="mb-3">
         {quota.dailyLimit === null ? (
-          <>No daily email limit is configured.</>
+          "No daily email limit is configured."
         ) : (
           <>
-            <strong className="text-white/80">{quota.sentToday} of {quota.dailyLimit}</strong> emails sent today (announcements and recruiting together); {quota.left} left. The count resets at 7 pm Central (6 pm in winter). A message that fails because the limit was reached can be resent after that.
+            <strong className="font-semibold text-foreground">
+              {quota.sentToday} of {quota.dailyLimit}
+            </strong>{" "}
+            emails sent today (announcements and recruiting together); {quota.left} left. The count resets at 7 pm Central (6 pm in winter). A message that fails because the limit was reached can be resent after that.
           </>
         )}
-      </p>
+      </Notice>
 
-      <div className="overflow-x-auto rounded-lg border border-white/10 bg-black/40">
-        <table className="w-full text-left text-xs">
-          <thead className="bg-white/5 text-[10px] uppercase tracking-wider text-white/40">
-            <tr>
-              <th className="px-3 py-2">Applicant</th>
-              <th className="px-3 py-2">Email</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Created</th>
-              <th className="px-3 py-2" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/5">
+      {rows.length === 0 ? (
+        <div className="rounded-lg border bg-card">
+          <EmptyState title="Nothing needs attention" description="Every email for this round was sent." />
+        </div>
+      ) : (
+        <Table minWidth={720}>
+          <THead>
+            <TH>Applicant</TH>
+            <TH>Email</TH>
+            <TH>Status</TH>
+            <TH>Created</TH>
+            <TH className="text-right">
+              <span className="sr-only">Actions</span>
+            </TH>
+          </THead>
+          <tbody>
             {rows.map((r) => (
-              <tr key={r.id} className="align-top hover:bg-white/[0.03]">
-                <td className="px-3 py-2">
-                  <Link href={`/admin/recruiting/${r.applicationId}`} className="font-bold text-white hover:text-lsr-orange">{r.applicantName || "Unnamed applicant"}</Link>
-                  <div className="text-white/40">{r.toEmail}</div>
-                </td>
-                <td className="px-3 py-2">
-                  <div className="text-white/80">{EMAIL_TEMPLATE_LABEL[r.template] ?? r.template}</div>
-                  <div className="max-w-xs truncate text-white/40">{r.subject}</div>
-                </td>
-                <td className="px-3 py-2">
-                  <span className={cn("rounded border px-2 py-0.5 text-[10px] uppercase tracking-wider", EMAIL_STATUS_BADGE[r.status])}>{r.status.toLowerCase()}</span>
-                  {r.error && <div className="mt-1 max-w-xs text-red-300/80">{r.error}</div>}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 text-white/50">{formatCentral(r.createdAt, "MMM d, h:mm a")}</td>
-                <td className="px-3 py-2 text-right">
+              <TR key={r.id} className="align-top">
+                <TD>
+                  <Link href={`/admin/recruiting/${r.applicationId}`} className="font-semibold hover:text-primary hover:underline">
+                    {r.applicantName || "Unnamed applicant"}
+                  </Link>
+                  <div className="text-xs text-admin-subtle">{r.toEmail}</div>
+                </TD>
+                <TD>
+                  <div>{EMAIL_TEMPLATE_LABEL[r.template] ?? r.template}</div>
+                  <div className="max-w-xs truncate text-xs text-admin-subtle">{r.subject}</div>
+                </TD>
+                <TD>
+                  <Badge tone={EMAIL_STATUS_TONE[r.status] ?? "neutral"}>{r.status.toLowerCase()}</Badge>
+                  {r.error && <div className="mt-1 max-w-xs text-xs text-tone-danger-foreground">{r.error}</div>}
+                </TD>
+                <TD className="whitespace-nowrap text-muted-foreground">{formatCentral(r.createdAt, "MMM d, h:mm a")}</TD>
+                <TD className="text-right">
                   {r.status === "FAILED" ? (
-                    <Button size="sm" variant="outline" disabled={pending} onClick={() => resendOne(r.id)} className="h-7 border-white/10 text-[11px] uppercase tracking-wider">
-                      {busyId === r.id ? "Sending..." : "Resend"}
+                    <Button size="sm" pending={busyId === r.id} disabled={pending} onClick={() => resendOne(r.id)}>
+                      Resend
                     </Button>
                   ) : (
-                    <span className="text-[11px] text-white/30">sending</span>
+                    <span className="text-xs text-admin-subtle">sending</span>
                   )}
-                </td>
-              </tr>
+                </TD>
+              </TR>
             ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-3 py-12 text-center uppercase tracking-widest text-white/30">Nothing needs attention</td>
-              </tr>
-            )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      )}
 
-      {bulkOpen && <ResendAllDialog cycleId={cycle.id} count={failed.length} onClose={(changed) => { setBulkOpen(false); if (changed) router.refresh(); }} />}
+      {bulkOpen && (
+        <ResendAllDialog
+          cycleId={cycle.id}
+          count={failed.length}
+          onClose={(changed) => {
+            setBulkOpen(false);
+            if (changed) router.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -163,26 +171,34 @@ function ResendAllDialog({ cycleId, count, onClose }: { cycleId: string; count: 
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && !pending && onClose(false)}>
-      <DialogContent className="max-w-md border-white/10 bg-lsr-charcoal text-white">
-        <DialogHeader>
-          <DialogTitle className="font-display text-xl font-black uppercase italic">Resend {count} failed email{count === 1 ? "" : "s"}?</DialogTitle>
-          <DialogDescription className="text-white/60">Each goes to the applicant it was written for, with the same message. Up to 100 are sent at a time.</DialogDescription>
-        </DialogHeader>
-        {limitHit && (
-          <label className="flex items-start gap-2 text-xs text-amber-200">
-            <Checkbox checked={ignoreLimit} onCheckedChange={(v) => setIgnoreLimit(v === true)} className="mt-0.5" />
-            <span>Send anyway. Anything over today&apos;s limit will fail again and can be resent later.</span>
-          </label>
-        )}
-        {error && <p role="alert" className="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">{error}</p>}
-        <DialogFooter className="gap-2">
-          <Button variant="ghost" disabled={pending} onClick={() => onClose(false)} className="text-white/60">Cancel</Button>
-          <Button disabled={pending || (limitHit && !ignoreLimit)} onClick={go} className="bg-lsr-orange text-white hover:bg-white hover:text-lsr-charcoal">
-            {pending ? "Sending..." : "Resend all"}
+    <Dialog
+      open
+      size="sm"
+      onOpenChange={(open) => !open && !pending && onClose(false)}
+      title={`Resend ${count} failed email${count === 1 ? "" : "s"}?`}
+      description="Each goes to the applicant it was written for, with the same message. Up to 100 are sent at a time."
+      footer={
+        <>
+          <Button disabled={pending} onClick={() => onClose(false)}>
+            Cancel
           </Button>
-        </DialogFooter>
-      </DialogContent>
+          <Button variant="primary" pending={pending} disabled={limitHit && !ignoreLimit} onClick={go}>
+            Resend all
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        {limitHit && (
+          <CheckboxField
+            checked={ignoreLimit}
+            onChange={(e) => setIgnoreLimit(e.target.checked)}
+            label="Send anyway"
+            description="Anything over today's limit will fail again and can be resent later."
+          />
+        )}
+        {error && <Notice tone="danger">{error}</Notice>}
+      </div>
     </Dialog>
   );
 }

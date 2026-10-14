@@ -7,8 +7,9 @@ import { listCycles } from "@/server/services/recruiting-cycle.service";
 import { isTrackKey, tracks } from "@/schemas/recruiting.schema";
 import { parseTrackStatus } from "@/lib/recruiting/labels";
 import { RecruitingConsole } from "@/components/admin/recruiting/recruiting-console";
+import { Button, EmptyState, PageHeader, Panel } from "@/components/admin/kit";
 
-export const metadata: Metadata = { title: "Recruiting | LSR Admin" };
+export const metadata: Metadata = { title: "Recruiting" };
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 50;
@@ -25,11 +26,20 @@ export default async function RecruitingAdminPage({
   const cycles = await listCycles();
   if (cycles.length === 0) {
     return (
-      <div className="mx-auto max-w-xl space-y-3 font-mono text-sm text-white/70">
-        <h1 className="font-display text-2xl font-black uppercase italic text-white">Recruiting</h1>
-        <p>There are no recruiting rounds yet.</p>
-        <Link href="/admin/recruiting/cycles" className="text-lsr-orange hover:underline">Create the first round</Link>
-      </div>
+      <>
+        <PageHeader title="Recruiting" />
+        <Panel>
+          <EmptyState
+            title="There are no recruiting rounds yet"
+            description="A round sets when applications open and close. Create one to get started."
+            action={
+              <Button variant="primary" asChild>
+                <Link href="/admin/recruiting/cycles">Create the first round</Link>
+              </Button>
+            }
+          />
+        </Panel>
+      </>
     );
   }
 
@@ -48,6 +58,8 @@ export default async function RecruitingAdminPage({
   ]);
 
   return (
+    <>
+      <PageHeader title="Recruiting" description={`${cycle.name}${cycle.isActive ? " (active round)" : ""}`} />
     <RecruitingConsole
       viewerId={officer.id}
       cycles={cycles.map((c) => ({ id: c.id, slug: c.slug, name: c.name, isActive: c.isActive }))}
@@ -75,5 +87,6 @@ export default async function RecruitingAdminPage({
       filters={{ team, status, q, auto: autoSubmitted === true }}
       attentionCount={attention}
     />
+    </>
   );
 }

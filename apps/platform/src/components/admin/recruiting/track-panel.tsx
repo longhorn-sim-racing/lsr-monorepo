@@ -4,18 +4,16 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { TrackStatus } from "@prisma/client";
-import { Button } from "@/components/ui/button";
+import { Badge, Button, Notice, Panel, PanelBody, PanelHeader, Select, Textarea } from "@/components/admin/kit";
 import { addReviewAction, resendEmailAction } from "@/app/admin/recruiting/actions";
-import { EMAIL_STATUS_BADGE, EMAIL_TEMPLATE_LABEL, OFFICER_SETTABLE, TRACK_STATUS_LABEL, formatCentral } from "@/lib/recruiting/labels";
-import { cn } from "@/lib/utils";
+import { EMAIL_STATUS_TONE, EMAIL_TEMPLATE_LABEL, OFFICER_SETTABLE, TRACK_STATUS_LABEL, formatCentral } from "@/lib/recruiting/labels";
 import { DecisionDialog } from "./decision-dialog";
 import { StatusBadge } from "./status-badge";
 
 export type PanelReview = { id: string; score: number | null; notes: string | null; createdAt: string; reviewer: string | null };
 export type PanelEmail = { id: string; template: string; subject: string; status: string; error: string | null; sentAt: string | null; createdAt: string };
 
-const fieldClass =
-  "w-full bg-black/50 border border-white/10 rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-lsr-orange transition-colors";
+const sectionTitle = "mb-2.5 text-xs font-bold text-foreground";
 
 /** Everything about one team's application: decision buttons, the team's answers (children), reviews, and email history. */
 export function TrackPanel({
@@ -51,36 +49,26 @@ export function TrackPanel({
   const choices = OFFICER_SETTABLE.filter((s) => s !== status && (s !== "INTERVIEW" || interviewRequired));
 
   return (
-    <section className="rounded-lg border border-white/10 bg-black/40">
-      <header className="flex flex-wrap items-center gap-3 border-b border-white/10 bg-white/5 px-4 py-3">
-        <h2 className="font-display text-lg font-black uppercase italic">{teamLabel}</h2>
-        <StatusBadge status={status} />
-        {decidedAt && (
-          <span className="text-[11px] text-white/40">
-            {decidedBy ? `by ${decidedBy}, ` : ""}
-            {formatCentral(decidedAt)}
+    <Panel>
+      <PanelHeader
+        title={
+          <span className="flex flex-wrap items-center gap-2">
+            {teamLabel}
+            <StatusBadge status={status} />
+            {!interviewRequired && <Badge>No interview</Badge>}
           </span>
-        )}
-        {!interviewRequired && <span className="rounded border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-white/40">No interview</span>}
-      </header>
+        }
+        description={decidedAt ? `${decidedBy ? `Decided by ${decidedBy}, ` : "Decided "}${formatCentral(decidedAt)}` : undefined}
+      />
 
-      <div className="space-y-6 p-4">
+      <PanelBody className="space-y-6">
         {isOwn ? (
-          <p className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-            This is your own application. You can read it, but you can&apos;t review or decide it.
-          </p>
+          <Notice tone="warning">This is your own application. You can read it, but you can&apos;t review or decide it.</Notice>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] uppercase tracking-wider text-white/40">Mark as</span>
+            <span className="text-xs font-semibold text-muted-foreground">Mark as</span>
             {choices.map((s) => (
-              <Button
-                key={s}
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setTarget(s)}
-                className={cn("h-8 border-white/10 text-xs uppercase tracking-wider", s === "ACCEPTED" && "text-green-400", s === "REJECTED" && "text-red-300", s === "INTERVIEW" && "text-sky-300")}
-              >
+              <Button key={s} onClick={() => setTarget(s)}>
                 {TRACK_STATUS_LABEL[s]}
               </Button>
             ))}
@@ -88,13 +76,13 @@ export function TrackPanel({
         )}
 
         <div>
-          <h3 className="mb-3 text-[11px] uppercase tracking-wider text-lsr-orange">{teamLabel} answers</h3>
+          <h3 className={sectionTitle}>{teamLabel} answers</h3>
           {children}
         </div>
 
         <ReviewsSection trackId={trackId} reviews={reviews} canAdd={!isOwn} />
         <EmailsSection emails={emails} canResend={!isOwn} />
-      </div>
+      </PanelBody>
 
       <DecisionDialog
         trackId={trackId}
@@ -106,7 +94,7 @@ export function TrackPanel({
           if (changed) router.refresh();
         }}
       />
-    </section>
+    </Panel>
   );
 }
 
@@ -132,19 +120,19 @@ function ReviewsSection({ trackId, reviews, canAdd }: { trackId: string; reviews
 
   return (
     <div>
-      <h3 className="mb-3 text-[11px] uppercase tracking-wider text-lsr-orange">Reviews</h3>
+      <h3 className={sectionTitle}>Reviews</h3>
       {reviews.length === 0 ? (
-        <p className="text-xs text-white/40">No reviews yet.</p>
+        <p className="text-xs text-admin-subtle">No reviews yet.</p>
       ) : (
-        <ul className="space-y-3">
+        <ul className="space-y-2">
           {reviews.map((r) => (
-            <li key={r.id} className="rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-xs">
-              <div className="flex flex-wrap items-center gap-2 text-white/50">
-                <span className="font-bold text-white/80">{r.reviewer ?? "Former officer"}</span>
-                {r.score !== null && <span className="rounded border border-lsr-orange/40 bg-lsr-orange/10 px-1.5 text-lsr-orange">{r.score}/5</span>}
+            <li key={r.id} className="rounded-md border bg-admin-surface px-3 py-2 text-[13px]">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">{r.reviewer ?? "Former officer"}</span>
+                {r.score !== null && <Badge tone="accent">{r.score}/5</Badge>}
                 <span>{formatCentral(r.createdAt)}</span>
               </div>
-              {r.notes && <p className="mt-1 whitespace-pre-wrap text-white/80">{r.notes}</p>}
+              {r.notes && <p className="mt-1 whitespace-pre-wrap">{r.notes}</p>}
             </li>
           ))}
         </ul>
@@ -152,17 +140,23 @@ function ReviewsSection({ trackId, reviews, canAdd }: { trackId: string; reviews
       {canAdd && (
         <form onSubmit={add} className="mt-3 space-y-2">
           <div className="flex gap-2">
-            <select aria-label="Score" value={score} onChange={(e) => setScore(e.target.value)} className="rounded border border-white/10 bg-black/50 px-2 py-2 text-xs text-white focus:border-lsr-orange focus:outline-none">
+            <Select aria-label="Score" className="w-28 shrink-0" value={score} onChange={(e) => setScore(e.target.value)}>
               <option value="">No score</option>
               {[1, 2, 3, 4, 5].map((n) => (
-                <option key={n} value={n}>{n} / 5</option>
+                <option key={n} value={n}>
+                  {n} / 5
+                </option>
               ))}
-            </select>
-            <textarea aria-label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} maxLength={2000} placeholder="Notes for the other officers" className={fieldClass} />
+            </Select>
+            <Textarea aria-label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} maxLength={2000} placeholder="Notes for the other officers" />
           </div>
-          {error && <p role="alert" className="text-xs text-red-300">{error}</p>}
-          <Button type="submit" size="sm" disabled={pending || (!score && !notes.trim())} className="h-8 bg-white/10 text-xs uppercase tracking-wider hover:bg-white/20">
-            {pending ? "Adding..." : "Add review"}
+          {error && (
+            <p role="alert" className="text-xs font-medium text-tone-danger-foreground">
+              {error}
+            </p>
+          )}
+          <Button type="submit" pending={pending} disabled={!score && !notes.trim()}>
+            Add review
           </Button>
         </form>
       )}
@@ -187,24 +181,24 @@ export function EmailsSection({ emails, canResend, title = "Emails to the applic
 
   return (
     <div>
-      <h3 className="mb-3 text-[11px] uppercase tracking-wider text-lsr-orange">{title}</h3>
+      <h3 className={sectionTitle}>{title}</h3>
       {emails.length === 0 ? (
-        <p className="text-xs text-white/40">{emptyText}</p>
+        <p className="text-xs text-admin-subtle">{emptyText}</p>
       ) : (
         <ul className="space-y-2">
           {emails.map((m) => (
-            <li key={m.id} className="flex flex-wrap items-start gap-3 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-xs">
+            <li key={m.id} className="flex flex-wrap items-start gap-3 rounded-md border bg-admin-surface px-3 py-2 text-[13px]">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-bold text-white/80">{EMAIL_TEMPLATE_LABEL[m.template] ?? m.template}</span>
-                  <span className={cn("rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wider", EMAIL_STATUS_BADGE[m.status])}>{m.status.toLowerCase()}</span>
-                  <span className="text-white/40">{formatCentral(m.sentAt ?? m.createdAt)}</span>
+                  <span className="font-semibold">{EMAIL_TEMPLATE_LABEL[m.template] ?? m.template}</span>
+                  <Badge tone={EMAIL_STATUS_TONE[m.status] ?? "neutral"}>{m.status.toLowerCase()}</Badge>
+                  <span className="text-xs text-admin-subtle">{formatCentral(m.sentAt ?? m.createdAt)}</span>
                 </div>
-                <div className="mt-1 truncate text-white/60">{m.subject}</div>
-                {m.error && <div className="mt-1 text-red-300/80">{m.error}</div>}
+                <div className="mt-1 truncate text-muted-foreground">{m.subject}</div>
+                {m.error && <div className="mt-1 text-xs text-tone-danger-foreground">{m.error}</div>}
               </div>
               {canResend && m.status === "FAILED" && (
-                <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => resend(m.id)} className="h-7 border-white/10 text-[11px] uppercase tracking-wider">
+                <Button size="sm" disabled={pending} onClick={() => resend(m.id)}>
                   Resend
                 </Button>
               )}
