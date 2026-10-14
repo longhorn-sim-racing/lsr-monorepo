@@ -75,13 +75,15 @@ export function checkEvalDatabase(env: { DATABASE_URL?: string; JACK_DATABASE_UR
   if (!main) return { ok: false, error: "DATABASE_URL isn't set (or isn't a postgres:// URL) in the environment or apps/platform/.env.local / .env." }
   if (main.hostOverride) return { ok: false, error: `Refusing to run: ${overrideProblem("DATABASE_URL", main.hostOverride)}` }
   const local = LOCAL_HOSTS.includes(main.host)
-  if (!local && allowRemote?.toLowerCase() !== main.host) {
+  // A Supabase pooler host is shared by every project in its region, so the flag names the project too
+  const remoteName = main.projectRef ? `${main.host}/${main.projectRef}` : main.host
+  if (!local && allowRemote?.toLowerCase() !== remoteName.toLowerCase()) {
     return {
       ok: false,
       error:
         `Refusing to run: DATABASE_URL points at ${main.host}, not this machine (127.0.0.1 or localhost). ` +
         `The eval writes to the database it runs on (a draft event and an audit entry, then deletes them). ` +
-        `To run it on a copy of the data anyway, pass --allow-remote=${main.host}. Never point it at production.`,
+        `To run it on a copy of the data anyway, pass --allow-remote=${remoteName}. Never point it at production.`,
     }
   }
   const jack = parseDatabaseUrl(env.JACK_DATABASE_URL)
@@ -120,12 +122,18 @@ export function plain(text: string): string {
 
 const MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
 const YEAR_AFTER = String.raw`(?:,?\s+\d{4}\b)?`
-/** "Oct 13", "October 13th, 2026": the month first */
-const MONTH_THEN_DAY = new RegExp(String.raw`\b(?:${MONTHS})\.?\s+\d{1,2}(?:st|nd|rd|th)?\b` + YEAR_AFTER, "gi")
-/** "13 October", "13th of Oct, 2026": the day first. May is matched apart (below) */
-const DAY_THEN_MONTH = new RegExp(String.raw`\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:${MONTHS.replace("|may|", "|")})\b\.?` + YEAR_AFTER, "gi")
+/**
+ * A day range's other end, written tight with an en dash or hyphen ("1–13", "1-13"). A spaced dash or
+ * an em dash starts something else, so "Oct 10 – 0 registered" and "Sep 3—45 people" keep their counts
+ */
+const RANGE_END = String.raw`(?:[–-]\d{1,2}(?:st|nd|rd|th)?)?`
+const RANGE_START = String.raw`(?:\d{1,2}(?:st|nd|rd|th)?[–-])?`
+/** "Oct 13", "October 13th, 2026", "Oct 1–13": the month first */
+const MONTH_THEN_DAY = new RegExp(String.raw`\b(?:${MONTHS})\.?\s+\d{1,2}(?:st|nd|rd|th)?${RANGE_END}\b` + YEAR_AFTER, "gi")
+/** "13 October", "13th of Oct, 2026", "1–13 Oct": the day first. May is matched apart (below) */
+const DAY_THEN_MONTH = new RegExp(String.raw`\b${RANGE_START}\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:${MONTHS.replace("|may|", "|")})\b\.?` + YEAR_AFTER, "gi")
 /** "13 May", only capitalized: "13 may have paid" isn't a date */
-const DAY_THEN_MAY = new RegExp(String.raw`\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?May\b` + YEAR_AFTER, "g")
+const DAY_THEN_MAY = new RegExp(String.raw`\b${RANGE_START}\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?May\b` + YEAR_AFTER, "g")
 
 /**
  * The answer without its dates, times, years and clock values, so "Mon, Oct 13, 7:00 PM CT" doesn't
@@ -152,6 +160,9 @@ function numberForms(n: number): string[] {
   if (n >= 0 && n <= 12) forms.add(WORDS[n])
   return [...forms]
 }
+
+/** Ways of saying none, which count as zero only right before what they count ("No drivers have paid") */
+const NONE_WORDS = ["no one", "no-one", "nobody", "nothing", "none", "no"]
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
@@ -189,9 +200,27 @@ function otherNumbers(text: string, n: number): number[] {
 export function mentionsNumber(text: string, n: number, nouns: string[] = []): boolean {
   const clean = stripDatesAndTimes(text)
   const forms = numberForms(n)
-  if (!forms.some((form) => new RegExp(standalone(form), "i").test(clean))) return false
-  if (!nouns.length) return true
-  return nextToNoun(clean, forms, nouns) || otherNumbers(clean, n).length === 0
+  if (forms.some((form) => new RegExp(standalone(form), "i").test(clean))) {
+    if (!nouns.length) return true
+    if (nextToNoun(clean, forms, nouns) || otherNumbers(clean, n).length === 0) return true
+  }
+  // Zero said in words: "no drivers", "none of the applicants", "nobody has paid". Only right before one
+  // of the nouns, and only when no other count sits next to those nouns ("5 drivers paid; no other drivers")
+  if (n !== 0 || !nouns.length) return false
+  const said = NONE_WORDS.some((word) =>
+    nouns.some((noun) =>
+      new RegExp(
+        `(?<![\\w'’-])${word}(?:['’]s)?(?:\\s+(?:of|the|them|our|other|new|more|lsc|club|current|this|season's|paid|unpaid|active|confirmed|completed))*\\s+(?:(?:has|have|had|is|are|was|were)(?:\\s+been)?\\s+)?\\b${escapeRegExp(noun)}[\\w'’-]*(?=\\s+(?:have|has|had|are|were|is|was|yet|so|paid|entered|signed|registered|applied|on|in|this|for|at)\\b|\\s*[.,;:!)]|\\s*$)`,
+        "i",
+      ).test(clean),
+    ),
+  )
+  if (!said) return false
+  // Another count by the same nouns, in digits or words, means the "no" isn't the answer ("no one" isn't a one)
+  const counted = clean.replace(/\bno[ -]one\b/gi, "nobody")
+  const wordCounts = WORDS.slice(1).filter((w) => new RegExp(standalone(w), "i").test(counted))
+  const others = [...new Set([...otherNumbers(clean, 0).map(String), ...wordCounts])]
+  return !(others.length && nextToNoun(counted, others, nouns))
 }
 
 /** "$45", "$45.00" or "45.00" for 4,500 cents */

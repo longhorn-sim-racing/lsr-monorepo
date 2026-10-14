@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { costUsd, MODEL_PRICES, UsageTally, usageByModel } from "./cost"
+import { costUsd, LONG_PROMPT_PRICES, MODEL_PRICES, UsageTally, usageByModel } from "./cost"
 
 const M = 1_000_000
 
@@ -84,5 +84,37 @@ describe("UsageTally", () => {
 
   it("reports the requested model before any call", () => {
     expect(new UsageTally("claude-sonnet-5-5").models).toEqual(["claude-sonnet-5-5"])
+  })
+})
+
+describe("Haiku's long-prompt rates", () => {
+  const haiku = "claude-haiku-5-5"
+  const reply = (input: number, cacheRead: number, output: number) => ({
+    model: haiku,
+    usage: { input_tokens: input, cache_creation_input_tokens: 0, cache_read_input_tokens: cacheRead, output_tokens: output, iterations: null } as never,
+  })
+
+  it("bills a request whose prompt is over 100K tokens at the higher rates, the whole request", () => {
+    expect(LONG_PROMPT_PRICES[haiku]).toEqual({ overTokens: 100_000, price: { input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 } })
+    // 20K uncached + 90K cache read = a 110K prompt: every token at the long rates
+    expect(costUsd(haiku, { inputTokens: 20_000, cacheWriteTokens: 0, cacheReadTokens: 90_000, outputTokens: 1_000 })).toBeCloseTo(
+      (20_000 * 0.5 + 90_000 * 0.05 + 1_000 * 2.5) / 1_000_000,
+      6
+    )
+    // Exactly 100K is still the normal rates
+    expect(costUsd(haiku, { inputTokens: 100_000, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 })).toBeCloseTo(0.01, 6)
+  })
+
+  it("decides per request, not on a reply's total", () => {
+    const tally = new UsageTally(haiku)
+    tally.add(reply(5_000, 50_000, 500)) // 55K prompt: normal rates
+    tally.add(reply(5_000, 105_000, 500)) // 110K prompt: long rates
+    const short = (5_000 * 0.1 + 50_000 * 0.01 + 500 * 0.5) / 1_000_000
+    const long = (5_000 * 0.5 + 105_000 * 0.05 + 500 * 2.5) / 1_000_000
+    expect(tally.costUsd).toBeCloseTo(short + long, 6)
+  })
+
+  it("leaves the other models at their one rate", () => {
+    expect(costUsd("claude-sonnet-5-5", { inputTokens: 200_000, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 })).toBeCloseTo(0.4, 6)
   })
 })

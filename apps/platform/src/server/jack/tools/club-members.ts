@@ -1,7 +1,11 @@
 import { z } from "zod"
+import type { JackToolDisplay } from "@/lib/jack/parts"
 import { prisma } from "@/server/db"
-import { forModelWithLists, plural, tableDisplay } from "./display"
-import { addDays, centralDate, centralDateInput, ct, periodKey, periodsBetween, startOfCentralDay, endOfCentralDay, type Period } from "./time"
+import { listSeasonEntrants } from "@/server/services/league-entry.service"
+import { forModelWithLists, plural, tableDisplay, type ModelList } from "./display"
+import { activityByMember } from "./member-activity"
+import { DEFAULT_LEAGUE, resolveLeagueSeason } from "./seasons"
+import { addDays, centralDate, centralDateInput, ct, dollars, periodKey, periodsBetween, startOfCentralDay, endOfCentralDay, type Period } from "./time"
 import type { JackTool } from "./types"
 
 /**
@@ -56,14 +60,22 @@ const input = z.object({
   from: centralDateInput.optional().describe("First Central date for signups (default: 12 months or 12 weeks back)"),
   to: centralDateInput.optional().describe("Last Central date for signups (default: today)"),
   newest: z.number().int().min(0).max(50).default(10).describe("How many of the newest members to list (0 for none)"),
+  roster: z
+    .enum(["none", "officers", "members"])
+    .default("none")
+    .describe(
+      "officers: every officer and admin with their title, roles, email and EID. members: every member (or those who joined between joinedFrom and joinedTo) with email, EID, join date, roles, events registered for, check-ins, races driven, this LSC season's entry status, and money paid",
+    ),
+  joinedFrom: centralDateInput.optional().describe("With roster members: only people whose account was made on or after this Central date"),
+  joinedTo: centralDateInput.optional().describe("With roster members: only people whose account was made on or before this Central date"),
 })
 
 export const clubMembersTool: JackTool<z.infer<typeof input>> = {
   name: "club_members",
   description:
-    "Club membership numbers: accounts by status, signups over time (by week or month, Central time), counts by role (officer, admin, lsc_driver, collegiate_driver) and by membership tier (General, LSR Member, Alumni, Partner), active dues entitlements, and the newest members with emails. Use it for 'how many members', 'how many joined this month', 'who are the officers' counts.",
+    "Club membership: accounts by status, signups over time (by week or month, Central time), counts by role (officer, admin, lsc_driver, collegiate_driver) and by membership tier (General, LSR Member, Alumni, Partner), active dues entitlements, and the newest members. roster lists people: 'officers' gives every officer and admin with title, email and EID ('who are the officers'); 'members' gives every member (optionally only those who joined in a date range) with email, EID, join date, roles, events registered for, check-ins, races driven, LSC entry status for the open season, and dollars paid ('everyone's emails', 'people who joined in August and came back', a full member breakdown). Officers may see emails and EIDs.",
   input,
-  async run({ groupBy, from, to, newest }) {
+  async run({ groupBy, from, to, newest, roster, joinedFrom, joinedTo }) {
     const now = new Date()
     const today = centralDate(now)
     const end = to ?? today
@@ -115,15 +127,23 @@ export const clubMembersTool: JackTool<z.infer<typeof input>> = {
       signups: { by: groupBy, from: start, to: end, total: joined.length },
     }
     const newestList = newestRows.map((u) => ({ name: u.displayName, handle: u.handle, email: u.email, eid: u.eid, status: u.status, joined: ct(u.createdAt) }))
+    const people = roster === "none" ? null : await buildRoster(roster, { joinedFrom, joinedTo, now })
+    if (people && "error" in people) return { isError: true, forModel: people.error, label: "Members lookup failed", displays: [] }
+    const forModelText = membersForModel(result, {
+      roster: people ? { rows: people.rows, definitions: people.note, kind: roster as "officers" | "members" } : null,
+      wholeClub: roster === "members" && !joinedFrom && !joinedTo,
+      newest: newestList,
+      signups,
+    })
 
     return {
-      // The newest members (at most 50) first; a long signup range keeps its most recent periods
-      forModel: forModelWithLists(result, [
-        { key: "newest", items: newestList },
-        { key: "signupPeriods", items: signups, keep: "last" },
-      ]),
-      label: `Looked up members (${plural(members.length, "member")}, ${joined.length} joined since ${start})`,
+      // See membersForModel for how a roster and the newest members share the room
+      forModel: forModelText,
+      label: people
+        ? `Listed ${roster === "officers" ? plural(people.rows.length, "officer") : plural(people.rows.length, "member")}`
+        : `Looked up members (${plural(members.length, "member")}, ${joined.length} joined since ${start})`,
       displays: [
+        ...(people ? [people.display] : []),
         tableDisplay(signups, [
           { header: groupBy === "month" ? "Month" : "Week of", value: (r) => r.period },
           { header: "Signups", value: (r) => r.signups },
@@ -131,4 +151,120 @@ export const clubMembersTool: JackTool<z.infer<typeof input>> = {
       ],
     }
   },
+}
+
+/**
+ * The model's JSON. A roster goes first and takes the room it needs. An unfiltered member roster that
+ * fits whole already holds the newest members, so that list is left out then (and the result says
+ * so); if the roster had to be cut short, its newest rows are the ones cut, so the newest list goes
+ * first instead.
+ */
+export function membersForModel(
+  result: Record<string, unknown>,
+  opts: { roster: { rows: unknown[]; definitions: string; kind: "officers" | "members" } | null; wholeClub: boolean; newest: unknown[]; signups: unknown[] },
+): string {
+  const rosterList: ModelList[] = opts.roster
+    ? [
+        {
+          key: "roster",
+          items: opts.roster.rows,
+          ...(opts.roster.kind === "members" ? { whenTrimmed: "Ask again with joinedFrom and joinedTo to get the rest, a few months at a time." } : {}),
+        },
+      ]
+    : []
+  const newest: ModelList = { key: "newest", items: opts.newest }
+  const periods: ModelList = { key: "signupPeriods", items: opts.signups, keep: "last" }
+  const base = opts.roster ? { ...result, rosterDefinitions: opts.roster.definitions } : result
+  if (!opts.roster || !opts.wholeClub) return forModelWithLists(base, [...rosterList, newest, periods])
+  const whole = forModelWithLists({ ...base, newest: "left out: the roster has everyone, oldest first" }, [...rosterList, periods])
+  return (JSON.parse(whole) as Record<string, unknown>).rosterNote ? forModelWithLists(base, [newest, ...rosterList, periods]) : whole
+}
+
+/** Officers and admins with titles, or every member (optionally by join date) with what they've done */
+type Roster = { rows: Record<string, unknown>[]; note: string; display: JackToolDisplay }
+
+/** Said with every roster: the room has the table, the reply has the point */
+const SUMMARIZE = "The room shows the whole list as a table, so don't repeat its rows in your reply: summarize, and name people when asked which people or who (up to about 20)."
+
+/** A roster row without its empty fields: null, an empty list, zero */
+export function compactRow(row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(row).filter(([, v]) => v !== null && v !== undefined && v !== 0 && !(Array.isArray(v) && v.length === 0)))
+}
+
+async function buildRoster(
+  kind: "officers" | "members",
+  { joinedFrom, joinedTo, now }: { joinedFrom?: string; joinedTo?: string; now: Date },
+): Promise<Roster | { error: string }> {
+  if (kind === "officers") {
+    const officers = await prisma.user.findMany({
+      where: { status: { not: "deleted" }, roles: { some: { role: { key: { in: ["officer", "admin"] } } } } },
+      orderBy: { displayName: "asc" },
+      select: { displayName: true, officerTitle: true, email: true, eid: true, roles: { select: { role: { select: { key: true } } } } },
+    })
+    const rows = officers.map((u) => ({ name: u.displayName, title: u.officerTitle, roles: u.roles.map((r) => r.role.key), email: u.email, eid: u.eid }))
+    return {
+      rows,
+      note: `Everyone with the officer or admin role (both open the admin console). title is the board title shown on the site. ${SUMMARIZE}`,
+      display: tableDisplay(rows, [
+        { header: "Officer", value: (r) => r.name },
+        { header: "Title", value: (r) => r.title },
+        { header: "Roles", value: (r) => r.roles.join(", ") },
+        { header: "Email", value: (r) => r.email },
+      ], `${plural(rows.length, "officer")} and admins`),
+    }
+  }
+
+  if (joinedFrom && joinedTo && joinedFrom > joinedTo) return { error: `joinedFrom (${joinedFrom}) is after joinedTo (${joinedTo}).` }
+  const users = await prisma.user.findMany({
+    where: {
+      status: { not: "deleted" },
+      ...(joinedFrom || joinedTo
+        ? { createdAt: { ...(joinedFrom ? { gte: startOfCentralDay(joinedFrom) } : {}), ...(joinedTo ? { lte: endOfCentralDay(joinedTo) } : {}) } }
+        : {}),
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, displayName: true, handle: true, email: true, eid: true, createdAt: true, roles: { select: { role: { select: { key: true } } } } },
+  })
+  const ids = users.map((u) => u.id)
+  const season = await resolveLeagueSeason(DEFAULT_LEAGUE, undefined, now)
+  const [activity, paid, entrants] = await Promise.all([
+    activityByMember({}, ids),
+    prisma.payment.groupBy({ by: ["userId"], where: { userId: { in: ids }, status: "succeeded" }, _sum: { amountCents: true } }),
+    season.ok ? listSeasonEntrants(season.season.id) : Promise.resolve(null),
+  ])
+  const paidBy = new Map(paid.map((p) => [p.userId, p._sum.amountCents ?? 0]))
+  const lscBy = new Map((entrants?.entrants ?? []).map((e) => [e.user.id, e.status === "none" ? "form only" : e.status]))
+  const rows = users.map((u) => {
+    const a = activity.get(u.id)
+    return {
+      name: u.displayName,
+      email: u.email,
+      eid: u.eid,
+      joined: centralDate(u.createdAt),
+      roles: u.roles.map((r) => r.role.key),
+      eventsRegistered: a?.registrations ?? 0,
+      checkIns: a?.checkIns ?? 0,
+      racesDriven: a?.races ?? 0,
+      lsc: lscBy.get(u.id) ?? null,
+      paidDollars: dollars(paidBy.get(u.id) ?? 0),
+    }
+  })
+  return {
+    // The model's copy leaves out empty fields (no EID, no roles, zero counts), so a whole club fits
+    rows: rows.map(compactRow),
+    note:
+      `Every member${joinedFrom || joinedTo ? ` who joined ${joinedFrom ?? "any time"} to ${joinedTo ?? "now"} (Central)` : ""}, oldest account first. ` +
+      `A field that's left out is empty or zero. joined = Central date the account was made; eventsRegistered = REGISTERED seats on events that weren't cancelled (all time); checkIns = event check-ins; racesDriven = race sessions with a linked result; ` +
+      `lsc = entry status for ${season.ok ? season.season.name : "the open LSC season"} (paid, manual, ended, form only; left out = no form); paidDollars = succeeded payments, all time. ${SUMMARIZE}`,
+    display: tableDisplay(rows, [
+      { header: "Member", value: (r) => r.name },
+      { header: "Email", value: (r) => r.email },
+      { header: "EID", value: (r) => r.eid },
+      { header: "Joined", value: (r) => r.joined },
+      { header: "Events", value: (r) => r.eventsRegistered },
+      { header: "Races", value: (r) => r.racesDriven },
+      { header: "LSC", value: (r) => r.lsc },
+      { header: "Paid", value: (r) => `$${r.paidDollars.toFixed(2)}` },
+    ], plural(rows.length, "member")),
+  }
 }

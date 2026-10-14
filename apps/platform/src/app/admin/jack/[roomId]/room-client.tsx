@@ -6,7 +6,7 @@ import { unexpectedError } from "@/lib/action-result"
 import type { RoomSnapshotData } from "@/lib/jack/room-state"
 import type { JackSpend } from "@/lib/jack/spend"
 import type { JackPresence, JackRoomPersonaKey, JackRoomSummary } from "@/lib/jack/types"
-import { loadJackRoomSnapshot, postJackMessage, resumeJackRoom, setJackRoomPersona } from "../actions"
+import { loadJackRoomSnapshot, postJackMessage, renameJackRoom, resumeJackRoom, setJackRoomPersona } from "../actions"
 
 type JackRoomClientProps = {
   initial: RoomSnapshotData
@@ -23,6 +23,7 @@ export function JackRoomClient({ initial, rooms, me, spend }: JackRoomClientProp
     loadSnapshot: loadJackRoomSnapshot,
     postMessage: postJackMessage,
     setPersona: setJackRoomPersona,
+    rename: renameJackRoom,
     resume: resumeJackRoom,
   })
 
@@ -41,6 +42,15 @@ export function JackRoomClient({ initial, rooms, me, spend }: JackRoomClientProp
       return result.ok ? null : result.error
     } catch (error) {
       return unexpectedError(error, "Couldn't switch")
+    }
+  }
+
+  async function rename(title: string) {
+    try {
+      const result = await room.renameRoom(title)
+      return result.ok ? null : result.error
+    } catch (error) {
+      return unexpectedError(error, "Couldn't rename the room")
     }
   }
 
@@ -64,6 +74,7 @@ export function JackRoomClient({ initial, rooms, me, spend }: JackRoomClientProp
       stall={room.stall}
       onSend={send}
       onSwitchPersona={switchPersona}
+      onRename={rename}
       onContinue={continueRoom}
     />
   )

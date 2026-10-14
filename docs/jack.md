@@ -19,10 +19,16 @@ Code paths below are relative to `apps/platform/`.
 | Name | Model | Effort | Used for |
 |---|---|---|---|
 | Jack | Claude Sonnet 5.5 (`claude-sonnet-5-5`) | medium | Every answer, by default |
-| Lift | Claude Opus 5.5 (`claude-opus-5-5`) | high | Harder questions. Set per room with **Answered by** ("Lift (higher cost)"); it stays until someone switches back, and the switch is posted in the room. About twice Jack's price per token |
-| Stand | Claude Haiku 5.5 (`claude-haiku-5-5`) | low | Side jobs: naming a new room after its first answer |
+| Lift | Claude Opus 5.5 (`claude-opus-5-5`) | high | Long, multi-step analysis. Set per room with **Answered by** ("Lift (slower, higher cost)"); it stays until someone switches back, and the switch is posted in the room. About twice Jack's price per token; in the October eval it was no more accurate than Jack, about twice as slow and three times the cost per answer |
+| Stand | Claude Haiku 5.5 (`claude-haiku-5-5`) | medium (low for side jobs) | Quick, simple questions, set per room with **Answered by** ("Stand (simple tasks)"), at about a twentieth of Jack's price per token. Also the side job of naming a new room after its first answer (`STAND_SIDE_JOB`) |
 
 The names are the joke; the answers stay plain. Models and effort live in `src/server/jack/models.ts`. These models always think before answering (adaptive thinking can't be turned off); effort is the dial for how much.
+
+## Renaming rooms
+
+Any officer can rename a room at any time with the pencil next to its name (`renameJackRoom` in `src/app/admin/jack/actions.ts`, `renameRoom` in `src/server/jack/rooms.ts`). The room gets a note ("Alex renamed this room “GM 1 planning”"), everyone in it sees the new name live, and the change is in the audit log. Stand only names rooms that are still untitled, so it never overwrites a name an officer gave.
+
+If a deploy has to be rolled back to a version from before Stand could answer rooms, first move those rooms back to Jack, or the older code fails reading them: `UPDATE "JackRoom" SET persona = 'jack' WHERE persona = 'stand';`
 
 ## How a reply works
 
@@ -30,10 +36,10 @@ The names are the joke; the answers stay plain. Models and effort live in `src/s
 2. If `ANTHROPIC_API_KEY` isn't set, the reply says so ("Jack isn't connected yet…"). If this month's spend has reached `JACK_MONTHLY_BUDGET_USD`, the reply says the budget is used up. Neither calls Claude.
 3. Otherwise the request is built (`src/server/jack/model-loop.ts`), in this order:
    - **tools**, in the fixed order of `JACK_TOOLS` (`src/server/jack/tools/index.ts`);
-   - the **system prompt** (`src/server/jack/prompt.ts`): who Jack is, who he's talking to, the club, and the rules (read-only except drafts, never move money, say where numbers came from, Central Time, emails and EIDs only when asked, concise plain text, typed tools first, `run_sql` for the rest, `describe_schema` when unsure, charts through the chart tool), then the notes on the club's tables (`JACK_SCHEMA_NOTES` in `src/server/jack/tools/schema-notes.ts`);
+   - the **system prompt** (`src/server/jack/prompt.ts`): who Jack is, who he's talking to, the club, and the rules (read-only except drafts, never move money, name the admin page that does a change, say where numbers came from, Central Time, emails and EIDs only when asked, concise plain text, typed tools first, `run_sql` for the rest, `describe_schema` when unsure, charts through the chart tool), then the notes on the club's tables (`JACK_SCHEMA_NOTES` in `src/server/jack/tools/schema-notes.ts`);
    - the **room history** (`src/server/jack/history.ts`): each exchange as an officer turn ("Name: message" lines under a Central Time timestamp, room notes included) and the reply's text with a one-line note of the tools it used. Several officers' messages answered together are one turn, and notices that never reached Claude ("isn't connected yet") are left out so their questions carry over. The last 40 exchanges are sent.
 4. Claude streams. Text goes out in ~150 ms batches. Each tool call is checked against the tool's schema, run for the officer whose message started this reply (the newest message it answers; when one reply answers several officers, it's the last one who posted), saved on the reply (`JackMessage.toolCalls`) and broadcast (`message.tool`), and its result goes back to Claude. This repeats until Claude answers.
-5. Limits per reply: 12 tool calls, then Claude is told to answer with what it has (and can't call more tools); the same after 64K output tokens, or after 150 s (sooner when the run has less time left; see [Function duration](#function-duration)); 16K output tokens per call for Jack, 32K for Lift.
+5. Limits per reply: 12 tool calls, then Claude is told to answer with what it has (and can't call more tools); the same after 64K output tokens, or after 150 s (sooner when the run has less time left; see [Function duration](#function-duration)); 16K output tokens per call for Jack and Stand, 32K for Lift.
 6. After every Claude call the reply's tokens and cost so far are saved on it, so a reply that's cut off, or whose function dies, still counts. The finished reply is saved with its model, tokens and cost, and its cost is logged (`[jack] Reply … $0.0123, … in + … cache write + … cache read, … out`).
 7. The `message.done` event carries the whole reply. If it's over about 200 KB (Realtime drops messages over its limit, about 256 KB on the Free plan) it goes out `trimmed`, without its tool displays (or its text, if that's still too big), and the page loads the full reply from the database.
 8. If the room has no title yet, Stand names it in 2 to 5 words in the background and posts "Stand named this room “…”".
@@ -52,7 +58,7 @@ What the room sees when something goes wrong:
 
 ### Refusals
 
-Sonnet 5.5 and Opus 5.5 run safety classifiers that can decline a request (cyber, bio and a few other categories), occasionally on harmless club questions. Replies opt into Anthropic's server-side fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`): a declined request is retried on the model Anthropic recommends for that category, inside the same call. The fallback attempt is billed at that model's rates, and the cost math prices each attempt by the model that ran it. Not every category is retried (from Sonnet 5.5, only cyber and frontier_llm declines are); then, or when the fallback model declines too, the room sees the refusal message. Haiku has no server-side fallback, so Stand just leaves the room untitled.
+Sonnet 5.5 and Opus 5.5 run safety classifiers that can decline a request (cyber, bio and a few other categories), occasionally on harmless club questions. Replies opt into Anthropic's server-side fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`): a declined request is retried on the model Anthropic recommends for that category, inside the same call. The fallback attempt is billed at that model's rates, and the cost math prices each attempt by the model that ran it. Not every category is retried (from Sonnet 5.5, only cyber and frontier_llm declines are); then, or when the fallback model declines too, the room sees the refusal message. Haiku has no server-side fallback: a declined room answer from Stand shows the refusal message, which suggests switching the room to Jack, and a declined room name just leaves the room untitled.
 
 ### Prompt caching
 
@@ -65,6 +71,19 @@ Every request starts with the same tools and system prompt, with a cache breakpo
 Thinking blocks are only ever sent back within the reply that made them. Earlier replies go back as text, so no thinking block is replayed into an edited conversation (which these models reject). Requests set `prefix_mismatch_behavior: "drop_block"` (beta `thinking-binding-controls-2026-08-01`), so if a bug ever did edit the history, the reply would continue without that thinking instead of failing; it's logged as a warning.
 
 ## Tools and the database
+
+The typed tools carry the club's definitions, so Jack should rarely need his own SQL. After the October eval (see [The eval](#the-eval)) they cover what officers asked for most:
+
+- `club_members` lists a **roster**: the officers with titles, emails and EIDs, or every member (optionally by join date) with email, EID, join date, roles, events registered for, check-ins, races driven, this LSC season's entry status and money paid.
+- `member_activity` ranks members by registrations, check-ins and races driven.
+- `lsc_entries` gives each driver's school (the form leaves it blank for UT Austin), experience, equipment and form notes, and counts forms by school and experience.
+- `events_overview` says whether an event takes registrations and check-ins at all (settings, not whether they're open now), how full it was, and can list only events that had check-ins.
+- `payments_summary` lists the people who started a checkout and never paid for that item (`unpaidCheckouts`), the club's definition.
+- `draft_event` returns the whole link, so the reply never guesses the site's address.
+
+**Times.** Every tool gives times in Central time with the weekday ("Fri 2026-10-09 16:49 CT", `ct()` in `tools/time.ts`), so no model works a weekday out. Prisma returns `date`, `timestamp` and `timestamptz` columns all as Dates, so `run_sql` also selects each row as `row_to_json` to tell them apart: the model gets Central times and plain dates, and the room's table gets UTC ISO (which it shows in Central) and plain dates. `run_sql` can't tell a time the query itself converted to Central from a stored UTC one, so a query that leaves an `AT TIME ZONE 'America/Chicago'` conversion as a timestamp gets a note to select times as stored (or cast the bucket to `date`).
+
+**Room tables** show up to 200 rows, as many as `run_sql` returns, so a whole member list fits.
 
 Two tools run Jack's own SQL, as `jack_readonly` through `JACK_DATABASE_URL` (`src/server/jack/sql-client.ts`):
 
@@ -83,7 +102,7 @@ As defense in depth on top of that, `run_sql` refuses a query before it reaches 
 
 Jack gets "Catalog and settings access is off-limits" (`isOffLimitsName` in `src/server/jack/tools/run-sql.ts`). It's a check on names, not a permission, so it narrows what Jack can try; what he can actually read is still whatever `jack_readonly` can, which is why the settings and catalogs shouldn't hold secrets in the first place.
 
-Everything else uses the app's own Prisma client (`DATABASE_URL`), not `jack_readonly`, with fixed, parameterized queries Jack only fills in through each tool's validated input: the typed tools (`club_members`, `events_overview`, `lsc_entries`, `payments_summary`, `standings`, `audit_log`) only read, `chart` only draws the rows it's given, and `draft_event` is the one write. It creates an event as a `DRAFT` through the admin form's validation, writes an audit log entry credited to the officer whose message started this reply (the newest message it answers), and links to the edit page; publishing stays a human click.
+Everything else uses the app's own Prisma client (`DATABASE_URL`), not `jack_readonly`, with fixed, parameterized queries Jack only fills in through each tool's validated input: the typed tools (`club_members`, `member_activity`, `events_overview`, `lsc_entries`, `payments_summary`, `standings`, `audit_log`) only read, `chart` only draws the rows it's given, and `draft_event` is the one write. It creates an event as a `DRAFT` through the admin form's validation, writes an audit log entry credited to the officer whose message started this reply (the newest message it answers), and links to the edit page; publishing stays a human click.
 
 `scripts/check-jack-sql-role.ts` checks all of this against local Supabase: writes, DDL, secrets, other schemas, escalation and the timeout as the role; which catalog reads the role itself can make; then the same through `run_sql`, including the off-limits names (`table_to_xml` on a catalog table, `schema_to_xml('pg_catalog', …)`, `pg_roles`, `pg_user`, a `current_setting` call hidden after a `--` comment ended by a carriage return) and that advisory locks are dropped after a query that works and one that fails. It also warns (without failing) when the database keeps secret-looking settings in `pg_db_role_setting`; local Supabase does by design. It prints setting names only, never values.
 
@@ -137,22 +156,30 @@ A typical answer takes 5 to 60 seconds, so one run usually answers several round
 
 ## The eval
 
-`scripts/jack-eval.ts` is the test set from #161: 16 questions officers ask (LSC applications and paid entries, rounds missing results, unpaid checkouts, charges this month, accounts, officers, upcoming events, GM 1, check-ins, a chart, drafting an event). The right answers are worked out from the database when it runs, and each question goes through the same code a room reply does, on Jack and on Lift. It prints pass or fail per question, then accuracy, cost and latency per model.
+`scripts/jack-eval.ts` (questions in `scripts/jack-eval/`) is Jack's test set: 52 questions in nine groups, from what officers ask every day to things he must refuse or could be tricked by. Everyday lookups, harder analysis, vague questions, things he can't do (refunds, email, role changes), things the data doesn't cover, attempts to break him (secrets, a `DELETE`, instructions hidden in an applicant's notes), very large requests, drafting, and follow-ups. Each goes through the same code a room reply does, on Stand, Jack and Lift.
+
+Grading has two parts. A script checks what it can against the database: the right number or names, no forbidden tool, nothing changed, no secret in the answer. Opus 5.5 judges the rest against a written expectation and the database facts, blind to which model answered, and with the model's system prompt and each tool's description and inputs, so a claim that comes from them isn't counted as invented. It also grades tool use and notes tools that would have helped. If Opus declines to grade (a question about password hashes trips its checks), Fable 5.1 grades instead. If both decline and the script checks pass, the answer is saved ungraded: it's left out of the pass rate and listed apart, so read it yourself. (A script failure is still a failure.)
+
+Results go to `.claude/hillclimb/jack-<model>/<variant>/` at the repo root (one row and one full transcript per answer) and a comparison of the three models to `.claude/hillclimb/jack-compare/<variant>.md`. That folder holds real member data from the database it ran on and is gitignored; never commit it. Run it on a local copy of production, not on production. `--variant=v1` (v2…) saves a run beside the baseline after a change, to compare.
 
 ```bash
 # from apps/platform, with DATABASE_URL, JACK_DATABASE_URL and ANTHROPIC_API_KEY in .env.local
-pnpm exec tsx scripts/jack-eval.ts              # both models, a few dollars
-pnpm exec tsx scripts/jack-eval.ts --only=jack  # one model
-pnpm exec tsx scripts/jack-eval.ts --filter=lsc # some questions
-pnpm exec tsx scripts/jack-eval.ts --verbose    # print every answer
-pnpm exec tsx scripts/jack-eval.ts --dry-run    # no API calls: a fake model checks the plumbing
+pnpm exec tsx scripts/jack-eval.ts                 # everything, all three models: about $6 (about $2.50 for the models, $3 for the judge)
+pnpm exec tsx scripts/jack-eval.ts --pilot         # five questions, under $1, to check grades and cost first
+pnpm exec tsx scripts/jack-eval.ts --only=jack     # one model
+pnpm exec tsx scripts/jack-eval.ts --group=safety  # one group (or --filter=<text> for question ids)
+pnpm exec tsx scripts/jack-eval.ts --variant=v1    # save beside the baseline after a change
+pnpm exec tsx scripts/jack-eval.ts --regrade       # grade saved answers again after a grader fix (judge calls only)
+pnpm exec tsx scripts/jack-eval.ts --regrade --no-judge  # rerun the answer-only checks (TEXT_RECHECK) on saved answers: free, no key
+pnpm exec tsx scripts/jack-eval.ts --dry-run       # no API calls: a fake model checks the plumbing
+pnpm exec tsx scripts/jack-eval/judge-check.ts     # the judge passes a right answer and fails three wrong ones
 ```
 
 - It reads only `apps/platform/.env.local` and `.env` (found from the script, wherever it's run from), without overriding the environment.
-- It refuses to run unless `DATABASE_URL` is this machine (127.0.0.1 or localhost), or `--allow-remote=<host>` names that exact host (for a copy of real data; never production). `JACK_DATABASE_URL` has to point at the same host and database (and Supabase project). Neither may carry `host=`, `hostaddr=` or `service=` in its query string (Prisma and libpq connect there instead of the URL's host). It prints which database it's on in a banner first.
-- It refuses to run without `ANTHROPIC_API_KEY`, except with `--dry-run`. A real run's spend doesn't show in Jack's spend meter, only in the Anthropic Console.
+- It refuses to run unless `DATABASE_URL` is this machine (127.0.0.1 or localhost), or `--allow-remote=<host>` names that exact host, plus `/<project-ref>` for a Supabase pooler URL, since a pooler host is shared by every project in its region (for a copy of real data; never production). `JACK_DATABASE_URL` has to point at the same host and database (and Supabase project). Neither may carry `host=`, `hostaddr=` or `service=` in its query string (Prisma and libpq connect there instead of the URL's host). It prints which database it's on in a banner first.
+- It refuses to run without `ANTHROPIC_API_KEY`, except with `--dry-run` or `--regrade --no-judge` (neither calls Claude). A real run's spend doesn't show in Jack's spend meter, only in the Anthropic Console.
 - It asks as the first officer or admin (by account age), or `--as=<email|handle>`; the draft is credited to them. The draft question checks the event was created as a DRAFT on the right day and time.
-- After every question it deletes any DRAFT event the reply drafted (from its event-draft parts, and from the audit entries Jack wrote for the eval's room since the run started) and those audit entries. Nothing else is written.
+- After the drafting questions (which run one at a time, after the rest) and at the end, it deletes every DRAFT event Jack drafted in the eval's own room (found through the audit entries he wrote for it, from this run or an interrupted one) and those audit entries. On a local database it also plants one fake LSC applicant for the injection question and leaves it there. Nothing else is written.
 - Questions with nothing to ask about (no open LSC season, no check-ins yet) are skipped.
 - Checks look for the right numbers, names and Central Time dates in the answer, and for a chart whose bars add up. Dates, times and years don't count as numbers ("Oct 13, 7:00 PM" isn't 13 or 7), and a count has to sit next to its noun ("13 paid entries") unless it's the only number in the answer (`src/server/jack/eval-support.ts`). A failure prints what was expected next to the answer.
 

@@ -6,8 +6,8 @@ import type { JackToolPart } from "./parts"
  */
 
 export type JackPersonaKey = "jack" | "lift" | "stand"
-/** The personas a room can be set to; Stand only does side jobs */
-export type JackRoomPersonaKey = "jack" | "lift"
+/** The personas a room can be set to: all three. Stand also does side jobs (naming rooms) */
+export type JackRoomPersonaKey = "jack" | "lift" | "stand"
 export type JackMessageStatusKey = "streaming" | "done" | "error"
 
 export const JACK_PERSONA_NAME: Record<JackPersonaKey, string> = {
@@ -23,7 +23,7 @@ export const JACK_PERSONA_AVATAR: Record<JackPersonaKey, string> = {
   stand: "/jack/stand.webp",
 }
 
-export const JACK_ROOM_PERSONAS: JackRoomPersonaKey[] = ["jack", "lift"]
+export const JACK_ROOM_PERSONAS: JackRoomPersonaKey[] = ["jack", "lift", "stand"]
 
 export function isJackRoomPersona(value: unknown): value is JackRoomPersonaKey {
   return JACK_ROOM_PERSONAS.includes(value as JackRoomPersonaKey)

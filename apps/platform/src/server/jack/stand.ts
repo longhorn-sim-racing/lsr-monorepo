@@ -5,7 +5,7 @@ import type { RoomBroadcaster } from "./broadcast"
 import { savedUsage, UsageTally } from "./cost"
 import { jackMessageInclude, jackRoomViewSelect, toMessageView, toRoomView } from "./messages"
 import type { JackModelClient } from "./model-loop"
-import { JACK_MODELS } from "./models"
+import { STAND_SIDE_JOB } from "./models"
 
 /** Stand's side job: a short title for a room, from its first exchange */
 const STAND_SYSTEM =
@@ -41,7 +41,7 @@ export type NameRoomInput = {
  */
 export async function nameRoom({ roomId, client, broadcast, question, answer, signal, timeoutMs = STAND_TIMEOUT_MS }: NameRoomInput): Promise<void> {
   try {
-    const config = JACK_MODELS.stand
+    const config = STAND_SIDE_JOB
     const message = await client.create({
       model: config.model,
       // Room for Haiku's adaptive thinking plus a few words; low effort keeps the thinking short

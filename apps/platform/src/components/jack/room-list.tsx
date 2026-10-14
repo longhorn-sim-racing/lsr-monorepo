@@ -53,6 +53,7 @@ export function JackRoomList({ rooms, spend, onCreate }: RoomListProps) {
                   </span>
                   <span className="flex items-center gap-3 text-xs text-admin-subtle">
                     {room.persona === "lift" && <Badge tone="accent">{JACK_PERSONA_NAME.lift}</Badge>}
+                    {room.persona === "stand" && <Badge tone="neutral">{JACK_PERSONA_NAME.stand}</Badge>}
                     {formatRoomTime(room.updatedAt)}
                   </span>
                 </Link>

@@ -21,12 +21,32 @@ describe("buildSystemPrompt", () => {
     expect(jack[0].cache_control).toEqual({ type: "ephemeral" })
     expect(jack[0].text).toMatch(/^You are Jack/)
     expect(buildSystemPrompt("lift", { schemaNotes: "" })[0].text).toMatch(/^You are Lift/)
+    const stand = buildSystemPrompt("stand", { schemaNotes: "" })[0].text
+    expect(stand).toMatch(/^You are Stand/)
+    expect(stand).toMatch(/suggest switching the room to Jack/)
     expect(jack[0].text).not.toMatch(/\b20\d\d\b/) // no dates
   })
 
   it("carries the rules officers rely on", () => {
     const text = buildSystemPrompt("jack", { schemaNotes: "" })[0].text
-    for (const rule of [/read-only/, /Never move money/, /Central Time \(America\/Chicago\)/, /emails or EIDs/, /run_sql/, /describe_schema/, /chart tool/, /draft_event/]) {
+    for (const rule of [
+      /read-only/,
+      /Never move money/,
+      /Central Time \(America\/Chicago\)/,
+      /emails or EIDs/,
+      /run_sql/,
+      /describe_schema/,
+      /chart tool/,
+      /draft_event/,
+      // Added after the eval: the commonest slip was adding background no tool gave
+      /Say only what the tools returned/,
+      /Give links exactly as a tool returns them/,
+      /name them in your reply/,
+      // Added after the second eval: name the page that does a change, instead of guessing another way
+      /name the admin console page that does it/,
+      /Products: annual dues and the LSC entry fee/,
+      /Only admins can give someone the officer or admin role/,
+    ]) {
       expect(text).toMatch(rule)
     }
   })

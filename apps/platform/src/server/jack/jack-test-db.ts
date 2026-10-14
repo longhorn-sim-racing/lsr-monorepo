@@ -10,7 +10,7 @@ type Where = Record<string, unknown>
 export type FakeRoom = {
   id: string
   title: string | null
-  persona: "jack" | "lift"
+  persona: "jack" | "lift" | "stand"
   createdById: string | null
   createdAt: Date
   updatedAt: Date
@@ -65,7 +65,8 @@ function matches(row: Row, where: Where = {}): boolean {
       const c = condition as { lt?: Date; in?: unknown[]; not?: unknown }
       if (c.lt !== undefined) return value instanceof Date && value < c.lt
       if (c.in !== undefined) return c.in.includes(value)
-      if ("not" in c) return value !== c.not
+      // SQL's <> is never true for NULL, so `not` skips null the way Postgres does
+      if ("not" in c) return value !== null && value !== undefined && value !== c.not
     }
     return value === condition
   })

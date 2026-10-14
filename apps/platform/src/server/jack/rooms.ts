@@ -152,3 +152,46 @@ export async function setRoomPersona(
   await broadcast(roomId, { type: JACK_EVENT.created, message })
   return { changed: true, before: before.persona, room, message }
 }
+
+export type RoomRename =
+  | { changed: true; before: string | null; room: JackRoomView; message: JackMessageView }
+  | { changed: false; room: JackRoomView }
+
+/**
+ * Renames a room and posts a note saying who did it, e.g. "Alex renamed this room “GM 1 planning”".
+ * Any officer can, any time. Stand only names rooms that are still untitled, so it never overwrites
+ * this. The same name again changes nothing. Null when the room is gone.
+ */
+export async function renameRoom(
+  roomId: string,
+  officer: { id: string; displayName: string },
+  title: string,
+  broadcast: RoomBroadcaster = broadcastRoomEvent
+): Promise<RoomRename | null> {
+  const before = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: jackRoomViewSelect })
+  if (!before) return null
+
+  const result = await prisma.$transaction(async (tx) => {
+    // Conditional, like switching: two officers saving the same name post one note. An untitled room's
+    // title is NULL, which `not` alone wouldn't match
+    const { count } = await tx.jackRoom.updateMany({
+      where: { id: roomId, OR: [{ title: null }, { title: { not: title } }] },
+      data: { title },
+    })
+    const room = await tx.jackRoom.findUniqueOrThrow({ where: { id: roomId }, select: jackRoomViewSelect })
+    if (!count) return { changed: false as const, room }
+    const note = await tx.jackMessage.create({
+      data: { roomId, kind: "system", authorUserId: officer.id, content: `${officer.displayName} renamed this room “${title}”` },
+      include: jackMessageInclude,
+    })
+    return { changed: true as const, room, note }
+  })
+
+  const room = toRoomView(result.room)
+  if (!result.changed) return { changed: false, room }
+
+  const message = toMessageView(result.note)
+  await broadcast(roomId, { type: JACK_EVENT.room, room })
+  await broadcast(roomId, { type: JACK_EVENT.created, message })
+  return { changed: true, before: before.title, room, message }
+}

@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache"
 import { requireOfficer } from "@/server/auth/guards"
 import { createAuditLog } from "@/server/audit/log"
-import { createRoom, getRoomSnapshot, postOfficerMessage, resumeRoom, setRoomPersona, type RoomSnapshot } from "@/server/jack/rooms"
-import { jackMessageSchema, jackPersonaSwitchSchema, jackRoomIdSchema, jackRoomTitleSchema } from "@/schemas/jack.schema"
+import { createRoom, getRoomSnapshot, postOfficerMessage, renameRoom, resumeRoom, setRoomPersona, type RoomSnapshot } from "@/server/jack/rooms"
+import { jackMessageSchema, jackPersonaSwitchSchema, jackRoomIdSchema, jackRoomRenameSchema, jackRoomTitleSchema } from "@/schemas/jack.schema"
 import type { ActionResult } from "@/lib/action-result"
 import { JACK_PERSONA_NAME, type JackMessageView, type JackRoomView } from "@/lib/jack/types"
 
@@ -81,7 +81,7 @@ export async function loadJackRoomSnapshot(roomId: string): Promise<ActionResult
 }
 
 /**
- * Switches which model answers in a room (Jack or Lift). It's per room, not per message, so the
+ * Switches which model answers in a room (Jack, Lift or Stand). It's per room, not per message, so the
  * room's prompt cache survives. Posts a note to the room saying who switched it.
  */
 export async function setJackRoomPersona(
@@ -108,5 +108,33 @@ export async function setJackRoomPersona(
   })
 
   // No revalidatePath, as with posting: the room is live and the list renders fresh on every visit
+  return { ok: true, data: { room: result.room, message: result.message } }
+}
+
+/** Renames a room. Any officer can, any time; posts a note to the room saying who renamed it */
+export async function renameJackRoom(
+  roomId: string,
+  title: string
+): Promise<ActionResult<{ room: JackRoomView; message: JackMessageView | null }>> {
+  const officer = await requireOfficer()
+
+  const parsed = jackRoomRenameSchema.safeParse({ roomId, title })
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message }
+
+  const result = await renameRoom(parsed.data.roomId, officer, parsed.data.title)
+  if (!result) return { ok: false, error: ROOM_GONE }
+  if (!result.changed) return { ok: true, data: { room: result.room, message: null } }
+
+  await createAuditLog({
+    actorUserId: officer.id,
+    actionType: "UPDATE",
+    entityType: "JACK_ROOM",
+    entityId: result.room.id,
+    summary: `Renamed Jack room to ${result.room.title}`,
+    before: { title: result.before },
+    after: { title: result.room.title },
+  })
+
+  // The room list renders fresh on every visit; the open room hears it live
   return { ok: true, data: { room: result.room, message: result.message } }
 }

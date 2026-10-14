@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import type { Prisma } from "@prisma/client"
 import type { JackToolPart } from "@/lib/jack/parts"
 import { formatUsd } from "@/lib/jack/spend"
-import { JACK_EVENT, JACK_PERSONA_NAME, type JackRoomPersonaKey } from "@/lib/jack/types"
+import { isJackRoomPersona, JACK_EVENT, JACK_PERSONA_NAME, type JackRoomPersonaKey } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
 import { savedUsage, UsageTally } from "./cost"
@@ -207,7 +207,7 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   })
   await deps.broadcast(roomId, { type: JACK_EVENT.created, message: toMessageView(reply), answers: waiting.map((m) => m.id) })
 
-  const persona: JackRoomPersonaKey = reply.persona === "lift" ? "lift" : "jack"
+  const persona: JackRoomPersonaKey = isJackRoomPersona(reply.persona) ? reply.persona : "jack"
   const usage = new UsageTally(JACK_MODELS[persona].model)
   const startedAt = Date.now()
   let parts: JackToolPart[] = []
