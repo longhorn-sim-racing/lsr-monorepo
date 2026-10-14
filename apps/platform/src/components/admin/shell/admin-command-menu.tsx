@@ -3,11 +3,19 @@
 import { useRouter } from "next/navigation"
 import * as Dialog from "@radix-ui/react-dialog"
 import { Command } from "cmdk"
-import { Search } from "lucide-react"
+import { Moon, Search, Sun } from "lucide-react"
+import type { AdminTheme } from "@/lib/admin-theme"
 import { ADMIN_NAV } from "./admin-nav"
 
-/** Ctrl/Cmd K: jump to any admin page by name or keyword. */
-export function AdminCommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+type CommandMenuProps = {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  theme: AdminTheme
+  onToggleTheme: () => void
+}
+
+/** Ctrl/Cmd K: jump to any admin page by name or keyword, or switch between light and dark. */
+export function AdminCommandMenu({ open, onOpenChange, theme, onToggleTheme }: CommandMenuProps) {
   const router = useRouter()
 
   return (
@@ -46,6 +54,22 @@ export function AdminCommandMenu({ open, onOpenChange }: { open: boolean; onOpen
                   ))}
                 </Command.Group>
               ))}
+              <Command.Group
+                heading="Appearance"
+                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:text-admin-subtle"
+              >
+                <Command.Item
+                  value="theme dark light mode appearance"
+                  onSelect={() => {
+                    onOpenChange(false)
+                    onToggleTheme()
+                  }}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 data-[selected=true]:bg-accent"
+                >
+                  {theme === "dark" ? <Sun className="size-3.5 text-admin-subtle" aria-hidden /> : <Moon className="size-3.5 text-admin-subtle" aria-hidden />}
+                  <span className="font-medium">{theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}</span>
+                </Command.Item>
+              </Command.Group>
             </Command.List>
           </Command>
         </Dialog.Content>

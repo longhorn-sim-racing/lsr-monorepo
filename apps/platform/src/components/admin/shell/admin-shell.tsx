@@ -4,20 +4,37 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import * as Dialog from "@radix-ui/react-dialog"
-import { Menu, Search, X } from "lucide-react"
+import { Menu, Moon, Search, Sun, X } from "lucide-react"
+import { adminThemeCookie, type AdminTheme } from "@/lib/admin-theme"
 import { AdminSidebarContent, type ShellUser } from "./admin-sidebar"
 import { AdminCommandMenu } from "./admin-command-menu"
 import { findNavItem } from "./admin-nav"
 import { ConfirmProvider } from "../kit/dialog"
 
 /**
- * The admin console's frame: a dark sidebar (a drawer on phones), a slim top bar with breadcrumbs, and the
- * light workspace. `admin-light` switches the whole document to the admin theme (see globals.css).
+ * The theme this tab last switched to. Back/Forward into the admin from the public site remounts the
+ * shell with the props it was first rendered with (Next reuses them however old), so a toggle made
+ * since then would be lost without this. Null until a toggle, so hydration always uses the prop.
  */
-export function AdminShell({ user, children }: { user: ShellUser; children: React.ReactNode }) {
+let chosenTheme: AdminTheme | null = null
+
+/**
+ * The admin console's frame: a dark sidebar (a drawer on phones), a slim top bar with breadcrumbs, and the
+ * workspace. `admin-light` or `admin-dark` switches the whole document to that admin theme (see globals.css).
+ * The server picks the starting theme from a cookie, so the page never flashes the other one.
+ */
+export function AdminShell({ user, theme: initialTheme, children }: { user: ShellUser; theme: AdminTheme; children: React.ReactNode }) {
   const pathname = usePathname()
   const [commandOpen, setCommandOpen] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [theme, setTheme] = useState(() => chosenTheme ?? initialTheme)
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark"
+    document.cookie = adminThemeCookie(next)
+    chosenTheme = next
+    setTheme(next)
+  }
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -47,8 +64,8 @@ export function AdminShell({ user, children }: { user: ShellUser; children: Reac
   const match = findNavItem(pathname)
 
   return (
-    <div className="admin-light flex min-h-dvh bg-background font-sans text-sm text-foreground">
-      <aside className="admin-nav-scroll sticky top-0 hidden h-dvh w-[236px] shrink-0 overflow-y-auto bg-admin-nav text-admin-nav-foreground md:block">
+    <div className={`admin-${theme} flex min-h-dvh bg-background font-sans text-sm text-foreground`}>
+      <aside className="admin-nav-scroll sticky top-0 hidden h-dvh w-[236px] shrink-0 overflow-y-auto border-r border-admin-nav-border bg-admin-nav text-admin-nav-foreground md:block">
         <AdminSidebarContent user={user} onSearch={openSearch} />
       </aside>
 
@@ -92,6 +109,15 @@ export function AdminShell({ user, children }: { user: ShellUser; children: Reac
             >
               <Search className="size-4" />
             </button>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              title={theme === "dark" ? "Light mode" : "Dark mode"}
+            >
+              {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            </button>
             <Link href="/" className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
               View site
             </Link>
@@ -104,7 +130,7 @@ export function AdminShell({ user, children }: { user: ShellUser; children: Reac
         </div>
       </div>
 
-      <AdminCommandMenu open={commandOpen} onOpenChange={setCommandOpen} />
+      <AdminCommandMenu open={commandOpen} onOpenChange={setCommandOpen} theme={theme} onToggleTheme={toggleTheme} />
     </div>
   )
 }

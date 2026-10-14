@@ -7,19 +7,20 @@ How the admin console (`/admin`) is built, for anyone adding or changing an admi
 - **Shell:** `apps/platform/src/components/admin/shell/`. It holds the dark sidebar (a drawer on phones), the top bar with breadcrumbs, and the Ctrl K command menu. The sidebar groups live in `admin-nav.ts`; add new pages there.
 - **Kit:** `apps/platform/src/components/admin/kit/`. Import everything from `@/components/admin/kit`.
 - **Live gallery:** `/admin/kit` shows every kit component with sample data. Copy patterns from `app/admin/kit/gallery.tsx`.
-- **Theme:** `app/globals.css` (`html:has(.admin-light)`). Admin pages are light; the public site stays dark. A dark admin theme can come later as a second set of values.
+- **Theme:** `app/globals.css` has two sets of the same variables, `html:has(.admin-light)` and `html:has(.admin-dark)`. Officers switch with the sun/moon button in the top bar or from Ctrl K, and a cookie (`lsr-admin-theme`) remembers the choice in that browser. Light is the default; the public site stays dark.
 
 ## Look
 
 - Montserrat for text. Kanit (`font-display`) only for page titles, which `PageHeader` already does.
-- Warm off-white background, white panels, warm gray borders. Orange is for the one primary action per view, the active nav item and highlights. Don't use orange for decoration.
-- Use theme classes, never raw colors or white/black opacity:
+- Warm neutrals in both themes: an off-white background with white panels in light, warm near-black with slightly lighter panels in dark, and warm gray borders. Orange is for the one primary action per view, the active nav item and highlights. Don't use orange for decoration.
+- Use theme classes, never raw colors or white/black opacity, so pages work in both themes:
   - surfaces: `bg-card`, `bg-background`, `bg-admin-surface`
   - borders: `border`, `border-admin-row`
   - text: `text-foreground`, `text-muted-foreground`, `text-admin-subtle`
   - status: `bg-tone-*` and `text-tone-*-foreground`, or just `<Badge tone>`
+  - where a class can't reach (chart SVG, inline styles), the variable itself: `var(--card)`, `var(--series-1)`
 - Dense: 32px controls, 13px text in tables and forms.
-- No uppercase or letter-spaced labels. No `font-mono` except for code, IDs and JSON. No `dark:` classes.
+- No uppercase or letter-spaced labels. No `font-mono` except for code, IDs and JSON. No `dark:` classes; the theme variables already change. Check new pages in both themes.
 
 ## Page anatomy
 

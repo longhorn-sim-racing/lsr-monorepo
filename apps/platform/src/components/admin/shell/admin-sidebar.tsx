@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Search } from "lucide-react"
@@ -25,9 +26,8 @@ export function AdminSidebarContent({ user, onSearch, onNavigate }: { user: Shel
   return (
     <div className="flex h-full flex-col gap-3.5 px-3 py-3.5">
       <Link href="/admin" onClick={onNavigate} className="flex items-center gap-2.5 rounded-md px-1.5 py-0.5 text-white">
-        <span className="flex size-[30px] items-center justify-center rounded-md bg-primary font-display text-xs font-semibold text-primary-foreground">
-          LSR
-        </span>
+        {/* The sidebar is dark in both themes, so the white logo always shows */}
+        <Image src="/brand/logos/white_logo2.png" alt="" width={972} height={326} priority className="h-[22px] w-auto shrink-0" />
         <span className="flex flex-col">
           <span className="font-display text-base font-semibold leading-tight">Admin</span>
           <span className="text-[11px] text-admin-nav-muted">Longhorn Sim Racing</span>

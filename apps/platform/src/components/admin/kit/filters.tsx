@@ -73,7 +73,7 @@ export function Segmented<V extends string>({
             onClick={() => onChange(option.value)}
             className={cn(
               "flex h-7 shrink-0 items-center gap-1.5 rounded-[5px] px-3 text-[13px] transition-colors",
-              active ? "bg-card font-semibold text-foreground shadow-sm" : "font-medium text-muted-foreground hover:text-foreground",
+              active ? "bg-admin-raised font-semibold text-foreground shadow-sm" : "font-medium text-muted-foreground hover:text-foreground",
             )}
           >
             {option.label}
