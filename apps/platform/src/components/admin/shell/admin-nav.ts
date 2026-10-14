@@ -32,7 +32,7 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     items: [
       { title: "Seasons", href: "/admin/seasons", keywords: ["league", "standings"] },
       { title: "Results", href: "/admin/results", keywords: ["upload", "race"] },
-      { title: "Hotlap", href: "/admin/hotlap", keywords: ["leaderboard", "lap times"] },
+      { title: "Hotlap and clips", href: "/admin/hotlap", keywords: ["competition clip", "video", "highlights", "home page"] },
       { title: "Driver mapping", href: "/admin/drivers", keywords: ["guid", "identity"] },
       { title: "Car mapping", href: "/admin/cars" },
     ],

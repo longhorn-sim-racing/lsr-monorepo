@@ -3,21 +3,34 @@
 import { toast } from "sonner"
 import type { HotlapSettings } from "@/lib/email/settings"
 import { useFormAction } from "@/components/admin/use-form-action"
-import { Button, Field, FieldGrid, FormActions, FormSection, Input, Notice, Panel, PanelBody, PanelFooter } from "@/components/admin/kit"
+import { Badge, Button, Field, FieldGrid, FormActions, FormSection, Input, Notice, Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/admin/kit"
 import { updateHotlapSettings } from "./actions"
+import { VideoField } from "./video-field"
 
-export default function HotlapForm({ initial }: { initial: HotlapSettings | null }) {
+export default function HotlapForm({ initial, showing }: { initial: HotlapSettings | null; showing: boolean }) {
   const { onSubmit, error, pending } = useFormAction(updateHotlapSettings, () => toast.success("Hotlap saved"))
 
   return (
     <form onSubmit={onSubmit}>
       <Panel>
+        <PanelHeader
+          title={
+            <span className="flex items-center gap-2">
+              Hotlap of the week
+              {showing && <Badge tone="success">On the home page</Badge>}
+            </span>
+          }
+        />
         <PanelBody className="flex flex-col gap-6">
-          {!initial && <Notice tone="info">Nothing saved yet, so the home page shows its built-in hotlap until you save one.</Notice>}
+          {!initial && (
+            <Notice tone="info">
+              {showing
+                ? "Nothing saved yet, so the home page shows its built-in hotlap until you save one."
+                : "Nothing saved yet. If you switch back before saving one, the home page shows its built-in hotlap."}
+            </Notice>
+          )}
           <FormSection title="Video">
-            <Field label="YouTube link" htmlFor="videoUrl" required hint="A youtube.com/watch?v=, youtu.be/ or youtube.com/embed/ link.">
-              <Input id="videoUrl" name="videoUrl" type="url" required defaultValue={initial?.videoUrl ?? ""} placeholder="https://www.youtube.com/watch?v=…" />
-            </Field>
+            <VideoField name="videoUrl" defaultValue={initial?.videoUrl} defaultKind="youtube" />
           </FormSection>
           <FormSection title="The lap">
             <FieldGrid>
@@ -42,7 +55,10 @@ export default function HotlapForm({ initial }: { initial: HotlapSettings | null
           )}
         </PanelBody>
         <PanelFooter>
-          <FormActions className="w-full" note="Shows on the home page as soon as you save.">
+          <FormActions
+            className="w-full"
+            note={showing ? "Shows on the home page as soon as you save." : "The home page shows the competition clip until you switch back above."}
+          >
             <Button type="submit" variant="primary" pending={pending}>
               Save
             </Button>
