@@ -25,11 +25,11 @@ export function centralDate(date: Date): string {
   return formatInTimeZone(date, CLUB_TZ, "yyyy-MM-dd")
 }
 
-/** "2026-10-19 18:00 CT", for the model */
+/** "Mon 2026-10-19 18:00 CT", for the model: the weekday is given so it never has to work one out */
 export function ct(date: Date): string
 export function ct(date: Date | null | undefined): string | null
 export function ct(date: Date | null | undefined): string | null {
-  return date ? `${formatInTimeZone(date, CLUB_TZ, "yyyy-MM-dd HH:mm")} CT` : null
+  return date ? `${formatInTimeZone(date, CLUB_TZ, "EEE yyyy-MM-dd HH:mm")} CT` : null
 }
 
 /** "Mon Oct 19, 6:00 PM", for tables in the room */

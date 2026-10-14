@@ -1,8 +1,8 @@
 import type { JackCellValue, JackToolDisplay } from "@/lib/jack/parts"
 import { fitRows, jsonText, toCell } from "./cells"
 
-/** Most rows a typed tool shows in the room; the model still gets everything it asked for */
-export const DISPLAY_ROWS = 50
+/** Most rows a typed tool shows in the room (a whole member roster fits); the model still gets everything it asked for */
+export const DISPLAY_ROWS = 200
 
 /** A table display from rows of objects, picking and naming the columns to show */
 export function tableDisplay<T>(
@@ -44,8 +44,11 @@ export function forModelWithList<T>(base: Record<string, unknown>, key: string, 
   ).text
 }
 
-/** One list in a result for forModelWithLists. `keep: "last"` trims from the start (e.g. older periods) */
-export type ModelList = { key: string; items: unknown[]; keep?: "first" | "last" }
+/**
+ * One list in a result for forModelWithLists. `keep: "last"` trims from the start (e.g. older periods);
+ * `whenTrimmed` says how to see the rest when it doesn't all fit
+ */
+export type ModelList = { key: string; items: unknown[]; keep?: "first" | "last"; whenTrimmed?: string }
 
 /**
  * Like forModelWithList for a result with several lists: each is trimmed to fit in `max` characters
@@ -55,7 +58,7 @@ export function forModelWithLists(base: Record<string, unknown>, lists: ModelLis
   let fixed: Record<string, unknown> = { ...base }
   for (const { key } of lists) delete fixed[key]
   let text = jsonText(fixed)
-  for (const { key, items, keep = "first" } of lists) {
+  for (const { key, items, keep = "first", whenTrimmed = "Narrow the request to see the rest." } of lists) {
     const ordered = keep === "last" ? [...items].reverse() : items
     const shape = (kept: unknown[]) => {
       const inOrder = keep === "last" ? [...kept].reverse() : kept
@@ -63,7 +66,7 @@ export function forModelWithLists(base: Record<string, unknown>, lists: ModelLis
         ...fixed,
         [key]: inOrder,
         ...(kept.length < items.length
-          ? { [`${key}Note`]: `Only the ${keep} ${kept.length} of ${items.length} ${key} fit in this reply. Narrow the request to see the rest.` }
+          ? { [`${key}Note`]: `Only the ${keep} ${kept.length} of ${items.length} ${key} fit in this reply. ${whenTrimmed}` }
           : {}),
       }
     }

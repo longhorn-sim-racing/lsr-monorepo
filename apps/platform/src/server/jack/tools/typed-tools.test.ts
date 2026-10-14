@@ -7,20 +7,22 @@ vi.mock("@/server/jack/sql-client", () => ({ getJackSqlClient: () => null, JACK_
 
 import type { SeasonEntrant } from "@/server/services/league-entry.service"
 import { auditWhere } from "./audit-log"
-import { bucketSignups, monthsBefore, tierCounts } from "./club-members"
+import { bucketSignups, compactRow, membersForModel, monthsBefore, tierCounts } from "./club-members"
 import { forModelWithList, forModelWithLists, MAX_MODEL_CHARS } from "./display"
 import { formatSchema, parseConstraints, typeName } from "./describe-schema"
 import { summarizeEvent, searchWhere, type EventRow } from "./events-overview"
 import { JACK_TOOLS, findJackTool } from "./index"
-import { checkoutOutcome, driverRow, entrantSummary } from "./lsc-entries"
-import { itemName, summarizePayments, type PaymentRow } from "./payments-summary"
+import { checkoutOutcome, driverRow, entrantSummary, schoolOf } from "./lsc-entries"
+import { rankActivity } from "./member-activity"
+import { itemName, purchaseKey, summarizePayments, unpaidCheckouts, type PaymentRow } from "./payments-summary"
 import { raceSessionsCount, roundResults } from "./standings"
 import { addDays, centralDateInput, centralRange, ct, endOfCentralDay, isCalendarDate, periodKey, periodsBetween, startOfCentralDay, weekStart } from "./time"
 
 describe("Central time helpers", () => {
   it("formats instants in Central time, across daylight saving", () => {
-    expect(ct(new Date("2026-10-19T23:00:00Z"))).toBe("2026-10-19 18:00 CT") // CDT
-    expect(ct(new Date("2026-12-01T00:30:00Z"))).toBe("2026-11-30 18:30 CT") // CST
+    // With the weekday, so no model has to work one out
+    expect(ct(new Date("2026-10-19T23:00:00Z"))).toBe("Mon 2026-10-19 18:00 CT") // CDT
+    expect(ct(new Date("2026-12-01T00:30:00Z"))).toBe("Mon 2026-11-30 18:30 CT") // CST
     expect(ct(null)).toBeNull()
   })
 
@@ -111,13 +113,16 @@ describe("events_overview shaping", () => {
   it("counts everyone registered as attended when the event doesn't take check-ins", () => {
     const row = summarizeEvent(event(), { REGISTERED: 30, WAITLISTED: 4, NOT_ATTENDING: 2 }, now)
     expect(row).toMatchObject({
-      startsAt: "2026-10-05 18:00 CT",
+      startsAt: "Mon 2026-10-05 18:00 CT",
       status: "PUBLISHED",
       effectiveStatus: "COMPLETED",
       public: true,
-      registration: { registered: 30, waitlisted: 4, notAttending: 2, capacity: 50 },
+      // Settings, said plainly: the event took sign-ups even though it's over
+      takesRegistrations: true,
+      takesCheckIns: false,
+      registration: { registered: 30, waitlisted: 4, notAttending: 2, capacity: 50, filled: "30/50" },
       attendance: { basis: "assumed: everyone registered", attended: 30, checkedIn: 0 },
-      manageUrl: "/admin/events/e1/manage",
+      manageLink: expect.stringMatching(/^https?:\/\/[^/]+\/admin\/events\/e1\/manage$/),
     })
   })
 
@@ -130,7 +135,11 @@ describe("events_overview shaping", () => {
 
   it("shows drafts as hidden, and fees and results", () => {
     const row = summarizeEvent(event({ status: "DRAFT", registrationFeeCents: 1250, _count: { rawResultUploads: 1, ingestedSessions: 0 } }), {}, now)
-    expect(row).toMatchObject({ effectiveStatus: "DRAFT", public: false, registration: { feeDollars: 12.5 }, results: "uploaded, no race results" })
+    expect(row).toMatchObject({ effectiveStatus: "DRAFT", public: false, registration: { feeDollars: 12.5 }, results: "uploaded, no race results yet" })
+    // A past round of a league's race series with nothing uploaded says so; a general meeting or a one-off says nothing
+    expect(summarizeEvent(event({ series: { title: "LSC S3", _count: { seasons: 1 } } }), {}, now).results).toBe("none uploaded")
+    expect(summarizeEvent(event({ series: { title: "General Meetings", _count: { seasons: 0 } } }), {}, now).results).toBeNull()
+    expect(summarizeEvent(event(), {}, now).results).toBeNull()
   })
 
   it("matches every search word in the title, slug or series", () => {
@@ -142,14 +151,26 @@ describe("events_overview shaping", () => {
 })
 
 describe("lsc_entries shaping", () => {
-  const entrant = (status: SeasonEntrant["status"], extra: { source?: "SITE" | "ADMIN" | "GOOGLE_FORM" | null; cents?: number; tier?: string; formAt?: string } = {}) =>
+  const entrant = (
+    status: SeasonEntrant["status"],
+    extra: { source?: "SITE" | "ADMIN" | "GOOGLE_FORM" | null; cents?: number; tier?: string; formAt?: string; school?: string; experience?: string; notes?: string } = {},
+  ) =>
     ({
       status,
       user: { id: status, handle: status, displayName: `Driver ${status}`, email: `${status}@utexas.edu`, eid: "abc123" },
       application:
         extra.source === null
           ? null
-          : { source: extra.source ?? "SITE", createdAt: new Date(extra.formAt ?? "2026-10-01T15:00:00Z"), discordUsername: "d" },
+          : {
+              source: extra.source ?? "SITE",
+              createdAt: new Date(extra.formAt ?? "2026-10-01T15:00:00Z"),
+              discordUsername: "d",
+              school: extra.school ?? null,
+              experience: extra.experience ?? "CASUAL",
+              equipment: ["WHEEL_PEDALS"],
+              canCommit: true,
+              notes: extra.notes ?? null,
+            },
       entry:
         status === "none"
           ? null
@@ -163,14 +184,21 @@ describe("lsc_entries shaping", () => {
   it("counts forms, entries and money the way /admin/league-entries does", () => {
     const entrants = [
       entrant("paid", { cents: 1000 }),
-      entrant("paid", { cents: 500, tier: "returning", source: "GOOGLE_FORM" }),
+      entrant("paid", { cents: 500, tier: "returning", source: "GOOGLE_FORM", school: "Texas A&M", experience: "COMPETITIVE" }),
       entrant("manual", { source: "ADMIN" }),
       entrant("ended", { formAt: "2026-09-20T15:00:00Z" }),
       entrant("none"),
       entrant("manual", { source: null }),
     ]
     expect(entrantSummary(entrants, new Date("2026-09-29T05:00:00Z"))).toEqual({
-      forms: { total: 5, bySource: { SITE: 3, GOOGLE_FORM: 1, ADMIN: 1 }, newSince: 4 },
+      // A blank school on the form means UT Austin
+      forms: {
+        total: 5,
+        bySource: { SITE: 3, GOOGLE_FORM: 1, ADMIN: 1 },
+        bySchool: { "UT Austin": 4, "Texas A&M": 1 },
+        byExperience: { CASUAL: 4, COMPETITIVE: 1 },
+        newSince: 4,
+      },
       entries: { entered: 4, paid: 2, manual: 2, ended: 1, formButNotEntered: 2 },
       paidIn: { dollars: 15, returningRate: 1 },
     })
@@ -182,10 +210,17 @@ describe("lsc_entries shaping", () => {
       eid: "abc123",
       status: "paid",
       paidDollars: 5,
-      paidAt: "2026-10-02 10:00 CT",
+      paidAt: "Fri 2026-10-02 10:00 CT",
       returningRate: true,
+      school: "UT Austin",
+      experience: "CASUAL",
     })
-    expect(driverRow(entrant("manual"))).toMatchObject({ paidDollars: null, paidAt: "2026-10-02 10:00 CT", note: "Paid cash" })
+    expect(driverRow(entrant("manual"))).toMatchObject({ paidDollars: null, paidAt: "Fri 2026-10-02 10:00 CT", note: "Paid cash" })
+    // The driver's own words, cut to a few hundred characters
+    const long = driverRow(entrant("none", { notes: "x".repeat(400), school: "Clemson" }))
+    expect(long).toMatchObject({ school: "Clemson" })
+    expect(long.formNotes).toHaveLength(301)
+    expect(driverRow(entrant("manual", { source: null }))).toMatchObject({ school: null, formNotes: null })
   })
 
   it("names what happened to an unpaid checkout", () => {
@@ -228,7 +263,7 @@ describe("payments_summary shaping", () => {
       { item: "Lone Star Cup Entry Fee", kind: "League entry", status: "failed", count: 1, dollars: 10 },
       { item: "Lone Star Cup Entry Fee", kind: "League entry", status: "succeeded", count: 3, dollars: 25 },
     ])
-    expect(summary.flaggedDuplicates).toEqual([{ name: "Driver", email: "d@utexas.edu", item: "Lone Star Cup Entry Fee", dollars: 10, paidAt: "2026-10-02 10:05 CT" }])
+    expect(summary.flaggedDuplicates).toEqual([{ name: "Driver", email: "d@utexas.edu", item: "Lone Star Cup Entry Fee", dollars: 10, paidAt: "Fri 2026-10-02 10:05 CT" }])
   })
 
   it("names productless payments as event fees", () => {
@@ -375,6 +410,7 @@ describe("the tool list", () => {
     const names = JACK_TOOLS.map((t) => t.name)
     expect(names).toEqual([
       "club_members",
+      "member_activity",
       "events_overview",
       "lsc_entries",
       "payments_summary",
@@ -400,8 +436,124 @@ describe("the tool list", () => {
       expect(schema.type, tool.name).toBe("object")
       expect(tool.description.length, tool.name).toBeGreaterThan(80)
     }
-    for (const name of ["club_members", "events_overview", "lsc_entries", "payments_summary", "standings", "audit_log", "describe_schema"]) {
+    for (const name of ["club_members", "member_activity", "events_overview", "lsc_entries", "payments_summary", "standings", "audit_log", "describe_schema"]) {
       expect(findJackTool(name)!.input.safeParse({}).success, name).toBe(true)
+    }
+  })
+})
+
+describe("unpaid checkouts", () => {
+  const attempt = (userId: string, status: "pending" | "failed" | "succeeded", productId: string | null, at: string, eventId?: string) => ({
+    userId,
+    status,
+    productId,
+    metadata: eventId ? { eventId } : null,
+    createdAt: new Date(at),
+    amountCents: 1000,
+  })
+
+  it("names what was bought: the product, or the event for an event fee", () => {
+    expect(purchaseKey({ productId: "lsc", metadata: null })).toBe("product:lsc")
+    expect(purchaseKey({ productId: null, metadata: { eventId: "e1" } })).toBe("event:e1")
+    expect(purchaseKey({ productId: null, metadata: null, eventRegistration: { eventId: "e2" } })).toBe("event:e2")
+  })
+
+  it("keeps people who never paid for the item, once each with their latest try", () => {
+    const attempts = [
+      attempt("anya", "pending", "lsc", "2026-10-01T15:00:00Z"),
+      attempt("anya", "failed", "lsc", "2026-10-03T15:00:00Z"),
+      attempt("sam", "failed", "lsc", "2026-10-09T15:00:00Z"),
+      // Gray tried, then paid for the same thing: not unpaid
+      attempt("gray", "failed", "lsc", "2026-09-30T15:00:00Z"),
+      // Sam paid for a different event, which doesn't clear the LSC checkout
+      attempt("sam", "pending", null, "2026-10-02T15:00:00Z", "karting"),
+    ]
+    const succeeded = [
+      { userId: "gray", productId: "lsc", metadata: null },
+      { userId: "sam", productId: null, metadata: { eventId: "karting" } },
+    ]
+    expect(unpaidCheckouts(attempts, succeeded).map((a) => `${a.userId} ${a.createdAt.toISOString().slice(5, 10)}`)).toEqual(["sam 10-09", "anya 10-03"])
+  })
+})
+
+describe("member_activity ranking", () => {
+  const member = (name: string, registrations: number, checkIns: number, races: number) => ({ name, registrations, checkIns, races, lastActive: null })
+
+  it("ranks by the chosen count, ties by the total then name, and leaves out the inactive", () => {
+    const rows = [member("Harold", 0, 0, 54), member("Mark", 1, 0, 52), member("Douglas", 3, 1, 0), member("Quiet", 0, 0, 0)]
+    expect(rankActivity(rows, "races").map((r) => r.name)).toEqual(["Harold", "Mark", "Douglas"])
+    expect(rankActivity(rows, "registrations").map((r) => r.name)).toEqual(["Douglas", "Mark", "Harold"])
+    expect(rankActivity(rows, "total")[0]).toMatchObject({ name: "Harold", total: 54 })
+  })
+})
+
+describe("an entry form's school", () => {
+  it("reads a blank school as UT Austin, and no form as no school", () => {
+    expect(schoolOf({ school: null })).toBe("UT Austin")
+    expect(schoolOf({ school: "  " })).toBe("UT Austin")
+    expect(schoolOf({ school: "Clemson" })).toBe("Clemson")
+    expect(schoolOf(null)).toBeNull()
+  })
+})
+
+describe("club_members roster", () => {
+  it("leaves empty fields out of the model's copy", () => {
+    expect(compactRow({ name: "Ana", eid: null, roles: [], checkIns: 0, races: 3, lsc: null, paidDollars: 0 })).toEqual({ name: "Ana", races: 3 })
+  })
+
+  it("fits a whole club with its definitions, and says how to page when it doesn't", () => {
+    const members = Array.from({ length: 110 }, (_, i) =>
+      compactRow({
+        name: `Member Number ${i}`,
+        email: `member.number.${i}@utexas.edu`,
+        eid: i % 9 === 0 ? `ab${10000 + i}` : null,
+        joined: "2026-02-14",
+        roles: i < 21 ? ["officer"] : [],
+        eventsRegistered: i % 4,
+        checkIns: 0,
+        racesDriven: i % 7,
+        lsc: i < 14 ? "form only" : null,
+        paidDollars: i % 5 === 0 ? 25 : 0,
+      }),
+    )
+    const text = forModelWithLists({ rosterDefinitions: "what the fields mean" }, [{ key: "roster", items: members, whenTrimmed: "Page with joinedFrom." }])
+    const body = JSON.parse(text)
+    expect(text.length).toBeLessThanOrEqual(MAX_MODEL_CHARS)
+    expect(body.roster).toHaveLength(110)
+    expect(body.rosterDefinitions).toBe("what the fields mean")
+
+    const many = Array.from({ length: 400 }, (_, i) => ({ name: `Member ${i}`, email: `m${i}@utexas.edu`, joined: "2026-02-14", note: "x".repeat(40) }))
+    const trimmed = JSON.parse(forModelWithLists({ rosterDefinitions: "kept" }, [{ key: "roster", items: many, whenTrimmed: "Page with joinedFrom." }]))
+    expect(trimmed.rosterDefinitions).toBe("kept")
+    expect(trimmed.rosterNote).toMatch(/^Only the first \d+ of 400 roster fit in this reply\. Page with joinedFrom\.$/)
+  })
+})
+
+describe("club_members: the roster and the newest members", () => {
+  const newest = [{ name: "Newest One", joined: "Mon 2026-10-12 18:00 CT" }]
+  const signups = [{ period: "2026-10", signups: 3 }]
+  const member = (i: number, pad = 0) => ({ name: `Member ${i}`, email: `m${i}@utexas.edu`, joined: "2026-02-14", ...(pad ? { note: "x".repeat(pad) } : {}) })
+
+  it("leaves the newest list out when the whole club fits, and says why", () => {
+    const body = JSON.parse(membersForModel({}, { roster: { rows: [member(1), member(2)], definitions: "defs", kind: "members" }, wholeClub: true, newest, signups }))
+    expect(body.roster).toHaveLength(2)
+    expect(body.newest).toBe("left out: the roster has everyone, oldest first")
+  })
+
+  it("puts the newest members first when the roster is cut short (its newest rows are the ones cut)", () => {
+    const rows = Array.from({ length: 300 }, (_, i) => member(i, 60))
+    const body = JSON.parse(membersForModel({}, { roster: { rows, definitions: "defs", kind: "members" }, wholeClub: true, newest, signups }))
+    expect(body.newest).toEqual(newest)
+    expect(body.rosterNote).toMatch(/Ask again with joinedFrom and joinedTo/)
+    expect(body.rosterDefinitions).toBe("defs")
+  })
+
+  it("keeps the newest list for officers and filtered rosters", () => {
+    for (const roster of [
+      { rows: [member(1)], definitions: "defs", kind: "officers" as const },
+      { rows: [member(1)], definitions: "defs", kind: "members" as const },
+    ]) {
+      expect(JSON.parse(membersForModel({}, { roster, wholeClub: false, newest, signups })).newest).toEqual(newest)
     }
   })
 })

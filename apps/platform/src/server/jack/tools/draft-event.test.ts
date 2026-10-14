@@ -91,7 +91,10 @@ describe("draft_event", () => {
       },
     ])
     const body = JSON.parse(result.forModel)
-    expect(body).toMatchObject({ status: "DRAFT", startsAt: "2026-11-02 18:00 CT", editUrl: "/admin/events/event-1/edit" })
+    // The model gets the whole link, so it never makes up the site's address; the room's card keeps the path
+    expect(body).toMatchObject({ status: "DRAFT", startsAt: "Mon 2026-11-02 18:00 CT" })
+    expect(body.link).toMatch(/^https?:\/\/[^/]+\/admin\/events\/event-1\/edit$/)
+    expect(body.note).toContain("give this link exactly as it is")
     expect(draftEventTool.writes).toBe(true)
   })
 

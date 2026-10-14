@@ -259,7 +259,7 @@ function PersonaSwitch({ persona, onSwitch }: { persona: JackRoomPersonaKey; onS
       >
         <option value="stand">Stand (simple tasks)</option>
         <option value="jack">Jack</option>
-        <option value="lift">Lift (higher cost)</option>
+        <option value="lift">Lift (slower, higher cost)</option>
       </Select>
       {error ? (
         <span role="alert" className="text-xs font-medium text-tone-danger-foreground">
