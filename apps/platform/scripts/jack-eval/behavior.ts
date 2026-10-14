@@ -269,7 +269,14 @@ export const BEHAVIOR: Question[] = [
     expect: "Says what it counted as \"active\" (for example event registrations, check-ins or races driven) and names the member who leads on it.",
     truth: async ({ prisma }) => {
       const regs = await prisma.eventRegistration.groupBy({ by: ["userId"], where: { status: "REGISTERED" }, _count: { _all: true }, orderBy: { _count: { userId: "desc" } }, take: 3 });
-      const starts = await prisma.raceParticipant.groupBy({ by: ["userId"], where: { userId: { not: null } }, _count: { _all: true }, orderBy: { _count: { userId: "desc" } }, take: 3 });
+      // Race sessions with a result, as member_activity counts "races driven"
+      const starts = await prisma.raceParticipant.groupBy({
+        by: ["userId"],
+        where: { userId: { not: null }, results: { some: {} }, session: { sessionType: "RACE" } },
+        _count: { _all: true },
+        orderBy: { _count: { userId: "desc" } },
+        take: 3,
+      });
       const names = new Map(
         (await prisma.user.findMany({ where: { id: { in: [...regs.map((r) => r.userId), ...starts.flatMap((s) => (s.userId ? [s.userId] : []))] } }, select: { id: true, displayName: true } })).map((u) => [
           u.id,
@@ -278,7 +285,7 @@ export const BEHAVIOR: Question[] = [
       );
       return judged(
         `Most event registrations: ${listed(regs.map((r) => `${names.get(r.userId)} (${r._count._all})`))}. ` +
-          `Most race sessions driven (linked accounts): ${listed(starts.map((s) => `${names.get(s.userId ?? "") ?? "?"} (${s._count._all})`))}. Check-ins are too few to rank on.`
+          `Most races driven (race sessions with a result, linked accounts; practice and qualifying not counted): ${listed(starts.map((s) => `${names.get(s.userId ?? "") ?? "?"} (${s._count._all})`))}. Check-ins are too few to rank on.`
       );
     },
   },

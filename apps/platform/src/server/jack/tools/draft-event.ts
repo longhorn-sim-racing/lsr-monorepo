@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
+import { getSiteUrl } from "@/lib/site-url"
 import { parseEventForm } from "@/schemas/event.schema"
 import { createAuditLog } from "@/server/audit/log"
 import { prisma } from "@/server/db"
@@ -171,6 +172,8 @@ export async function draftEvent(input: DraftEventInput, ctx: JackToolContext) {
   revalidateAdmin()
 
   const editUrl = `/admin/events/${event.id}/edit`
+  // The whole link for the reply, so it never has to guess the site's address
+  const link = `${getSiteUrl()}${editUrl}`
   const now = new Date()
   return {
     forModel: forModel({
@@ -184,8 +187,8 @@ export async function draftEvent(input: DraftEventInput, ctx: JackToolContext) {
       series: seriesPick?.name ?? null,
       takesRegistrations: event.registrationEnabled,
       capacity: event.registrationMax,
-      editUrl,
-      note: `Saved as a draft, hidden from members. An officer reviews and publishes it from ${editUrl}.${event.startsAtUtc < now ? " Heads up: it starts in the past." : ""}`,
+      link,
+      note: `Saved as a draft, hidden from members. An officer reviews and publishes it at ${link} (give this link exactly as it is).${event.startsAtUtc < now ? " Heads up: it starts in the past." : ""}`,
     }),
     label: `Drafted ${event.title}`,
     displays: [
@@ -205,7 +208,7 @@ export async function draftEvent(input: DraftEventInput, ctx: JackToolContext) {
 export const draftEventTool: JackTool<DraftEventInput> = {
   name: "draft_event",
   description:
-    "Create a new event as a DRAFT (hidden from members) for an officer to review and publish. Times are Central local time (YYYY-MM-DDTHH:mm). Venue and series must already exist (by name); leave them out if unsure. Free events only. It never publishes; reply with the edit link it returns. Check events_overview first so you don't draft a duplicate.",
+    "Create a new event as a DRAFT (hidden from members) for an officer to review and publish. Times are Central local time (YYYY-MM-DDTHH:mm). Venue and series must already exist (by name); leave them out if unsure. Free events only. It never publishes; reply with the link it returns, exactly as given. Check events_overview first so you don't draft a duplicate.",
   input: draftEventInput,
   writes: true,
   run: draftEvent,
