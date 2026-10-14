@@ -100,14 +100,15 @@ export type TrackDefinition = {
   interviewRequired: boolean;
 };
 
+// The blurbs for the real teams are the ones on the /about page (src/app/about/roster.ts); keep them in step.
 // Technology, Community, Media and Competition are real (transcribed from the leads' questions). The one
 // "(placeholder)" team stands in for the fifth team, which hasn't sent its questions yet; replace it when it does
 // (see PLACEHOLDER_CONTENT). Its key is used by the tests (it is the team without interviews), so keep it until then.
 export const tracks = [
-  { key: 'technology', label: 'Technology', blurb: 'Web, data, infrastructure and broadcast tech behind the club.', interviewRequired: true },
-  { key: 'community', label: 'Community', blurb: 'Events, socials and growing the club community.', interviewRequired: true },
-  { key: 'media', label: 'Media', blurb: 'Design, video, photography and social media for the club.', interviewRequired: true },
-  { key: 'competition', label: 'Competition', blurb: 'Race operations, data analysis, endurance events and leagues.', interviewRequired: true },
+  { key: 'technology', label: 'Technology', blurb: 'Builds and runs this website and the tools behind it: events, payments, results and the member database.', interviewRequired: true },
+  { key: 'community', label: 'Community', blurb: 'Brings people in and keeps them around: watch parties, sim nights, socials, tabling and volunteering at track events.', interviewRequired: true },
+  { key: 'media', label: 'Media', blurb: 'Photos, video, race highlights and the LSR brand across every channel.', interviewRequired: true },
+  { key: 'competition', label: 'Competition', blurb: 'Runs the Lone Star Cup: race control, stewarding, sporting regulations and the sim servers we race on.', interviewRequired: true },
   { key: 'team-b', label: 'Team B (placeholder)', blurb: 'Placeholder for a team whose questions are not in yet. No interview.', interviewRequired: false },
 ] as const satisfies readonly TrackDefinition[];
 
