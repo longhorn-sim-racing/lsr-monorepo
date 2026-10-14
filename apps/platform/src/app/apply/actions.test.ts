@@ -28,7 +28,7 @@ const allServices = () => [...Object.values(recruiting), ...Object.values(email)
 describe("access", () => {
   const calls: Array<[string, () => Promise<unknown>]> = [
     ["saveProgressAction", () => saveProgressAction({ step: "about" })],
-    ["setTeamsAction", () => setTeamsAction(["team-a"])],
+    ["setTeamsAction", () => setTeamsAction(["media"])],
     ["submitApplicationAction", () => submitApplicationAction()],
   ];
 
@@ -106,10 +106,10 @@ describe("saving progress", () => {
 
 describe("choosing teams", () => {
   it("passes the list to the service for the signed-in applicant and reports what changed", async () => {
-    recruiting.setSelectedTracks.mockResolvedValue({ added: ["team-a"], removed: ["team-b"], application: { secret: "not returned" } });
-    const result = await setTeamsAction(["team-a"]);
-    expect(recruiting.setSelectedTracks).toHaveBeenCalledWith("applicant-1", ["team-a"]);
-    expect(result).toEqual({ ok: true, data: { added: ["team-a"], removed: ["team-b"] } });
+    recruiting.setSelectedTracks.mockResolvedValue({ added: ["media"], removed: ["team-b"], application: { secret: "not returned" } });
+    const result = await setTeamsAction(["media"]);
+    expect(recruiting.setSelectedTracks).toHaveBeenCalledWith("applicant-1", ["media"]);
+    expect(result).toEqual({ ok: true, data: { added: ["media"], removed: ["team-b"] } });
   });
 
   it("explains an unknown team", async () => {

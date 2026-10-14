@@ -181,11 +181,11 @@ describe("rounds", () => {
   });
 
   it("saves a booking link, passing the 'use another host' choice", async () => {
-    await saveBookingLinkAction("c1", "team-a", "https://calendar.app.google/x");
-    expect(cycles.saveTrackConfig).toHaveBeenLastCalledWith("officer-1", "c1", "team-a", "https://calendar.app.google/x", { allowOtherHost: false });
-    await saveBookingLinkAction("c1", "team-a", "https://calendly.com/x", true);
-    expect(cycles.saveTrackConfig).toHaveBeenLastCalledWith("officer-1", "c1", "team-a", "https://calendly.com/x", { allowOtherHost: true });
-    expect((await saveBookingLinkAction("c1", "team-a", "x".repeat(2200))).ok).toBe(false);
+    await saveBookingLinkAction("c1", "media", "https://calendar.app.google/x");
+    expect(cycles.saveTrackConfig).toHaveBeenLastCalledWith("officer-1", "c1", "media", "https://calendar.app.google/x", { allowOtherHost: false });
+    await saveBookingLinkAction("c1", "media", "https://calendly.com/x", true);
+    expect(cycles.saveTrackConfig).toHaveBeenLastCalledWith("officer-1", "c1", "media", "https://calendly.com/x", { allowOtherHost: true });
+    expect((await saveBookingLinkAction("c1", "media", "x".repeat(2200))).ok).toBe(false);
   });
 
   it("shows a taken address on the right field", async () => {

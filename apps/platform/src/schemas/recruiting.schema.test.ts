@@ -39,10 +39,10 @@ describe("validateContent", () => {
     expect(() => validateContent({ tracks, genericQuestions, trackQuestions: Object.fromEntries(tracks.map((t) => [t.key, questionsForTrack(t.key)])) })).not.toThrow();
   });
 
-  it("allows exactly 5 questions and rejects 6", () => {
-    const five = [1, 2, 3, 4, 5].map((n) => q(`a_${n}`));
-    expect(() => validateContent(withTrackQuestions(five))).not.toThrow();
-    expect(() => validateContent(withTrackQuestions([...five, q("a_6")]))).toThrow(/maximum is 5/);
+  it("allows exactly 6 questions and rejects 7", () => {
+    const six = [1, 2, 3, 4, 5, 6].map((n) => q(`a_${n}`));
+    expect(() => validateContent(withTrackQuestions(six))).not.toThrow();
+    expect(() => validateContent(withTrackQuestions([...six, q("a_7")]))).toThrow(/maximum is 6/);
   });
 
   it.each([
@@ -239,19 +239,19 @@ describe("checkCompleteness", () => {
   it("accepts three complete teams", () => {
     const d = draft({
       tracks: [
-        { track: "team-a", answers: { a_experience: "x" } },
+        { track: "media", answers: { media_tools: ["Canva"], media_social: "x", media_portfolio: "https://example.com", media_favorite: "x", media_hours: "1–3" } },
         { track: "team-b", answers: {} },
-        { track: "team-c", answers: { c_motivation: "x", c_hours: "4 to 6", c_link: "https://example.com" } },
+        { track: "competition", answers: { comp_skills: ["Commentating races/events"], comp_exec: "x", comp_challenge: "x", comp_endurance: "Yes", comp_hours: "2" } },
       ],
     });
     expect(checkCompleteness(d).complete).toBe(true);
   });
 
   it("is all-or-nothing across teams: one incomplete team blocks everything", () => {
-    const d = draft({ tracks: [{ track: "team-b", answers: {} }, { track: "team-a", answers: {} }] });
+    const d = draft({ tracks: [{ track: "team-b", answers: {} }, { track: "media", answers: {} }] });
     expect(checkCompleteness(d).complete).toBe(false);
-    expect(incompleteKeys(d)).toEqual(["track:team-a"]);
-    expect(checkCompleteness(d).sections.find((s) => s.key === "track:team-a")?.problems[0]).toMatch(/^Missing: /);
+    expect(incompleteKeys(d)).toEqual(["track:media"]);
+    expect(checkCompleteness(d).sections.find((s) => s.key === "track:media")?.problems[0]).toMatch(/^Missing: /);
   });
 
   it.each([
@@ -267,11 +267,11 @@ describe("checkCompleteness", () => {
 
 describe("lookups and shipped content", () => {
   it("knows real team keys and rejects junk", () => {
-    expect(isTrackKey("team-a")).toBe(true);
+    expect(isTrackKey("media")).toBe(true);
     expect(isTrackKey("nope")).toBe(false);
     expect(isTrackKey(5)).toBe(false);
     expect(isTrackKey("__proto__")).toBe(false);
-    expect(getTrack("team-a")?.interviewRequired).toBe(true);
+    expect(getTrack("media")?.interviewRequired).toBe(true);
     expect(getTrack("team-b")?.interviewRequired).toBe(false);
     expect(isTrackKey("technology")).toBe(true);
     expect(isTrackKey("community")).toBe(true);
@@ -283,8 +283,8 @@ describe("lookups and shipped content", () => {
     expect(questionsForTrack("nope")).toEqual([]);
   });
 
-  it("never exceeds 5 questions for any team", () => {
-    for (const t of tracks) expect(questionsForTrack(t.key).length).toBeLessThanOrEqual(5);
+  it("never exceeds 6 questions for any team", () => {
+    for (const t of tracks) expect(questionsForTrack(t.key).length).toBeLessThanOrEqual(6);
   });
 
   it("has the Technology and Community questions the leads sent", () => {
@@ -344,5 +344,22 @@ describe("lookups and shipped content", () => {
     ];
     if (!PLACEHOLDER_CONTENT) expect(leftovers).toEqual([]);
     else expect(leftovers.length).toBeGreaterThan(0);
+  });
+});
+
+describe("Media and Competition questions", () => {
+  it("Media has six questions, with the write-in for other tools optional", () => {
+    const media = questionsForTrack("media");
+    expect(media).toHaveLength(6);
+    expect(media.find((q) => q.id === "media_tools_other")).toMatchObject({ type: "short_text", required: false });
+    expect(media.filter((q) => !q.required).map((q) => q.id)).toEqual(["media_tools_other"]);
+  });
+
+  it("Competition has five required questions and both teams interview", () => {
+    const comp = questionsForTrack("competition");
+    expect(comp).toHaveLength(5);
+    expect(comp.every((q) => q.required)).toBe(true);
+    expect(getTrack("media")?.interviewRequired).toBe(true);
+    expect(getTrack("competition")?.interviewRequired).toBe(true);
   });
 });

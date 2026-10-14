@@ -106,6 +106,9 @@ async function makeUser(label: string, extra: Record<string, unknown> = {}) {
 const IN = new Date("2026-11-15T12:00:00Z");
 const BEFORE = new Date("2026-09-01T12:00:00Z");
 const AFTER = new Date("2027-01-01T12:00:00Z");
+/** A complete set of answers for each real team that has required questions. */
+const MEDIA_FULL = { media_tools: ["Canva"], media_social: "Ran a club account", media_portfolio: "https://example.com/work", media_favorite: "My logo", media_hours: "1–3" };
+const COMP_FULL = { comp_skills: ["Commentating races/events"], comp_exec: "x", comp_challenge: "x", comp_endurance: "Yes", comp_hours: "2" };
 const GENERIC = {}; // there are no general questions
 const RESUME = "https://example.com/resume.pdf";
 
@@ -146,53 +149,53 @@ async function main() {
   await expectError("can't set another user's id", () => saveDraft(u1.id, { userId: u2.id }, IN), "INVALID");
   await expectError("profile email must stay the account email", () => saveDraft(u1.id, { profile: { email: "someone-else@example.com" } }, IN), "INVALID", (e) => "profile.email" in (e.fieldErrors ?? {}));
   // There are no general questions: every answer belongs to a team's page, so choose a team first.
-  await setSelectedTracks(u1.id, ["team-c"], IN);
-  await saveDraft(u1.id, { step: "team:team-c", profile: { major: "Math" }, trackAnswers: { "team-c": { c_motivation: "  Love racing  " } } }, IN);
-  await saveDraft(u1.id, { trackAnswers: { "team-c": { c_hours: "4 to 6" } } }, IN);
+  await setSelectedTracks(u1.id, ["competition"], IN);
+  await saveDraft(u1.id, { step: "team:competition", profile: { major: "Math" }, trackAnswers: { "competition": { comp_exec: "  Love racing  " } } }, IN);
+  await saveDraft(u1.id, { trackAnswers: { "competition": { comp_hours: "2" } } }, IN);
   {
     const a = await getMyApplication(u1.id);
-    const g = a?.tracks.find((t) => t.track === "team-c")?.answers as Record<string, unknown>;
-    check("pages merge instead of overwriting", g.c_motivation === "Love racing" && g.c_hours === "4 to 6", JSON.stringify(g));
-    check("text is trimmed and the step is remembered", a?.draftStep === "team:team-c" && a.major === "Math");
+    const g = a?.tracks.find((t) => t.track === "competition")?.answers as Record<string, unknown>;
+    check("pages merge instead of overwriting", g.comp_exec === "Love racing" && g.comp_hours === "2", JSON.stringify(g));
+    check("text is trimmed and the step is remembered", a?.draftStep === "team:competition" && a.major === "Math");
   }
-  await saveDraft(u1.id, { trackAnswers: { "team-c": { c_motivation: "" } } }, IN);
-  check("clearing a field removes it", !("c_motivation" in ((await getMyApplication(u1.id))?.tracks.find((t) => t.track === "team-c")?.answers as Record<string, unknown>)));
-  await expectError("unknown question id rejected", () => saveDraft(u1.id, { trackAnswers: { "team-c": { nope: "x" } } }, IN), "INVALID");
-  await expectError("an option that isn't listed is rejected", () => saveDraft(u1.id, { trackAnswers: { "team-c": { c_hours: "99 hours" } } }, IN), "INVALID");
+  await saveDraft(u1.id, { trackAnswers: { "competition": { comp_exec: "" } } }, IN);
+  check("clearing a field removes it", !("comp_exec" in ((await getMyApplication(u1.id))?.tracks.find((t) => t.track === "competition")?.answers as Record<string, unknown>)));
+  await expectError("unknown question id rejected", () => saveDraft(u1.id, { trackAnswers: { "competition": { nope: "x" } } }, IN), "INVALID");
+  await expectError("an option that isn't listed is rejected", () => saveDraft(u1.id, { trackAnswers: { "competition": { comp_hours: "99 hours" } } }, IN), "INVALID");
   await expectError("general answers are rejected: there are no general questions", () => saveDraft(u1.id, { genericAnswers: { why_join: "x" } }, IN), "INVALID");
-  await expectError("answers for a team that isn't chosen rejected", () => saveDraft(u1.id, { trackAnswers: { "team-a": { a_experience: "x" } } }, IN), "INVALID");
+  await expectError("answers for a team that isn't chosen rejected", () => saveDraft(u1.id, { trackAnswers: { "media": { media_social: "x" } } }, IN), "INVALID");
   await expectError("http resume link rejected", () => saveDraft(u1.id, { resumeUrl: "http://example.com/r.pdf" }, IN), "INVALID");
   await expectError("portfolio links are no longer accepted", () => saveDraft(u1.id, { portfolioLinks: [{ label: "GitHub", url: "https://github.com/ada" }] }, IN), "INVALID");
   {
     // all-or-nothing: one valid change + one invalid change writes nothing
     const before = await getMyApplication(u1.id);
-    await expectError("a bad answer rejects the whole save", () => saveDraft(u1.id, { profile: { major: "Chemistry" }, trackAnswers: { "team-c": { c_hours: "99 hours" } } }, IN), "INVALID");
+    await expectError("a bad answer rejects the whole save", () => saveDraft(u1.id, { profile: { major: "Chemistry" }, trackAnswers: { "competition": { comp_hours: "99 hours" } } }, IN), "INVALID");
     const after = await getMyApplication(u1.id);
     check("...and nothing from it was written", after?.major === before?.major, `${before?.major} -> ${after?.major}`);
   }
 
   console.log("--- choosing teams ---");
   await expectError("unknown team rejected", () => setSelectedTracks(u1.id, ["nope"], IN), "INVALID");
-  await expectError("duplicate team rejected", () => setSelectedTracks(u1.id, ["team-a", "team-a"], IN), "INVALID");
-  await expectError("non-array rejected", () => setSelectedTracks(u1.id, "team-a", IN), "INVALID");
+  await expectError("duplicate team rejected", () => setSelectedTracks(u1.id, ["media", "media"], IN), "INVALID");
+  await expectError("non-array rejected", () => setSelectedTracks(u1.id, "media", IN), "INVALID");
   {
-    const r = await setSelectedTracks(u1.id, ["team-a", "team-b"], IN);
+    const r = await setSelectedTracks(u1.id, ["media", "team-b"], IN);
     check("adds teams", r.added.length === 2 && r.application.tracks.length === 2);
-    const again = await setSelectedTracks(u1.id, ["team-a", "team-b"], IN);
+    const again = await setSelectedTracks(u1.id, ["media", "team-b"], IN);
     check("same selection is a no-op", again.added.length === 0 && again.removed.length === 0);
   }
-  await saveDraft(u1.id, { trackAnswers: { "team-a": { a_experience: "Built a rig" }, "team-b": { b_tools: ["Tool 1"] } } }, IN);
+  await saveDraft(u1.id, { trackAnswers: { "media": MEDIA_FULL, "team-b": { b_tools: ["Tool 1"] } } }, IN);
   {
-    const r = await setSelectedTracks(u1.id, ["team-a"], IN);
+    const r = await setSelectedTracks(u1.id, ["media"], IN);
     check("dropping a team removes its row and answers", r.removed.join() === "team-b" && r.application.tracks.length === 1);
-    check("the kept team's answers survive", JSON.stringify(r.application.tracks[0].answers).includes("Built a rig"));
+    check("the kept team's answers survive", JSON.stringify(r.application.tracks[0].answers).includes("Ran a club account"));
   }
-  await setSelectedTracks(u1.id, ["team-a", "team-b"], IN);
+  await setSelectedTracks(u1.id, ["media", "team-b"], IN);
 
   console.log("--- submitting ---");
   await expectError("incomplete application can't be submitted", () => submitApplication(u1.id, IN), "INCOMPLETE", (e) => !!e.report && !e.report.complete && e.report.sections.some((s) => !s.complete));
   check("it is still a draft", (await getMyApplication(u1.id))?.state === "DRAFT");
-  await saveDraft(u1.id, { genericAnswers: GENERIC, resumeUrl: RESUME, trackAnswers: { "team-a": { a_experience: "Built a rig" } } }, IN);
+  await saveDraft(u1.id, { genericAnswers: GENERIC, resumeUrl: RESUME, trackAnswers: { "media": MEDIA_FULL } }, IN);
   await expectError("submit after closing is rejected", () => submitApplication(u1.id, AFTER), "ROUND_CLOSED");
   await expectError("saving after closing is rejected", () => saveDraft(u1.id, { step: "x" }, AFTER), "ROUND_CLOSED");
   {
@@ -208,7 +211,7 @@ async function main() {
     check("submitted: state, time, and not auto-submitted", a?.state === "SUBMITTED" && !!a.submittedAt && a.autoSubmitted === false);
   }
   await expectError("saving after submit is rejected", () => saveDraft(u1.id, { step: "x" }, IN), "ALREADY_SUBMITTED");
-  await expectError("changing teams after submit is rejected", () => setSelectedTracks(u1.id, ["team-a"], IN), "ALREADY_SUBMITTED");
+  await expectError("changing teams after submit is rejected", () => setSelectedTracks(u1.id, ["media"], IN), "ALREADY_SUBMITTED");
   await expectError("submitting twice is rejected", () => submitApplication(u1.id, IN), "ALREADY_SUBMITTED");
 
   console.log("--- isolation between applicants ---");
@@ -216,13 +219,13 @@ async function main() {
     const a2 = await getMyApplication(u2.id);
     check("u2 sees their own empty draft, not u1's", a2 !== null && a2.id !== d1.id && a2.state === "DRAFT" && a2.tracks.length === 0);
     const view2 = await getApplicantStatus(u2.id, IN);
-    check("u2's status view contains none of u1's data", !JSON.stringify(view2).includes("Built a rig") && !JSON.stringify(view2).includes(u1.email));
+    check("u2's status view contains none of u1's data", !JSON.stringify(view2).includes("Ran a club account") && !JSON.stringify(view2).includes(u1.email));
     check("a user with no application gets null", (await getApplicantStatus(officer.id, IN)).application === null);
   }
 
   console.log("--- a second applicant: draft stays invisible to officers ---");
-  await setSelectedTracks(u3.id, ["team-b", "team-c"], IN);
-  await saveDraft(u3.id, { genericAnswers: GENERIC, resumeUrl: RESUME, trackAnswers: { "team-c": { c_motivation: "x", c_hours: "4 to 6", c_link: "https://example.com/w" } } }, IN);
+  await setSelectedTracks(u3.id, ["team-b", "competition"], IN);
+  await saveDraft(u3.id, { genericAnswers: GENERIC, resumeUrl: RESUME, trackAnswers: { "competition": COMP_FULL } }, IN);
   const d3 = await getMyApplication(u3.id);
   {
     const list = await listTrackApplications({ cycleId: cycle.id, q: run });
@@ -238,7 +241,7 @@ async function main() {
   {
     const all = await listTrackApplications({ cycleId: cycle.id, q: run });
     check("both applicants appear (4 team rows)", all.total === 4 && all.rows.length === 4, `total=${all.total}`);
-    check("filter by team", (await listTrackApplications({ cycleId: cycle.id, q: run, track: "team-c" })).rows.every((r) => r.track === "team-c"));
+    check("filter by team", (await listTrackApplications({ cycleId: cycle.id, q: run, track: "competition" })).rows.every((r) => r.track === "competition"));
     check("filter by status", (await listTrackApplications({ cycleId: cycle.id, q: run, status: "ACCEPTED" })).total === 0);
     check("search matches name or email", (await listTrackApplications({ cycleId: cycle.id, q: "TEST U3" })).rows.some((r) => r.application.userId === u3.id));
     check("autoSubmitted filter", (await listTrackApplications({ cycleId: cycle.id, q: run, autoSubmitted: true })).total === 0);
@@ -247,7 +250,7 @@ async function main() {
   }
 
   console.log("--- decisions ---");
-  const trackA = (await prisma.applicationTrack.findFirstOrThrow({ where: { applicationId: d1.id, track: "team-a" } })).id;
+  const trackA = (await prisma.applicationTrack.findFirstOrThrow({ where: { applicationId: d1.id, track: "media" } })).id;
   const trackB = (await prisma.applicationTrack.findFirstOrThrow({ where: { applicationId: d1.id, track: "team-b" } })).id;
   await expectError("an officer can't decide their own application", () => setTrackStatus(u1.id, trackA, "ACCEPTED"), "SELF_REVIEW");
   await expectError("Interview is refused for a team without interviews", () => setTrackStatus(officer.id, trackB, "INTERVIEW"), "INTERVIEW_NOT_OFFERED");
@@ -271,17 +274,17 @@ async function main() {
   console.log("--- booking link visibility ---");
   {
     await prisma.recruitingTrackConfig.upsert({
-      where: { cycleId_track: { cycleId: cycle.id, track: "team-a" } },
-      create: { cycleId: cycle.id, track: "team-a", schedulingUrl: "https://calendar.app.google/example" },
+      where: { cycleId_track: { cycleId: cycle.id, track: "media" } },
+      create: { cycleId: cycle.id, track: "media", schedulingUrl: "https://calendar.app.google/example" },
       update: { schedulingUrl: "https://calendar.app.google/example" },
     });
-    const ta = (await getApplicantStatus(u1.id, IN)).application!.tracks.find((t) => t.track === "team-a")!;
+    const ta = (await getApplicantStatus(u1.id, IN)).application!.tracks.find((t) => t.track === "media")!;
     check("no booking link unless the team has invited them", ta.bookingUrl === null);
     await setTrackStatus(officer.id, trackA, "INTERVIEW");
-    const ta2 = (await getApplicantStatus(u1.id, IN)).application!.tracks.find((t) => t.track === "team-a")!;
+    const ta2 = (await getApplicantStatus(u1.id, IN)).application!.tracks.find((t) => t.track === "media")!;
     check("booking link appears once invited to interview", ta2.bookingUrl === "https://calendar.app.google/example");
     await setTrackStatus(officer.id, trackA, "ACCEPTED");
-    const ta3 = (await getApplicantStatus(u1.id, IN)).application!.tracks.find((t) => t.track === "team-a")!;
+    const ta3 = (await getApplicantStatus(u1.id, IN)).application!.tracks.find((t) => t.track === "media")!;
     check("...and disappears after a final decision", ta3.bookingUrl === null);
   }
 
@@ -295,7 +298,7 @@ async function main() {
     const r = await addReview(officer.id, trackA, { score: 4, notes: "  strong  " });
     check("valid review saved, note trimmed", r.score === 4 && r.notes === "strong" && r.reviewerId === officer.id);
     await addReview(officer.id, trackA, { notes: "note only" });
-    const list = await listTrackApplications({ cycleId: cycle.id, q: run, track: "team-a" });
+    const list = await listTrackApplications({ cycleId: cycle.id, q: run, track: "media" });
     const row = list.rows.find((x) => x.application.userId === u1.id)!;
     check("list shows review count and average score", row.reviewCount === 2 && row.averageScore === 4, `${row.reviewCount} / ${row.averageScore}`);
   }
@@ -310,8 +313,8 @@ async function main() {
     check("the API key is cleared, so nothing can really send", process.env.RESEND_API_KEY === "");
     const label = (key: string) => tracks.find((t) => t.key === key)!.label;
     const u4 = await makeUser("u4");
-    await setSelectedTracks(u4.id, ["team-a", "team-b"], IN);
-    await saveDraft(u4.id, { genericAnswers: GENERIC, resumeUrl: RESUME, trackAnswers: { "team-a": { a_experience: "Built a rig" } } }, IN);
+    await setSelectedTracks(u4.id, ["media", "team-b"], IN);
+    await saveDraft(u4.id, { genericAnswers: GENERIC, resumeUrl: RESUME, trackAnswers: { "media": MEDIA_FULL } }, IN);
 
     // -- the confirmation email, queued by the submission itself
     const submitted = await submitAndNotify(u4.id, IN);
@@ -319,25 +322,25 @@ async function main() {
     check("submitting queues exactly one confirmation email", app4.state === "SUBMITTED" && app4.emails.length === 1, `emails=${app4.emails.length}`);
     const received = app4.emails[0];
     check("it is the application-level RECEIVED email, addressed to the ACCOUNT email", received.template === "RECEIVED" && received.applicationTrackId === null && received.toEmail === u4.email);
-    check("it lists every team applied to", received.body.includes(label("team-a")) && received.body.includes(label("team-b")));
+    check("it lists every team applied to", received.body.includes(label("media")) && received.body.includes(label("team-b")));
     check("delivery was attempted and honestly recorded as FAILED, and the submission is unaffected", submitted.delivery?.status === "FAILED" && received.status === "FAILED" && /not configured/i.test(received.error ?? ""), `${received.status} ${received.error}`);
     await expectError("submitting again is refused", () => submitAndNotify(u4.id, IN), "ALREADY_SUBMITTED");
     check("...and queued no second confirmation", (await prisma.applicationEmail.count({ where: { applicationId: app4.id } })) === 1);
 
-    const tA = app4.tracks.find((t) => t.track === "team-a")!.id;
+    const tA = app4.tracks.find((t) => t.track === "media")!.id;
     const tB = app4.tracks.find((t) => t.track === "team-b")!.id;
     const emailCount = (trackId: string) => prisma.applicationEmail.count({ where: { applicationTrackId: trackId } });
 
-    // -- decision emails (team-a has a booking link from the section above)
+    // -- decision emails (media has a booking link from the section above)
     const d1 = await decideAndNotify(officer.id, tA, "INTERVIEW", { sendEmail: true });
     const interviewMail = await prisma.applicationEmail.findUniqueOrThrow({ where: { id: d1.emailId! } });
     check("a decision with 'send email' changes the status and queues one email together", d1.status === "INTERVIEW" && !!d1.emailId && (await emailCount(tA)) === 1);
-    check("the interview email names the team, goes to the account address, and uses the booking link", interviewMail.template === "INTERVIEW" && interviewMail.applicationTrackId === tA && interviewMail.toEmail === u4.email && interviewMail.subject.includes(label("team-a")) && interviewMail.body.includes("https://calendar.app.google/example"), JSON.stringify({ subject: interviewMail.subject }));
+    check("the interview email names the team, goes to the account address, and uses the booking link", interviewMail.template === "INTERVIEW" && interviewMail.applicationTrackId === tA && interviewMail.toEmail === u4.email && interviewMail.subject.includes(label("media")) && interviewMail.body.includes("https://calendar.app.google/example"), JSON.stringify({ subject: interviewMail.subject }));
     check("a failed send is recorded on the row, and the decision stands", d1.delivery?.status === "FAILED" && interviewMail.status === "FAILED" && (await prisma.applicationTrack.findUniqueOrThrow({ where: { id: tA } })).status === "INTERVIEW");
 
     // -- the transaction really rolls back when the email can't be built
     await setTrackStatus(officer.id, tA, "IN_REVIEW");
-    await prisma.recruitingTrackConfig.deleteMany({ where: { cycleId: cycle.id, track: "team-a" } });
+    await prisma.recruitingTrackConfig.deleteMany({ where: { cycleId: cycle.id, track: "media" } });
     const before = await emailCount(tA);
     await expectError("an email that needs a missing booking link is refused", () => decideAndNotify(officer.id, tA, "INTERVIEW", { sendEmail: true, override: { subject: "Hi", body: "Book here: {{schedulingLink}}" } }), "MISSING_SCHEDULING_LINK");
     const afterFail = await prisma.applicationTrack.findUniqueOrThrow({ where: { id: tA } });
@@ -372,7 +375,7 @@ async function main() {
     check("previewing shows the final text and HTML and writes nothing", !!preview && preview.subject.includes(label("team-b")) && preview.html.includes("<html") && (await prisma.applicationEmail.count({ where: { applicationId: app4.id } })) === rowsBeforePreview);
     check("a status with no email has no preview", (await previewDecisionEmail(tB, "IN_REVIEW")) === null);
     const draftId = (await getMyApplication(u2.id))!.id;
-    const draftTrackId = (await prisma.applicationTrack.create({ data: { applicationId: draftId, track: "team-c" } })).id;
+    const draftTrackId = (await prisma.applicationTrack.create({ data: { applicationId: draftId, track: "competition" } })).id;
     await expectError("a draft application can't be emailed or previewed", () => composeTrackEmail(prisma, draftTrackId, "ACCEPTED"), "NOT_FOUND");
 
     // -- resend and cleanup of stuck mail
@@ -414,7 +417,7 @@ async function main() {
     const byAccountEmail = await listTrackApplications({ cycleId: cycle.id, q: u4.email });
     check("the list finds an applicant by their account email even when the application's copy differs", byAccountEmail.rows.length === 2 && byAccountEmail.rows.every((r) => r.application.email === u4.email), `rows=${byAccountEmail.rows.length}`);
     check("...and never by the altered copy being shown", (await listTrackApplications({ cycleId: cycle.id, q: "attacker@evil.test" })).rows.every((r) => r.application.email !== "attacker@evil.test"));
-    const onlyA = await exportRound(officer.id, "fall-2026", { q: run, track: "team-a" }, { adminBaseUrl: "https://example.test" });
+    const onlyA = await exportRound(officer.id, "fall-2026", { q: run, track: "media" }, { adminBaseUrl: "https://example.test" });
     check("filters apply to the export", !!onlyA && onlyA.rowCount === 2 && !onlyA.csv.includes(`${tracks.find((t) => t.key === "team-b")!.label}`), `rowCount=${onlyA?.rowCount}`);
     check("an unknown round exports nothing", (await exportRound(officer.id, "no-such-round", {}, { adminBaseUrl: "https://example.test" })) === null);
     const audits = await prisma.auditLog.count({ where: { entityType: "RECRUITING_CYCLE", entityId: cycle.id, actionType: "RECRUITING_EXPORTED", actorUserId: officer.id } });
@@ -426,12 +429,12 @@ async function main() {
   console.log("--- bulk decisions and the daily email limit ---");
   {
     const u5 = await makeUser("u5");
-    await setSelectedTracks(u5.id, ["team-a", "team-b"], IN).catch(() => null);
+    await setSelectedTracks(u5.id, ["media", "team-b"], IN).catch(() => null);
     // u5 needs its own complete application: it can only be started while a round is active (fall-2026 is)
-    await saveDraft(u5.id, { genericAnswers: GENERIC, resumeUrl: RESUME, trackAnswers: { "team-a": { a_experience: "Built a rig" } } }, IN);
+    await saveDraft(u5.id, { genericAnswers: GENERIC, resumeUrl: RESUME, trackAnswers: { "media": MEDIA_FULL } }, IN);
     await submitAndNotify(u5.id, IN);
     const app5 = await prisma.application.findFirstOrThrow({ where: { userId: u5.id }, include: { tracks: true } });
-    const t5a = app5.tracks.find((t) => t.track === "team-a")!.id;
+    const t5a = app5.tracks.find((t) => t.track === "media")!.id;
     const t5b = app5.tracks.find((t) => t.track === "team-b")!.id;
     const originalLimit = process.env.RESEND_DAILY_LIMIT;
     try {
@@ -465,18 +468,18 @@ async function main() {
     await expectError("a round that closes before it opens is refused", () => createCycle(officer.id, { name: "bad", slug: roundSlug("bad"), opensAt: new Date("2027-04-01T06:00:00Z"), closesAt: new Date("2027-03-01T06:00:00Z") }), "INVALID");
     await expectError("an uppercase address is refused", () => createCycle(officer.id, { name: "bad", slug: "Not-OK", opensAt: new Date("2027-03-01T06:00:00Z"), closesAt: new Date("2027-04-01T06:00:00Z") }), "INVALID");
 
-    await saveTrackConfig(officer.id, a.id, "team-a", "https://calendar.app.google/t6-copy-me");
-    check("a booking link is saved for a team that interviews", (await getTrackConfigs(a.id))["team-a"] === "https://calendar.app.google/t6-copy-me");
+    await saveTrackConfig(officer.id, a.id, "media", "https://calendar.app.google/t6-copy-me");
+    check("a booking link is saved for a team that interviews", (await getTrackConfigs(a.id))["media"] === "https://calendar.app.google/t6-copy-me");
     await expectError("a team without interviews can't have a booking link", () => saveTrackConfig(officer.id, a.id, "team-b", "https://calendar.app.google/x"), "INVALID");
-    await expectError("a non-Google host is refused by default", () => saveTrackConfig(officer.id, a.id, "team-a", "https://calendly.com/lsr/x"), "INVALID");
-    await expectError("a plain http link is refused", () => saveTrackConfig(officer.id, a.id, "team-a", "http://calendar.app.google/x", { allowOtherHost: true }), "INVALID");
-    await saveTrackConfig(officer.id, a.id, "team-a", "https://calendly.com/lsr/x", { allowOtherHost: true });
-    check("...unless the officer allows another host", (await getTrackConfigs(a.id))["team-a"] === "https://calendly.com/lsr/x");
-    await saveTrackConfig(officer.id, a.id, "team-a", "https://calendar.app.google/t6-copy-me");
+    await expectError("a non-Google host is refused by default", () => saveTrackConfig(officer.id, a.id, "media", "https://calendly.com/lsr/x"), "INVALID");
+    await expectError("a plain http link is refused", () => saveTrackConfig(officer.id, a.id, "media", "http://calendar.app.google/x", { allowOtherHost: true }), "INVALID");
+    await saveTrackConfig(officer.id, a.id, "media", "https://calendly.com/lsr/x", { allowOtherHost: true });
+    check("...unless the officer allows another host", (await getTrackConfigs(a.id))["media"] === "https://calendly.com/lsr/x");
+    await saveTrackConfig(officer.id, a.id, "media", "https://calendar.app.google/t6-copy-me");
     check("every link change is audit-logged with before and after", (await prisma.auditLog.count({ where: { entityId: a.id, actionType: "RECRUITING_BOOKING_LINK_CHANGED" } })) === 3);
 
     const b = await createCycle(officer.id, { name: `T6 ${run} B`, slug: roundSlug("b"), opensAt: new Date("2027-03-01T06:00:00Z"), closesAt: new Date("2027-04-01T06:00:00Z") });
-    check("a new round copies the previous round's booking links", b.copiedLinks === 1 && (await getTrackConfigs(b.id))["team-a"] === "https://calendar.app.google/t6-copy-me", `copied=${b.copiedLinks}`);
+    check("a new round copies the previous round's booking links", b.copiedLinks === 1 && (await getTrackConfigs(b.id))["media"] === "https://calendar.app.google/t6-copy-me", `copied=${b.copiedLinks}`);
 
     await setActiveCycle(officer.id, a.id);
     const active = await prisma.recruitingCycle.findMany({ where: { isActive: true }, select: { id: true } });

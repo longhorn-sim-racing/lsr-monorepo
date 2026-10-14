@@ -8,7 +8,7 @@
 // Team leads send their questions as text; a developer transcribes them below
 // (one commit per team). The rules for lead questions are enforced in code, not just
 // by convention, so a violation fails typecheck/build (and therefore CI):
-//   - at most 5 questions per team            (type `Upto5` + validateContent)
+//   - at most 6 questions per team            (type `Upto6` + validateContent)
 //   - only these types: short_text, long_text, single_choice, multi_choice, link
 //   - every question says whether it is required
 //   - choice questions list 2 to 8 options of at most 100 characters
@@ -18,7 +18,7 @@
 import { z } from 'zod';
 
 export const RECRUITING_LIMITS = {
-  maxQuestionsPerTrack: 5,
+  maxQuestionsPerTrack: 6,
   minOptions: 2,
   maxOptions: 8,
   maxOptionLength: 100,
@@ -76,14 +76,15 @@ export type Question = GenericQuestion;
 export const TRACK_QUESTION_TYPES = ['short_text', 'long_text', 'single_choice', 'multi_choice', 'link'] as const;
 export const GENERIC_QUESTION_TYPES = [...TRACK_QUESTION_TYPES, 'scale', 'yes_no'] as const;
 
-/** A tuple of 0 to 5 items: a sixth question is a compile error. */
-type Upto5<T> =
+/** A tuple of 0 to 6 items: a seventh question is a compile error. */
+type Upto6<T> =
   | readonly []
   | readonly [T]
   | readonly [T, T]
   | readonly [T, T, T]
   | readonly [T, T, T, T]
-  | readonly [T, T, T, T, T];
+  | readonly [T, T, T, T, T]
+  | readonly [T, T, T, T, T, T];
 
 // ---------------------------------------------------------------------------
 // Teams ("tracks")
@@ -99,15 +100,15 @@ export type TrackDefinition = {
   interviewRequired: boolean;
 };
 
-// Technology and Community are real (transcribed from the leads' questions). The three
-// "(placeholder)" teams stand in for teams that haven't sent theirs yet; replace each one when it does
-// (see PLACEHOLDER_CONTENT). Their keys are used by the tests, so keep them until they are replaced.
+// Technology, Community, Media and Competition are real (transcribed from the leads' questions). The one
+// "(placeholder)" team stands in for the fifth team, which hasn't sent its questions yet; replace it when it does
+// (see PLACEHOLDER_CONTENT). Its key is used by the tests (it is the team without interviews), so keep it until then.
 export const tracks = [
   { key: 'technology', label: 'Technology', blurb: 'Web, data, infrastructure and broadcast tech behind the club.', interviewRequired: true },
   { key: 'community', label: 'Community', blurb: 'Events, socials and growing the club community.', interviewRequired: true },
-  { key: 'team-a', label: 'Team A (placeholder)', blurb: 'Placeholder for a team whose questions are not in yet. Interviews.', interviewRequired: true },
+  { key: 'media', label: 'Media', blurb: 'Design, video, photography and social media for the club.', interviewRequired: true },
+  { key: 'competition', label: 'Competition', blurb: 'Race operations, data analysis, endurance events and leagues.', interviewRequired: true },
   { key: 'team-b', label: 'Team B (placeholder)', blurb: 'Placeholder for a team whose questions are not in yet. No interview.', interviewRequired: false },
-  { key: 'team-c', label: 'Team C (placeholder)', blurb: 'Placeholder for a team whose questions are not in yet. Five questions.', interviewRequired: true },
 ] as const satisfies readonly TrackDefinition[];
 
 export type TrackKey = (typeof tracks)[number]['key'];
@@ -122,8 +123,8 @@ export type TrackKey = (typeof tracks)[number]['key'];
 export const genericQuestions: readonly GenericQuestion[] = [];
 
 // Team questions. Ids must be unique across every list in this file, so prefix them with the team.
-// Technology and Community are the leads' wording, verbatim; the `[Placeholder]` ones are stand-ins.
-export const trackQuestions: Record<TrackKey, Upto5<TrackQuestion>> = {
+// Technology, Community, Media and Competition are the leads' wording, verbatim; the `[Placeholder]` ones are stand-ins.
+export const trackQuestions: Record<TrackKey, Upto6<TrackQuestion>> = {
   technology: [
     {
       id: 'tech_areas',
@@ -169,19 +170,55 @@ export const trackQuestions: Record<TrackKey, Upto5<TrackQuestion>> = {
     },
     { id: 'comm_hours', type: 'single_choice', label: 'Roughly how many hours a week would you be able to work for LSR?', options: ['1–3', '3–5', '5–8', '8+'], required: true },
   ],
-  'team-a': [
-    { id: 'a_experience', type: 'long_text', label: '[Placeholder] Describe your relevant experience.', required: true },
-    { id: 'a_portfolio', type: 'link', label: '[Placeholder] Link to a past project.', required: false },
+  media: [
+    {
+      id: 'media_tools',
+      type: 'multi_choice',
+      label: 'Which of these are you proficient in?',
+      options: ['Canva', 'Adobe Illustrator', 'Adobe Photoshop', 'Video editing software'],
+      required: true,
+    },
+    { id: 'media_tools_other', type: 'short_text', label: 'Anything else you are proficient in? (optional)', required: false },
+    { id: 'media_social', type: 'long_text', label: 'Do you have any experience in social media management? (Ex: for an org or a HS club)', required: true },
+    { id: 'media_portfolio', type: 'link', label: 'Please link your portfolio to your work', required: true },
+    { id: 'media_favorite', type: 'long_text', label: 'Pick your favorite piece from your portfolio and explain why. Tell us all about the process!', required: true },
+    { id: 'media_hours', type: 'single_choice', label: 'Please share with us how much time you can work on LSR-related projects', options: ['1–3', '3–5', '5–8', '8+'], required: true },
+  ],
+  competition: [
+    {
+      id: 'comp_skills',
+      type: 'multi_choice',
+      label: 'Which of these are you proficient in?',
+      options: [
+        'How to save replays',
+        'How to cut up said replay',
+        'Teaching others, for example how to drive',
+        'AC data upload to website (can be taught)',
+        'Data analysis (tires, fuel, making set-ups for endurance team/Garage 66)',
+        'Commentating races/events',
+        'Esports team/intercollegiate outreach',
+        'League making (LSC/FSL)',
+      ],
+      required: true,
+    },
+    { id: 'comp_exec', type: 'long_text', label: 'Do you have any experience being in an executive position at an org or club?', required: true },
+    {
+      id: 'comp_challenge',
+      type: 'long_text',
+      label: 'Tell us about a challenge you faced while being in a group and what you did and what you would like to do at LSR.',
+      required: true,
+    },
+    {
+      id: 'comp_endurance',
+      type: 'single_choice',
+      label: 'We at LSR do a lot of endurance events. If you want to be a data analyst, would you be willing to stay with us periodically through the events? (Keep in mind these events can range from 6-24hrs).',
+      options: ['Yes', 'No', "I'm not applying for analyst"],
+      required: true,
+    },
+    { id: 'comp_hours', type: 'single_choice', label: 'How much time (hours) can you work on LSR-related projects per week?', options: ['1', '2', '3', '4+'], required: true },
   ],
   'team-b': [
     { id: 'b_tools', type: 'multi_choice', label: '[Placeholder] Which tools do you use?', options: ['Tool 1', 'Tool 2', 'Tool 3', 'Other'], required: false },
-  ],
-  'team-c': [
-    { id: 'c_motivation', type: 'long_text', label: '[Placeholder] Why this team?', required: true },
-    { id: 'c_hours', type: 'single_choice', label: '[Placeholder] Hours per week you can commit', options: ['1 to 3', '4 to 6', '7 or more'], required: true },
-    { id: 'c_skills', type: 'multi_choice', label: '[Placeholder] Which skills apply to you?', options: ['Skill 1', 'Skill 2', 'Skill 3'], required: false },
-    { id: 'c_headline', type: 'short_text', label: '[Placeholder] Describe yourself in one line.', required: false },
-    { id: 'c_link', type: 'link', label: '[Placeholder] Link to your best work.', required: true },
   ],
 };
 
