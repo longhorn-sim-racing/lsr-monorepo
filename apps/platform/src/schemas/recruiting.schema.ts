@@ -24,7 +24,8 @@ export const RECRUITING_LIMITS = {
   maxOptionLength: 100,
   maxLabelLength: 300,
   shortTextMax: 200,
-  longTextMax: 1500,
+  // Business asks for answers of up to 500 words (about 3,000 characters)
+  longTextMax: 3000,
   urlMax: 2000,
 } as const;
 
@@ -101,14 +102,15 @@ export type TrackDefinition = {
 };
 
 // The blurbs for the real teams are the ones on the /about page (src/app/about/roster.ts); keep them in step.
-// Technology, Community, Media and Competition are real (transcribed from the leads' questions). The one
-// "(placeholder)" team stands in for the fifth team, which hasn't sent its questions yet; replace it when it does
-// (see PLACEHOLDER_CONTENT). Its key is used by the tests (it is the team without interviews), so keep it until then.
+// Technology, Community, Media, Competition and Business are real (transcribed from the leads' questions). The one
+// "(placeholder)" team is a stand-in kept only because the tests and integration script use it as the team without
+// interviews; remove it (and flip PLACEHOLDER_CONTENT) before launch.
 export const tracks = [
   { key: 'technology', label: 'Technology', blurb: 'Builds and runs this website and the tools behind it: events, payments, results and the member database.', interviewRequired: true },
   { key: 'community', label: 'Community', blurb: 'Brings people in and keeps them around: watch parties, sim nights, socials, tabling and volunteering at track events.', interviewRequired: true },
   { key: 'media', label: 'Media', blurb: 'Photos, video, race highlights and the LSR brand across every channel.', interviewRequired: true },
   { key: 'competition', label: 'Competition', blurb: 'Runs the Lone Star Cup: race control, stewarding, sporting regulations and the sim servers we race on.', interviewRequired: true },
+  { key: 'business', label: 'Business', blurb: 'Funds the club: sponsorships, partnerships, fundraising, budgeting and marketing.', interviewRequired: true },
   { key: 'team-b', label: 'Team B (placeholder)', blurb: 'Placeholder for a team whose questions are not in yet. No interview.', interviewRequired: false },
 ] as const satisfies readonly TrackDefinition[];
 
@@ -124,7 +126,7 @@ export type TrackKey = (typeof tracks)[number]['key'];
 export const genericQuestions: readonly GenericQuestion[] = [];
 
 // Team questions. Ids must be unique across every list in this file, so prefix them with the team.
-// Technology, Community, Media and Competition are the leads' wording, verbatim; the `[Placeholder]` ones are stand-ins.
+// Technology, Community, Media, Competition and Business are the leads' wording, verbatim; the `[Placeholder]` ones are stand-ins.
 export const trackQuestions: Record<TrackKey, Upto6<TrackQuestion>> = {
   technology: [
     {
@@ -217,6 +219,43 @@ export const trackQuestions: Record<TrackKey, Upto6<TrackQuestion>> = {
       required: true,
     },
     { id: 'comp_hours', type: 'single_choice', label: 'How much time (hours) can you work on LSR-related projects per week?', options: ['1', '2', '3', '4+'], required: true },
+  ],
+  business: [
+    {
+      id: 'biz_experience',
+      type: 'long_text',
+      label: 'What is your previous experience working with finances, budgeting, fundraising, business-to-business relations, and/or sponsorships? Are you involved with any other student organizations/commitments?',
+      help: 'Up to 500 words.',
+      required: true,
+    },
+    {
+      id: 'biz_areas',
+      type: 'multi_choice',
+      label: 'Which areas are you interested in working on?',
+      options: ['Sponsorships/partnerships', 'Fundraising', 'Budgeting/finance', 'Marketing', 'Open to all'],
+      required: true,
+    },
+    {
+      id: 'biz_teamwork',
+      type: 'long_text',
+      label: 'Describe an experience where you worked with others, organized a project, or managed resources. What was your contribution? Experience from classes, jobs, or volunteering counts.',
+      help: 'Up to 350 words.',
+      required: true,
+    },
+    {
+      id: 'biz_idea',
+      type: 'long_text',
+      label: 'Suggest one fundraising idea or potential sponsor for our organization. How would you get started?',
+      help: 'Up to 350 words.',
+      required: true,
+    },
+    {
+      id: 'biz_hours',
+      type: 'single_choice',
+      label: 'How many hours per week can you realistically commit to the team?',
+      options: ['Less than 2 hours', '2–4 hours', '5–7 hours', '8 or more hours'],
+      required: true,
+    },
   ],
   'team-b': [
     { id: 'b_tools', type: 'multi_choice', label: '[Placeholder] Which tools do you use?', options: ['Tool 1', 'Tool 2', 'Tool 3', 'Other'], required: false },

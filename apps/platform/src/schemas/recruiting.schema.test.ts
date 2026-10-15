@@ -154,11 +154,11 @@ describe("parseAnswers", () => {
     expect(parseAnswers(sample, { many: [] }, "submit").missing).not.toContain("many");
   });
 
-  it("enforces text lengths at exactly 200 and 1500", () => {
+  it("enforces text lengths at exactly 200 and 3000", () => {
     expect(errorsFor({ txt: "x".repeat(201) })).toHaveProperty("txt");
     expect(errorsFor({ txt: "x".repeat(200) })).not.toHaveProperty("txt");
-    expect(errorsFor({ long: "x".repeat(1501) })).toHaveProperty("long");
-    expect(errorsFor({ long: "x".repeat(1500) })).not.toHaveProperty("long");
+    expect(errorsFor({ long: "x".repeat(3001) })).toHaveProperty("long");
+    expect(errorsFor({ long: "x".repeat(3000) })).not.toHaveProperty("long");
   });
 
   it.each([
@@ -361,5 +361,13 @@ describe("Media and Competition questions", () => {
     expect(comp.every((q) => q.required)).toBe(true);
     expect(getTrack("media")?.interviewRequired).toBe(true);
     expect(getTrack("competition")?.interviewRequired).toBe(true);
+  });
+
+  it("Business has five required questions and interviews", () => {
+    const biz = questionsForTrack("business");
+    expect(biz).toHaveLength(5);
+    expect(biz.every((q) => q.required)).toBe(true);
+    expect(biz.find((q) => q.id === "biz_areas")).toMatchObject({ type: "multi_choice" });
+    expect(getTrack("business")?.interviewRequired).toBe(true);
   });
 });
