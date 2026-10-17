@@ -60,7 +60,10 @@ export function AuthForms({
   initialMode?: AuthMode
   /** Where to go after signing in; without it the current page refreshes */
   next?: string
-  /** Where Google sign-in returns to; without it the callback sends people to their driver page */
+  /**
+   * Where Google sign-in and the email-confirmation link return to; without it the callback sends
+   * people to their driver page. Must already be a safe same-site path (see safeNextPath).
+   */
   googleNext?: string
   /** Called after a successful sign-in (the dialog closes itself) */
   onSignedIn?: () => void
@@ -114,7 +117,9 @@ export function AuthForms({
         email,
         password,
         options: {
-          emailRedirectTo: `${getSiteUrl()}/auth/callback`,
+          // Keep the destination through the confirmation email, so someone who signs up on the way to
+          // /apply/start lands there after clicking the link instead of on their driver page
+          emailRedirectTo: `${getSiteUrl()}/auth/callback${googleNext ? `?next=${encodeURIComponent(googleNext)}` : ""}`,
           data: { displayName, eid, marketingOptIn: marketing },
         },
       })

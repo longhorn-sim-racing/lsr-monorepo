@@ -68,6 +68,8 @@ Environment variables (Supabase credentials, Stripe keys, etc.) are configured i
 
 A GitHub Actions cron job (`.github/workflows/notification-cron.yml`) runs every 15 minutes to process queued notifications. It calls the `/api/cron/notifications` endpoint with a bearer token. This is independent of deployments.
 
+A second job (`.github/workflows/recruiting-cron.yml`) calls `/api/cron/recruiting` every 15 minutes. After a recruiting round's deadline it submits every complete draft for its applicant (and emails a confirmation); before the deadline it does nothing, and running it again changes nothing. Unlike the other cron routes it **refuses every request when `CRON_SECRET` is not set**, so the secret must exist in both Vercel and the repo's GitHub secrets (with `SITE_URL`) before the first recruiting deadline.
+
 ## Database migrations
 
 Migrations are applied automatically via the **Database Migrate** workflow (`.github/workflows/migrate.yml`). The process:
