@@ -81,13 +81,13 @@ export function CyclesConsole({
   const active = cycles.find((c) => c.isActive) ?? null;
 
   /** Confirms, runs the action, and reports the outcome. */
-  async function run(key: string, options: Parameters<typeof confirm>[0], action: () => Promise<{ ok: boolean; error?: string }>, success: string) {
+  async function run(key: string, options: Parameters<typeof confirm>[0], action: () => Promise<{ ok: boolean; error?: string }>, success: string | null) {
     if (!(await confirm(options))) return;
     setBusy(key);
     const res = await action();
     setBusy(null);
     if (!res.ok) return void toast.error(res.error ?? "That didn't work.");
-    toast.success(success);
+    if (success) toast.success(success);
     router.refresh();
   }
 
@@ -104,18 +104,19 @@ export function CyclesConsole({
         const res = await runSweepAction(c.id);
         if (res.ok) {
           const d = res.data;
+          const unsent = d.emailsFailed + d.emailsOverLimit;
           toast.message(
-            `${d.submitted} submitted, ${d.skippedIncomplete + d.skippedNoTeams} incomplete left as drafts${d.emailsFailed > 0 ? `, ${d.emailsFailed} confirmation email(s) failed (see Emails)` : ""}${d.timedOut ? ". Time ran out: run it again to continue" : ""}.`,
+            `Sweep finished: ${d.submitted} submitted, ${d.skippedIncomplete + d.skippedNoTeams} incomplete left as drafts${unsent > 0 ? `, ${unsent} confirmation email(s) not sent (see Emails)` : ""}${d.timedOut ? ". Time ran out: run it again to continue" : ""}.`,
           );
         }
         return res;
       },
-      "Sweep finished.",
+      null, // the action reports its own result
     );
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4">
+    <div className="max-w-5xl space-y-4">
       <PageHeader
         back={{ href: "/admin/recruiting", label: "Applications" }}
         title="Recruiting rounds"

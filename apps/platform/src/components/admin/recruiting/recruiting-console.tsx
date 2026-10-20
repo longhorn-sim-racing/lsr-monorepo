@@ -15,6 +15,7 @@ import {
   Input,
   Notice,
   Pager,
+  Panel,
   Segmented,
   Select,
   TD,
@@ -196,9 +197,9 @@ export function RecruitingConsole({
         </span>
       </Toolbar>
 
-      {selected.size > 0 && (
+      {selectedRows.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2.5 rounded-lg border bg-admin-selected px-3.5 py-2.5 text-[13px]">
-          <span className="font-semibold">{selected.size} selected</span>
+          <span className="font-semibold">{selectedRows.length} selected</span>
           <Select
             aria-label="Set status for the selected"
             className="w-auto"
@@ -223,12 +224,12 @@ export function RecruitingConsole({
       )}
 
       {rows.length === 0 ? (
-        <div className="rounded-lg border bg-card">
+        <Panel>
           <EmptyState
             title={everything === 0 ? "No submitted applications yet" : "Nothing matches these filters"}
             description={everything === 0 ? "Applications appear here as soon as applicants submit. Drafts are never shown." : "Try a different team or status, or clear the search."}
           />
-        </div>
+        </Panel>
       ) : (
         <Table minWidth={760}>
           <THead>
@@ -334,6 +335,8 @@ function BulkDialog({
   const [sendEmail, setSendEmail] = useState(canEmail);
   const [ignoreLimit, setIgnoreLimit] = useState(false);
   const [limitHit, setLimitHit] = useState(false);
+  const reversing = rows.filter((r) => r.status === "ACCEPTED" || r.status === "REJECTED");
+  const [confirmedReversal, setConfirmedReversal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BulkDecisionResult | null>(null);
   const [pending, startTransition] = useTransition();
@@ -342,7 +345,12 @@ function BulkDialog({
   function apply() {
     setError(null);
     startTransition(async () => {
-      const res = await bulkDecideAction(rows.map((r) => r.id), status, { sendEmail, ignoreLimit });
+      const res = await bulkDecideAction(rows.map((r) => r.id), status, {
+        sendEmail,
+        ignoreLimit,
+        // What each officer saw, so a row a colleague changed in the meantime is refused, not overwritten
+        expectedStatuses: Object.fromEntries(rows.map((r) => [r.id, r.status])),
+      });
       if (!res.ok) {
         setError(res.error);
         setLimitHit(res.code === "EMAIL_LIMIT");
@@ -373,7 +381,12 @@ function BulkDialog({
             {result ? "Close" : "Cancel"}
           </Button>
           {!result && (
-            <Button variant="primary" pending={pending} disabled={limitHit && !ignoreLimit} onClick={apply}>
+            <Button
+              variant="primary"
+              pending={pending}
+              disabled={(limitHit && !ignoreLimit) || (reversing.length > 0 && !confirmedReversal)}
+              onClick={apply}
+            >
               {sendEmail ? `Mark ${label} and email` : `Mark ${label}`}
             </Button>
           )}
@@ -389,6 +402,18 @@ function BulkDialog({
             </li>
           ))}
         </ul>
+
+        {!result && reversing.length > 0 && (
+          <Notice
+            tone="warning"
+            title={`${reversing.length} ${reversing.length === 1 ? "is" : "are"} already Accepted or Not moving forward`}
+          >
+            <p>Those applicants may already have been told. Changing them can send a second, different email.</p>
+            <div className="mt-2">
+              <CheckboxField checked={confirmedReversal} onChange={(e) => setConfirmedReversal(e.target.checked)} label="Yes, change them too" />
+            </div>
+          </Notice>
+        )}
 
         {result ? (
           <Notice tone="warning" title={`${result.decided} of ${result.total} were changed. These were not:`}>

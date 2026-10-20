@@ -61,7 +61,9 @@ The app uses file-system routing via the Next.js App Router. Key route groups:
 | `/sponsors` | Sponsor information |
 | `/account` | User account settings |
 | `/auth/*` | Sign in, password reset, OAuth callback |
+| `/apply`, `/apply/start`, `/apply/status` | Recruiting: round info, the application form, and the applicant's read-only status (behind the `recruiting` feature flag) |
 | `/admin/*` | Admin console (events, users, results, seasons, etc.) |
+| `/admin/recruiting/*` | Recruiting console: applications, per-application review and decisions, rounds and booking links, the emails that need attention, CSV export |
 | `/api/*` | API routes (registration, payments, cron, Shopify cart, etc.) |
 | `/check-in/[id]` | QR-based event check-in |
 
@@ -140,6 +142,7 @@ The database schema is defined in `prisma/schema.prisma`. Key model groups:
 - **Competition**: `League`, `Season`, `Entry` (a driver's per-season standings aggregates), `LeagueApplication` (Lone Star Cup entry form)
 - **Race data**: `RawResultUpload` → `RaceSession`, `RaceParticipant`, `RaceResult`, `RaceLap`, `RaceEvent`, `ParseReport`; `DriverIdentity` and `CarMapping` map sim driver GUIDs and car names
 - **Content**: `Post`, `Page` (editable pages such as the Lone Star Cup rules), `GalleryImage`, `Tag`
+- **Recruiting**: `RecruitingCycle` (a round; at most one is active), `Application` (one per person per round), `ApplicationTrack` (one per team applied to, with its own status), `ApplicationReview`, `ApplicationEmail` (every recruiting email, with its delivery state), `RecruitingTrackConfig` (booking links). These tables have row level security on; `jack_readonly` has a read-only policy on each. The rules live in `recruiting.service.ts` (drafts, submission, decisions, the deadline sweep) and `recruiting-email.service.ts` (composing, sending, resending, the daily email quota); see [recruiting-system-design.md](./recruiting-system-design.md)
 - **Notifications & settings**: `Notification`, `NotificationPreference`, `SystemSetting`, `FeatureFlag`
 
 Migrations live in `prisma/migrations/`. Apply with `pnpm --filter @lsr/platform db:migrate`.

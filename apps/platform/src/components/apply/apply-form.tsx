@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Check, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -37,12 +37,12 @@ type Props = {
   /** The page the applicant last saved, so the form reopens there */
   initialStep: string | null;
   accountEmail: string;
-  round: { name: string; closesAt: string };
+  round: { id: string; name: string; closesAt: string };
   teams: TeamDef[];
 };
 
 /** Codes that mean "this application can't be changed any more", not "fix a field". */
-const LOCKED_CODES = ["ROUND_CLOSED", "ROUND_NOT_OPEN_YET", "ALREADY_SUBMITTED", "CLOSED"];
+const LOCKED_CODES = ["ROUND_CLOSED", "ROUND_NOT_OPEN_YET", "ALREADY_SUBMITTED", "CLOSED", "ROUND_CHANGED"];
 
 /** Server field errors are keyed by path; the page keys question errors by question id. */
 function normalizeFieldErrors(fieldErrors: Record<string, string> | undefined): Record<string, string> {
@@ -59,14 +59,28 @@ function questionErrors(step: StepKey, state: FormState): Record<string, string>
   const questions = questionsForStep(step);
   if (questions.length === 0) return {};
   const answers = step === "general" ? state.genericAnswers : (state.trackAnswers[step.slice(5)] ?? {});
-  return parseAnswers(questions, answers, "draft").errors;
+  // Answers to questions that were removed since they were saved aren't the applicant's to fix
+  return parseAnswers(questions, answers, "draft", { ignoreUnknown: true }).errors;
+}
+
+/** Field-error keys the page has somewhere to show: this page's questions, profile fields, the resume link. */
+function keysShownOn(step: StepKey): Set<string> {
+  const keys = new Set(questionsForStep(step).map((q) => q.id));
+  return keys;
+}
+
+/** The problems a page can't show next to a field (a team's page that isn't part of the application, say), for the banner. */
+function unmatchedMessages(step: StepKey, fields: Record<string, string>): string[] {
+  const shown = keysShownOn(step);
+  return Object.entries(fields)
+    .filter(([key]) => !shown.has(key) && !key.startsWith("profile.") && key !== "resumeUrl" && key !== "tracks")
+    .map(([, message]) => message);
 }
 
 export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: Props) {
   const router = useRouter();
   const [state, setState] = useState<FormState>(initial);
   const [lastSaved, setLastSaved] = useState(() => JSON.stringify(initial));
-  const [stepKey, setStepKey] = useState<StepKey>(() => resolveStep(initialStep, buildSteps(initial.teams)));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<string | null>(null);
   const [serverReport, setServerReport] = useState<CompletenessReport | null>(null);
@@ -77,6 +91,10 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
   const heading = useRef<HTMLHeadingElement>(null);
 
   const steps = useMemo(() => buildSteps(state.teams), [state.teams]);
+  // The page lives in the URL (?step=), so the browser's Back and the phone's back gesture move
+  // between pages instead of leaving the form. The first visit opens where the applicant left off.
+  const stepParam = useSearchParams().get("step");
+  const stepKey = resolveStep(stepParam ?? initialStep, steps);
   const completion = useMemo(() => stepCompletion(state, accountEmail), [state, accountEmail]);
   const dirty = JSON.stringify(state) !== lastSaved;
   const index = Math.max(0, steps.findIndex((s) => s.key === stepKey));
@@ -92,6 +110,54 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
+  // Give the first page an address of its own, so Back from page two lands here and not on a different page
+  useEffect(() => {
+    if (stepParam === null) window.history.replaceState(null, "", `?step=${encodeURIComponent(stepKey)}`);
+    // Only on arrival
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Save the current page a moment after the applicant stops typing, so leaving the form any way
+  // at all (the back gesture on a phone, a closed tab) loses at most a few seconds of typing.
+  // Pages with problems are left for "Save and continue" to explain.
+  useEffect(() => {
+    if (!dirty || pending || locked || stepKey === "review" || stepKey === "teams") return;
+    const built = patchForStep(stepKey, state);
+    if (!built.ok || Object.keys(questionErrors(stepKey, state)).length > 0) return;
+    const snapshot = JSON.stringify(state);
+    const timer = setTimeout(async () => {
+      const res = await saveProgressAction(round.id, built.patch);
+      if (res.ok) {
+        setLastSaved(snapshot);
+        setSavedAt(res.data.savedAt);
+      } else if (res.code && LOCKED_CODES.includes(res.code)) setLocked(true);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [state, dirty, pending, locked, stepKey, round.id]);
+
+  // Back (or the back gesture) can move to another page while the one just left has unsaved typing:
+  // save that page now. "Save and continue" saves before it moves, so it never has anything left to save here.
+  const latest = useRef({ state, dirty });
+  useEffect(() => {
+    latest.current = { state, dirty };
+  });
+  const shownStep = useRef(stepKey);
+  useEffect(() => {
+    const left = shownStep.current;
+    shownStep.current = stepKey;
+    const { state: current, dirty: unsaved } = latest.current;
+    if (left === stepKey || !unsaved || left === "review" || left === "teams") return;
+    const built = patchForStep(left, current);
+    if (!built.ok || Object.keys(questionErrors(left, current)).length > 0) return;
+    const snapshot = JSON.stringify(current);
+    void saveProgressAction(round.id, built.patch).then((res) => {
+      if (res.ok) {
+        setLastSaved(snapshot);
+        setSavedAt(res.data.savedAt);
+      }
+    });
+  }, [stepKey, round.id]);
+
   // Move focus to the new page's heading so keyboard and screen-reader users land in the right place
   useEffect(() => {
     heading.current?.focus();
@@ -106,7 +172,9 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
     else {
       const fields = normalizeFieldErrors(res.fieldErrors);
       setErrors(fields);
-      setBanner(Object.keys(fields).length > 0 ? "Some answers need attention (see below)." : res.error);
+      const loose = unmatchedMessages(stepKey, fields);
+      if (loose.length > 0) setBanner(`${res.error} ${loose.join(" ")}`);
+      else setBanner(Object.keys(fields).length > 0 ? "Some answers need attention (see below)." : res.error);
     }
     if (res.report) setServerReport(res.report);
     return false;
@@ -129,10 +197,10 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
       return false;
     }
     if (stepKey === "teams") {
-      const teamsResult = await setTeamsAction(state.teams);
+      const teamsResult = await setTeamsAction(round.id, state.teams);
       if (!teamsResult.ok) return failed(teamsResult);
     }
-    const res = await saveProgressAction(built.patch);
+    const res = await saveProgressAction(round.id, built.patch);
     if (!res.ok) return failed(res);
     setLastSaved(JSON.stringify(state));
     setSavedAt(res.data.savedAt);
@@ -145,7 +213,7 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
       if (dirty && !(await saveCurrent())) return;
       setErrors({});
       setBanner(null);
-      setStepKey(target);
+      window.history.pushState(null, "", `?step=${encodeURIComponent(target)}`);
       window.scrollTo({ top: 0 });
     });
   }
@@ -160,7 +228,7 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
   function submit() {
     startTransition(async () => {
       setBanner(null);
-      const res = await submitApplicationAction();
+      const res = await submitApplicationAction(round.id);
       if (res.ok) {
         router.replace("/apply/status?submitted=1");
         router.refresh();
@@ -268,7 +336,8 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
             </p>
           )}
 
-          <div className="mt-6 space-y-6">
+          {/* Nothing can be typed while a save is in flight: an edit made then would be left behind by the page moving on */}
+          <fieldset disabled={pending} className="mt-6 min-w-0 space-y-6 border-0 p-0">
             {stepKey === "about" && <AboutStep state={state} accountEmail={accountEmail} setProfile={setProfile} errors={errors} />}
             {(stepKey === "general" || stepKey.startsWith("team:")) && (
               <QuestionsStep
@@ -293,7 +362,7 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
                 onSubmit={submit}
               />
             )}
-          </div>
+          </fieldset>
 
           {stepKey !== "review" && (
             <div className="mt-8 flex flex-wrap items-center gap-3 border-t border-white/10 pt-6">

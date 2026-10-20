@@ -7,9 +7,13 @@ on:
   workflow_dispatch:
     # Allow manual triggering from the GitHub Actions UI
 
+# The job only calls a URL with a secret: it needs no access to the repository
+permissions: {}
+
 jobs:
   sweep:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Run the recruiting deadline sweep
         env:
@@ -21,7 +25,7 @@ jobs:
             exit 1
           fi
 
-          response=$(curl -s -L -w "\n%{http_code}" -X GET "${SITE_URL}/api/cron/recruiting" \
+          response=$(curl -s -L --max-time 90 -w "\n%{http_code}" -X GET "${SITE_URL}/api/cron/recruiting" \
             -H "Authorization: Bearer ${CRON_SECRET}")
 
           http_code=$(echo "$response" | tail -n1)

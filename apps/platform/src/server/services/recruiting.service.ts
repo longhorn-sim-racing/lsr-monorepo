@@ -13,12 +13,14 @@ import { z } from "zod";
 import { prisma } from "@/server/db";
 import { createAuditLog } from "@/server/audit/log";
 import { cycleWindow, type CycleWindow } from "@/lib/recruiting/cycle";
+import { TRACK_STATUS_LABEL } from "@/lib/recruiting/labels";
 import * as repo from "@/server/repos/application.repo";
 import {
   checkCompleteness,
   draftPatchSchema,
   genericQuestions,
   getTrack,
+  isSafeHttpsUrl,
   isTrackKey,
   parseAnswers,
   questionsForTrack,
@@ -43,6 +45,7 @@ export type RecruitingErrorCode =
   | "ALREADY_SUBMITTED"
   | "SELF_REVIEW"
   | "BAD_STATUS"
+  | "STATUS_CHANGED"
   | "INTERVIEW_NOT_OFFERED"
   | "MISSING_SCHEDULING_LINK"
   | "EMAIL_LIMIT";
@@ -89,14 +92,20 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 /**
  * Applies one page of answers on top of what is stored: every key the page sent is first
  * removed (so clearing a field clears it), then the cleaned non-blank answers are added.
- * Answers on other pages are untouched.
+ * Answers on other pages are untouched. Stored answers to questions that no longer exist
+ * are dropped, so a removed question can't linger and block the applicant.
  */
 function mergeAnswers(
   existing: unknown,
   touchedKeys: string[],
   cleaned: Record<string, unknown>,
+  questions: readonly { id: string }[],
 ): Prisma.InputJsonObject {
-  const base: Record<string, unknown> = isPlainObject(existing) ? { ...existing } : {};
+  const known = new Set(questions.map((q) => q.id));
+  const base: Record<string, unknown> = {};
+  if (isPlainObject(existing)) {
+    for (const [k, v] of Object.entries(existing)) if (known.has(k)) base[k] = v;
+  }
   for (const k of touchedKeys) delete base[k];
   return { ...base, ...cleaned } as Prisma.InputJsonObject;
 }
@@ -185,12 +194,21 @@ export type ApplicantStatusView = {
 
 /** Read-only view of the applicant's OWN application, for /apply/status and the review page. */
 export async function getApplicantStatus(userId: string, now: Date = new Date()): Promise<ApplicantStatusView> {
-  const cycle = await repo.findActiveCycle();
+  const active = await repo.findActiveCycle();
+  let cycle = active;
+  let app = active ? await repo.findApplicationByUser(userId, active.id) : null;
+  if (!app) {
+    // Decision emails link here for as long as the applicant has the email, so once their round
+    // is no longer the active one, show their most recent submitted application instead.
+    const previous = await repo.findLatestSubmittedApplicationByUser(userId);
+    if (previous) {
+      app = previous;
+      cycle = await repo.findCycleById(previous.cycleId);
+    }
+  }
   if (!cycle) return { round: null, application: null };
   const window = cycleWindow(cycle, now);
   const round = { id: cycle.id, name: cycle.name, slug: cycle.slug, opensAt: cycle.opensAt, closesAt: cycle.closesAt, window };
-
-  const app = await repo.findApplicationByUser(userId, cycle.id);
   if (!app) return { round, application: null };
 
   const configs = await repo.findTrackConfigs(cycle.id);
@@ -211,10 +229,12 @@ export async function getApplicantStatus(userId: string, now: Date = new Date())
       tracks: app.tracks.map((t) => {
         const def = getTrack(t.track);
         const interviewRequired = def?.interviewRequired ?? false;
-        const bookingUrl =
+        const configured =
           submitted && interviewRequired && t.status === "INTERVIEW"
             ? (configs.find((c) => c.track === t.track)?.schedulingUrl ?? null)
             : null;
+        // Checked when saved, and again here: only a clean https link is ever put in front of an applicant
+        const bookingUrl = configured && isSafeHttpsUrl(configured) ? configured : null;
         return {
           track: t.track,
           label: def?.label ?? t.track,
@@ -304,16 +324,17 @@ export async function saveDraft(userId: string, input: unknown, now: Date = new 
       if (p.email !== undefined && p.email.toLowerCase() !== (account?.email ?? "").toLowerCase()) {
         fieldErrors["profile.email"] = "Your application uses your account email. Change it in your account settings.";
       }
-      if (p.fullName !== undefined) data.fullName = p.fullName;
-      if (p.eid !== undefined) data.eid = p.eid;
+      // Blank or null clears the field
+      if (p.fullName !== undefined) data.fullName = p.fullName || null;
+      if (p.eid !== undefined) data.eid = p.eid || null;
       if (p.gradYear !== undefined) data.gradYear = p.gradYear;
-      if (p.major !== undefined) data.major = p.major;
+      if (p.major !== undefined) data.major = p.major || null;
     }
 
     if (patch.genericAnswers) {
       const r = parseAnswers(genericQuestions, patch.genericAnswers, "draft");
       for (const [id, msg] of Object.entries(r.errors)) fieldErrors[`genericAnswers.${id}`] = msg;
-      data.genericAnswers = mergeAnswers(app.genericAnswers, Object.keys(patch.genericAnswers), r.value);
+      data.genericAnswers = mergeAnswers(app.genericAnswers, Object.keys(patch.genericAnswers), r.value, genericQuestions);
     }
 
     for (const [key, answers] of Object.entries(patch.trackAnswers ?? {})) {
@@ -324,7 +345,7 @@ export async function saveDraft(userId: string, input: unknown, now: Date = new 
       }
       const r = parseAnswers(questionsForTrack(key), answers, "draft");
       for (const [id, msg] of Object.entries(r.errors)) fieldErrors[`trackAnswers.${key}.${id}`] = msg;
-      trackUpdates.push({ id: row.id, answers: mergeAnswers(row.answers, Object.keys(answers), r.value) });
+      trackUpdates.push({ id: row.id, answers: mergeAnswers(row.answers, Object.keys(answers), r.value, questionsForTrack(key)) });
     }
 
     if (patch.resumeUrl !== undefined) data.resumeUrl = patch.resumeUrl === "" ? null : patch.resumeUrl;
@@ -513,6 +534,8 @@ export type SweepResult = {
   failed: number;
   /** true if the time budget ran out before every draft was looked at (the next run continues) */
   timedOut: boolean;
+  /** The deadline was moved while the sweep ran, so the round is open again and the sweep stopped */
+  reopened?: boolean;
 };
 
 /**
@@ -551,24 +574,48 @@ export async function sweepCycle(
   const drafts = await prisma.application.findMany({
     where: { cycleId, state: "DRAFT" },
     orderBy: { id: "asc" },
-    select: { id: true },
+    include: { tracks: { orderBy: { createdAt: "asc" } } },
   });
 
-  for (const { id } of drafts) {
+  for (const draft of drafts) {
+    const id = draft.id;
     if (Date.now() - started > budgetMs) {
       result.timedOut = true;
       break;
     }
     result.checked += 1;
+    // Drafts that can't be submitted (most of them, once the round is old) are counted without
+    // taking a lock. Nothing can edit a draft after the deadline, and a complete-looking one is
+    // checked again under its lock below.
+    if (draft.tracks.length === 0) {
+      result.skippedNoTeams += 1;
+      continue;
+    }
+    if (!checkCompleteness(toSnapshot(draft)).complete) {
+      result.skippedIncomplete += 1;
+      continue;
+    }
     try {
       const outcome = await prisma.$transaction(async (tx) => {
+        // The deadline may have been moved since the round was read at the top. Share-lock the round
+        // row (updateCycle waits for it) and read the deadline again, so nothing is finalized for a
+        // round that has been reopened, and the deadline can't move before this commits.
+        await tx.$executeRaw`SELECT 1 FROM "RecruitingCycle" WHERE id = ${cycleId} FOR SHARE`;
+        const current = await repo.findCycleById(cycleId, tx);
+        if (!current || cycleWindow(current, now) !== "closed") return { kind: "reopened" } as const;
         const app = await lockApplication(tx, id);
         if (!app || app.state !== "DRAFT") return { kind: "already" } as const;
         if (app.tracks.length === 0) return { kind: "no-teams" } as const;
         if (!checkCompleteness(toSnapshot(app)).complete) return { kind: "incomplete" } as const;
-        const done = await finalizeSubmission(tx, app, { auto: true, now: cycle.closesAt, email: hooks.email });
+        const done = await finalizeSubmission(tx, app, { auto: true, now: current.closesAt, email: hooks.email });
         return done.submitted ? ({ kind: "submitted", emailId: done.emailId } as const) : ({ kind: "already" } as const);
       });
+      if (outcome.kind === "reopened") {
+        // Applications are open again: leave every remaining draft alone
+        result.checked -= 1;
+        result.reopened = true;
+        break;
+      }
       if (outcome.kind === "submitted") {
         result.submitted += 1;
         if (outcome.emailId) result.emailIds.push(outcome.emailId);
@@ -608,6 +655,9 @@ export async function recordApplicationViewed(officerId: string, applicationId: 
 /** Null for drafts and unknown ids, so a draft can never be opened by guessing its id. */
 export const getApplicationDetail = repo.findSubmittedApplicationDetail;
 
+/** Templates that announce a decision for one team (the confirmation is not one of them). */
+export const DECISION_TEMPLATES = ["INTERVIEW", "ACCEPTED", "REJECTED"] as const;
+
 /** `SUBMITTED` is the starting status and is never set by an officer. */
 const OFFICER_STATUSES: readonly TrackStatus[] = ["IN_REVIEW", "INTERVIEW", "ACCEPTED", "REJECTED"];
 
@@ -624,6 +674,8 @@ export async function setTrackStatus(
   status: TrackStatus,
   now: Date = new Date(),
   hooks: { email?: EmailHook<{ applicationTrackId: string; applicationId: string; applicantUserId: string; track: string; status: TrackStatus }> } = {},
+  /** The status the officer was looking at. If someone changed it since, nothing is saved. */
+  expectedStatus?: TrackStatus,
 ) {
   if (!OFFICER_STATUSES.includes(status)) {
     throw new RecruitingError("BAD_STATUS", "That status can't be set.");
@@ -641,6 +693,12 @@ export async function setTrackStatus(
     if (row.application.userId === officerId) {
       throw new RecruitingError("SELF_REVIEW", "You can't review or decide your own application.");
     }
+    if (expectedStatus !== undefined && row.status !== expectedStatus) {
+      throw new RecruitingError(
+        "STATUS_CHANGED",
+        `Someone else just changed this to "${TRACK_STATUS_LABEL[row.status]}". Reload the page to see it before deciding again.`,
+      );
+    }
     if (row.status === status) {
       throw new RecruitingError("BAD_STATUS", "It already has that status.");
     }
@@ -653,6 +711,12 @@ export async function setTrackStatus(
     await tx.applicationTrack.update({
       where: { id: row.id },
       data: { status, decidedAt: decided ? now : null, decidedById: decided ? officerId : null },
+    });
+    // A decision email that never went out (failed or still pending) is about the old status, so it
+    // must not be resendable later.
+    await tx.applicationEmail.updateMany({
+      where: { applicationTrackId: row.id, template: { in: [...DECISION_TEMPLATES] }, status: { in: ["FAILED", "PENDING"] } },
+      data: { status: "CANCELLED", error: "Cancelled: the decision changed before this was sent" },
     });
     await createAuditLog(
       {

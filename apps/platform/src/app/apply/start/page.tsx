@@ -51,7 +51,7 @@ export default async function StartPage() {
         initial={formStateFromSaved({ profile: app.profile, resumeUrl: app.resumeUrl, genericAnswers: app.genericAnswers, tracks: app.tracks })}
         initialStep={app.draftStep}
         accountEmail={user.email}
-        round={{ name: availability.round.name, closesAt: availability.round.closesAt.toISOString() }}
+        round={{ id: availability.round.id, name: availability.round.name, closesAt: availability.round.closesAt.toISOString() }}
         teams={tracks.map((t) => ({ key: t.key, label: t.label, blurb: t.blurb, interviewRequired: t.interviewRequired }))}
       />
     </ApplyShell>

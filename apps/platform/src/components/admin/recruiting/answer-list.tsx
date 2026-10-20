@@ -1,5 +1,5 @@
 import type { AnswerEntry } from "@/lib/recruiting/answers";
-import { SafeLink } from "./safe-link";
+import { SafeLink } from "@/components/recruiting/safe-link";
 
 /** Questions and the applicant's answers. All text is rendered as text (React escapes it). */
 export function AnswerList({ entries }: { entries: AnswerEntry[] }) {

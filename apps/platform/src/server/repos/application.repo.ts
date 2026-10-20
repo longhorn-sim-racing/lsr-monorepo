@@ -21,6 +21,18 @@ export function findApplicationByUser(userId: string, cycleId: string, db: Db = 
   });
 }
 
+/**
+ * The user's most recent submitted application in any round. The status page falls back to it
+ * once their round is no longer the active one.
+ */
+export function findLatestSubmittedApplicationByUser(userId: string, db: Db = prisma) {
+  return db.application.findFirst({
+    where: { userId, state: "SUBMITTED" },
+    orderBy: [{ submittedAt: "desc" }, { id: "asc" }],
+    include: { tracks: { orderBy: { createdAt: "asc" } } },
+  });
+}
+
 export function findTrackConfigs(cycleId: string, db: Db = prisma) {
   return db.recruitingTrackConfig.findMany({ where: { cycleId } });
 }
@@ -44,6 +56,11 @@ export type TrackListFilters = {
   track?: string;
   status?: TrackStatus;
   autoSubmitted?: boolean;
+  /**
+   * The officer looking. Reviews and scores of their OWN application are left out (rows,
+   * counts and averages), so an officer who applies can't read what colleagues wrote about them.
+   */
+  viewerId?: string;
   /** Matches the applicant's name or email, case-insensitively. */
   q?: string;
   take?: number;
@@ -55,7 +72,7 @@ export type TrackListFilters = {
  * rows whose Application is SUBMITTED are selected.
  */
 export async function listSubmittedTracks(filters: TrackListFilters, db: Db = prisma) {
-  const { cycleId, track, status, autoSubmitted, q } = filters;
+  const { cycleId, track, status, autoSubmitted, q, viewerId } = filters;
   const take = Math.min(Math.max(filters.take ?? 50, 1), 200);
   const skip = Math.max(filters.skip ?? 0, 0);
   const search = q?.trim();
@@ -74,7 +91,7 @@ export async function listSubmittedTracks(filters: TrackListFilters, db: Db = pr
   const [rows, total] = await Promise.all([
     db.applicationTrack.findMany({
       where,
-      orderBy: [{ application: { submittedAt: "asc" } }, { track: "asc" }],
+      orderBy: [{ application: { submittedAt: "asc" } }, { track: "asc" }, { id: "asc" }],
       take,
       skip,
       select: {
@@ -103,7 +120,8 @@ export async function listSubmittedTracks(filters: TrackListFilters, db: Db = pr
   return {
     total,
     rows: rows.map((r) => {
-      const scores = r.reviews.map((x) => x.score).filter((s): s is number => s !== null);
+      const reviews = viewerId && r.application.userId === viewerId ? [] : r.reviews;
+      const scores = reviews.map((x) => x.score).filter((s): s is number => s !== null);
       return {
         id: r.id,
         track: r.track,
@@ -120,7 +138,7 @@ export async function listSubmittedTracks(filters: TrackListFilters, db: Db = pr
           submittedAt: r.application.submittedAt,
           autoSubmitted: r.application.autoSubmitted,
         },
-        reviewCount: r.reviews.length,
+        reviewCount: reviews.length,
         averageScore: scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null,
       };
     }),
@@ -142,8 +160,8 @@ export async function countSubmittedTracks(cycleId: string, db: Db = prisma) {
  * id, so a draft can never be opened by guessing its id. The applicant is selected
  * narrowly (no full User row).
  */
-export function findSubmittedApplicationDetail(applicationId: string, db: Db = prisma) {
-  return db.application.findFirst({
+export async function findSubmittedApplicationDetail(applicationId: string, viewerId?: string, db: Db = prisma) {
+  const app = await db.application.findFirst({
     where: { id: applicationId, state: "SUBMITTED" },
     include: {
       // The ACCOUNT email (where every message goes), not the copy typed on the application
@@ -170,6 +188,11 @@ export function findSubmittedApplicationDetail(applicationId: string, db: Db = p
       },
     },
   });
+  // An officer who applied can read their own application but not what colleagues wrote about it
+  if (app && viewerId && app.userId === viewerId) {
+    return { ...app, tracks: app.tracks.map((t) => ({ ...t, reviews: [] })) };
+  }
+  return app;
 }
 
 /**
@@ -180,7 +203,7 @@ export async function listSubmittedTracksForExport(
   filters: Omit<TrackListFilters, "take" | "skip">,
   db: Db = prisma,
 ) {
-  const { cycleId, track, status, autoSubmitted, q } = filters;
+  const { cycleId, track, status, autoSubmitted, q, viewerId } = filters;
   const search = q?.trim();
   const rows = await db.applicationTrack.findMany({
     where: {
@@ -193,7 +216,7 @@ export async function listSubmittedTracksForExport(
         ...(search ? searchClause(search) : {}),
       },
     },
-    orderBy: [{ application: { submittedAt: "asc" } }, { track: "asc" }],
+    orderBy: [{ application: { submittedAt: "asc" } }, { track: "asc" }, { id: "asc" }],
     take: 5000,
     select: {
       track: true,
@@ -203,6 +226,7 @@ export async function listSubmittedTracksForExport(
       application: {
         select: {
           id: true,
+          userId: true,
           fullName: true,
           eid: true,
           gradYear: true,
@@ -218,7 +242,8 @@ export async function listSubmittedTracksForExport(
   });
 
   return rows.map((r) => {
-    const scores = r.reviews.map((x) => x.score).filter((s): s is number => s !== null);
+    const reviews = viewerId && r.application.userId === viewerId ? [] : r.reviews;
+    const scores = reviews.map((x) => x.score).filter((s): s is number => s !== null);
     return {
       applicationId: r.application.id,
       email: r.application.user.email,
@@ -230,7 +255,7 @@ export async function listSubmittedTracksForExport(
       status: r.status,
       submittedAt: r.application.submittedAt,
       autoSubmitted: r.application.autoSubmitted,
-      reviewCount: r.reviews.length,
+      reviewCount: reviews.length,
       averageScore: scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null,
       resumeUrl: r.application.resumeUrl,
       genericAnswers: r.application.genericAnswers,

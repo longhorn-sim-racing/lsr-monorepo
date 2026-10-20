@@ -163,9 +163,16 @@ describe("answersPayload", () => {
 });
 
 describe("patchForStep: about you", () => {
-  it("trims, drops blank fields, and turns the year into a number", () => {
+  it("trims, sends blank fields as null (so clearing them clears them), and turns the year into a number", () => {
     const state = { ...emptyFormState(), profile: { fullName: "  Ada  ", eid: "", gradYear: "2028", major: " Math " } };
-    expect(patchForStep("about", state)).toEqual({ ok: true, patch: { step: "about", profile: { fullName: "Ada", major: "Math", gradYear: 2028 } } });
+    expect(patchForStep("about", state)).toEqual({ ok: true, patch: { step: "about", profile: { fullName: "Ada", eid: null, major: "Math", gradYear: 2028 } } });
+  });
+
+  it("lowercases the EID and refuses one with anything but letters and numbers", () => {
+    const ok = patchForStep("about", { ...emptyFormState(), profile: { fullName: "", eid: " AB12345 ", gradYear: "", major: "" } });
+    expect(ok).toMatchObject({ ok: true, patch: { profile: { eid: "ab12345" } } });
+    const bad = patchForStep("about", { ...emptyFormState(), profile: { fullName: "", eid: "ab 12!", gradYear: "", major: "" } });
+    expect(bad).toMatchObject({ ok: false, errors: { "profile.eid": expect.stringContaining("letters and numbers") } });
   });
 
   it("refuses an impossible year or over-long text, naming the field", () => {
@@ -175,7 +182,10 @@ describe("patchForStep: about you", () => {
   });
 
   it("allows saving an empty page (it's a draft)", () => {
-    expect(patchForStep("about", emptyFormState())).toEqual({ ok: true, patch: { step: "about", profile: {} } });
+    expect(patchForStep("about", emptyFormState())).toEqual({
+      ok: true,
+      patch: { step: "about", profile: { fullName: null, eid: null, major: null, gradYear: null } },
+    });
   });
 });
 

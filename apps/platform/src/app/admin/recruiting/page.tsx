@@ -52,7 +52,7 @@ export default async function RecruitingAdminPage({
   const page = Math.max(1, Number.parseInt(sp.page ?? "1", 10) || 1);
 
   const [list, counts, attention] = await Promise.all([
-    listTrackApplications({ cycleId: cycle.id, track: team, status, autoSubmitted, q, take: PAGE_SIZE, skip: (page - 1) * PAGE_SIZE }),
+    listTrackApplications({ cycleId: cycle.id, viewerId: officer.id, track: team, status, autoSubmitted, q, take: PAGE_SIZE, skip: (page - 1) * PAGE_SIZE }),
     countTrackApplications(cycle.id),
     countEmailsNeedingAttention(cycle.id),
   ]);

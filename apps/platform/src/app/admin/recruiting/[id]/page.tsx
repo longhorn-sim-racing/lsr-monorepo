@@ -8,7 +8,7 @@ import { answerEntries } from "@/lib/recruiting/answers";
 import { formatCentral } from "@/lib/recruiting/labels";
 import { Badge, DetailList, PageHeader, Panel, PanelBody, PanelHeader } from "@/components/admin/kit";
 import { AnswerList } from "@/components/admin/recruiting/answer-list";
-import { SafeLink } from "@/components/admin/recruiting/safe-link";
+import { SafeLink } from "@/components/recruiting/safe-link";
 import { StatusBadge } from "@/components/admin/recruiting/status-badge";
 import { EmailsSection, TrackPanel, type PanelEmail } from "@/components/admin/recruiting/track-panel";
 
@@ -31,7 +31,7 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
   const { id } = await params;
 
   // Null for a draft or an unknown id, so a draft can't be opened by guessing its id
-  const app = await getApplicationDetail(id);
+  const app = await getApplicationDetail(id, officer.id);
   if (!app) notFound();
   const cycle = await findCycleById(app.cycleId);
   await recordApplicationViewed(officer.id, app.id, app.userId);
@@ -40,7 +40,7 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
   const name = app.fullName?.trim() || app.user.displayName;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4">
+    <div className="max-w-4xl space-y-4">
       <PageHeader
         back={{ href: `/admin/recruiting${cycle ? `?cycle=${cycle.slug}` : ""}`, label: "All applications" }}
         title={name}

@@ -7,7 +7,7 @@ import { Button, CheckboxField, Dialog, Field, Input, Notice, Textarea } from "@
 import { decideAction, previewDecisionAction } from "@/app/admin/recruiting/actions";
 import { STATUSES_WITH_EMAIL, TRACK_STATUS_LABEL } from "@/lib/recruiting/labels";
 
-type Preview = { to: string; subject: string; body: string; html: string };
+type Preview = { to: string; subject: string; body: string; html: string; replyToMissing: boolean };
 
 /**
  * Set one team's status for one applicant, optionally emailing them. Shows the exact message
@@ -18,37 +18,55 @@ export function DecisionDialog({
   trackId,
   teamLabel,
   applicantName,
+  currentStatus,
   status,
   onClose,
 }: {
   trackId: string;
   teamLabel: string;
   applicantName: string;
+  /** The status the officer is looking at; the change is refused if someone else changed it since */
+  currentStatus: TrackStatus;
   /** The status being set; null keeps the dialog closed */
   status: TrackStatus | null;
   /** `changed` is true after a successful save, so the page can refresh */
   onClose: (changed: boolean) => void;
 }) {
   if (!status) return null;
-  return <DecisionForm key={`${trackId}:${status}`} trackId={trackId} teamLabel={teamLabel} applicantName={applicantName} status={status} onClose={onClose} />;
+  return (
+    <DecisionForm
+      key={`${trackId}:${status}`}
+      trackId={trackId}
+      teamLabel={teamLabel}
+      applicantName={applicantName}
+      currentStatus={currentStatus}
+      status={status}
+      onClose={onClose}
+    />
+  );
 }
 
 function DecisionForm({
   trackId,
   teamLabel,
   applicantName,
+  currentStatus,
   status,
   onClose,
 }: {
   trackId: string;
   teamLabel: string;
   applicantName: string;
+  currentStatus: TrackStatus;
   status: TrackStatus;
   onClose: (changed: boolean) => void;
 }) {
   const hasEmail = STATUSES_WITH_EMAIL.includes(status);
   const label = TRACK_STATUS_LABEL[status];
   const [sendEmail, setSendEmail] = useState(hasEmail);
+  // Moving off a final decision may mean the applicant has already been told
+  const reversing = currentStatus === "ACCEPTED" || currentStatus === "REJECTED";
+  const [confirmedReversal, setConfirmedReversal] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [original, setOriginal] = useState<{ subject: string; body: string } | null>(null);
   const [subject, setSubject] = useState("");
@@ -82,12 +100,16 @@ function DecisionForm({
   }, [hasEmail, load]);
 
   const edited = Boolean(original && (subject !== original.subject || body !== original.body));
-  const blocked = sendEmail && (loading || previewError !== null || !preview);
+  const blocked = (sendEmail && (loading || previewError !== null || !preview)) || (reversing && !confirmedReversal);
 
   function save() {
     setFormError(null);
     startTransition(async () => {
-      const res = await decideAction(trackId, status, { sendEmail, override: sendEmail && edited ? { subject, body } : undefined });
+      const res = await decideAction(trackId, status, {
+        sendEmail,
+        override: sendEmail && edited ? { subject, body } : undefined,
+        expectedStatus: currentStatus,
+      });
       if (!res.ok) return setFormError(res.fieldErrors?.body ? `${res.error} (${res.fieldErrors.body})` : res.error);
       const delivery = res.data.delivery;
       if (!sendEmail) toast.success(`${teamLabel}: marked ${label}.`);
@@ -116,6 +138,14 @@ function DecisionForm({
       }
     >
       <div className="space-y-4">
+        {reversing && (
+          <Notice tone="warning" title={`This team is currently ${TRACK_STATUS_LABEL[currentStatus]}`}>
+            <p>The applicant may already have been told. Changing it can send them a second, different email.</p>
+            <div className="mt-2">
+              <CheckboxField checked={confirmedReversal} onChange={(e) => setConfirmedReversal(e.target.checked)} label="Yes, change it" />
+            </div>
+          </Notice>
+        )}
         {hasEmail ? (
           <>
             <CheckboxField
@@ -128,6 +158,11 @@ function DecisionForm({
               <>
                 {loading && !preview && <p className="text-xs text-admin-subtle">Preparing the message...</p>}
                 {previewError && <Notice tone="danger">{previewError}</Notice>}
+                {preview?.replyToMissing && (
+                  <Notice tone="warning">
+                    RECRUITING_REPLY_TO is not set, so replies to this email go to the noreply address and nobody sees them. Ask a tech officer to set it before sending.
+                  </Notice>
+                )}
                 {preview && (
                   <div className="space-y-3">
                     <Field label="Subject" htmlFor="decision-subject">

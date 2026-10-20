@@ -4,13 +4,7 @@ import { prisma } from "@/server/db";
 import { getEntrantRows } from "@/server/queries/league-entrants";
 import { equipmentLabel, experienceLabel } from "@/schemas/league-application.schema";
 import { centsToDollarInput } from "@/lib/money";
-
-const csvCell = (value: unknown) => {
-  let s = value === null || value === undefined ? "" : String(value);
-  // Drivers write some of these fields; don't let Sheets/Excel run them as formulas.
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
+import { csvCell } from "@/lib/csv";
 
 /** GET /admin/league-entries/export?season=<slug> → CSV of the season's entrants. */
 export async function GET(req: NextRequest) {

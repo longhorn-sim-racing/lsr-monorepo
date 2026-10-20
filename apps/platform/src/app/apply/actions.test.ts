@@ -27,9 +27,9 @@ const allServices = () => [...Object.values(recruiting), ...Object.values(email)
 
 describe("access", () => {
   const calls: Array<[string, () => Promise<unknown>]> = [
-    ["saveProgressAction", () => saveProgressAction({ step: "about" })],
-    ["setTeamsAction", () => setTeamsAction(["media"])],
-    ["submitApplicationAction", () => submitApplicationAction()],
+    ["saveProgressAction", () => saveProgressAction("r1", { step: "about" })],
+    ["setTeamsAction", () => setTeamsAction("r1", ["media"])],
+    ["submitApplicationAction", () => submitApplicationAction("r1")],
   ];
 
   it.each(calls)("%s does nothing for someone who isn't signed in", async (_name, call) => {
@@ -58,10 +58,24 @@ describe("access", () => {
   });
 });
 
+describe("a page left open for an earlier round", () => {
+  const calls: Array<[string, () => Promise<unknown>]> = [
+    ["saveProgressAction", () => saveProgressAction("old-round", { step: "about" })],
+    ["setTeamsAction", () => setTeamsAction("old-round", ["media"])],
+    ["submitApplicationAction", () => submitApplicationAction("old-round")],
+  ];
+
+  it.each(calls)("%s is refused once another round is the active one, writing nothing", async (_name, call) => {
+    expect(await call()).toMatchObject({ ok: false, code: "ROUND_CHANGED" });
+    for (const fn of allServices()) expect(fn).not.toHaveBeenCalled();
+    expect(cache.revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
 describe("saving progress", () => {
   it("always uses the signed-in applicant's id, never anything from the request", async () => {
     recruiting.saveDraft.mockResolvedValue({});
-    const result = await saveProgressAction({ step: "general", genericAnswers: {}, userId: "someone-else" });
+    const result = await saveProgressAction("r1", { step: "general", genericAnswers: {}, userId: "someone-else" });
     expect(result.ok).toBe(true);
     expect(recruiting.saveDraft).toHaveBeenCalledWith("applicant-1", { step: "general", genericAnswers: {}, userId: "someone-else" });
     // the service (not the action) rejects the stray field: it is passed through untouched to be validated there
@@ -69,14 +83,14 @@ describe("saving progress", () => {
 
   it("returns when it was saved and refreshes the apply pages", async () => {
     recruiting.saveDraft.mockResolvedValue({});
-    const result = await saveProgressAction({ step: "about" });
+    const result = await saveProgressAction("r1", { step: "about" });
     expect(result).toMatchObject({ ok: true, data: { savedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) } });
     expect(cache.revalidatePath).toHaveBeenCalledWith("/apply", "layout");
   });
 
   it("turns a validation problem into messages the form can show next to the right field", async () => {
     recruiting.saveDraft.mockRejectedValue(new RecruitingError("INVALID", "Some answers need attention.", { fieldErrors: { "genericAnswers.why_join": "Keep it under 1500 characters." } }));
-    expect(await saveProgressAction({ step: "general" })).toEqual({
+    expect(await saveProgressAction("r1", { step: "general" })).toEqual({
       ok: false,
       error: "Some answers need attention.",
       fieldErrors: { "genericAnswers.why_join": "Keep it under 1500 characters." },
@@ -92,13 +106,13 @@ describe("saving progress", () => {
     ["ALREADY_SUBMITTED", "This application has been submitted and can no longer be changed."],
   ] as const)("passes %s through so the page can explain it", async (code, message) => {
     recruiting.saveDraft.mockRejectedValue(new RecruitingError(code, message));
-    expect(await saveProgressAction({ step: "about" })).toMatchObject({ ok: false, error: message, code });
+    expect(await saveProgressAction("r1", { step: "about" })).toMatchObject({ ok: false, error: message, code });
   });
 
   it("never leaks an unexpected error's details in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     recruiting.saveDraft.mockRejectedValue(new Error("connection to 10.0.0.5 refused"));
-    const result = await saveProgressAction({ step: "about" });
+    const result = await saveProgressAction("r1", { step: "about" });
     expect(result.ok).toBe(false);
     expect(JSON.stringify(result)).not.toContain("10.0.0.5");
   });
@@ -107,40 +121,40 @@ describe("saving progress", () => {
 describe("choosing teams", () => {
   it("passes the list to the service for the signed-in applicant and reports what changed", async () => {
     recruiting.setSelectedTracks.mockResolvedValue({ added: ["media"], removed: ["team-b"], application: { secret: "not returned" } });
-    const result = await setTeamsAction(["media"]);
+    const result = await setTeamsAction("r1", ["media"]);
     expect(recruiting.setSelectedTracks).toHaveBeenCalledWith("applicant-1", ["media"]);
     expect(result).toEqual({ ok: true, data: { added: ["media"], removed: ["team-b"] } });
   });
 
   it("explains an unknown team", async () => {
     recruiting.setSelectedTracks.mockRejectedValue(new RecruitingError("INVALID", "Choose teams from the list.", { fieldErrors: { tracks: "Unknown team: x" } }));
-    expect(await setTeamsAction(["x"])).toMatchObject({ ok: false, fieldErrors: { tracks: "Unknown team: x" } });
+    expect(await setTeamsAction("r1", ["x"])).toMatchObject({ ok: false, fieldErrors: { tracks: "Unknown team: x" } });
   });
 });
 
 describe("submitting", () => {
   it("submits for the signed-in applicant and says whether the confirmation email went out", async () => {
     email.submitAndNotify.mockResolvedValue({ applicationId: "a1", delivery: { emailId: "e1", status: "SENT" } });
-    expect(await submitApplicationAction()).toEqual({ ok: true, data: { emailStatus: "SENT" } });
+    expect(await submitApplicationAction("r1")).toEqual({ ok: true, data: { emailStatus: "SENT" } });
     expect(email.submitAndNotify).toHaveBeenCalledWith("applicant-1");
   });
 
   it("still succeeds when the confirmation email failed (the submission is what matters)", async () => {
     email.submitAndNotify.mockResolvedValue({ applicationId: "a1", delivery: { emailId: "e1", status: "FAILED", error: "disabled" } });
-    expect(await submitApplicationAction()).toEqual({ ok: true, data: { emailStatus: "FAILED" } });
+    expect(await submitApplicationAction("r1")).toEqual({ ok: true, data: { emailStatus: "FAILED" } });
     email.submitAndNotify.mockResolvedValue({ applicationId: "a1", delivery: null });
-    expect(await submitApplicationAction()).toEqual({ ok: true, data: { emailStatus: null } });
+    expect(await submitApplicationAction("r1")).toEqual({ ok: true, data: { emailStatus: null } });
   });
 
   it("returns the completeness report when the application isn't finished, so the page can show what's missing", async () => {
     const report = { complete: false, sections: [{ key: "general", label: "General questions", complete: false, problems: ["Missing: Why do you want to join?"] }] };
     email.submitAndNotify.mockRejectedValue(new RecruitingError("INCOMPLETE", "Your application is not complete yet.", { report }));
-    const result = await submitApplicationAction();
+    const result = await submitApplicationAction("r1");
     expect(result).toMatchObject({ ok: false, code: "INCOMPLETE", report });
   });
 
   it("refuses a second submit with a clear message", async () => {
     email.submitAndNotify.mockRejectedValue(new RecruitingError("ALREADY_SUBMITTED", "This application has already been submitted."));
-    expect(await submitApplicationAction()).toMatchObject({ ok: false, code: "ALREADY_SUBMITTED" });
+    expect(await submitApplicationAction("r1")).toMatchObject({ ok: false, code: "ALREADY_SUBMITTED" });
   });
 });

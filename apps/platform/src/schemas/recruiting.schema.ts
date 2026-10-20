@@ -373,11 +373,15 @@ export const httpsUrl = z
   .max(RECRUITING_LIMITS.urlMax, 'That link is too long.')
   .refine(isSafeHttpsUrl, { error: 'Enter a full link that starts with https://' });
 
+/** A UT EID is letters and digits (like "ab12345"); stored lowercase, which is how the rest of the app keeps it. */
+const EID_PATTERN = /^[a-z0-9]+$/i;
+const EID_MESSAGE = 'A UT EID is letters and numbers only, like ab12345.';
+
 /** Profile fields, pre-filled from the account and copied onto the application. All required at submit. */
 export const profileSchema = z.object({
   fullName: z.string().trim().min(1, 'Enter your name.').max(120),
   email: z.string().trim().max(254).pipe(z.email('Enter a valid email.')),
-  eid: z.string().trim().min(1, 'Enter your UT EID.').max(16),
+  eid: z.string().trim().min(1, 'Enter your UT EID.').max(16).regex(EID_PATTERN, EID_MESSAGE).transform((v) => v.toLowerCase()),
   gradYear: z.number().int().min(2000).max(2100),
   major: z.string().trim().min(1, 'Enter your major.').max(120),
 });
@@ -436,6 +440,8 @@ export function parseAnswers(
   questions: readonly GenericQuestion[],
   answers: unknown,
   mode: 'draft' | 'submit',
+  /** Stored answers can hold keys of questions that were later removed; they are not the applicant's to fix. */
+  options: { ignoreUnknown?: boolean } = {},
 ): ParsedAnswers {
   const result: ParsedAnswers = { value: {}, errors: {}, missing: [] };
   if (answers === null || answers === undefined) answers = {};
@@ -445,8 +451,10 @@ export function parseAnswers(
   }
   const record = answers as Record<string, unknown>;
   const known = new Set(questions.map((q) => q.id));
-  for (const key of Object.keys(record)) {
-    if (!known.has(key)) result.errors[key] = 'Unknown question.';
+  if (!options.ignoreUnknown) {
+    for (const key of Object.keys(record)) {
+      if (!known.has(key)) result.errors[key] = 'Unknown question.';
+    }
   }
   for (const q of questions) {
     const raw = record[q.id];
@@ -466,13 +474,29 @@ export function parseAnswers(
 // ---------------------------------------------------------------------------
 
 /**
+ * The profile as saved while drafting: any field may be left out, and null or blank clears it
+ * (the required-field checks are for Submit). What is typed is still checked.
+ */
+const draftProfileSchema = z
+  .object({
+    fullName: z.string().trim().max(120).nullable(),
+    email: profileSchema.shape.email,
+    eid: z
+      .union([z.literal(''), z.string().trim().max(16).regex(EID_PATTERN, EID_MESSAGE).transform((v) => v.toLowerCase())])
+      .nullable(),
+    gradYear: profileSchema.shape.gradYear.nullable(),
+    major: z.string().trim().max(120).nullable(),
+  })
+  .partial();
+
+/**
  * Shape of one "Save and continue". Loose on purpose: no required-field checks, and
  * question answers are validated afterwards with parseAnswers(..., 'draft').
  */
 export const draftPatchSchema = z
   .object({
     step: z.string().max(40).optional(),
-    profile: profileSchema.partial().optional(),
+    profile: draftProfileSchema.optional(),
     genericAnswers: z.record(z.string(), z.unknown()).optional(),
     trackAnswers: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
     resumeUrl: z.union([z.literal(''), httpsUrl]).optional(),
@@ -541,7 +565,7 @@ export function checkCompleteness(draft: DraftSnapshot): CompletenessReport {
   add(
     'general',
     'General questions',
-    describeAnswerProblems(genericQuestions, parseAnswers(genericQuestions, draft.genericAnswers, 'submit')),
+    describeAnswerProblems(genericQuestions, parseAnswers(genericQuestions, draft.genericAnswers, 'submit', { ignoreUnknown: true })),
   );
 
   // Team selection
@@ -559,7 +583,7 @@ export function checkCompleteness(draft: DraftSnapshot): CompletenessReport {
     add(
       `track:${t.track}`,
       getTrack(t.track)?.label ?? t.track,
-      describeAnswerProblems(qs, parseAnswers(qs, t.answers, 'submit')),
+      describeAnswerProblems(qs, parseAnswers(qs, t.answers, 'submit', { ignoreUnknown: true })),
     );
   }
 

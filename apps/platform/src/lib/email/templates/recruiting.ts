@@ -206,6 +206,8 @@ export function renderEmail(email: EmailDraft): { subject: string; html: string;
     title: escapeHtml(email.subject),
     body: bodyHtml,
     footerText: "Longhorn Sim Racing · UT Austin",
+    // Recruiting mail ignores email preferences, so don't offer a way to change them
+    hidePreferencesLink: true,
   });
 
   return {

@@ -149,6 +149,14 @@ describe("parseAnswers", () => {
     expect(r.value.flag).toBe(false);
   });
 
+  it("rejects an unknown question id in what was just sent, but ignores one in stored answers (the question was removed)", () => {
+    expect(errorsFor({ gone: "x" })).toEqual({ gone: "Unknown question." });
+    const stored = parseAnswers(sample, { gone: "x", txt: "hi", one: "A", flag: true }, "submit", { ignoreUnknown: true });
+    expect(stored.errors).toEqual({});
+    expect(stored.missing).toEqual([]);
+    expect(stored.value).not.toHaveProperty("gone");
+  });
+
   it("treats whitespace-only text and empty selections as unanswered", () => {
     expect(parseAnswers(sample, { txt: "   ", one: "A", flag: true }, "submit").missing).toContain("txt");
     expect(parseAnswers(sample, { many: [] }, "submit").missing).not.toContain("many");
@@ -210,6 +218,17 @@ describe("draftPatchSchema", () => {
   it("rejects an impossible graduation year", () => {
     expect(draftPatchSchema.safeParse({ profile: { gradYear: 1850 } }).success).toBe(false);
   });
+
+  it("lets a profile field be cleared (null, or a blank EID)", () => {
+    expect(draftPatchSchema.safeParse({ profile: { fullName: null, eid: null, gradYear: null, major: null } }).success).toBe(true);
+    expect(draftPatchSchema.safeParse({ profile: { eid: "" } }).success).toBe(true);
+  });
+
+  it("checks the EID's format and stores it lowercase", () => {
+    expect(draftPatchSchema.safeParse({ profile: { eid: "ab 1!" } }).success).toBe(false);
+    const parsed = draftPatchSchema.parse({ profile: { eid: " AB12345 " } });
+    expect(parsed.profile?.eid).toBe("ab12345");
+  });
 });
 
 describe("checkCompleteness", () => {
@@ -234,6 +253,14 @@ describe("checkCompleteness", () => {
   it("accepts a complete single-team draft", () => {
     expect(checkCompleteness(draft()).complete).toBe(true);
     expect(checkCompleteness(draft()).sections).toHaveLength(5);
+  });
+
+  it("ignores stored answers to questions that were removed since, so they can't block Submit", () => {
+    const d = draft({
+      genericAnswers: { removed_question: "x" },
+      tracks: [{ track: "team-b", answers: { removed_question: "x" } }],
+    });
+    expect(checkCompleteness(d).complete).toBe(true);
   });
 
   it("accepts three complete teams", () => {

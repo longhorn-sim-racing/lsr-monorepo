@@ -88,6 +88,7 @@ export function TrackPanel({
         trackId={trackId}
         teamLabel={teamLabel}
         applicantName={applicantName}
+        currentStatus={status}
         status={target}
         onClose={(changed) => {
           setTarget(null);

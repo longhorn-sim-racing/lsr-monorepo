@@ -29,8 +29,9 @@ import {
   type RecruitingEmailTemplate,
 } from "@/lib/email/templates/recruiting";
 import { getTrack, isSafeHttpsUrl } from "@/schemas/recruiting.schema";
-import { getEmailUsage } from "@/server/services/notification.service";
+import { getEmailUsage, TRANSACTIONAL_HEADROOM } from "@/server/services/notification.service";
 import {
+  DECISION_TEMPLATES,
   RecruitingError,
   setTrackStatus,
   submitApplication,
@@ -117,7 +118,8 @@ export async function composeTrackEmail(
 
   const draft = override ?? defaultDraft(template, { hasSchedulingLink: Boolean(schedulingUrl) });
   const composed = composeOrThrow(draft, {
-    applicantName: row.application.fullName?.trim() || row.application.user.displayName,
+    // Braces are dropped: an edited email is composed a second time, and a name must never read as a placeholder then
+    applicantName: (row.application.fullName?.trim() || row.application.user.displayName).replace(/[{}]/g, ""),
     trackName: getTrack(row.track)?.label ?? row.track,
     cycleName: row.application.cycle.name,
     schedulingLink: schedulingUrl,
@@ -148,6 +150,8 @@ export async function previewDecisionEmail(applicationTrackId: string, status: T
     subject: email.subject,
     body: email.body,
     html: renderEmail({ subject: email.subject, body: email.body }).html,
+    /** Every email says "just reply", so in production replies need somewhere to go besides the noreply address */
+    replyToMissing: process.env.NODE_ENV === "production" && !replyToAddress(),
   };
 }
 
@@ -200,45 +204,60 @@ export type DeliveryResult = {
 
 /** Marks a row that was left PENDING by a crash, so the officer sees why and the idempotency key is reused. */
 export const INTERRUPTED_ERROR = "Interrupted before it finished sending";
+export const DAILY_LIMIT_ERROR = "Not sent: today's email limit was reached. Resend it after the limit resets.";
 const PENDING_TIMEOUT_MS = 10 * 60 * 1000;
+/** The cron retries rows PENDING for longer than this (a send takes seconds; the key makes a retry safe) */
+const PENDING_RETRY_AFTER_MS = 2 * 60 * 1000;
 
-type SendableRow = { id: string; toEmail: string; subject: string; body: string };
+type SendableRow = { id: string; toEmail: string; subject: string; body: string; idempotencyKey?: string | null };
+
+/** The key a row is sent with. Stored on resend; a first send uses the row id. */
+const keyFor = (row: { id: string; idempotencyKey?: string | null }) => row.idempotencyKey ?? `recruiting-email:${row.id}`;
 
 async function markFailed(id: string, error: string): Promise<DeliveryResult> {
   await prisma.applicationEmail.update({ where: { id }, data: { status: "FAILED", error: error.slice(0, 500) } });
   return { emailId: id, status: "FAILED", error };
 }
 
-async function sendRow(row: SendableRow, idempotencyKey: string): Promise<DeliveryResult> {
+async function sendRow(row: SendableRow): Promise<DeliveryResult> {
+  // Only the Resend call decides "failed". Once Resend has accepted the email, a problem saving
+  // that fact must not mark it failed (a resend would deliver it twice).
+  let result: Awaited<ReturnType<typeof sendEmail>>;
   try {
     const rendered = renderEmail({ subject: row.subject, body: row.body });
-    const result = await sendEmail(
+    result = await sendEmail(
       { to: row.toEmail, subject: rendered.subject, html: rendered.html, text: rendered.text, replyTo: replyToAddress() },
-      { idempotencyKey },
+      { idempotencyKey: keyFor(row) },
     );
-    if (!result.success) return await markFailed(row.id, result.error ?? "Send failed");
+  } catch (e) {
+    return await markFailed(row.id, `Unexpected error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (!result.success) return await markFailed(row.id, result.error ?? "Send failed");
+  try {
     await prisma.applicationEmail.update({
       where: { id: row.id },
       data: { status: "SENT", resendMessageId: result.messageId ?? null, sentAt: new Date(), error: null },
     });
-    return { emailId: row.id, status: "SENT" };
   } catch (e) {
-    return await markFailed(row.id, `Unexpected error: ${e instanceof Error ? e.message : String(e)}`);
+    // The row stays PENDING; the cron retries it with the same key, which makes Resend return
+    // this same message instead of sending another.
+    console.error("[Recruiting] Email was sent but could not be recorded:", e instanceof Error ? e.message : e);
   }
+  return { emailId: row.id, status: "SENT" };
 }
 
 /**
- * Sends a PENDING email. The idempotency key is the row id, so two deliveries racing for the
- * same row (or a retry after a lost response) cannot send it twice.
+ * Sends a PENDING email. The idempotency key is stored on the row (the row id for a first send),
+ * so two deliveries racing for the same row (or a retry after a lost response) cannot send it twice.
  */
 export async function deliverEmail(emailId: string): Promise<DeliveryResult> {
   const row = await prisma.applicationEmail.findUnique({
     where: { id: emailId },
-    select: { id: true, status: true, toEmail: true, subject: true, body: true },
+    select: { id: true, status: true, toEmail: true, subject: true, body: true, idempotencyKey: true },
   });
   if (!row) throw new RecruitingError("NOT_FOUND", "Email not found.");
   if (row.status !== "PENDING") return { emailId, status: row.status === "SENT" ? "SENT" : "SKIPPED" };
-  return sendRow(row, `recruiting-email:${row.id}`);
+  return sendRow(row);
 }
 
 /** deliverEmail that never throws: the change it follows is already saved and must stay saved. */
@@ -252,20 +271,55 @@ export async function deliverEmailSafely(emailId: string): Promise<DeliveryResul
 }
 
 /**
- * Manual Resend of a FAILED email. The row is claimed (FAILED to PENDING) atomically, so a
- * double click can't send twice. A normal failure gets a fresh idempotency key (a reused key
- * would just return the old failure); a row that was interrupted before any result was recorded
- * reuses its original key, so if it had in fact been delivered Resend won't send a duplicate.
+ * Manual Resend of a FAILED email. The row is claimed (FAILED to PENDING, with the time and the
+ * key it will be sent with) atomically, so a double click can't send twice. A normal failure gets
+ * a fresh idempotency key (a reused key would just return the old failure); a row that was
+ * interrupted before any result was recorded reuses its stored key, so if it had in fact been
+ * delivered Resend won't send a duplicate.
+ *
+ * A decision email is only resent while it still matches the team's current status: after the
+ * decision changed, an old "You're in" must never go out.
  */
 export async function resendEmail(officerId: string, emailId: string): Promise<DeliveryResult> {
   const row = await prisma.applicationEmail.findUnique({
     where: { id: emailId },
-    select: { id: true, status: true, error: true, toEmail: true, subject: true, body: true, application: { select: { id: true, userId: true } } },
+    select: {
+      id: true,
+      status: true,
+      error: true,
+      template: true,
+      toEmail: true,
+      subject: true,
+      body: true,
+      idempotencyKey: true,
+      applicationTrack: { select: { status: true } },
+      application: { select: { id: true, userId: true, user: { select: { email: true } } } },
+    },
   });
   if (!row) throw new RecruitingError("NOT_FOUND", "Email not found.");
   if (row.status !== "FAILED") throw new RecruitingError("BAD_STATUS", "Only failed emails can be resent.");
 
-  const claim = await prisma.applicationEmail.updateMany({ where: { id: row.id, status: "FAILED" }, data: { status: "PENDING" } });
+  if ((DECISION_TEMPLATES as readonly string[]).includes(row.template)) {
+    const current = row.applicationTrack ? statusToTemplate(row.applicationTrack.status) : null;
+    if (current !== row.template) {
+      await prisma.applicationEmail.updateMany({
+        where: { id: row.id, status: "FAILED" },
+        data: { status: "CANCELLED", error: "Cancelled: the decision changed before this was sent" },
+      });
+      throw new RecruitingError("BAD_STATUS", "The decision has changed since this email was written, so it was cancelled instead of sent.");
+    }
+  }
+
+  // An interrupted send may already have been delivered: keep its recipient and key so Resend can
+  // recognise it. Any other resend is a fresh send, and goes to the applicant's CURRENT account email
+  // (they may have changed it since), like a new decision would.
+  const interrupted = row.error === INTERRUPTED_ERROR;
+  const key = interrupted ? keyFor(row) : `recruiting-email:${row.id}:${randomUUID()}`;
+  const toEmail = interrupted ? row.toEmail : row.application.user.email;
+  const claim = await prisma.applicationEmail.updateMany({
+    where: { id: row.id, status: "FAILED" },
+    data: { status: "PENDING", claimedAt: new Date(), idempotencyKey: key, toEmail },
+  });
   if (claim.count !== 1) throw new RecruitingError("BAD_STATUS", "That email is already being resent.");
 
   await createAuditLog({
@@ -275,20 +329,39 @@ export async function resendEmail(officerId: string, emailId: string): Promise<D
     entityId: row.id,
     targetUserId: row.application.userId,
     summary: "Resent a failed recruiting email",
-    metadata: { applicationId: row.application.id, previousError: row.error },
+    metadata: {
+      applicationId: row.application.id,
+      previousError: row.error,
+      ...(toEmail !== row.toEmail ? { recipientChanged: { from: row.toEmail, to: toEmail } } : {}),
+    },
   });
 
-  const key = row.error === INTERRUPTED_ERROR ? `recruiting-email:${row.id}` : `recruiting-email:${row.id}:${randomUUID()}`;
-  return sendRow(row, key);
+  return sendRow({ ...row, toEmail, idempotencyKey: key });
 }
 
-/** Turns emails stuck PENDING (the process died mid-send) into FAILED so they can be resent. */
+/**
+ * Turns emails stuck PENDING (the process died mid-send) into FAILED so they can be resent. The
+ * clock runs from when the send was claimed (a resend sets it), not from when the row was created.
+ */
 export async function failInterruptedEmails(now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - PENDING_TIMEOUT_MS);
   const res = await prisma.applicationEmail.updateMany({
-    where: { status: "PENDING", createdAt: { lt: new Date(now.getTime() - PENDING_TIMEOUT_MS) } },
+    where: { status: "PENDING", OR: [{ claimedAt: { lt: cutoff } }, { claimedAt: null, createdAt: { lt: cutoff } }] },
     data: { status: "FAILED", error: INTERRUPTED_ERROR },
   });
   return res.count;
+}
+
+/** Ids of rows that have been PENDING for a couple of minutes, so a cron run can finish what a dead request started. */
+async function stalePendingEmailIds(now: Date, take = 50): Promise<string[]> {
+  const cutoff = new Date(now.getTime() - PENDING_RETRY_AFTER_MS);
+  const rows = await prisma.applicationEmail.findMany({
+    where: { status: "PENDING", OR: [{ claimedAt: { lt: cutoff } }, { claimedAt: null, createdAt: { lt: cutoff } }] },
+    orderBy: { createdAt: "asc" },
+    take,
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
 }
 
 /** For the officers' "emails that need attention" page: failed and still-pending mail for a round. */
@@ -328,6 +401,8 @@ export type SweepSummary = {
   submitted: number;
   emailsSent: number;
   emailsFailed: number;
+  /** Confirmations over today's email limit; they wait on the Emails page for a resend */
+  emailsOverLimit: number;
   skippedNoTeams: number;
   skippedIncomplete: number;
   failed: number;
@@ -335,35 +410,68 @@ export type SweepSummary = {
   interruptedEmails: number;
 };
 
+/** The whole deadline job has to fit in the 60 s the cron route is allowed to run */
+const SWEEP_BUDGET_MS = 40_000;
+
 /**
  * The deadline job end to end: for every closed round that still has drafts, auto-submit the complete
  * ones (the "received" confirmation, auto-submit wording, is queued in the same transaction), then
  * send the confirmations after the commits. A confirmation that fails to send stays on the Emails page
- * for a manual resend; it never undoes a submission. Safe to run as often as you like.
- * `cycleId` limits it to one round (the admin button); the cron passes none.
+ * for a manual resend; it never undoes a submission. Confirmations from an earlier run that never got
+ * sent (the function died, or ran out of time) are retried first. Safe to run as often as you like.
+ * `cycleId` limits it to one round (the admin button, which also re-checks a round already swept);
+ * the cron passes none and skips rounds it has already been through cleanly.
  */
 export async function sweepAndNotify(options: { cycleId?: string; now?: Date } = {}): Promise<SweepSummary> {
   const now = options.now ?? new Date();
+  const started = Date.now();
   const summary: SweepSummary = {
     cycles: 0,
     submitted: 0,
     emailsSent: 0,
     emailsFailed: 0,
+    emailsOverLimit: 0,
     skippedNoTeams: 0,
     skippedIncomplete: 0,
     failed: 0,
     timedOut: false,
-    interruptedEmails: await failInterruptedEmails(now),
+    interruptedEmails: 0,
   };
 
+  // One quota check for the whole run; each send below spends from it
+  let allowance = (await getEmailQuota()).left;
+  const send = async (emailId: string) => {
+    if (allowance !== null && allowance <= 0) {
+      await markFailed(emailId, DAILY_LIMIT_ERROR);
+      summary.emailsOverLimit += 1;
+      return;
+    }
+    if (allowance !== null) allowance -= 1;
+    const delivery = await deliverEmailSafely(emailId);
+    if (delivery.status === "SENT") summary.emailsSent += 1;
+    else if (delivery.status === "FAILED") summary.emailsFailed += 1;
+  };
+
+  for (const emailId of await stalePendingEmailIds(now)) await send(emailId);
+  summary.interruptedEmails = await failInterruptedEmails(now);
+
   const cycles = await prisma.recruitingCycle.findMany({
-    where: { ...(options.cycleId ? { id: options.cycleId } : {}), closesAt: { lte: now }, applications: { some: { state: "DRAFT" } } },
+    where: {
+      ...(options.cycleId ? { id: options.cycleId } : { sweptAt: null }),
+      closesAt: { lte: now },
+      applications: { some: { state: "DRAFT" } },
+    },
     orderBy: { closesAt: "asc" },
     select: { id: true },
   });
 
   for (const { id } of cycles) {
-    const swept = await sweepCycle(id, now, { email: receivedEmailHook });
+    const remaining = SWEEP_BUDGET_MS - (Date.now() - started);
+    if (remaining <= 0) {
+      summary.timedOut = true;
+      break;
+    }
+    const swept = await sweepCycle(id, now, { email: receivedEmailHook, budgetMs: remaining });
     if (!swept.ran) continue;
     summary.cycles += 1;
     summary.submitted += swept.submitted;
@@ -371,10 +479,10 @@ export async function sweepAndNotify(options: { cycleId?: string; now?: Date } =
     summary.skippedIncomplete += swept.skippedIncomplete;
     summary.failed += swept.failed;
     summary.timedOut = summary.timedOut || swept.timedOut;
-    for (const emailId of swept.emailIds) {
-      const delivery = await deliverEmailSafely(emailId);
-      if (delivery.status === "SENT") summary.emailsSent += 1;
-      else if (delivery.status === "FAILED") summary.emailsFailed += 1;
+    for (const emailId of swept.emailIds) await send(emailId);
+    // Everything left is an abandoned draft: stop looking at this round every 15 minutes
+    if (!swept.timedOut && !swept.reopened && swept.failed === 0) {
+      await prisma.recruitingCycle.updateMany({ where: { id, sweptAt: null }, data: { sweptAt: now } });
     }
   }
   return summary;
@@ -389,7 +497,7 @@ export async function decideAndNotify(
   officerId: string,
   applicationTrackId: string,
   status: TrackStatus,
-  options: { sendEmail?: boolean; override?: EmailDraft; now?: Date } = {},
+  options: { sendEmail?: boolean; override?: EmailDraft; expectedStatus?: TrackStatus; now?: Date } = {},
 ) {
   const template = statusToTemplate(status);
   if (options.sendEmail && !template) {
@@ -403,6 +511,7 @@ export async function decideAndNotify(
     options.sendEmail && template
       ? { email: (tx, ctx) => composeTrackEmail(tx, ctx.applicationTrackId, template, options.override) }
       : {},
+    options.expectedStatus,
   );
   const delivery = decision.emailId ? await deliverEmailSafely(decision.emailId) : null;
   return { ...decision, delivery };
@@ -412,22 +521,26 @@ export async function decideAndNotify(
 // Daily email quota and bulk operations
 // ---------------------------------------------------------------------------
 
-export type EmailQuota = { sentToday: number; dailyLimit: number | null; left: number | null };
+export type EmailQuota = {
+  sentToday: number;
+  dailyLimit: number | null;
+  /** What recruiting may still send today: the limit minus what was sent and the emails held back for receipts. null = no limit. */
+  left: number | null;
+};
 
 /**
- * Emails Resend has accepted since 00:00 UTC (7 pm Central in summer, 6 pm in winter), counting
- * BOTH the announcements/receipts tracked by the notification service and recruiting mail,
- * against the plan's daily limit (RESEND_DAILY_LIMIT, 100 on the free plan). The notification
- * service's own counter doesn't know about recruiting mail, so use this one for recruiting.
+ * Emails Resend has accepted since 00:00 UTC (7 pm Central in summer, 6 pm in winter), against the
+ * plan's daily limit (RESEND_DAILY_LIMIT, 100 on the free plan). The count (getEmailUsage) covers
+ * announcements, receipts AND recruiting mail. TRANSACTIONAL_HEADROOM emails stay held back for
+ * registration confirmations and LSC receipts, so bulk decisions can't use them up.
  */
-export async function getEmailQuota(now: Date = new Date()): Promise<EmailQuota> {
-  const notifications = await getEmailUsage();
-  const startOfUtcDay = new Date(now);
-  startOfUtcDay.setUTCHours(0, 0, 0, 0);
-  const recruiting = await prisma.applicationEmail.count({ where: { status: "SENT", sentAt: { gte: startOfUtcDay } } });
-  const sentToday = notifications.sentToday + recruiting;
-  const { dailyLimit } = notifications;
-  return { sentToday, dailyLimit, left: dailyLimit === null ? null : Math.max(0, dailyLimit - sentToday) };
+export async function getEmailQuota(): Promise<EmailQuota> {
+  const { sentToday, dailyLimit } = await getEmailUsage();
+  return {
+    sentToday,
+    dailyLimit,
+    left: dailyLimit === null ? null : Math.max(0, dailyLimit - sentToday - TRANSACTIONAL_HEADROOM),
+  };
 }
 
 async function assertQuotaFor(count: number, ignoreLimit: boolean | undefined) {
@@ -436,7 +549,7 @@ async function assertQuotaFor(count: number, ignoreLimit: boolean | undefined) {
   if (dailyLimit === null || left === null || count <= left) return;
   throw new RecruitingError(
     "EMAIL_LIMIT",
-    `This would send ${count} email${count === 1 ? "" : "s"}, but only ${left} of today's ${dailyLimit} are left (${sentToday} sent today, counting announcements and recruiting). The limit resets at 7 pm Central (6 pm in winter). Send fewer, wait for the reset, or tick "Send anyway" (the rest will show up as failed emails you can resend).`,
+    `This would send ${count} email${count === 1 ? "" : "s"}, but only ${left} of today's ${dailyLimit} are left (${sentToday} sent today, counting announcements and recruiting, and ${TRANSACTIONAL_HEADROOM} kept for confirmations and receipts). The limit resets at 7 pm Central (6 pm in winter). Send fewer, wait for the reset, or tick "Send anyway" (the rest will show up as failed emails you can resend).`,
   );
 }
 
@@ -460,7 +573,13 @@ export async function bulkDecide(
   officerId: string,
   applicationTrackIds: unknown,
   status: TrackStatus,
-  options: { sendEmail?: boolean; ignoreLimit?: boolean; now?: Date } = {},
+  options: {
+    sendEmail?: boolean;
+    ignoreLimit?: boolean;
+    /** Per team-application id, the status the officer saw. A row that has changed since is refused, not overwritten. */
+    expectedStatuses?: Record<string, TrackStatus>;
+    now?: Date;
+  } = {},
 ): Promise<BulkDecisionResult> {
   const parsed = idList.safeParse(applicationTrackIds);
   if (!parsed.success) {
@@ -475,7 +594,11 @@ export async function bulkDecide(
   const result: BulkDecisionResult = { total: ids.length, decided: 0, emailsSent: 0, emailsFailed: 0, failures: [] };
   for (const id of ids) {
     try {
-      const done = await decideAndNotify(officerId, id, status, { sendEmail: options.sendEmail, now: options.now });
+      const done = await decideAndNotify(officerId, id, status, {
+        sendEmail: options.sendEmail,
+        expectedStatus: options.expectedStatuses?.[id],
+        now: options.now,
+      });
       result.decided++;
       if (done.delivery?.status === "SENT") result.emailsSent++;
       else if (done.delivery) result.emailsFailed++;

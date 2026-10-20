@@ -108,7 +108,12 @@ export async function updateCycle(actorId: string, cycleId: string, input: { nam
   const before = await prisma.recruitingCycle.findUnique({ where: { id: cycleId } });
   if (!before) throw new RecruitingError("NOT_FOUND", "Round not found.");
 
-  const updated = await prisma.recruitingCycle.update({ where: { id: cycleId }, data: parsed.data });
+  // A moved deadline means the deadline sweep has to go through the round again
+  const deadlineMoved = parsed.data.closesAt.getTime() !== before.closesAt.getTime();
+  const updated = await prisma.recruitingCycle.update({
+    where: { id: cycleId },
+    data: deadlineMoved ? { ...parsed.data, sweptAt: null } : parsed.data,
+  });
   await createAuditLog({
     actorUserId: actorId,
     actionType: "RECRUITING_CYCLE_UPDATED",
@@ -127,6 +132,18 @@ export async function updateCycle(actorId: string, cycleId: string, input: { nam
  * at most one active round at a time.
  */
 export async function setActiveCycle(actorId: string, cycleId: string | null) {
+  try {
+    return await activateCycle(actorId, cycleId);
+  } catch (e) {
+    // Two officers switching at once: the unique index let only one through
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      throw new RecruitingError("BAD_STATUS", "Another officer just changed the active round. Reload the page and try again.");
+    }
+    throw e;
+  }
+}
+
+async function activateCycle(actorId: string, cycleId: string | null) {
   return prisma.$transaction(async (tx) => {
     if (cycleId !== null) {
       const target = await tx.recruitingCycle.findUnique({ where: { id: cycleId }, select: { id: true } });

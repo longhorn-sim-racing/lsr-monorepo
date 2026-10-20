@@ -163,16 +163,19 @@ function dailyEmailLimit(): number | null {
 
 /**
  * Emails sent today against Resend's daily limit. Resend's day is the UTC day (it resets at
- * 7 pm Central, 6 pm in winter). Counts the app's own emails, so other mail on the account
- * can make the real number higher.
+ * 7 pm Central, 6 pm in winter). Counts the app's own emails (notifications AND recruiting
+ * mail, which is tracked separately), so other mail on the account can make the real number higher.
  */
 export async function getEmailUsage(): Promise<{ sentToday: number; dailyLimit: number | null }> {
   const startOfUtcDay = new Date();
   startOfUtcDay.setUTCHours(0, 0, 0, 0);
-  const sentToday = await prisma.notification.count({
-    where: { channel: "EMAIL", emailMessageId: { not: null }, sentAt: { gte: startOfUtcDay } },
-  });
-  return { sentToday, dailyLimit: dailyEmailLimit() };
+  const [notifications, recruiting] = await Promise.all([
+    prisma.notification.count({
+      where: { channel: "EMAIL", emailMessageId: { not: null }, sentAt: { gte: startOfUtcDay } },
+    }),
+    prisma.applicationEmail.count({ where: { status: "SENT", sentAt: { gte: startOfUtcDay } } }),
+  ]);
+  return { sentToday: notifications + recruiting, dailyLimit: dailyEmailLimit() };
 }
 
 // Announcement-style emails: these also need the marketing opt-in. Everything else is about

@@ -4,7 +4,7 @@ import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import { genericQuestions, getTrack, questionsForTrack, tracks } from "@/schemas/recruiting.schema";
 import { formatAnswer } from "@/lib/recruiting/answers";
 import { TRACK_STATUS_LABEL } from "@/lib/recruiting/labels";
-import { toCsv, uniqueHeaders } from "@/lib/recruiting/csv";
+import { toCsv, uniqueHeaders } from "@/lib/csv";
 
 /** One submitted team application, flattened for the spreadsheet. */
 export type ExportRow = {

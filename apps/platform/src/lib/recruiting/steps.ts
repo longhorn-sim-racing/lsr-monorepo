@@ -115,16 +115,19 @@ export function patchForStep(step: StepKey, state: FormState): StepPatch {
   switch (step) {
     case "about": {
       const errors: Record<string, string> = {};
-      const profile: Record<string, unknown> = {};
+      // A blank field is sent as null, so clearing it on the page clears it on the server too
       const { fullName, eid, gradYear, major } = state.profile;
-      if (fullName.trim()) profile.fullName = fullName.trim();
-      if (eid.trim()) profile.eid = eid.trim();
-      if (major.trim()) profile.major = major.trim();
+      const profile: Record<string, unknown> = {
+        fullName: fullName.trim() || null,
+        eid: eid.trim() ? eid.trim().toLowerCase() : null,
+        major: major.trim() || null,
+      };
       const year = parseGradYear(gradYear);
       if (year === "invalid") errors["profile.gradYear"] = "Enter a four-digit year, like 2028.";
-      else if (year !== null) profile.gradYear = year;
+      else profile.gradYear = year;
       if (fullName.trim().length > 120) errors["profile.fullName"] = "Keep it under 120 characters.";
       if (eid.trim().length > 16) errors["profile.eid"] = "A UT EID is at most 16 characters.";
+      else if (eid.trim() && !/^[a-z0-9]+$/i.test(eid.trim())) errors["profile.eid"] = "A UT EID is letters and numbers only, like ab12345.";
       if (major.trim().length > 120) errors["profile.major"] = "Keep it under 120 characters.";
       return Object.keys(errors).length ? { ok: false, errors } : { ok: true, patch: { step, profile } };
     }

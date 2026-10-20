@@ -19,7 +19,7 @@ export async function exportRound(
   const cycle = await prisma.recruitingCycle.findUnique({ where: { slug: cycleSlug }, select: { id: true, slug: true, name: true } });
   if (!cycle) return null;
 
-  const rows = await listSubmittedTracksForExport({ ...filters, cycleId: cycle.id });
+  const rows = await listSubmittedTracksForExport({ ...filters, cycleId: cycle.id, viewerId: officerId });
   const csv = buildExportCsv(rows, { adminBaseUrl: options.adminBaseUrl });
 
   await createAuditLog({

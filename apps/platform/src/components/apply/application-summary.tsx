@@ -1,7 +1,7 @@
 import { answerEntries } from "@/lib/recruiting/answers";
 import { genericQuestions, questionsForTrack } from "@/schemas/recruiting.schema";
 import { teamLabel } from "@/lib/recruiting/steps";
-import { SafeLink } from "@/components/admin/recruiting/safe-link";
+import { SafeLink } from "@/components/recruiting/safe-link";
 
 type Props = {
   profile: { fullName: string | null; email: string | null; eid: string | null; gradYear: number | string | null; major: string | null };

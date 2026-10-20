@@ -92,7 +92,8 @@ describe("updateCycle", () => {
     const later = new Date("2026-10-20T04:59:00Z");
     await updateCycle(OFFICER, "c1", { name: "Fall 2026 (extended)", opensAt, closesAt: later });
     const data = db.recruitingCycle.update.mock.calls[0][0].data;
-    expect(data).toEqual({ name: "Fall 2026 (extended)", opensAt, closesAt: later });
+    // A moved deadline also sends the deadline sweep back through the round
+    expect(data).toEqual({ name: "Fall 2026 (extended)", opensAt, closesAt: later, sweptAt: null });
     expect(data).not.toHaveProperty("slug");
     expect(audit.createAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({ before: { name: "Old name", opensAt, closesAt }, after: { name: "Fall 2026 (extended)", opensAt, closesAt: later } }),

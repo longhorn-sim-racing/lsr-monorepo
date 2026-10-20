@@ -97,6 +97,17 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
   return (
     <ApplyShell kicker={kicker} title="Your application">
       <div className="space-y-8">
+        {availability.state === "open" && view.round && availability.round.id !== view.round.id && (
+          <ApplyNotice
+            action={
+              <Button asChild className={primaryButton}>
+                <Link href="/apply/start">Start a new application</Link>
+              </Button>
+            }
+          >
+            This is your application from {view.round.name}. Applications are open for {availability.round.name}.
+          </ApplyNotice>
+        )}
         {submitted === "1" && (
           <ApplyNotice tone="good">
             <p className="font-display text-xl font-black uppercase italic text-white">Application submitted</p>

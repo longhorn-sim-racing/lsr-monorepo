@@ -20,7 +20,10 @@ export async function GET(request: Request) {
 
   try {
     const summary = await sweepAndNotify();
-    return NextResponse.json({ ok: true, ...summary });
+    // Drafts that threw are a failure the workflow should turn red for; running out of time is not
+    // (the next run carries on), but it is reported.
+    const ok = summary.failed === 0 && !summary.timedOut;
+    return NextResponse.json({ ok, ...summary }, { status: summary.failed > 0 ? 500 : 200 });
   } catch (error) {
     console.error("[Cron] Recruiting sweep failed:", error instanceof Error ? error.message : error);
     return NextResponse.json({ ok: false, error: "Sweep failed" }, { status: 500 });

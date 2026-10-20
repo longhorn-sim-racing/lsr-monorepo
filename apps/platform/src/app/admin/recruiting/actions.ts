@@ -17,9 +17,12 @@ import { createCycle, deleteCycle, saveTrackConfig, setActiveCycle, updateCycle 
 
 const idSchema = z.string().min(1).max(64);
 const statusSchema = z.enum(["IN_REVIEW", "INTERVIEW", "ACCEPTED", "REJECTED"]);
+/** The status the officer saw when they decided (SUBMITTED included: a new application has not been touched yet) */
+const expectedStatusSchema = z.enum(["SUBMITTED", "IN_REVIEW", "INTERVIEW", "ACCEPTED", "REJECTED"]);
 const overrideSchema = z.object({ subject: z.string().max(400), body: z.string().max(10000) }).strict().optional();
 
-async function run<T>(work: (officerId: string) => Promise<T>): Promise<RecruitingActionResult<T>> {
+/** `revalidate: false` for actions that only read, so they don't re-run the pages or fill the audit log with page views. */
+async function run<T>(work: (officerId: string) => Promise<T>, options: { revalidate?: boolean } = {}): Promise<RecruitingActionResult<T>> {
   let officerId: string;
   try {
     officerId = (await requireOfficer()).id;
@@ -28,7 +31,7 @@ async function run<T>(work: (officerId: string) => Promise<T>): Promise<Recruiti
   }
   try {
     const data = await work(officerId);
-    revalidatePath("/admin/recruiting", "layout");
+    if (options.revalidate !== false) revalidatePath("/admin/recruiting", "layout");
     return { ok: true, data };
   } catch (e) {
     if (isRecruitingError(e)) return { ok: false, error: e.message, fieldErrors: e.fieldErrors, code: e.code };
@@ -56,20 +59,22 @@ function parseCentral(value: string, field: string): Date {
 
 /** What would be emailed for this decision, as editable text plus rendered HTML. Writes nothing. */
 export async function previewDecisionAction(applicationTrackId: string, status: string, override?: { subject: string; body: string }) {
-  return run(async () =>
-    previewDecisionEmail(idSchema.parse(applicationTrackId), statusSchema.parse(status), overrideSchema.parse(override)),
+  return run(
+    async () => previewDecisionEmail(idSchema.parse(applicationTrackId), statusSchema.parse(status), overrideSchema.parse(override)),
+    { revalidate: false },
   );
 }
 
 export async function decideAction(
   applicationTrackId: string,
   status: string,
-  options: { sendEmail?: boolean; override?: { subject: string; body: string } } = {},
+  options: { sendEmail?: boolean; override?: { subject: string; body: string }; expectedStatus?: string } = {},
 ) {
   return run(async (officerId) =>
     decideAndNotify(officerId, idSchema.parse(applicationTrackId), statusSchema.parse(status), {
       sendEmail: z.boolean().optional().parse(options.sendEmail),
       override: overrideSchema.parse(options.override),
+      expectedStatus: expectedStatusSchema.optional().parse(options.expectedStatus),
     }),
   );
 }
@@ -77,11 +82,12 @@ export async function decideAction(
 export async function bulkDecideAction(
   applicationTrackIds: string[],
   status: string,
-  options: { sendEmail?: boolean; ignoreLimit?: boolean } = {},
+  options: { sendEmail?: boolean; ignoreLimit?: boolean; expectedStatuses?: Record<string, string> } = {},
 ) {
   return run(async (officerId) =>
     bulkDecide(officerId, applicationTrackIds, statusSchema.parse(status), {
       sendEmail: z.boolean().optional().parse(options.sendEmail),
+      expectedStatuses: z.record(idSchema, expectedStatusSchema).optional().parse(options.expectedStatuses),
       ignoreLimit: z.boolean().optional().parse(options.ignoreLimit),
     }),
   );

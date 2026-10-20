@@ -1022,35 +1022,35 @@ model JackMessage {
   @@index([authorUserId])
 }
 
-
 // ---------- Recruiting ----------
 // Applicants are Users. An Application is one person's submission for a round; it has
 // one ApplicationTrack per team they applied to, and decisions are made per track.
 // Design: docs/recruiting-system-design.md (local doc).
 
 enum ApplicationState {
-  DRAFT      // saved on the server, editable, invisible to officers
-  SUBMITTED  // final: by the applicant, or by the deadline sweep if it was complete
+  DRAFT // saved on the server, editable, invisible to officers
+  SUBMITTED // final: by the applicant, or by the deadline sweep if it was complete
 }
 
 enum TrackStatus {
-  SUBMITTED  // received, not looked at yet
+  SUBMITTED // received, not looked at yet
   IN_REVIEW
-  INTERVIEW  // only for teams that run interviews (enforced in the service layer)
+  INTERVIEW // only for teams that run interviews (enforced in the service layer)
   ACCEPTED
-  REJECTED   // "not moving forward"
+  REJECTED // "not moving forward"
 }
 
 model RecruitingCycle {
-  id          String   @id @default(uuid())
-  slug        String   @unique // "fall-2026"
+  id          String    @id @default(uuid())
+  slug        String    @unique // "fall-2026"
   name        String
   opensAt     DateTime
   closesAt    DateTime // UTC; shown in America/Chicago
-  isActive    Boolean  @default(false) // at most one active round (partial unique index in the migration)
-  formVersion Int      @default(1)     // bump when a question is removed or changes meaning
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isActive    Boolean   @default(false) // at most one active round (partial unique index in the migration)
+  formVersion Int       @default(1) // bump when a question is removed or changes meaning
+  sweptAt     DateTime? // the deadline sweep has been through this closed round cleanly; cleared when closesAt moves
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   applications   Application[]
   trackConfigs   RecruitingTrackConfig[]
@@ -1083,8 +1083,8 @@ model Application {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  cycle  RecruitingCycle @relation(fields: [cycleId], references: [id], onDelete: Restrict)
-  user   User            @relation("ApplicationApplicant", fields: [userId], references: [id], onDelete: Cascade)
+  cycle  RecruitingCycle    @relation(fields: [cycleId], references: [id], onDelete: Restrict)
+  user   User               @relation("ApplicationApplicant", fields: [userId], references: [id], onDelete: Cascade)
   tracks ApplicationTrack[]
   emails ApplicationEmail[]
 
@@ -1103,8 +1103,8 @@ model ApplicationTrack {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
-  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  decidedBy   User?       @relation("ApplicationDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+  application Application         @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  decidedBy   User?               @relation("ApplicationDecider", fields: [decidedById], references: [id], onDelete: SetNull)
   reviews     ApplicationReview[]
   emails      ApplicationEmail[]
 
@@ -1140,6 +1140,8 @@ model ApplicationEmail {
   resendMessageId    String?
   error              String?
   sentAt             DateTime?
+  claimedAt          DateTime? // when a send (first or resend) started; an unfinished one is "interrupted" only after a timeout from here
+  idempotencyKey     String? // the key the current send uses; a retry after a crash reuses it
   createdAt          DateTime           @default(now())
 
   application      Application       @relation(fields: [applicationId], references: [id], onDelete: Cascade)

@@ -141,6 +141,10 @@ describe("default drafts", () => {
 describe("renderEmail", () => {
   const hostile = '<script>alert(1)</script> & "quotes" <img src=x onerror=alert(1)>';
 
+  it("has no email-preferences link, since these emails ignore those preferences", () => {
+    expect(renderEmail({ subject: "Hi", body: "Hello there" }).html).not.toContain("Manage email preferences");
+  });
+
   it("escapes everything: applicant-controlled text can't become markup", () => {
     const composed = composeEmail(
       { subject: "Hi {{applicantName}}", body: "Dear {{applicantName}},\n\nsecond <b>paragraph</b>" },

@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Badge, Button, CheckboxField, Dialog, EmptyState, Notice, PageHeader, Select, TD, TH, THead, TR, Table, Toolbar } from "@/components/admin/kit";
+import { Badge, Button, CheckboxField, Dialog, EmptyState, Notice, PageHeader, Panel, Select, TD, TH, THead, TR, Table, Toolbar } from "@/components/admin/kit";
 import { resendAllFailedAction, resendEmailAction } from "@/app/admin/recruiting/actions";
 import { EMAIL_STATUS_TONE, EMAIL_TEMPLATE_LABEL, formatCentral } from "@/lib/recruiting/labels";
 
@@ -50,7 +50,7 @@ export function EmailsConsole({
   }
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="max-w-5xl">
       <PageHeader
         back={{ href: `/admin/recruiting?cycle=${cycle.slug}`, label: "Applications" }}
         title="Emails that need attention"
@@ -81,15 +81,15 @@ export function EmailsConsole({
             <strong className="font-semibold text-foreground">
               {quota.sentToday} of {quota.dailyLimit}
             </strong>{" "}
-            emails sent today (announcements and recruiting together); {quota.left} left. The count resets at 7 pm Central (6 pm in winter). A message that fails because the limit was reached can be resent after that.
+            emails sent today (announcements, receipts and recruiting together); {quota.left} left for recruiting (a few are held back for registration confirmations and receipts). The count resets at 7 pm Central (6 pm in winter). A message that fails because the limit was reached can be resent after that.
           </>
         )}
       </Notice>
 
       {rows.length === 0 ? (
-        <div className="rounded-lg border bg-card">
+        <Panel>
           <EmptyState title="Nothing needs attention" description="Every email for this round was sent." />
-        </div>
+        </Panel>
       ) : (
         <Table minWidth={720}>
           <THead>

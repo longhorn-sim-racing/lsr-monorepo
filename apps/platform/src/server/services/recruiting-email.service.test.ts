@@ -6,12 +6,13 @@ const db = vi.hoisted(() => ({
   applicationTrack: { findUnique: vi.fn(), update: vi.fn() },
   recruitingTrackConfig: { findUnique: vi.fn() },
   application: { findUnique: vi.fn() },
+  recruitingCycle: { findMany: vi.fn(), updateMany: vi.fn() },
   $transaction: vi.fn(),
   $executeRaw: vi.fn(),
 }));
 const mail = vi.hoisted(() => ({ sendEmail: vi.fn() }));
 const audit = vi.hoisted(() => ({ createAuditLog: vi.fn() }));
-const notifications = vi.hoisted(() => ({ getEmailUsage: vi.fn() }));
+const notifications = vi.hoisted(() => ({ getEmailUsage: vi.fn(), TRANSACTIONAL_HEADROOM: 10 }));
 
 vi.mock("@/server/db", () => ({ prisma: db }));
 vi.mock("@/lib/email/resend", () => mail);
@@ -20,6 +21,7 @@ vi.mock("@/server/services/notification.service", () => notifications);
 
 import { tracks } from "@/schemas/recruiting.schema";
 import {
+  DAILY_LIMIT_ERROR,
   INTERRUPTED_ERROR,
   bulkDecide,
   composeTrackEmail,
@@ -33,6 +35,7 @@ import {
   resendAllFailed,
   resendEmail,
   statusToTemplate,
+  sweepAndNotify,
 } from "./recruiting-email.service";
 
 // Use whatever teams ship, so these tests don't break when the placeholder teams are replaced
@@ -258,7 +261,7 @@ describe("resendEmail", () => {
     toEmail: "ada@account.test",
     subject: "Hello",
     body: "Body text",
-    application: { id: "app-1", userId: APPLICANT_ID },
+    application: { id: "app-1", userId: APPLICANT_ID, user: { email: "ada@account.test" } },
     ...over,
   });
 
@@ -267,9 +270,32 @@ describe("resendEmail", () => {
     db.applicationEmail.updateMany.mockResolvedValue({ count: 1 });
     const result = await resendEmail(OFFICER_ID, "email-1");
     expect(result.status).toBe("SENT");
-    expect(db.applicationEmail.updateMany).toHaveBeenCalledWith({ where: { id: "email-1", status: "FAILED" }, data: { status: "PENDING" } });
+    expect(db.applicationEmail.updateMany).toHaveBeenCalledWith({
+      where: { id: "email-1", status: "FAILED" },
+      data: { status: "PENDING", claimedAt: expect.any(Date), idempotencyKey: expect.stringMatching(/^recruiting-email:email-1:.+/), toEmail: "ada@account.test" },
+    });
     expect(audit.createAuditLog).toHaveBeenCalledWith(expect.objectContaining({ actorUserId: OFFICER_ID, actionType: "APPLICATION_EMAIL_RESENT", targetUserId: APPLICANT_ID }));
     expect(mail.sendEmail.mock.calls[0][1].idempotencyKey).toMatch(/^recruiting-email:email-1:.+/);
+  });
+
+  it("sends a fresh resend to the applicant's CURRENT account email, and records the change", async () => {
+    db.applicationEmail.findUnique.mockResolvedValue(failed({ application: { id: "app-1", userId: APPLICANT_ID, user: { email: "ada@new.test" } } }));
+    db.applicationEmail.updateMany.mockResolvedValue({ count: 1 });
+    await resendEmail(OFFICER_ID, "email-1");
+    expect(db.applicationEmail.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ toEmail: "ada@new.test" }) }));
+    expect(mail.sendEmail.mock.calls[0][0].to).toBe("ada@new.test");
+    expect(audit.createAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: expect.objectContaining({ recipientChanged: { from: "ada@account.test", to: "ada@new.test" } }) }),
+    );
+  });
+
+  it("keeps the original recipient for an interrupted send, whose delivery may already have happened", async () => {
+    db.applicationEmail.findUnique.mockResolvedValue(
+      failed({ error: INTERRUPTED_ERROR, application: { id: "app-1", userId: APPLICANT_ID, user: { email: "ada@new.test" } } }),
+    );
+    db.applicationEmail.updateMany.mockResolvedValue({ count: 1 });
+    await resendEmail(OFFICER_ID, "email-1");
+    expect(mail.sendEmail.mock.calls[0][0].to).toBe("ada@account.test");
   });
 
   it("uses a different key every time, otherwise Resend would hand back the old failure", async () => {
@@ -315,8 +341,10 @@ describe("failInterruptedEmails", () => {
     db.applicationEmail.updateMany.mockResolvedValue({ count: 3 });
     const now = new Date("2026-11-01T12:00:00Z");
     expect(await failInterruptedEmails(now)).toBe(3);
+    // The clock runs from when the send was claimed (a resend sets it), falling back to creation
+    const cutoff = new Date("2026-11-01T11:50:00Z");
     expect(db.applicationEmail.updateMany).toHaveBeenCalledWith({
-      where: { status: "PENDING", createdAt: { lt: new Date("2026-11-01T11:50:00Z") } },
+      where: { status: "PENDING", OR: [{ claimedAt: { lt: cutoff } }, { claimedAt: null, createdAt: { lt: cutoff } }] },
       data: { status: "FAILED", error: INTERRUPTED_ERROR },
     });
   });
@@ -428,22 +456,13 @@ describe("decideAndNotify", () => {
 });
 
 describe("getEmailQuota", () => {
-  it("adds recruiting mail to the announcements already counted, against the plan's daily limit", async () => {
-    notifications.getEmailUsage.mockResolvedValue({ sentToday: 30, dailyLimit: 100 });
-    db.applicationEmail.count.mockResolvedValue(25);
-    expect(await getEmailQuota(new Date("2026-11-01T15:00:00Z"))).toEqual({ sentToday: 55, dailyLimit: 100, left: 45 });
-  });
-
-  it("counts only mail Resend accepted since the start of the UTC day", async () => {
-    notifications.getEmailUsage.mockResolvedValue({ sentToday: 0, dailyLimit: 100 });
-    db.applicationEmail.count.mockResolvedValue(0);
-    await getEmailQuota(new Date("2026-11-01T15:00:00Z"));
-    expect(db.applicationEmail.count).toHaveBeenCalledWith({ where: { status: "SENT", sentAt: { gte: new Date("2026-11-01T00:00:00Z") } } });
+  it("takes the count from the shared usage (announcements, receipts and recruiting mail) and holds the receipts headroom back", async () => {
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 55, dailyLimit: 100 });
+    expect(await getEmailQuota()).toEqual({ sentToday: 55, dailyLimit: 100, left: 35 });
   });
 
   it("never reports less than zero left, and no limit means no cap", async () => {
     notifications.getEmailUsage.mockResolvedValue({ sentToday: 120, dailyLimit: 100 });
-    db.applicationEmail.count.mockResolvedValue(5);
     expect((await getEmailQuota()).left).toBe(0);
     notifications.getEmailUsage.mockResolvedValue({ sentToday: 500, dailyLimit: null });
     expect(await getEmailQuota()).toMatchObject({ dailyLimit: null, left: null });
@@ -453,8 +472,7 @@ describe("getEmailQuota", () => {
 describe("bulkDecide", () => {
   const ids = (n: number) => Array.from({ length: n }, (_, i) => `track-${i + 1}`);
   beforeEach(() => {
-    notifications.getEmailUsage.mockResolvedValue({ sentToday: 10, dailyLimit: 100 });
-    db.applicationEmail.count.mockResolvedValue(5); // 15 sent today, 85 left
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 15, dailyLimit: 100 }); // 75 left after the headroom
     db.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(db));
     db.$executeRaw.mockResolvedValue(1);
     db.applicationTrack.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => trackRow({ id: where.id }));
@@ -499,8 +517,7 @@ describe("bulkDecide", () => {
   });
 
   it("refuses the whole batch up front when it would go past today's email limit, deciding nobody", async () => {
-    notifications.getEmailUsage.mockResolvedValue({ sentToday: 90, dailyLimit: 100 });
-    db.applicationEmail.count.mockResolvedValue(0); // 10 left
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 80, dailyLimit: 100 }); // 10 left after the headroom
     await expect(bulkDecide(OFFICER_ID, ids(11), "ACCEPTED", { sendEmail: true })).rejects.toMatchObject({
       code: "EMAIL_LIMIT",
       message: expect.stringContaining("only 10 of today's 100"),
@@ -514,7 +531,6 @@ describe("bulkDecide", () => {
 
   it("goes ahead past the limit only when told to", async () => {
     notifications.getEmailUsage.mockResolvedValue({ sentToday: 99, dailyLimit: 100 });
-    db.applicationEmail.count.mockResolvedValue(0);
     const result = await bulkDecide(OFFICER_ID, ids(5), "ACCEPTED", { sendEmail: true, ignoreLimit: true });
     expect(result.decided).toBe(5);
   });
@@ -547,10 +563,9 @@ describe("bulkDecide", () => {
 });
 
 describe("resendAllFailed", () => {
-  const failedRow = (id: string) => ({ id, status: "FAILED", error: "Daily quota exceeded", toEmail: "ada@account.test", subject: "s", body: "b", application: { id: "app-1", userId: APPLICANT_ID } });
+  const failedRow = (id: string) => ({ id, status: "FAILED", error: "Daily quota exceeded", toEmail: "ada@account.test", subject: "s", body: "b", application: { id: "app-1", userId: APPLICANT_ID, user: { email: "ada@account.test" } } });
   beforeEach(() => {
     notifications.getEmailUsage.mockResolvedValue({ sentToday: 0, dailyLimit: 100 });
-    db.applicationEmail.count.mockResolvedValue(0);
     db.applicationEmail.updateMany.mockResolvedValue({ count: 1 });
     db.applicationEmail.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => failedRow(where.id));
   });
@@ -575,7 +590,7 @@ describe("resendAllFailed", () => {
   });
 
   it("won't start a batch that is bigger than what's left of today's limit, unless told to", async () => {
-    notifications.getEmailUsage.mockResolvedValue({ sentToday: 98, dailyLimit: 100 });
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 88, dailyLimit: 100 }); // 2 left after the headroom
     db.applicationEmail.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }, { id: "e3" }]);
     await expect(resendAllFailed(OFFICER_ID, "cycle-1")).rejects.toMatchObject({ code: "EMAIL_LIMIT" });
     expect(mail.sendEmail).not.toHaveBeenCalled();
@@ -586,5 +601,150 @@ describe("resendAllFailed", () => {
     db.applicationEmail.findMany.mockResolvedValue([]);
     expect(await resendAllFailed(OFFICER_ID, "cycle-1")).toEqual({ total: 0, sent: 0, failed: 0 });
     expect(notifications.getEmailUsage).not.toHaveBeenCalled();
+  });
+});
+
+describe("a decision that changed", () => {
+  beforeEach(() => {
+    db.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(db));
+    db.$executeRaw.mockResolvedValue(1);
+    db.applicationTrack.findUnique.mockResolvedValue(trackRow({ status: "ACCEPTED" }));
+    db.applicationTrack.update.mockResolvedValue({});
+    db.applicationEmail.updateMany.mockResolvedValue({ count: 1 });
+    db.applicationEmail.create.mockResolvedValue({ id: "email-2" });
+    db.applicationEmail.findUnique.mockResolvedValue({ id: "email-2", status: "PENDING", toEmail: "ada@account.test", subject: "s", body: "b" });
+  });
+
+  it("cancels the team's unsent decision emails in the same transaction, before queuing the new one", async () => {
+    await decideAndNotify(OFFICER_ID, "track-1", "REJECTED", { sendEmail: true });
+    expect(db.applicationEmail.updateMany).toHaveBeenCalledWith({
+      where: { applicationTrackId: "track-1", template: { in: ["INTERVIEW", "ACCEPTED", "REJECTED"] }, status: { in: ["FAILED", "PENDING"] } },
+      data: expect.objectContaining({ status: "CANCELLED" }),
+    });
+    expect(db.applicationEmail.updateMany.mock.invocationCallOrder[0]).toBeLessThan(db.applicationEmail.create.mock.invocationCallOrder[0]);
+  });
+
+  it("refuses to overwrite a status the officer didn't see, saving and emailing nothing", async () => {
+    await expect(decideAndNotify(OFFICER_ID, "track-1", "REJECTED", { sendEmail: true, expectedStatus: "IN_REVIEW" })).rejects.toMatchObject({
+      code: "STATUS_CHANGED",
+    });
+    expect(db.applicationTrack.update).not.toHaveBeenCalled();
+    expect(db.applicationEmail.create).not.toHaveBeenCalled();
+    expect(mail.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("goes ahead when the status is still the one the officer saw", async () => {
+    const result = await decideAndNotify(OFFICER_ID, "track-1", "REJECTED", { sendEmail: true, expectedStatus: "ACCEPTED" });
+    expect(result.status).toBe("REJECTED");
+  });
+
+  it("in a bulk change, refuses only the rows that changed", async () => {
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 0, dailyLimit: 100 });
+    db.applicationTrack.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) =>
+      trackRow({ id: where.id, status: where.id === "track-2" ? "ACCEPTED" : "IN_REVIEW" }),
+    );
+    const result = await bulkDecide(OFFICER_ID, ["track-1", "track-2"], "REJECTED", {
+      sendEmail: false,
+      expectedStatuses: { "track-1": "IN_REVIEW", "track-2": "IN_REVIEW" },
+    });
+    expect(result.decided).toBe(1);
+    expect(result.failures).toEqual([{ applicationTrackId: "track-2", error: expect.stringContaining("Someone else just changed this") }]);
+  });
+
+  it("will not resend an old decision email once the status no longer matches it", async () => {
+    db.applicationEmail.findUnique.mockResolvedValue({
+      id: "email-1",
+      status: "FAILED",
+      error: "Daily quota exceeded",
+      template: "ACCEPTED",
+      toEmail: "ada@account.test",
+      subject: "You are in",
+      body: "b",
+      idempotencyKey: null,
+      applicationTrack: { status: "REJECTED" },
+      application: { id: "app-1", userId: APPLICANT_ID, user: { email: "ada@account.test" } },
+    });
+    await expect(resendEmail(OFFICER_ID, "email-1")).rejects.toMatchObject({ code: "BAD_STATUS" });
+    expect(mail.sendEmail).not.toHaveBeenCalled();
+    expect(db.applicationEmail.updateMany).toHaveBeenCalledWith({
+      where: { id: "email-1", status: "FAILED" },
+      data: expect.objectContaining({ status: "CANCELLED" }),
+    });
+  });
+
+  it("resends a decision email that still matches the status", async () => {
+    db.applicationEmail.findUnique.mockResolvedValue({
+      id: "email-1",
+      status: "FAILED",
+      error: "Daily quota exceeded",
+      template: "REJECTED",
+      toEmail: "ada@account.test",
+      subject: "s",
+      body: "b",
+      idempotencyKey: null,
+      applicationTrack: { status: "REJECTED" },
+      application: { id: "app-1", userId: APPLICANT_ID, user: { email: "ada@account.test" } },
+    });
+    expect((await resendEmail(OFFICER_ID, "email-1")).status).toBe("SENT");
+  });
+
+  it("drops braces from the applicant's name, so a second compose of an edited email can't read it as a placeholder", async () => {
+    db.applicationTrack.findUnique.mockResolvedValue(trackRow({}, { fullName: "Ada {{statusUrl}} Lovelace" }));
+    const email = await composeTrackEmail(db as never, "track-1", "ACCEPTED");
+    expect(email.body).toContain("Ada statusUrl Lovelace");
+    expect(email.body).not.toContain("{{statusUrl}}");
+  });
+});
+
+describe("sending", () => {
+  const pending = { id: "email-1", status: "PENDING", toEmail: "ada@account.test", subject: "Hello", body: "Body text", idempotencyKey: null };
+
+  it("does not mark an email failed when Resend accepted it but saving the result threw", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    db.applicationEmail.findUnique.mockResolvedValue(pending);
+    db.applicationEmail.update.mockRejectedValue(new Error("connection reset"));
+    const result = await deliverEmail("email-1");
+    expect(result).toEqual({ emailId: "email-1", status: "SENT" });
+    expect(db.applicationEmail.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "FAILED" }) }));
+  });
+
+  it("sends with the key stored on the row, so a retry after a crash can't deliver twice", async () => {
+    db.applicationEmail.findUnique.mockResolvedValue({ ...pending, idempotencyKey: "recruiting-email:email-1:stored" });
+    await deliverEmail("email-1");
+    expect(mail.sendEmail.mock.calls[0][1]).toEqual({ idempotencyKey: "recruiting-email:email-1:stored" });
+  });
+});
+
+describe("sweepAndNotify email handling", () => {
+  beforeEach(() => {
+    db.recruitingCycle.findMany.mockResolvedValue([]);
+    db.applicationEmail.updateMany.mockResolvedValue({ count: 0 });
+  });
+
+  it("retries confirmations an earlier run never sent", async () => {
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 0, dailyLimit: 100 });
+    db.applicationEmail.findMany.mockResolvedValue([{ id: "email-1" }]);
+    db.applicationEmail.findUnique.mockResolvedValue({ id: "email-1", status: "PENDING", toEmail: "a@b.test", subject: "s", body: "b", idempotencyKey: null });
+    const summary = await sweepAndNotify({ now: new Date("2026-11-01T12:00:00Z") });
+    expect(summary.emailsSent).toBe(1);
+  });
+
+  it("leaves confirmations that don't fit in today's email limit as failed, to resend later, instead of sending them", async () => {
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 95, dailyLimit: 100 }); // inside the receipts headroom: nothing left
+    db.applicationEmail.findMany.mockResolvedValue([{ id: "email-1" }]);
+    const summary = await sweepAndNotify({ now: new Date("2026-11-01T12:00:00Z") });
+    expect(summary).toMatchObject({ emailsSent: 0, emailsOverLimit: 1 });
+    expect(mail.sendEmail).not.toHaveBeenCalled();
+    expect(db.applicationEmail.update).toHaveBeenCalledWith({ where: { id: "email-1" }, data: { status: "FAILED", error: DAILY_LIMIT_ERROR } });
+  });
+
+  it("only looks at rounds it hasn't already been through cleanly (the admin button re-checks one)", async () => {
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 0, dailyLimit: 100 });
+    db.applicationEmail.findMany.mockResolvedValue([]);
+    await sweepAndNotify({ now: new Date("2026-11-01T12:00:00Z") });
+    expect(db.recruitingCycle.findMany.mock.calls[0][0].where).toMatchObject({ sweptAt: null });
+    await sweepAndNotify({ cycleId: "c1", now: new Date("2026-11-01T12:00:00Z") });
+    expect(db.recruitingCycle.findMany.mock.calls[1][0].where).toMatchObject({ id: "c1" });
+    expect(db.recruitingCycle.findMany.mock.calls[1][0].where).not.toHaveProperty("sweptAt");
   });
 });

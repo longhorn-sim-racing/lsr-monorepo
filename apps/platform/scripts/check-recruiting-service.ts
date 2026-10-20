@@ -393,6 +393,8 @@ async function main() {
     check("...but a brand-new PENDING one is left alone", (await prisma.applicationEmail.findUniqueOrThrow({ where: { id: fresh.id } })).status === "PENDING");
     const attention = await listEmailsNeedingAttention(cycle.id);
     check("the 'needs attention' list shows this applicant's failed and pending mail", attention.some((e) => e.id === stuck.id) && attention.some((e) => e.id === fresh.id) && !attention.some((e) => e.id === interviewMail.id));
+    // The sweep retries mail that has been PENDING for a couple of minutes; don't let this one skew its counts later
+    await prisma.applicationEmail.delete({ where: { id: fresh.id } });
   }
 
   console.log("--- a draft left unsubmitted after the deadline ---");
@@ -438,9 +440,10 @@ async function main() {
     const t5b = app5.tracks.find((t) => t.track === "team-b")!.id;
     const originalLimit = process.env.RESEND_DAILY_LIMIT;
     try {
-      process.env.RESEND_DAILY_LIMIT = "1";
+      // 10 of the day's emails are held back for receipts, so a limit of 11 leaves exactly 1
+      process.env.RESEND_DAILY_LIMIT = "11";
       const quota = await getEmailQuota();
-      check("the quota counts recruiting mail and reads the plan's limit", quota.dailyLimit === 1 && quota.left === 1 && quota.sentToday === 0, JSON.stringify(quota));
+      check("the quota counts recruiting mail and reads the plan's limit, holding the receipts headroom back", quota.dailyLimit === 11 && quota.left === 1 && quota.sentToday === 0, JSON.stringify(quota));
       await expectError("a batch bigger than what's left of today's limit is refused up front", () => bulkDecide(officer.id, [t5a, t5b], "ACCEPTED", { sendEmail: true }), "EMAIL_LIMIT");
       const untouched = await prisma.applicationTrack.findMany({ where: { applicationId: app5.id }, select: { status: true } });
       check("...and nobody was decided", untouched.every((t) => t.status === "SUBMITTED"), JSON.stringify(untouched));
