@@ -13,6 +13,7 @@ CREATE TABLE "public"."RecruitingCycle" (
     "closesAt" TIMESTAMP(3) NOT NULL,
     "isActive" BOOLEAN NOT NULL DEFAULT false,
     "formVersion" INTEGER NOT NULL DEFAULT 1,
+    "sweptAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -83,6 +84,8 @@ CREATE TABLE "public"."ApplicationEmail" (
     "resendMessageId" TEXT,
     "error" TEXT,
     "sentAt" TIMESTAMP(3),
+    "claimedAt" TIMESTAMP(3),
+    "idempotencyKey" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "ApplicationEmail_pkey" PRIMARY KEY ("id")
@@ -98,20 +101,6 @@ CREATE TABLE "public"."RecruitingTrackConfig" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "RecruitingTrackConfig_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "public"."RecruitingEmailTemplate" (
-    "id" TEXT NOT NULL,
-    "cycleId" TEXT NOT NULL,
-    "track" TEXT NOT NULL,
-    "template" TEXT NOT NULL,
-    "subject" TEXT NOT NULL,
-    "body" TEXT NOT NULL,
-    "updatedById" TEXT,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "RecruitingEmailTemplate_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -141,8 +130,6 @@ CREATE INDEX "ApplicationEmail_applicationId_idx" ON "public"."ApplicationEmail"
 -- CreateIndex
 CREATE UNIQUE INDEX "RecruitingTrackConfig_cycleId_track_key" ON "public"."RecruitingTrackConfig"("cycleId", "track");
 
--- CreateIndex
-CREATE UNIQUE INDEX "RecruitingEmailTemplate_cycleId_track_template_key" ON "public"."RecruitingEmailTemplate"("cycleId", "track", "template");
 
 -- AddForeignKey
 ALTER TABLE "public"."Application" ADD CONSTRAINT "Application_cycleId_fkey" FOREIGN KEY ("cycleId") REFERENCES "public"."RecruitingCycle"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -172,7 +159,6 @@ ALTER TABLE "public"."ApplicationEmail" ADD CONSTRAINT "ApplicationEmail_applica
 ALTER TABLE "public"."RecruitingTrackConfig" ADD CONSTRAINT "RecruitingTrackConfig_cycleId_fkey" FOREIGN KEY ("cycleId") REFERENCES "public"."RecruitingCycle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."RecruitingEmailTemplate" ADD CONSTRAINT "RecruitingEmailTemplate_cycleId_fkey" FOREIGN KEY ("cycleId") REFERENCES "public"."RecruitingCycle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- Hand-written (Prisma can't express these) -----------------------------------------
 
@@ -189,7 +175,6 @@ ALTER TABLE "public"."ApplicationTrack"        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."ApplicationReview"       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."ApplicationEmail"        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."RecruitingTrackConfig"   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."RecruitingEmailTemplate" ENABLE ROW LEVEL SECURITY;
 
 -- The anon / authenticated roles exist on Supabase but not on a plain Postgres (CI, other
 -- tooling), so only revoke where they exist.
@@ -201,8 +186,26 @@ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
       EXECUTE format(
         'REVOKE ALL ON TABLE "public"."RecruitingCycle", "public"."Application", "public"."ApplicationTrack", '
-        '"public"."ApplicationReview", "public"."ApplicationEmail", "public"."RecruitingTrackConfig", '
-        '"public"."RecruitingEmailTemplate" FROM %I', r);
+        '"public"."ApplicationReview", "public"."ApplicationEmail", "public"."RecruitingTrackConfig" FROM %I', r);
     END IF;
   END LOOP;
+END $$;
+
+-- jack_readonly (the officer chat agent's read-only SQL role) gets SELECT on new tables through
+-- default privileges, but these tables have row level security on, and with no policy for the role
+-- it would see zero rows. Give it a read-only policy on each recruiting table. Only where the role
+-- exists, like the revoke block above.
+DO $$
+DECLARE
+  t text;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'jack_readonly') THEN
+    FOREACH t IN ARRAY ARRAY[
+      'RecruitingCycle', 'Application', 'ApplicationTrack', 'ApplicationReview',
+      'ApplicationEmail', 'RecruitingTrackConfig'
+    ] LOOP
+      EXECUTE format('DROP POLICY IF EXISTS jack_readonly_select ON public.%I', t);
+      EXECUTE format('CREATE POLICY jack_readonly_select ON public.%I FOR SELECT TO jack_readonly USING (true)', t);
+    END LOOP;
+  END IF;
 END $$;

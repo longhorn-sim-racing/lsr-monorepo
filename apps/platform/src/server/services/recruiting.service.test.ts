@@ -5,7 +5,13 @@ const db = vi.hoisted(() => ({
   $transaction: vi.fn(),
   $executeRaw: vi.fn(),
 }));
-const repo = vi.hoisted(() => ({ findCycleById: vi.fn() }));
+const repo = vi.hoisted(() => ({
+  findCycleById: vi.fn(),
+  findActiveCycle: vi.fn(),
+  findApplicationByUser: vi.fn(),
+  findLatestSubmittedApplicationByUser: vi.fn(),
+  findTrackConfigs: vi.fn(),
+}));
 const audit = vi.hoisted(() => ({ createAuditLog: vi.fn() }));
 
 vi.mock("@/server/db", () => ({ prisma: db }));
@@ -13,7 +19,7 @@ vi.mock("@/server/audit/log", () => audit);
 vi.mock("@/server/repos/application.repo", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/server/repos/application.repo")>()), ...repo }));
 
 import { questionsForTrack, tracks } from "@/schemas/recruiting.schema";
-import { sweepCycle } from "./recruiting.service";
+import { getApplicantStatus, sweepCycle } from "./recruiting.service";
 
 // Whatever team ships with nothing required, so the draft below counts as complete
 const easyTeam = tracks.find((t) => questionsForTrack(t.key).every((q) => !q.required))!.key;
@@ -69,5 +75,76 @@ describe("sweepCycle", () => {
     expect(db.$transaction).toHaveBeenCalledTimes(1); // it stopped at the first draft
     // the round row is share-locked before the deadline is read again
     expect(db.$executeRaw).toHaveBeenCalled();
+  });
+});
+
+describe("getApplicantStatus", () => {
+  const opensAt = new Date("2026-10-01T00:00:00Z");
+  const cycle = (id: string, closesAt: Date) => ({ id, name: `Round ${id}`, slug: id, opensAt, closesAt });
+  const app = (cycleId: string) => ({
+    id: `app-${cycleId}`,
+    cycleId,
+    state: "SUBMITTED",
+    submittedAt: new Date("2026-10-10T00:00:00Z"),
+    autoSubmitted: false,
+    draftStep: null,
+    fullName: "Ada",
+    email: "ada@example.com",
+    eid: "al1",
+    gradYear: 2028,
+    major: "Math",
+    resumeUrl: null,
+    genericAnswers: {},
+    tracks: [],
+  });
+
+  beforeEach(() => {
+    repo.findTrackConfigs.mockResolvedValue([]);
+  });
+
+  it("shows the application in the active round when there is one", async () => {
+    repo.findActiveCycle.mockResolvedValue(cycle("r2", new Date("2027-03-01T00:00:00Z")));
+    repo.findApplicationByUser.mockResolvedValue(app("r2"));
+    const view = await getApplicantStatus("u1", NOW);
+    expect(view.application?.id).toBe("app-r2");
+    expect(repo.findLatestSubmittedApplicationByUser).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the latest submitted application once their round is no longer the active one", async () => {
+    repo.findActiveCycle.mockResolvedValue(cycle("r2", new Date("2027-03-01T00:00:00Z"))); // a newer round they didn't apply to
+    repo.findApplicationByUser.mockResolvedValue(null);
+    repo.findLatestSubmittedApplicationByUser.mockResolvedValue(app("r1"));
+    repo.findCycleById.mockResolvedValue(cycle("r1", CLOSES));
+    const view = await getApplicantStatus("u1", NOW);
+    expect(view.application?.id).toBe("app-r1");
+    expect(view.round?.id).toBe("r1");
+  });
+
+  it("falls back when no round is active at all", async () => {
+    repo.findActiveCycle.mockResolvedValue(null);
+    repo.findLatestSubmittedApplicationByUser.mockResolvedValue(app("r1"));
+    repo.findCycleById.mockResolvedValue(cycle("r1", CLOSES));
+    expect((await getApplicantStatus("u1", NOW)).application?.id).toBe("app-r1");
+  });
+
+  it("has nothing to show for someone who never applied", async () => {
+    repo.findActiveCycle.mockResolvedValue(cycle("r2", new Date("2027-03-01T00:00:00Z")));
+    repo.findApplicationByUser.mockResolvedValue(null);
+    repo.findLatestSubmittedApplicationByUser.mockResolvedValue(null);
+    expect((await getApplicantStatus("u1", NOW)).application).toBeNull();
+  });
+
+  it("only offers a booking link that is a clean https URL", async () => {
+    const withTrack = (url: string) => ({
+      ...app("r1"),
+      tracks: [{ track: tracks.find((t) => t.interviewRequired)!.key, status: "INTERVIEW", answers: {} }],
+      _url: url,
+    });
+    repo.findActiveCycle.mockResolvedValue(cycle("r1", CLOSES));
+    for (const [url, expected] of [["https://calendar.app.google/x", "https://calendar.app.google/x"], ["javascript:alert(1)", null], ["http://calendar.example.com/x", null]] as const) {
+      repo.findApplicationByUser.mockResolvedValue(withTrack(url));
+      repo.findTrackConfigs.mockResolvedValue([{ track: tracks.find((t) => t.interviewRequired)!.key, schedulingUrl: url }]);
+      expect((await getApplicantStatus("u1", NOW)).application?.tracks[0].bookingUrl).toBe(expected);
+    }
   });
 });

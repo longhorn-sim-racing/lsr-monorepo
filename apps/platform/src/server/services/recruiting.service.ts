@@ -46,6 +46,7 @@ export type RecruitingErrorCode =
   | "SELF_REVIEW"
   | "BAD_STATUS"
   | "STATUS_CHANGED"
+  | "ROUND_CHANGED"
   | "INTERVIEW_NOT_OFFERED"
   | "MISSING_SCHEDULING_LINK"
   | "EMAIL_LIMIT";
@@ -135,9 +136,13 @@ function toSnapshot(app: ApplicationWithTracks): DraftSnapshot {
 }
 
 /** The active round, if applications are open right now. Writes are only allowed through this. */
-async function requireOpenRound(now: Date, db: Db = prisma) {
+async function requireOpenRound(now: Date, db: Db = prisma, expectedCycleId?: string) {
   const cycle = await repo.findActiveCycle(db);
   if (!cycle) throw new RecruitingError("NO_ACTIVE_ROUND", "Recruiting is not open right now.");
+  // A page opened for one round must never write into another that was activated since
+  if (expectedCycleId !== undefined && cycle.id !== expectedCycleId) {
+    throw new RecruitingError("ROUND_CHANGED", "This page is for a round that is no longer the active one. Reload to continue.");
+  }
   const window = cycleWindow(cycle, now);
   if (window === "upcoming") {
     throw new RecruitingError("ROUND_NOT_OPEN_YET", "Applications for this round have not opened yet.");
@@ -257,8 +262,8 @@ export async function getApplicantStatus(userId: string, now: Date = new Date())
  * time. Only works while the round is open. The profile fields are copied from their
  * account (their email always stays their account email: decision emails go there).
  */
-export async function getOrCreateDraft(userId: string, now: Date = new Date()): Promise<ApplicationWithTracks> {
-  const cycle = await requireOpenRound(now);
+export async function getOrCreateDraft(userId: string, now: Date = new Date(), expectedCycleId?: string): Promise<ApplicationWithTracks> {
+  const cycle = await requireOpenRound(now, prisma, expectedCycleId);
   const existing = await repo.findApplicationByUser(userId, cycle.id);
   if (existing) return existing;
 
@@ -297,13 +302,13 @@ export async function getOrCreateDraft(userId: string, now: Date = new Date()): 
  * One "Save and continue". `input` is untrusted. Everything is validated first and
  * nothing is written unless all of it is valid. Only the keys sent are touched.
  */
-export async function saveDraft(userId: string, input: unknown, now: Date = new Date()) {
+export async function saveDraft(userId: string, input: unknown, now: Date = new Date(), expectedCycleId?: string) {
   const parsed = draftPatchSchema.safeParse(input);
   if (!parsed.success) {
     throw new RecruitingError("INVALID", "Some answers need attention.", { fieldErrors: fieldErrorsFromZod(parsed.error) });
   }
   const patch = parsed.data;
-  const draft = await getOrCreateDraft(userId, now);
+  const draft = await getOrCreateDraft(userId, now, expectedCycleId);
 
   return prisma.$transaction(async (tx) => {
     const app = await lockApplication(tx, draft.id);
@@ -369,7 +374,7 @@ export async function saveDraft(userId: string, input: unknown, now: Date = new 
  * Sets which teams the draft applies to. Teams that are dropped lose their answers
  * (the form asks for confirmation before calling this).
  */
-export async function setSelectedTracks(userId: string, keys: unknown, now: Date = new Date()) {
+export async function setSelectedTracks(userId: string, keys: unknown, now: Date = new Date(), expectedCycleId?: string) {
   const parsed = z.array(z.string().max(60)).max(50).safeParse(keys);
   if (!parsed.success) {
     throw new RecruitingError("INVALID", "Choose teams from the list.", { fieldErrors: fieldErrorsFromZod(parsed.error) });
@@ -383,7 +388,7 @@ export async function setSelectedTracks(userId: string, keys: unknown, now: Date
     throw new RecruitingError("INVALID", "Choose teams from the list.", { fieldErrors: { tracks: `Unknown team: ${unknown[0]}` } });
   }
 
-  const draft = await getOrCreateDraft(userId, now);
+  const draft = await getOrCreateDraft(userId, now, expectedCycleId);
 
   return prisma.$transaction(async (tx) => {
     const app = await lockApplication(tx, draft.id);
@@ -492,8 +497,9 @@ export async function submitApplication(
   userId: string,
   now: Date = new Date(),
   hooks: { email?: EmailHook<{ applicationId: string; userId: string; auto: boolean }> } = {},
+  expectedCycleId?: string,
 ) {
-  const cycle = await requireOpenRound(now);
+  const cycle = await requireOpenRound(now, prisma, expectedCycleId);
   const existing = await repo.findApplicationByUser(userId, cycle.id);
   if (!existing) throw new RecruitingError("NOT_FOUND", "Start your application first.");
 
@@ -536,6 +542,8 @@ export type SweepResult = {
   timedOut: boolean;
   /** The deadline was moved while the sweep ran, so the round is open again and the sweep stopped */
   reopened?: boolean;
+  /** The deadline this pass worked from */
+  closesAt?: Date;
 };
 
 /**
@@ -568,6 +576,7 @@ export async function sweepCycle(
   const cycle = await repo.findCycleById(cycleId);
   if (!cycle || cycleWindow(cycle, now) !== "closed") return result;
   result.ran = true;
+  result.closesAt = cycle.closesAt;
 
   const started = Date.now();
   const budgetMs = hooks.budgetMs ?? 40_000;
@@ -672,11 +681,18 @@ export async function setTrackStatus(
   officerId: string,
   applicationTrackId: string,
   status: TrackStatus,
-  now: Date = new Date(),
-  hooks: { email?: EmailHook<{ applicationTrackId: string; applicationId: string; applicantUserId: string; track: string; status: TrackStatus }> } = {},
-  /** The status the officer was looking at. If someone changed it since, nothing is saved. */
-  expectedStatus?: TrackStatus,
+  /**
+   * The status the officer was looking at. If someone changed it since, nothing is saved. Required, so
+   * no caller can skip the check by accident; "ANY" (scripts and tests) is a deliberate opt-out.
+   */
+  expectedStatus: TrackStatus | "ANY",
+  options: {
+    now?: Date;
+    email?: EmailHook<{ applicationTrackId: string; applicationId: string; applicantUserId: string; track: string; status: TrackStatus }>;
+  } = {},
 ) {
+  const now = options.now ?? new Date();
+  const hooks = { email: options.email };
   if (!OFFICER_STATUSES.includes(status)) {
     throw new RecruitingError("BAD_STATUS", "That status can't be set.");
   }
@@ -693,7 +709,7 @@ export async function setTrackStatus(
     if (row.application.userId === officerId) {
       throw new RecruitingError("SELF_REVIEW", "You can't review or decide your own application.");
     }
-    if (expectedStatus !== undefined && row.status !== expectedStatus) {
+    if (expectedStatus !== "ANY" && row.status !== expectedStatus) {
       throw new RecruitingError(
         "STATUS_CHANGED",
         `Someone else just changed this to "${TRACK_STATUS_LABEL[row.status]}". Reload the page to see it before deciding again.`,

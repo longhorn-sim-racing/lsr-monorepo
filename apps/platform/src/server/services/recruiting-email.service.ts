@@ -58,6 +58,9 @@ export function statusToTemplate(status: TrackStatus): RecruitingEmailTemplate |
 
 const replyToAddress = () => process.env.RECRUITING_REPLY_TO?.trim() || undefined;
 
+/** Every recruiting email says "just reply"; in production, replies need somewhere to go besides noreply. */
+export const isReplyToMissing = () => process.env.NODE_ENV === "production" && !replyToAddress();
+
 function composeOrThrow(draft: EmailDraft, values: Parameters<typeof composeEmail>[1]): EmailDraft {
   try {
     return composeEmail(draft, values);
@@ -151,7 +154,7 @@ export async function previewDecisionEmail(applicationTrackId: string, status: T
     body: email.body,
     html: renderEmail({ subject: email.subject, body: email.body }).html,
     /** Every email says "just reply", so in production replies need somewhere to go besides the noreply address */
-    replyToMissing: process.env.NODE_ENV === "production" && !replyToAddress(),
+    replyToMissing: isReplyToMissing(),
   };
 }
 
@@ -197,8 +200,8 @@ export const receivedEmailHook: EmailHook<{ applicationId: string; userId: strin
 
 export type DeliveryResult = {
   emailId: string;
-  /** SKIPPED: the row wasn't PENDING (already sent, failed, or cancelled), so nothing was sent. */
-  status: "SENT" | "FAILED" | "SKIPPED";
+  /** SKIPPED: the row wasn't PENDING (already sent, failed, or cancelled), so nothing was sent. CANCELLED: the decision it announced had changed, so it was cancelled instead of sent. */
+  status: "SENT" | "FAILED" | "SKIPPED" | "CANCELLED";
   error?: string;
 };
 
@@ -214,12 +217,18 @@ type SendableRow = { id: string; toEmail: string; subject: string; body: string;
 /** The key a row is sent with. Stored on resend; a first send uses the row id. */
 const keyFor = (row: { id: string; idempotencyKey?: string | null }) => row.idempotencyKey ?? `recruiting-email:${row.id}`;
 
+/** Only a PENDING row can fail: one cancelled in the meantime (the decision changed) must stay cancelled. */
 async function markFailed(id: string, error: string): Promise<DeliveryResult> {
-  await prisma.applicationEmail.update({ where: { id }, data: { status: "FAILED", error: error.slice(0, 500) } });
+  await prisma.applicationEmail.updateMany({ where: { id, status: "PENDING" }, data: { status: "FAILED", error: error.slice(0, 500) } });
   return { emailId: id, status: "FAILED", error };
 }
 
 async function sendRow(row: SendableRow): Promise<DeliveryResult> {
+  // Claim the row right before sending: it must still be PENDING (not cancelled since it was read),
+  // and the claim time keeps a page load or the cron from calling a send in flight "interrupted".
+  const claim = await prisma.applicationEmail.updateMany({ where: { id: row.id, status: "PENDING" }, data: { claimedAt: new Date() } });
+  if (claim.count !== 1) return { emailId: row.id, status: "SKIPPED" };
+
   // Only the Resend call decides "failed". Once Resend has accepted the email, a problem saving
   // that fact must not mark it failed (a resend would deliver it twice).
   let result: Awaited<ReturnType<typeof sendEmail>>;
@@ -302,11 +311,22 @@ export async function resendEmail(officerId: string, emailId: string): Promise<D
   if ((DECISION_TEMPLATES as readonly string[]).includes(row.template)) {
     const current = row.applicationTrack ? statusToTemplate(row.applicationTrack.status) : null;
     if (current !== row.template) {
-      await prisma.applicationEmail.updateMany({
+      const cancelled = await prisma.applicationEmail.updateMany({
         where: { id: row.id, status: "FAILED" },
         data: { status: "CANCELLED", error: "Cancelled: the decision changed before this was sent" },
       });
-      throw new RecruitingError("BAD_STATUS", "The decision has changed since this email was written, so it was cancelled instead of sent.");
+      if (cancelled.count === 1) {
+        await createAuditLog({
+          actorUserId: officerId,
+          actionType: "APPLICATION_EMAIL_CANCELLED",
+          entityType: "APPLICATION_EMAIL",
+          entityId: row.id,
+          targetUserId: row.application.userId,
+          summary: "Cancelled a failed recruiting email whose decision had changed",
+          metadata: { applicationId: row.application.id, template: row.template },
+        });
+      }
+      return { emailId: row.id, status: "CANCELLED", error: "The decision changed since this email was written, so it was cancelled instead of sent." };
     }
   }
 
@@ -364,6 +384,25 @@ async function stalePendingEmailIds(now: Date, take = 50): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
+/** Moves a few interrupted rows back to PENDING (claimed now) so the cron can retry them; returns the ones it won. */
+async function claimInterruptedEmailIds(now: Date, take = 20): Promise<string[]> {
+  const rows = await prisma.applicationEmail.findMany({
+    where: { status: "FAILED", error: INTERRUPTED_ERROR },
+    orderBy: { createdAt: "asc" },
+    take,
+    select: { id: true },
+  });
+  const claimed: string[] = [];
+  for (const { id } of rows) {
+    const res = await prisma.applicationEmail.updateMany({
+      where: { id, status: "FAILED", error: INTERRUPTED_ERROR },
+      data: { status: "PENDING", error: null, claimedAt: now },
+    });
+    if (res.count === 1) claimed.push(id);
+  }
+  return claimed;
+}
+
 /** For the officers' "emails that need attention" page: failed and still-pending mail for a round. */
 export async function listEmailsNeedingAttention(cycleId: string, now: Date = new Date()) {
   await failInterruptedEmails(now);
@@ -390,8 +429,8 @@ export async function listEmailsNeedingAttention(cycleId: string, now: Date = ne
 // ---------------------------------------------------------------------------
 
 /** The applicant presses Submit: submits, queues the confirmation in the same transaction, then sends it. */
-export async function submitAndNotify(userId: string, now: Date = new Date()) {
-  const result = await submitApplication(userId, now, { email: receivedEmailHook });
+export async function submitAndNotify(userId: string, now: Date = new Date(), expectedCycleId?: string) {
+  const result = await submitApplication(userId, now, { email: receivedEmailHook }, expectedCycleId);
   const delivery = result.emailId ? await deliverEmailSafely(result.emailId) : null;
   return { ...result, delivery };
 }
@@ -412,6 +451,8 @@ export type SweepSummary = {
 
 /** The whole deadline job has to fit in the 60 s the cron route is allowed to run */
 const SWEEP_BUDGET_MS = 40_000;
+/** No email is started after this: what is left stays PENDING for the next run, before the function is cut off */
+const SEND_DEADLINE_MS = 52_000;
 
 /**
  * The deadline job end to end: for every closed round that still has drafts, auto-submit the complete
@@ -438,22 +479,38 @@ export async function sweepAndNotify(options: { cycleId?: string; now?: Date } =
     interruptedEmails: 0,
   };
 
-  // One quota check for the whole run; each send below spends from it
+  // One quota check for the whole run; each NEW confirmation below spends from it
   let allowance = (await getEmailQuota()).left;
-  const send = async (emailId: string) => {
-    if (allowance !== null && allowance <= 0) {
-      await markFailed(emailId, DAILY_LIMIT_ERROR);
-      summary.emailsOverLimit += 1;
+  /**
+   * `retry`: a row an earlier run left PENDING. It may already have been delivered, so it is always
+   * retried with its own key (Resend hands back the original and sends nothing) and never marked as
+   * over the limit. A new row that doesn't fit today's limit was never attempted, so it is safe to
+   * mark failed. Out of time: leave the row PENDING; the next run retries it.
+   */
+  const send = async (emailId: string, retry: boolean) => {
+    if (Date.now() - started > SEND_DEADLINE_MS) {
+      summary.timedOut = true;
       return;
     }
-    if (allowance !== null) allowance -= 1;
+    if (!retry) {
+      if (allowance !== null && allowance <= 0) {
+        await markFailed(emailId, DAILY_LIMIT_ERROR);
+        summary.emailsOverLimit += 1;
+        return;
+      }
+      if (allowance !== null) allowance -= 1;
+    }
     const delivery = await deliverEmailSafely(emailId);
     if (delivery.status === "SENT") summary.emailsSent += 1;
     else if (delivery.status === "FAILED") summary.emailsFailed += 1;
   };
 
-  for (const emailId of await stalePendingEmailIds(now)) await send(emailId);
+  for (const emailId of await stalePendingEmailIds(now)) await send(emailId, true);
   summary.interruptedEmails = await failInterruptedEmails(now);
+  // Rows just marked interrupted (and any from earlier) are retried here with their stored key, so
+  // nobody has to find them on the Emails page. If the retry fails again the row gets the real error
+  // and is no longer "interrupted", which ends the retrying.
+  for (const emailId of await claimInterruptedEmailIds(now)) await send(emailId, true);
 
   const cycles = await prisma.recruitingCycle.findMany({
     where: {
@@ -479,10 +536,15 @@ export async function sweepAndNotify(options: { cycleId?: string; now?: Date } =
     summary.skippedIncomplete += swept.skippedIncomplete;
     summary.failed += swept.failed;
     summary.timedOut = summary.timedOut || swept.timedOut;
-    for (const emailId of swept.emailIds) await send(emailId);
-    // Everything left is an abandoned draft: stop looking at this round every 15 minutes
-    if (!swept.timedOut && !swept.reopened && swept.failed === 0) {
-      await prisma.recruitingCycle.updateMany({ where: { id, sweptAt: null }, data: { sweptAt: now } });
+    for (const emailId of swept.emailIds) await send(emailId, false);
+    // Everything left is an abandoned draft: stop looking at this round every 15 minutes. Only if the
+    // deadline is still the one this pass used: an officer who extended it meanwhile cleared sweptAt
+    // on purpose, and the round must be swept again when the new deadline passes.
+    if (!swept.timedOut && !swept.reopened && swept.failed === 0 && swept.closesAt) {
+      await prisma.recruitingCycle.updateMany({
+        where: { id, sweptAt: null, closesAt: { equals: swept.closesAt, lte: now } },
+        data: { sweptAt: now },
+      });
     }
   }
   return summary;
@@ -497,22 +559,25 @@ export async function decideAndNotify(
   officerId: string,
   applicationTrackId: string,
   status: TrackStatus,
-  options: { sendEmail?: boolean; override?: EmailDraft; expectedStatus?: TrackStatus; now?: Date } = {},
+  options: {
+    sendEmail?: boolean;
+    override?: EmailDraft;
+    /** The status the officer was looking at. Required: a decision made on stale information is refused. */
+    expectedStatus: TrackStatus | "ANY";
+    now?: Date;
+  },
 ) {
   const template = statusToTemplate(status);
   if (options.sendEmail && !template) {
     throw new RecruitingError("BAD_STATUS", "No email is sent for that status.");
   }
-  const decision = await setTrackStatus(
-    officerId,
-    applicationTrackId,
-    status,
-    options.now ?? new Date(),
-    options.sendEmail && template
-      ? { email: (tx, ctx) => composeTrackEmail(tx, ctx.applicationTrackId, template, options.override) }
-      : {},
-    options.expectedStatus,
-  );
+  const decision = await setTrackStatus(officerId, applicationTrackId, status, options.expectedStatus, {
+    now: options.now,
+    email:
+      options.sendEmail && template
+        ? (tx, ctx) => composeTrackEmail(tx, ctx.applicationTrackId, template, options.override)
+        : undefined,
+  });
   const delivery = decision.emailId ? await deliverEmailSafely(decision.emailId) : null;
   return { ...decision, delivery };
 }
@@ -577,9 +642,9 @@ export async function bulkDecide(
     sendEmail?: boolean;
     ignoreLimit?: boolean;
     /** Per team-application id, the status the officer saw. A row that has changed since is refused, not overwritten. */
-    expectedStatuses?: Record<string, TrackStatus>;
+    expectedStatuses: Record<string, TrackStatus | "ANY">;
     now?: Date;
-  } = {},
+  },
 ): Promise<BulkDecisionResult> {
   const parsed = idList.safeParse(applicationTrackIds);
   if (!parsed.success) {
@@ -593,10 +658,15 @@ export async function bulkDecide(
 
   const result: BulkDecisionResult = { total: ids.length, decided: 0, emailsSent: 0, emailsFailed: 0, failures: [] };
   for (const id of ids) {
+    const expectedStatus = options.expectedStatuses[id];
+    if (!expectedStatus) {
+      result.failures.push({ applicationTrackId: id, error: "Reload the page: its current status isn't known." });
+      continue;
+    }
     try {
       const done = await decideAndNotify(officerId, id, status, {
         sendEmail: options.sendEmail,
-        expectedStatus: options.expectedStatuses?.[id],
+        expectedStatus,
         now: options.now,
       });
       result.decided++;
@@ -609,7 +679,13 @@ export async function bulkDecide(
   return result;
 }
 
-export type BulkResendResult = { total: number; sent: number; failed: number };
+export type BulkResendResult = {
+  total: number;
+  sent: number;
+  failed: number;
+  /** Not sent because the decision they announced has changed since */
+  cancelled: number;
+};
 
 /**
  * Resends every failed email in a round (at most 100 at a time), after checking the daily quota.
@@ -625,11 +701,12 @@ export async function resendAllFailed(officerId: string, cycleId: string, option
   });
   await assertQuotaFor(rows.length, options.ignoreLimit);
 
-  const result: BulkResendResult = { total: rows.length, sent: 0, failed: 0 };
+  const result: BulkResendResult = { total: rows.length, sent: 0, failed: 0, cancelled: 0 };
   for (const row of rows) {
     try {
       const done = await resendEmail(officerId, row.id);
       if (done.status === "SENT") result.sent++;
+      else if (done.status === "CANCELLED") result.cancelled++;
       else result.failed++;
     } catch {
       result.failed++;

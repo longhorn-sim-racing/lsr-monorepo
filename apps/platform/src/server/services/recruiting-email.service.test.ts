@@ -5,8 +5,8 @@ const db = vi.hoisted(() => ({
   applicationEmail: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), create: vi.fn(), count: vi.fn() },
   applicationTrack: { findUnique: vi.fn(), update: vi.fn() },
   recruitingTrackConfig: { findUnique: vi.fn() },
-  application: { findUnique: vi.fn() },
-  recruitingCycle: { findMany: vi.fn(), updateMany: vi.fn() },
+  application: { findUnique: vi.fn(), findMany: vi.fn() },
+  recruitingCycle: { findMany: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
   $transaction: vi.fn(),
   $executeRaw: vi.fn(),
 }));
@@ -19,7 +19,7 @@ vi.mock("@/lib/email/resend", () => mail);
 vi.mock("@/server/audit/log", () => audit);
 vi.mock("@/server/services/notification.service", () => notifications);
 
-import { tracks } from "@/schemas/recruiting.schema";
+import { questionsForTrack, tracks } from "@/schemas/recruiting.schema";
 import {
   DAILY_LIMIT_ERROR,
   INTERRUPTED_ERROR,
@@ -43,6 +43,8 @@ const interviewTeam = tracks.find((t) => t.interviewRequired)!;
 const noInterviewTeam = tracks.find((t) => !t.interviewRequired)!;
 
 const APPLICANT_ID = "applicant-1";
+/** Skip the stale-status guard in tests about something else */
+const anyOf = (ids: string[]) => Object.fromEntries(ids.map((i) => [i, "ANY" as const]));
 const OFFICER_ID = "officer-1";
 
 function trackRow(over: Record<string, unknown> = {}, appOver: Record<string, unknown> = {}) {
@@ -65,6 +67,7 @@ function trackRow(over: Record<string, unknown> = {}, appOver: Record<string, un
 }
 
 beforeEach(() => {
+  db.applicationEmail.updateMany.mockResolvedValue({ count: 1 });
   db.applicationEmail.update.mockResolvedValue({});
   db.recruitingTrackConfig.findUnique.mockResolvedValue(null);
   mail.sendEmail.mockResolvedValue({ success: true, messageId: "msg-1" });
@@ -227,7 +230,8 @@ describe("deliverEmail", () => {
     mail.sendEmail.mockResolvedValue({ success: false, error: "Email system disabled" });
     const result = await deliverEmail("email-1");
     expect(result).toEqual({ emailId: "email-1", status: "FAILED", error: "Email system disabled" });
-    expect(db.applicationEmail.update).toHaveBeenCalledWith({ where: { id: "email-1" }, data: { status: "FAILED", error: "Email system disabled" } });
+    // Only a row that is still PENDING can fail: one cancelled in the meantime stays cancelled
+    expect(db.applicationEmail.updateMany).toHaveBeenCalledWith({ where: { id: "email-1", status: "PENDING" }, data: { status: "FAILED", error: "Email system disabled" } });
   });
 
   it("turns an unexpected exception into a recorded failure", async () => {
@@ -395,7 +399,7 @@ describe("decideAndNotify", () => {
   });
 
   it("queues the email with the status change, then sends it after the commit", async () => {
-    const result = await decideAndNotify(OFFICER_ID, "track-1", "ACCEPTED", { sendEmail: true });
+    const result = await decideAndNotify(OFFICER_ID, "track-1", "ACCEPTED", { expectedStatus: "ANY", sendEmail: true });
     expect(db.applicationTrack.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "ACCEPTED", decidedById: OFFICER_ID }) }));
     expect(db.applicationEmail.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ template: "ACCEPTED", status: "PENDING", toEmail: "ada@account.test", applicationTrackId: "track-1", applicationId: "app-1" }),
@@ -407,7 +411,7 @@ describe("decideAndNotify", () => {
   });
 
   it("sends nothing when the officer chose not to", async () => {
-    const result = await decideAndNotify(OFFICER_ID, "track-1", "ACCEPTED", { sendEmail: false });
+    const result = await decideAndNotify(OFFICER_ID, "track-1", "ACCEPTED", { expectedStatus: "ANY", sendEmail: false });
     expect(db.applicationEmail.create).not.toHaveBeenCalled();
     expect(mail.sendEmail).not.toHaveBeenCalled();
     expect(result.delivery).toBeNull();
@@ -415,19 +419,19 @@ describe("decideAndNotify", () => {
   });
 
   it("refuses to 'send an email' for a status that has none, before touching anything", async () => {
-    await expect(decideAndNotify(OFFICER_ID, "track-1", "IN_REVIEW", { sendEmail: true })).rejects.toMatchObject({ code: "BAD_STATUS" });
+    await expect(decideAndNotify(OFFICER_ID, "track-1", "IN_REVIEW", { expectedStatus: "ANY", sendEmail: true })).rejects.toMatchObject({ code: "BAD_STATUS" });
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   it("the decision survives a failed send: it comes back with a FAILED delivery to resend", async () => {
     mail.sendEmail.mockResolvedValue({ success: false, error: "Email service not configured" });
-    const result = await decideAndNotify(OFFICER_ID, "track-1", "REJECTED", { sendEmail: true });
+    const result = await decideAndNotify(OFFICER_ID, "track-1", "REJECTED", { expectedStatus: "ANY", sendEmail: true });
     expect(result.status).toBe("REJECTED");
     expect(result.delivery).toMatchObject({ status: "FAILED", error: "Email service not configured" });
   });
 
   it("queues the officer's edited wording, not the default", async () => {
-    await decideAndNotify(OFFICER_ID, "track-1", "ACCEPTED", { sendEmail: true, override: { subject: "Custom for {{applicantName}}", body: "A personal note." } });
+    await decideAndNotify(OFFICER_ID, "track-1", "ACCEPTED", { expectedStatus: "ANY", sendEmail: true, override: { subject: "Custom for {{applicantName}}", body: "A personal note." } });
     expect(db.applicationEmail.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ subject: "Custom for Ada Lovelace", body: "A personal note." }),
       select: { id: true },
@@ -436,21 +440,21 @@ describe("decideAndNotify", () => {
 
   it("aborts, without queuing anything, when the edited email can't be built", async () => {
     await expect(
-      decideAndNotify(OFFICER_ID, "track-1", "INTERVIEW", { sendEmail: true, override: { subject: "Hi", body: "Book: {{schedulingLink}}" } }),
+      decideAndNotify(OFFICER_ID, "track-1", "INTERVIEW", { expectedStatus: "ANY", sendEmail: true, override: { subject: "Hi", body: "Book: {{schedulingLink}}" } }),
     ).rejects.toMatchObject({ code: "MISSING_SCHEDULING_LINK" });
     expect(db.applicationEmail.create).not.toHaveBeenCalled();
     expect(mail.sendEmail).not.toHaveBeenCalled();
   });
 
   it("still blocks an officer from deciding their own application, before any email is built", async () => {
-    await expect(decideAndNotify(APPLICANT_ID, "track-1", "ACCEPTED", { sendEmail: true })).rejects.toMatchObject({ code: "SELF_REVIEW" });
+    await expect(decideAndNotify(APPLICANT_ID, "track-1", "ACCEPTED", { expectedStatus: "ANY", sendEmail: true })).rejects.toMatchObject({ code: "SELF_REVIEW" });
     expect(db.applicationEmail.create).not.toHaveBeenCalled();
     expect(mail.sendEmail).not.toHaveBeenCalled();
   });
 
   it("refuses Interview for a team that doesn't interview, with no email", async () => {
     db.applicationTrack.findUnique.mockResolvedValue(trackRow({ track: noInterviewTeam.key }));
-    await expect(decideAndNotify(OFFICER_ID, "track-1", "INTERVIEW", { sendEmail: true })).rejects.toMatchObject({ code: "INTERVIEW_NOT_OFFERED" });
+    await expect(decideAndNotify(OFFICER_ID, "track-1", "INTERVIEW", { expectedStatus: "ANY", sendEmail: true })).rejects.toMatchObject({ code: "INTERVIEW_NOT_OFFERED" });
     expect(db.applicationEmail.create).not.toHaveBeenCalled();
   });
 });
@@ -482,21 +486,21 @@ describe("bulkDecide", () => {
   });
 
   it("decides every selected application and emails each applicant", async () => {
-    const result = await bulkDecide(OFFICER_ID, ids(3), "ACCEPTED", { sendEmail: true });
+    const result = await bulkDecide(OFFICER_ID, ids(3), "ACCEPTED", { expectedStatuses: anyOf(ids(3)), sendEmail: true });
     expect(result).toEqual({ total: 3, decided: 3, emailsSent: 3, emailsFailed: 0, failures: [] });
     expect(db.applicationTrack.update).toHaveBeenCalledTimes(3);
     expect(mail.sendEmail).toHaveBeenCalledTimes(3);
   });
 
   it("sends nothing and skips the quota check when the officer chose not to email", async () => {
-    const result = await bulkDecide(OFFICER_ID, ids(3), "IN_REVIEW", { sendEmail: false });
+    const result = await bulkDecide(OFFICER_ID, ids(3), "IN_REVIEW", { expectedStatuses: anyOf(ids(3)), sendEmail: false });
     expect(result.decided).toBe(3);
     expect(mail.sendEmail).not.toHaveBeenCalled();
     expect(notifications.getEmailUsage).not.toHaveBeenCalled();
   });
 
   it("collapses a repeated id so nobody is decided or emailed twice", async () => {
-    const result = await bulkDecide(OFFICER_ID, ["track-1", "track-1", "track-2"], "ACCEPTED", { sendEmail: true });
+    const result = await bulkDecide(OFFICER_ID, ["track-1", "track-1", "track-2"], "ACCEPTED", { expectedStatuses: anyOf(["track-1", "track-1", "track-2"]), sendEmail: true });
     expect(result.total).toBe(2);
     expect(mail.sendEmail).toHaveBeenCalledTimes(2);
   });
@@ -507,37 +511,37 @@ describe("bulkDecide", () => {
     ["not a list", "track-1"],
     ["a list with a blank id", ["track-1", ""]],
   ])("rejects %s", async (_name, input) => {
-    await expect(bulkDecide(OFFICER_ID, input, "ACCEPTED", { sendEmail: true })).rejects.toMatchObject({ code: "INVALID" });
+    await expect(bulkDecide(OFFICER_ID, input, "ACCEPTED", { sendEmail: true, expectedStatuses: {} })).rejects.toMatchObject({ code: "INVALID" });
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   it("refuses to 'send an email' for a status that has none", async () => {
-    await expect(bulkDecide(OFFICER_ID, ids(2), "IN_REVIEW", { sendEmail: true })).rejects.toMatchObject({ code: "BAD_STATUS" });
+    await expect(bulkDecide(OFFICER_ID, ids(2), "IN_REVIEW", { expectedStatuses: anyOf(ids(2)), sendEmail: true })).rejects.toMatchObject({ code: "BAD_STATUS" });
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   it("refuses the whole batch up front when it would go past today's email limit, deciding nobody", async () => {
     notifications.getEmailUsage.mockResolvedValue({ sentToday: 80, dailyLimit: 100 }); // 10 left after the headroom
-    await expect(bulkDecide(OFFICER_ID, ids(11), "ACCEPTED", { sendEmail: true })).rejects.toMatchObject({
+    await expect(bulkDecide(OFFICER_ID, ids(11), "ACCEPTED", { expectedStatuses: anyOf(ids(11)), sendEmail: true })).rejects.toMatchObject({
       code: "EMAIL_LIMIT",
       message: expect.stringContaining("only 10 of today's 100"),
     });
     expect(db.applicationTrack.update).not.toHaveBeenCalled();
     expect(mail.sendEmail).not.toHaveBeenCalled();
     // exactly what's left is fine
-    const ok = await bulkDecide(OFFICER_ID, ids(10), "ACCEPTED", { sendEmail: true });
+    const ok = await bulkDecide(OFFICER_ID, ids(10), "ACCEPTED", { expectedStatuses: anyOf(ids(10)), sendEmail: true });
     expect(ok.decided).toBe(10);
   });
 
   it("goes ahead past the limit only when told to", async () => {
     notifications.getEmailUsage.mockResolvedValue({ sentToday: 99, dailyLimit: 100 });
-    const result = await bulkDecide(OFFICER_ID, ids(5), "ACCEPTED", { sendEmail: true, ignoreLimit: true });
+    const result = await bulkDecide(OFFICER_ID, ids(5), "ACCEPTED", { expectedStatuses: anyOf(ids(5)), sendEmail: true, ignoreLimit: true });
     expect(result.decided).toBe(5);
   });
 
   it("has no cap on a plan without a daily limit", async () => {
     notifications.getEmailUsage.mockResolvedValue({ sentToday: 5000, dailyLimit: null });
-    expect((await bulkDecide(OFFICER_ID, ids(40), "ACCEPTED", { sendEmail: true })).decided).toBe(40);
+    expect((await bulkDecide(OFFICER_ID, ids(40), "ACCEPTED", { expectedStatuses: anyOf(ids(40)), sendEmail: true })).decided).toBe(40);
   });
 
   it("carries on past an application it can't decide, and reports why", async () => {
@@ -546,7 +550,7 @@ describe("bulkDecide", () => {
       if (where.id === "track-mine") return trackRow({ id: where.id }, { userId: OFFICER_ID });
       return trackRow({ id: where.id });
     });
-    const result = await bulkDecide(OFFICER_ID, ["track-1", "track-gone", "track-mine", "track-2"], "ACCEPTED", { sendEmail: true });
+    const result = await bulkDecide(OFFICER_ID, ["track-1", "track-gone", "track-mine", "track-2"], "ACCEPTED", { expectedStatuses: anyOf(["track-1", "track-gone", "track-mine", "track-2"]), sendEmail: true });
     expect(result.decided).toBe(2);
     expect(result.emailsSent).toBe(2);
     expect(result.failures).toEqual([
@@ -557,7 +561,7 @@ describe("bulkDecide", () => {
 
   it("separates emails that went out from ones that failed (the decisions stand either way)", async () => {
     mail.sendEmail.mockResolvedValueOnce({ success: true, messageId: "m1" }).mockResolvedValueOnce({ success: false, error: "Daily quota exceeded" });
-    const result = await bulkDecide(OFFICER_ID, ids(2), "REJECTED", { sendEmail: true });
+    const result = await bulkDecide(OFFICER_ID, ids(2), "REJECTED", { expectedStatuses: anyOf(ids(2)), sendEmail: true });
     expect(result).toMatchObject({ decided: 2, emailsSent: 1, emailsFailed: 1 });
   });
 });
@@ -572,7 +576,7 @@ describe("resendAllFailed", () => {
 
   it("resends each failed email in the round and reports how many went out", async () => {
     db.applicationEmail.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }, { id: "e3" }]);
-    expect(await resendAllFailed(OFFICER_ID, "cycle-1")).toEqual({ total: 3, sent: 3, failed: 0 });
+    expect(await resendAllFailed(OFFICER_ID, "cycle-1")).toEqual({ total: 3, sent: 3, failed: 0, cancelled: 0 });
     expect(db.applicationEmail.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { status: "FAILED", application: { cycleId: "cycle-1" } }, take: 100 }));
     expect(mail.sendEmail).toHaveBeenCalledTimes(3);
   });
@@ -586,7 +590,7 @@ describe("resendAllFailed", () => {
   it("counts a still-failing email as failed without stopping", async () => {
     db.applicationEmail.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }]);
     mail.sendEmail.mockResolvedValueOnce({ success: false, error: "Daily quota exceeded" }).mockResolvedValueOnce({ success: true, messageId: "m2" });
-    expect(await resendAllFailed(OFFICER_ID, "cycle-1")).toEqual({ total: 2, sent: 1, failed: 1 });
+    expect(await resendAllFailed(OFFICER_ID, "cycle-1")).toEqual({ total: 2, sent: 1, failed: 1, cancelled: 0 });
   });
 
   it("won't start a batch that is bigger than what's left of today's limit, unless told to", async () => {
@@ -599,7 +603,7 @@ describe("resendAllFailed", () => {
 
   it("does nothing, and checks nothing, when no email has failed", async () => {
     db.applicationEmail.findMany.mockResolvedValue([]);
-    expect(await resendAllFailed(OFFICER_ID, "cycle-1")).toEqual({ total: 0, sent: 0, failed: 0 });
+    expect(await resendAllFailed(OFFICER_ID, "cycle-1")).toEqual({ total: 0, sent: 0, failed: 0, cancelled: 0 });
     expect(notifications.getEmailUsage).not.toHaveBeenCalled();
   });
 });
@@ -616,7 +620,7 @@ describe("a decision that changed", () => {
   });
 
   it("cancels the team's unsent decision emails in the same transaction, before queuing the new one", async () => {
-    await decideAndNotify(OFFICER_ID, "track-1", "REJECTED", { sendEmail: true });
+    await decideAndNotify(OFFICER_ID, "track-1", "REJECTED", { expectedStatus: "ANY", sendEmail: true });
     expect(db.applicationEmail.updateMany).toHaveBeenCalledWith({
       where: { applicationTrackId: "track-1", template: { in: ["INTERVIEW", "ACCEPTED", "REJECTED"] }, status: { in: ["FAILED", "PENDING"] } },
       data: expect.objectContaining({ status: "CANCELLED" }),
@@ -664,12 +668,14 @@ describe("a decision that changed", () => {
       applicationTrack: { status: "REJECTED" },
       application: { id: "app-1", userId: APPLICANT_ID, user: { email: "ada@account.test" } },
     });
-    await expect(resendEmail(OFFICER_ID, "email-1")).rejects.toMatchObject({ code: "BAD_STATUS" });
+    // A result, not an error, so the page can refresh and drop the stale Resend button
+    expect(await resendEmail(OFFICER_ID, "email-1")).toMatchObject({ emailId: "email-1", status: "CANCELLED" });
     expect(mail.sendEmail).not.toHaveBeenCalled();
     expect(db.applicationEmail.updateMany).toHaveBeenCalledWith({
       where: { id: "email-1", status: "FAILED" },
       data: expect.objectContaining({ status: "CANCELLED" }),
     });
+    expect(audit.createAuditLog).toHaveBeenCalledWith(expect.objectContaining({ actionType: "APPLICATION_EMAIL_CANCELLED", entityId: "email-1" }));
   });
 
   it("resends a decision email that still matches the status", async () => {
@@ -718,24 +724,48 @@ describe("sending", () => {
 describe("sweepAndNotify email handling", () => {
   beforeEach(() => {
     db.recruitingCycle.findMany.mockResolvedValue([]);
-    db.applicationEmail.updateMany.mockResolvedValue({ count: 0 });
   });
 
   it("retries confirmations an earlier run never sent", async () => {
     notifications.getEmailUsage.mockResolvedValue({ sentToday: 0, dailyLimit: 100 });
-    db.applicationEmail.findMany.mockResolvedValue([{ id: "email-1" }]);
+    db.applicationEmail.findMany.mockResolvedValueOnce([{ id: "email-1" }]).mockResolvedValue([]);
     db.applicationEmail.findUnique.mockResolvedValue({ id: "email-1", status: "PENDING", toEmail: "a@b.test", subject: "s", body: "b", idempotencyKey: null });
     const summary = await sweepAndNotify({ now: new Date("2026-11-01T12:00:00Z") });
     expect(summary.emailsSent).toBe(1);
   });
 
-  it("leaves confirmations that don't fit in today's email limit as failed, to resend later, instead of sending them", async () => {
+  it("retries an earlier run's row even when today's limit is used up: it keeps its key, so nothing is sent twice", async () => {
     notifications.getEmailUsage.mockResolvedValue({ sentToday: 95, dailyLimit: 100 }); // inside the receipts headroom: nothing left
-    db.applicationEmail.findMany.mockResolvedValue([{ id: "email-1" }]);
+    db.applicationEmail.findMany.mockResolvedValueOnce([{ id: "email-1" }]).mockResolvedValue([]);
+    db.applicationEmail.findUnique.mockResolvedValue({ id: "email-1", status: "PENDING", toEmail: "a@b.test", subject: "s", body: "b", idempotencyKey: "recruiting-email:email-1" });
     const summary = await sweepAndNotify({ now: new Date("2026-11-01T12:00:00Z") });
-    expect(summary).toMatchObject({ emailsSent: 0, emailsOverLimit: 1 });
+    expect(summary).toMatchObject({ emailsSent: 1, emailsOverLimit: 0 });
+    expect(mail.sendEmail.mock.calls[0][1]).toEqual({ idempotencyKey: "recruiting-email:email-1" });
+    // never marked failed for the limit: it may already have been delivered
+    expect(db.applicationEmail.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ error: DAILY_LIMIT_ERROR }) }));
+  });
+
+  it("retries rows marked interrupted with their stored key, claiming each first", async () => {
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 0, dailyLimit: 100 });
+    // first findMany: stale PENDING (none); second: interrupted FAILED rows
+    db.applicationEmail.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: "email-1" }]);
+    db.applicationEmail.findUnique.mockResolvedValue({ id: "email-1", status: "PENDING", toEmail: "a@b.test", subject: "s", body: "b", idempotencyKey: "recruiting-email:email-1" });
+    const summary = await sweepAndNotify({ now: new Date("2026-11-01T12:00:00Z") });
+    expect(db.applicationEmail.updateMany).toHaveBeenCalledWith({
+      where: { id: "email-1", status: "FAILED", error: INTERRUPTED_ERROR },
+      data: { status: "PENDING", error: null, claimedAt: new Date("2026-11-01T12:00:00Z") },
+    });
+    expect(summary.emailsSent).toBe(1);
+    expect(mail.sendEmail.mock.calls[0][1]).toEqual({ idempotencyKey: "recruiting-email:email-1" });
+  });
+
+  it("does not send a row that was cancelled between being read and being claimed", async () => {
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 0, dailyLimit: 100 });
+    db.applicationEmail.findMany.mockResolvedValue([]);
+    db.applicationEmail.findUnique.mockResolvedValue({ id: "email-1", status: "PENDING", toEmail: "a@b.test", subject: "s", body: "b", idempotencyKey: null });
+    db.applicationEmail.updateMany.mockResolvedValue({ count: 0 }); // the claim matches nothing: no longer PENDING
+    expect(await deliverEmail("email-1")).toEqual({ emailId: "email-1", status: "SKIPPED" });
     expect(mail.sendEmail).not.toHaveBeenCalled();
-    expect(db.applicationEmail.update).toHaveBeenCalledWith({ where: { id: "email-1" }, data: { status: "FAILED", error: DAILY_LIMIT_ERROR } });
   });
 
   it("only looks at rounds it hasn't already been through cleanly (the admin button re-checks one)", async () => {
@@ -746,5 +776,61 @@ describe("sweepAndNotify email handling", () => {
     await sweepAndNotify({ cycleId: "c1", now: new Date("2026-11-01T12:00:00Z") });
     expect(db.recruitingCycle.findMany.mock.calls[1][0].where).toMatchObject({ id: "c1" });
     expect(db.recruitingCycle.findMany.mock.calls[1][0].where).not.toHaveProperty("sweptAt");
+  });
+});
+
+describe("sweepAndNotify marking a round as swept", () => {
+  const NOW = new Date("2026-11-01T12:00:00Z");
+  const CLOSES = new Date("2026-10-17T04:59:00Z");
+  const opensAt = new Date("2026-10-01T00:00:00Z");
+  const easyTeam = tracks.find((t) => questionsForTrack(t.key).every((q) => !q.required))!.key;
+  const draft = {
+    id: "a1",
+    userId: "u1",
+    state: "DRAFT",
+    fullName: "Ada Lovelace",
+    email: "ada@example.com",
+    eid: "al123",
+    gradYear: 2028,
+    major: "Math",
+    resumeUrl: "https://example.com/r.pdf",
+    genericAnswers: {},
+    tracks: [{ id: "t1", track: easyTeam, answers: {} }],
+  };
+  const sweptWrites = () =>
+    db.recruitingCycle.updateMany.mock.calls.filter(([arg]) => (arg as { data?: { sweptAt?: unknown } }).data?.sweptAt !== undefined);
+
+  beforeEach(() => {
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 0, dailyLimit: 100 });
+    db.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(db));
+    db.$executeRaw.mockResolvedValue(1);
+    db.applicationEmail.findMany.mockResolvedValue([]);
+    db.recruitingCycle.findMany.mockResolvedValue([{ id: "c1" }]);
+    db.recruitingCycle.findUnique.mockResolvedValue({ id: "c1", opensAt, closesAt: CLOSES });
+  });
+
+  it("marks a cleanly swept round, only while its deadline is still the one the pass used", async () => {
+    db.application.findMany.mockResolvedValue([]);
+    await sweepAndNotify({ now: NOW });
+    expect(sweptWrites()).toEqual([[{ where: { id: "c1", sweptAt: null, closesAt: { equals: CLOSES, lte: NOW } }, data: { sweptAt: NOW } }]]);
+  });
+
+  it("does not mark a round whose deadline was extended mid-sweep", async () => {
+    db.recruitingCycle.findUnique
+      .mockResolvedValueOnce({ id: "c1", opensAt, closesAt: CLOSES })
+      .mockResolvedValueOnce({ id: "c1", opensAt, closesAt: new Date("2026-11-20T04:59:00Z") });
+    db.application.findMany.mockResolvedValue([draft]);
+    const summary = await sweepAndNotify({ now: NOW });
+    expect(summary.submitted).toBe(0);
+    expect(sweptWrites()).toEqual([]);
+  });
+
+  it("does not mark a round when a draft failed, so the next run tries again", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    db.application.findMany.mockResolvedValue([draft]);
+    db.$transaction.mockRejectedValue(new Error("deadlock"));
+    const summary = await sweepAndNotify({ now: NOW });
+    expect(summary.failed).toBe(1);
+    expect(sweptWrites()).toEqual([]);
   });
 });

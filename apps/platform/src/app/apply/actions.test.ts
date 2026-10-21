@@ -77,15 +77,15 @@ describe("saving progress", () => {
     recruiting.saveDraft.mockResolvedValue({});
     const result = await saveProgressAction("r1", { step: "general", genericAnswers: {}, userId: "someone-else" });
     expect(result.ok).toBe(true);
-    expect(recruiting.saveDraft).toHaveBeenCalledWith("applicant-1", { step: "general", genericAnswers: {}, userId: "someone-else" });
+    expect(recruiting.saveDraft).toHaveBeenCalledWith("applicant-1", { step: "general", genericAnswers: {}, userId: "someone-else" }, expect.any(Date), "r1");
     // the service (not the action) rejects the stray field: it is passed through untouched to be validated there
   });
 
-  it("returns when it was saved and refreshes the apply pages", async () => {
+  it("returns when it was saved, without re-rendering the apply pages (autosave runs often)", async () => {
     recruiting.saveDraft.mockResolvedValue({});
     const result = await saveProgressAction("r1", { step: "about" });
     expect(result).toMatchObject({ ok: true, data: { savedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) } });
-    expect(cache.revalidatePath).toHaveBeenCalledWith("/apply", "layout");
+    expect(cache.revalidatePath).not.toHaveBeenCalled();
   });
 
   it("turns a validation problem into messages the form can show next to the right field", async () => {
@@ -122,7 +122,7 @@ describe("choosing teams", () => {
   it("passes the list to the service for the signed-in applicant and reports what changed", async () => {
     recruiting.setSelectedTracks.mockResolvedValue({ added: ["media"], removed: ["team-b"], application: { secret: "not returned" } });
     const result = await setTeamsAction("r1", ["media"]);
-    expect(recruiting.setSelectedTracks).toHaveBeenCalledWith("applicant-1", ["media"]);
+    expect(recruiting.setSelectedTracks).toHaveBeenCalledWith("applicant-1", ["media"], expect.any(Date), "r1");
     expect(result).toEqual({ ok: true, data: { added: ["media"], removed: ["team-b"] } });
   });
 
@@ -136,7 +136,7 @@ describe("submitting", () => {
   it("submits for the signed-in applicant and says whether the confirmation email went out", async () => {
     email.submitAndNotify.mockResolvedValue({ applicationId: "a1", delivery: { emailId: "e1", status: "SENT" } });
     expect(await submitApplicationAction("r1")).toEqual({ ok: true, data: { emailStatus: "SENT" } });
-    expect(email.submitAndNotify).toHaveBeenCalledWith("applicant-1");
+    expect(email.submitAndNotify).toHaveBeenCalledWith("applicant-1", expect.any(Date), "r1");
   });
 
   it("still succeeds when the confirmation email failed (the submission is what matters)", async () => {

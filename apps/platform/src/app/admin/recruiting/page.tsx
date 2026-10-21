@@ -6,6 +6,7 @@ import { countTrackApplications, listTrackApplications } from "@/server/services
 import { listCycles } from "@/server/services/recruiting-cycle.service";
 import { isTrackKey, tracks } from "@/schemas/recruiting.schema";
 import { parseTrackStatus } from "@/lib/recruiting/labels";
+import { isReplyToMissing } from "@/server/services/recruiting-email.service";
 import { RecruitingConsole } from "@/components/admin/recruiting/recruiting-console";
 import { Button, EmptyState, PageHeader, Panel } from "@/components/admin/kit";
 
@@ -86,6 +87,7 @@ export default async function RecruitingAdminPage({
       pageSize={PAGE_SIZE}
       filters={{ team, status, q, auto: autoSubmitted === true }}
       attentionCount={attention}
+      replyToMissing={isReplyToMissing()}
     />
     </>
   );

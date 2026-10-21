@@ -228,10 +228,10 @@ async function main() {
   await saveDraft(u3.id, { genericAnswers: GENERIC, resumeUrl: RESUME, trackAnswers: { "competition": COMP_FULL } }, IN);
   const d3 = await getMyApplication(u3.id);
   {
-    const list = await listTrackApplications({ cycleId: cycle.id, q: run });
+    const list = await listTrackApplications({ viewerId: null, cycleId: cycle.id, q: run });
     check("the draft's teams are not in the officer list", !list.rows.some((r) => r.application.userId === u3.id));
     check("the submitted application's two teams are", list.rows.filter((r) => r.application.userId === u1.id).length === 2, `rows=${list.rows.length}`);
-    check("opening a draft by id returns null", (await getApplicationDetail(d3!.id)) === null);
+    check("opening a draft by id returns null", (await getApplicationDetail(d3!.id, null)) === null);
     const v3 = await getApplicantStatus(u3.id, IN);
     check("draft statuses are hidden from the applicant too", v3.application?.tracks.every((t) => t.status === null) === true);
   }
@@ -239,34 +239,34 @@ async function main() {
 
   console.log("--- officer list and filters ---");
   {
-    const all = await listTrackApplications({ cycleId: cycle.id, q: run });
+    const all = await listTrackApplications({ viewerId: null, cycleId: cycle.id, q: run });
     check("both applicants appear (4 team rows)", all.total === 4 && all.rows.length === 4, `total=${all.total}`);
-    check("filter by team", (await listTrackApplications({ cycleId: cycle.id, q: run, track: "competition" })).rows.every((r) => r.track === "competition"));
-    check("filter by status", (await listTrackApplications({ cycleId: cycle.id, q: run, status: "ACCEPTED" })).total === 0);
-    check("search matches name or email", (await listTrackApplications({ cycleId: cycle.id, q: "TEST U3" })).rows.some((r) => r.application.userId === u3.id));
-    check("autoSubmitted filter", (await listTrackApplications({ cycleId: cycle.id, q: run, autoSubmitted: true })).total === 0);
-    const detail = await getApplicationDetail(d1.id);
+    check("filter by team", (await listTrackApplications({ viewerId: null, cycleId: cycle.id, q: run, track: "competition" })).rows.every((r) => r.track === "competition"));
+    check("filter by status", (await listTrackApplications({ viewerId: null, cycleId: cycle.id, q: run, status: "ACCEPTED" })).total === 0);
+    check("search matches name or email", (await listTrackApplications({ viewerId: null, cycleId: cycle.id, q: "TEST U3" })).rows.some((r) => r.application.userId === u3.id));
+    check("autoSubmitted filter", (await listTrackApplications({ viewerId: null, cycleId: cycle.id, q: run, autoSubmitted: true })).total === 0);
+    const detail = await getApplicationDetail(d1.id, null);
     check("detail returns the applicant narrowly (account email, no full User row)", detail !== null && detail.user.email === u1.email && !("eid" in detail.user) && !("marketingOptIn" in detail.user) && detail.tracks.length === 2);
   }
 
   console.log("--- decisions ---");
   const trackA = (await prisma.applicationTrack.findFirstOrThrow({ where: { applicationId: d1.id, track: "media" } })).id;
   const trackB = (await prisma.applicationTrack.findFirstOrThrow({ where: { applicationId: d1.id, track: "team-b" } })).id;
-  await expectError("an officer can't decide their own application", () => setTrackStatus(u1.id, trackA, "ACCEPTED"), "SELF_REVIEW");
-  await expectError("Interview is refused for a team without interviews", () => setTrackStatus(officer.id, trackB, "INTERVIEW"), "INTERVIEW_NOT_OFFERED");
-  await expectError("an officer can't set SUBMITTED", () => setTrackStatus(officer.id, trackA, "SUBMITTED"), "BAD_STATUS");
-  await expectError("unknown id", () => setTrackStatus(officer.id, "does-not-exist", "ACCEPTED"), "NOT_FOUND");
+  await expectError("an officer can't decide their own application", () => setTrackStatus(u1.id, trackA, "ACCEPTED", "ANY"), "SELF_REVIEW");
+  await expectError("Interview is refused for a team without interviews", () => setTrackStatus(officer.id, trackB, "INTERVIEW", "ANY"), "INTERVIEW_NOT_OFFERED");
+  await expectError("an officer can't set SUBMITTED", () => setTrackStatus(officer.id, trackA, "SUBMITTED", "ANY"), "BAD_STATUS");
+  await expectError("unknown id", () => setTrackStatus(officer.id, "does-not-exist", "ACCEPTED", "ANY"), "NOT_FOUND");
   {
-    const r = await setTrackStatus(officer.id, trackA, "INTERVIEW");
+    const r = await setTrackStatus(officer.id, trackA, "INTERVIEW", "ANY");
     check("Interview works for a team that interviews", r.status === "INTERVIEW" && r.previousStatus === "SUBMITTED" && r.applicantUserId === u1.id);
     const row = await prisma.applicationTrack.findUniqueOrThrow({ where: { id: trackA } });
     check("decision time and officer are recorded", !!row.decidedAt && row.decidedById === officer.id);
-    await expectError("same status twice is rejected", () => setTrackStatus(officer.id, trackA, "INTERVIEW"), "BAD_STATUS");
-    await setTrackStatus(officer.id, trackB, "REJECTED");
+    await expectError("same status twice is rejected", () => setTrackStatus(officer.id, trackA, "INTERVIEW", "ANY"), "BAD_STATUS");
+    await setTrackStatus(officer.id, trackB, "REJECTED", "ANY");
     check("the two teams are decided independently", (await prisma.applicationTrack.findUniqueOrThrow({ where: { id: trackB } })).status === "REJECTED" && (await prisma.applicationTrack.findUniqueOrThrow({ where: { id: trackA } })).status === "INTERVIEW");
     const audits = await prisma.auditLog.count({ where: { entityType: "APPLICATION_TRACK", entityId: { in: [trackA, trackB] }, actionType: "APPLICATION_TRACK_STATUS_CHANGED" } });
     check("each change wrote an audit entry", audits === 2, `audits=${audits}`);
-    await setTrackStatus(officer.id, trackA, "IN_REVIEW");
+    await setTrackStatus(officer.id, trackA, "IN_REVIEW", "ANY");
     const back = await prisma.applicationTrack.findUniqueOrThrow({ where: { id: trackA } });
     check("moving back to In review clears the decision", back.status === "IN_REVIEW" && back.decidedAt === null && back.decidedById === null);
   }
@@ -280,10 +280,10 @@ async function main() {
     });
     const ta = (await getApplicantStatus(u1.id, IN)).application!.tracks.find((t) => t.track === "media")!;
     check("no booking link unless the team has invited them", ta.bookingUrl === null);
-    await setTrackStatus(officer.id, trackA, "INTERVIEW");
+    await setTrackStatus(officer.id, trackA, "INTERVIEW", "ANY");
     const ta2 = (await getApplicantStatus(u1.id, IN)).application!.tracks.find((t) => t.track === "media")!;
     check("booking link appears once invited to interview", ta2.bookingUrl === "https://calendar.app.google/example");
-    await setTrackStatus(officer.id, trackA, "ACCEPTED");
+    await setTrackStatus(officer.id, trackA, "ACCEPTED", "ANY");
     const ta3 = (await getApplicantStatus(u1.id, IN)).application!.tracks.find((t) => t.track === "media")!;
     check("...and disappears after a final decision", ta3.bookingUrl === null);
   }
@@ -298,14 +298,14 @@ async function main() {
     const r = await addReview(officer.id, trackA, { score: 4, notes: "  strong  " });
     check("valid review saved, note trimmed", r.score === 4 && r.notes === "strong" && r.reviewerId === officer.id);
     await addReview(officer.id, trackA, { notes: "note only" });
-    const list = await listTrackApplications({ cycleId: cycle.id, q: run, track: "media" });
+    const list = await listTrackApplications({ viewerId: null, cycleId: cycle.id, q: run, track: "media" });
     const row = list.rows.find((x) => x.application.userId === u1.id)!;
     check("list shows review count and average score", row.reviewCount === 2 && row.averageScore === 4, `${row.reviewCount} / ${row.averageScore}`);
   }
   {
     const draftTrack = await prisma.applicationTrack.create({ data: { applicationId: (await getOrCreateDraft(u2.id, IN)).id, track: "team-b" } });
     await expectError("can't review a draft's team", () => addReview(officer.id, draftTrack.id, { score: 3 }), "NOT_FOUND");
-    await expectError("can't decide a draft's team", () => setTrackStatus(officer.id, draftTrack.id, "IN_REVIEW"), "NOT_FOUND");
+    await expectError("can't decide a draft's team", () => setTrackStatus(officer.id, draftTrack.id, "IN_REVIEW", "ANY"), "NOT_FOUND");
   }
 
   console.log("--- email (no real mail is sent: RESEND_API_KEY is cleared) ---");
@@ -332,41 +332,41 @@ async function main() {
     const emailCount = (trackId: string) => prisma.applicationEmail.count({ where: { applicationTrackId: trackId } });
 
     // -- decision emails (media has a booking link from the section above)
-    const d1 = await decideAndNotify(officer.id, tA, "INTERVIEW", { sendEmail: true });
+    const d1 = await decideAndNotify(officer.id, tA, "INTERVIEW", { expectedStatus: "ANY", sendEmail: true });
     const interviewMail = await prisma.applicationEmail.findUniqueOrThrow({ where: { id: d1.emailId! } });
     check("a decision with 'send email' changes the status and queues one email together", d1.status === "INTERVIEW" && !!d1.emailId && (await emailCount(tA)) === 1);
     check("the interview email names the team, goes to the account address, and uses the booking link", interviewMail.template === "INTERVIEW" && interviewMail.applicationTrackId === tA && interviewMail.toEmail === u4.email && interviewMail.subject.includes(label("media")) && interviewMail.body.includes("https://calendar.app.google/example"), JSON.stringify({ subject: interviewMail.subject }));
     check("a failed send is recorded on the row, and the decision stands", d1.delivery?.status === "FAILED" && interviewMail.status === "FAILED" && (await prisma.applicationTrack.findUniqueOrThrow({ where: { id: tA } })).status === "INTERVIEW");
 
     // -- the transaction really rolls back when the email can't be built
-    await setTrackStatus(officer.id, tA, "IN_REVIEW");
+    await setTrackStatus(officer.id, tA, "IN_REVIEW", "ANY");
     await prisma.recruitingTrackConfig.deleteMany({ where: { cycleId: cycle.id, track: "media" } });
     const before = await emailCount(tA);
-    await expectError("an email that needs a missing booking link is refused", () => decideAndNotify(officer.id, tA, "INTERVIEW", { sendEmail: true, override: { subject: "Hi", body: "Book here: {{schedulingLink}}" } }), "MISSING_SCHEDULING_LINK");
+    await expectError("an email that needs a missing booking link is refused", () => decideAndNotify(officer.id, tA, "INTERVIEW", { expectedStatus: "ANY", sendEmail: true, override: { subject: "Hi", body: "Book here: {{schedulingLink}}" } }), "MISSING_SCHEDULING_LINK");
     const afterFail = await prisma.applicationTrack.findUniqueOrThrow({ where: { id: tA } });
     check("...and the status change was rolled back with it", afterFail.status === "IN_REVIEW" && afterFail.decidedAt === null, `status=${afterFail.status}`);
     check("...and no email row was left behind", (await emailCount(tA)) === before);
-    await expectError("an unknown placeholder is refused", () => decideAndNotify(officer.id, tA, "ACCEPTED", { sendEmail: true, override: { subject: "Hi", body: "Dear {{applicnatName}}" } }), "INVALID");
+    await expectError("an unknown placeholder is refused", () => decideAndNotify(officer.id, tA, "ACCEPTED", { expectedStatus: "ANY", sendEmail: true, override: { subject: "Hi", body: "Dear {{applicnatName}}" } }), "INVALID");
     check("...also with no status change", (await prisma.applicationTrack.findUniqueOrThrow({ where: { id: tA } })).status === "IN_REVIEW");
-    const d2 = await decideAndNotify(officer.id, tA, "INTERVIEW", { sendEmail: true });
+    const d2 = await decideAndNotify(officer.id, tA, "INTERVIEW", { expectedStatus: "ANY", sendEmail: true });
     const noLinkMail = await prisma.applicationEmail.findUniqueOrThrow({ where: { id: d2.emailId! } });
     check("with no booking link configured the default interview email asks them to reply instead", noLinkMail.body.includes("Reply to this email") && !noLinkMail.body.includes("https://"), noLinkMail.body.slice(0, 160));
 
     // -- rules around who gets what
     const bBefore = await emailCount(tB);
-    await expectError("Interview + email for a team without interviews is refused", () => decideAndNotify(officer.id, tB, "INTERVIEW", { sendEmail: true }), "INTERVIEW_NOT_OFFERED");
-    await expectError("an officer can't decide their own application, with or without email", () => decideAndNotify(u4.id, tB, "ACCEPTED", { sendEmail: true }), "SELF_REVIEW");
-    await expectError("'send email' on a status that has no email is refused", () => decideAndNotify(officer.id, tB, "IN_REVIEW", { sendEmail: true }), "BAD_STATUS");
+    await expectError("Interview + email for a team without interviews is refused", () => decideAndNotify(officer.id, tB, "INTERVIEW", { expectedStatus: "ANY", sendEmail: true }), "INTERVIEW_NOT_OFFERED");
+    await expectError("an officer can't decide their own application, with or without email", () => decideAndNotify(u4.id, tB, "ACCEPTED", { expectedStatus: "ANY", sendEmail: true }), "SELF_REVIEW");
+    await expectError("'send email' on a status that has no email is refused", () => decideAndNotify(officer.id, tB, "IN_REVIEW", { expectedStatus: "ANY", sendEmail: true }), "BAD_STATUS");
     check("none of those left an email row", (await emailCount(tB)) === bBefore);
-    const d3 = await decideAndNotify(officer.id, tB, "REJECTED", { sendEmail: false });
+    const d3 = await decideAndNotify(officer.id, tB, "REJECTED", { expectedStatus: "ANY", sendEmail: false });
     check("a decision without 'send email' queues nothing", d3.emailId === null && d3.delivery === null && (await emailCount(tB)) === bBefore);
 
-    const d4 = await decideAndNotify(officer.id, tB, "ACCEPTED", { sendEmail: true, override: { subject: "Custom for {{applicantName}}", body: "Edited note." } });
+    const d4 = await decideAndNotify(officer.id, tB, "ACCEPTED", { expectedStatus: "ANY", sendEmail: true, override: { subject: "Custom for {{applicantName}}", body: "Edited note." } });
     const edited = await prisma.applicationEmail.findUniqueOrThrow({ where: { id: d4.emailId! } });
     check("the officer's edited wording is what is stored (placeholders filled)", edited.subject === `Custom for ${u4.displayName}` && edited.body === "Edited note.", `${edited.subject} | ${edited.body}`);
 
     await prisma.application.update({ where: { id: app4.id }, data: { email: "attacker@evil.test" } });
-    const d5 = await decideAndNotify(officer.id, tB, "REJECTED", { sendEmail: true });
+    const d5 = await decideAndNotify(officer.id, tB, "REJECTED", { expectedStatus: "ANY", sendEmail: true });
     const toMail = await prisma.applicationEmail.findUniqueOrThrow({ where: { id: d5.emailId! } });
     check("mail goes to the account email even if the application's copy was changed", toMail.toEmail === u4.email, toMail.toEmail);
 
@@ -416,9 +416,9 @@ async function main() {
     check("the ACCOUNT email is exported, not the altered copy on the application", !!all && all.csv.includes(u4.email) && !all.csv.includes("attacker@evil.test"));
     check("rows link to the application in the admin area", !!all && all.csv.includes(`https://example.test/admin/recruiting/${d1.id}`));
     // Regression: the list used to search and show the email COPIED onto the application, which can differ from the account email
-    const byAccountEmail = await listTrackApplications({ cycleId: cycle.id, q: u4.email });
+    const byAccountEmail = await listTrackApplications({ viewerId: null, cycleId: cycle.id, q: u4.email });
     check("the list finds an applicant by their account email even when the application's copy differs", byAccountEmail.rows.length === 2 && byAccountEmail.rows.every((r) => r.application.email === u4.email), `rows=${byAccountEmail.rows.length}`);
-    check("...and never by the altered copy being shown", (await listTrackApplications({ cycleId: cycle.id, q: "attacker@evil.test" })).rows.every((r) => r.application.email !== "attacker@evil.test"));
+    check("...and never by the altered copy being shown", (await listTrackApplications({ viewerId: null, cycleId: cycle.id, q: "attacker@evil.test" })).rows.every((r) => r.application.email !== "attacker@evil.test"));
     const onlyA = await exportRound(officer.id, "fall-2026", { q: run, track: "media" }, { adminBaseUrl: "https://example.test" });
     check("filters apply to the export", !!onlyA && onlyA.rowCount === 2 && !onlyA.csv.includes(`${tracks.find((t) => t.key === "team-b")!.label}`), `rowCount=${onlyA?.rowCount}`);
     check("an unknown round exports nothing", (await exportRound(officer.id, "no-such-round", {}, { adminBaseUrl: "https://example.test" })) === null);
@@ -444,20 +444,20 @@ async function main() {
       process.env.RESEND_DAILY_LIMIT = "11";
       const quota = await getEmailQuota();
       check("the quota counts recruiting mail and reads the plan's limit, holding the receipts headroom back", quota.dailyLimit === 11 && quota.left === 1 && quota.sentToday === 0, JSON.stringify(quota));
-      await expectError("a batch bigger than what's left of today's limit is refused up front", () => bulkDecide(officer.id, [t5a, t5b], "ACCEPTED", { sendEmail: true }), "EMAIL_LIMIT");
+      await expectError("a batch bigger than what's left of today's limit is refused up front", () => bulkDecide(officer.id, [t5a, t5b], "ACCEPTED", { expectedStatuses: anyOf([t5a, t5b]), sendEmail: true }), "EMAIL_LIMIT");
       const untouched = await prisma.applicationTrack.findMany({ where: { applicationId: app5.id }, select: { status: true } });
       check("...and nobody was decided", untouched.every((t) => t.status === "SUBMITTED"), JSON.stringify(untouched));
-      const forced = await bulkDecide(officer.id, [t5a, t5b], "ACCEPTED", { sendEmail: true, ignoreLimit: true });
+      const forced = await bulkDecide(officer.id, [t5a, t5b], "ACCEPTED", { expectedStatuses: anyOf([t5a, t5b]), sendEmail: true, ignoreLimit: true });
       check("'send anyway' decides them, with their emails failing honestly (no key)", forced.decided === 2 && forced.emailsFailed === 2 && forced.emailsSent === 0, JSON.stringify(forced));
     } finally {
       if (originalLimit === undefined) delete process.env.RESEND_DAILY_LIMIT;
       else process.env.RESEND_DAILY_LIMIT = originalLimit;
     }
-    const mixed = await bulkDecide(officer.id, [t5a, "no-such-application", t5b], "IN_REVIEW", { sendEmail: false });
+    const mixed = await bulkDecide(officer.id, [t5a, "no-such-application", t5b], "IN_REVIEW", { expectedStatuses: anyOf([t5a, "no-such-application", t5b]), sendEmail: false });
     check("a bulk change carries on past one it can't make, and says why", mixed.decided === 2 && mixed.failures.length === 1 && mixed.failures[0].applicationTrackId === "no-such-application", JSON.stringify(mixed));
-    const interview = await bulkDecide(officer.id, [t5b], "INTERVIEW", { sendEmail: false });
+    const interview = await bulkDecide(officer.id, [t5b], "INTERVIEW", { expectedStatuses: anyOf([t5b]), sendEmail: false });
     check("Interview is refused per team inside a bulk change", interview.decided === 0 && /does not run interviews/.test(interview.failures[0]?.error ?? ""), JSON.stringify(interview));
-    const own = await bulkDecide(u5.id, [t5a], "ACCEPTED", { sendEmail: false });
+    const own = await bulkDecide(u5.id, [t5a], "ACCEPTED", { expectedStatuses: anyOf([t5a]), sendEmail: false });
     check("an officer can't bulk-decide their own application", own.decided === 0 && own.failures.length === 1);
   }
 
@@ -618,6 +618,9 @@ async function main() {
 
   console.log(`\n${pass} passed, ${fail} failed`);
 }
+
+/** For checks that exercise something else: skip the stale-status guard on purpose */
+const anyOf = (ids: string[]) => Object.fromEntries(ids.map((i) => [i, "ANY" as const]));
 
 async function cleanup() {
   const apps = await prisma.application.findMany({ where: { userId: { in: userIds } }, select: { id: true, tracks: { select: { id: true } } } });

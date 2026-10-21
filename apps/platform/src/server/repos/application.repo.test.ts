@@ -40,7 +40,7 @@ function fakeDb(rows: ReturnType<typeof trackRow>[]) {
 describe("listSubmittedTracks", () => {
   it("breaks ties on the id, so paging can't repeat or skip applicants who share a submit time", async () => {
     const db = fakeDb([]);
-    await listSubmittedTracks({ cycleId: "c1" }, db as never);
+    await listSubmittedTracks({ cycleId: "c1", viewerId: null }, db as never);
     expect(db.applicationTrack.findMany.mock.calls[0][0].orderBy).toEqual([
       { application: { submittedAt: "asc" } },
       { track: "asc" },
@@ -57,7 +57,7 @@ describe("listSubmittedTracks", () => {
 
   it("shows reviews when no viewer is given", async () => {
     const db = fakeDb([trackRow(OFFICER)]);
-    const { rows } = await listSubmittedTracks({ cycleId: "c1" }, db as never);
+    const { rows } = await listSubmittedTracks({ cycleId: "c1", viewerId: null }, db as never);
     expect(rows[0].reviewCount).toBe(3);
   });
 });

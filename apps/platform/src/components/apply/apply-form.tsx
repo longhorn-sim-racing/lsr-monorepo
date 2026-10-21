@@ -42,7 +42,7 @@ type Props = {
 };
 
 /** Codes that mean "this application can't be changed any more", not "fix a field". */
-const LOCKED_CODES = ["ROUND_CLOSED", "ROUND_NOT_OPEN_YET", "ALREADY_SUBMITTED", "CLOSED", "ROUND_CHANGED"];
+const LOCKED_CODES = ["ROUND_CLOSED", "ROUND_NOT_OPEN_YET", "ALREADY_SUBMITTED", "CLOSED"];
 
 /** Server field errors are keyed by path; the page keys question errors by question id. */
 function normalizeFieldErrors(fieldErrors: Record<string, string> | undefined): Record<string, string> {
@@ -63,6 +63,28 @@ function questionErrors(step: StepKey, state: FormState): Record<string, string>
   return parseAnswers(questions, answers, "draft", { ignoreUnknown: true }).errors;
 }
 
+/**
+ * What a page saves, as comparable text: the part of the form that page owns. A page counts as
+ * unsaved when this differs from what was last saved for it, so saving one page never marks another
+ * as saved.
+ */
+function sliceOf(step: StepKey, st: FormState): string {
+  if (step === "about") return JSON.stringify(st.profile);
+  if (step === "general") return JSON.stringify(st.genericAnswers);
+  if (step === "teams") return JSON.stringify(st.teams);
+  if (step === "links") return st.resumeUrl;
+  if (step.startsWith("team:")) return JSON.stringify(st.trackAnswers[step.slice(5)] ?? {});
+  return "";
+}
+
+/**
+ * A page's address. `n` counts how many pages deep into the form this history entry is (0 for the
+ * first), so that after Submit the whole form can be stepped back over, and Back from the status
+ * page doesn't land on a form page that bounces straight back to the status page.
+ */
+const stepUrl = (step: StepKey, n: number) => `?step=${encodeURIComponent(step)}&n=${n}`;
+const historyDepth = () => Number(new URLSearchParams(window.location.search).get("n")) || 0;
+
 /** Field-error keys the page has somewhere to show: this page's questions, profile fields, the resume link. */
 function keysShownOn(step: StepKey): Set<string> {
   const keys = new Set(questionsForStep(step).map((q) => q.id));
@@ -73,14 +95,17 @@ function keysShownOn(step: StepKey): Set<string> {
 function unmatchedMessages(step: StepKey, fields: Record<string, string>): string[] {
   const shown = keysShownOn(step);
   return Object.entries(fields)
-    .filter(([key]) => !shown.has(key) && !key.startsWith("profile.") && key !== "resumeUrl" && key !== "tracks")
+    .filter(([key]) => !shown.has(key) && !key.startsWith("profile.") && key !== "resumeUrl")
     .map(([, message]) => message);
 }
 
 export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: Props) {
   const router = useRouter();
   const [state, setState] = useState<FormState>(initial);
-  const [lastSaved, setLastSaved] = useState(() => JSON.stringify(initial));
+  // What each page last saved (a page missing here still holds what the server gave us)
+  const [saved, setSaved] = useState<Record<string, string>>({});
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [stale, setStale] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<string | null>(null);
   const [serverReport, setServerReport] = useState<CompletenessReport | null>(null);
@@ -96,7 +121,10 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
   const stepParam = useSearchParams().get("step");
   const stepKey = resolveStep(stepParam ?? initialStep, steps);
   const completion = useMemo(() => stepCompletion(state, accountEmail), [state, accountEmail]);
-  const dirty = JSON.stringify(state) !== lastSaved;
+  const isDirty = (step: StepKey, st: FormState, savedMap: Record<string, string>) =>
+    step !== "review" && sliceOf(step, st) !== (savedMap[step] ?? sliceOf(step, initial));
+  const currentDirty = isDirty(stepKey, state, saved);
+  const dirty = steps.some((s) => isDirty(s.key, state, saved));
   const index = Math.max(0, steps.findIndex((s) => s.key === stepKey));
 
   // Typed but unsaved changes: warn before the tab closes
@@ -112,51 +140,80 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
 
   // Give the first page an address of its own, so Back from page two lands here and not on a different page
   useEffect(() => {
-    if (stepParam === null) window.history.replaceState(null, "", `?step=${encodeURIComponent(stepKey)}`);
+    if (stepParam === null) window.history.replaceState(null, "", stepUrl(stepKey, 0));
     // Only on arrival
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * Sends one page (the team choice first, if that is the page). Quietly: the callers decide what to
+   * tell the applicant. Marks only THAT page as saved.
+   */
+  async function persist(step: StepKey, st: FormState): Promise<{ ok: true } | { ok: false; res: Parameters<typeof failed>[0] }> {
+    try {
+      const built = patchForStep(step, st);
+      if (!built.ok) return { ok: false, res: { error: "Some answers need attention." } };
+      if (step === "teams") {
+        const teamsResult = await setTeamsAction(round.id, st.teams);
+        if (!teamsResult.ok) return { ok: false, res: teamsResult };
+      }
+      const res = await saveProgressAction(round.id, built.patch);
+      if (!res.ok) return { ok: false, res };
+      const slice = sliceOf(step, st);
+      setSaved((prev) => ({ ...prev, [step]: slice }));
+      setSavedAt(res.data.savedAt);
+      setSaveFailed(false);
+      return { ok: true };
+    } catch {
+      return { ok: false, res: { error: "We couldn't reach the server." } };
+    }
+  }
+
+  /** A background save went wrong: say so, so the applicant doesn't think it was kept. */
+  function backgroundFailed(res: Parameters<typeof failed>[0]) {
+    if (res.code === "ROUND_CHANGED") setStale(true);
+    else if (res.code && LOCKED_CODES.includes(res.code)) setLocked(true);
+    else setSaveFailed(true);
+  }
 
   // Save the current page a moment after the applicant stops typing, so leaving the form any way
   // at all (the back gesture on a phone, a closed tab) loses at most a few seconds of typing.
   // Pages with problems are left for "Save and continue" to explain.
   useEffect(() => {
-    if (!dirty || pending || locked || stepKey === "review" || stepKey === "teams") return;
-    const built = patchForStep(stepKey, state);
-    if (!built.ok || Object.keys(questionErrors(stepKey, state)).length > 0) return;
-    const snapshot = JSON.stringify(state);
+    if (!currentDirty || pending || locked || stale || stepKey === "review") return;
+    if (stepKey !== "teams" && Object.keys(questionErrors(stepKey, state)).length > 0) return;
+    if (!patchForStep(stepKey, state).ok) return;
     const timer = setTimeout(async () => {
-      const res = await saveProgressAction(round.id, built.patch);
-      if (res.ok) {
-        setLastSaved(snapshot);
-        setSavedAt(res.data.savedAt);
-      } else if (res.code && LOCKED_CODES.includes(res.code)) setLocked(true);
+      const result = await persist(stepKey, state);
+      if (!result.ok) backgroundFailed(result.res);
     }, 2000);
     return () => clearTimeout(timer);
-  }, [state, dirty, pending, locked, stepKey, round.id]);
+    // persist and backgroundFailed only use setters and the round id
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, saved, currentDirty, pending, locked, stale, stepKey]);
 
-  // Back (or the back gesture) can move to another page while the one just left has unsaved typing:
-  // save that page now. "Save and continue" saves before it moves, so it never has anything left to save here.
-  const latest = useRef({ state, dirty });
+  // Back (or the back gesture) can move to another page while the one just left has unsaved changes
+  // (typing, or a changed team choice): save that page now. "Save and continue" saves before it moves,
+  // so it never has anything left to save here.
+  const latest = useRef({ state, saved });
   useEffect(() => {
-    latest.current = { state, dirty };
+    latest.current = { state, saved };
   });
   const shownStep = useRef(stepKey);
   useEffect(() => {
     const left = shownStep.current;
     shownStep.current = stepKey;
-    const { state: current, dirty: unsaved } = latest.current;
-    if (left === stepKey || !unsaved || left === "review" || left === "teams") return;
-    const built = patchForStep(left, current);
-    if (!built.ok || Object.keys(questionErrors(left, current)).length > 0) return;
-    const snapshot = JSON.stringify(current);
-    void saveProgressAction(round.id, built.patch).then((res) => {
-      if (res.ok) {
-        setLastSaved(snapshot);
-        setSavedAt(res.data.savedAt);
-      }
+    const { state: current, saved: savedMap } = latest.current;
+    if (left === stepKey || !isDirty(left, current, savedMap)) return;
+    if (left !== "teams" && Object.keys(questionErrors(left, current)).length > 0) return;
+    void persist(left, current).then((result) => {
+      if (result.ok) return;
+      backgroundFailed(result.res);
+      setBanner("Your changes on the page you just left weren't saved. Go back to it and press Save and continue.");
     });
-  }, [stepKey, round.id]);
+    // only when the page changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepKey]);
 
   // Move focus to the new page's heading so keyboard and screen-reader users land in the right place
   useEffect(() => {
@@ -167,7 +224,8 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
   const setProfile = (patch: Partial<FormState["profile"]>) => setState((s) => ({ ...s, profile: { ...s.profile, ...patch } }));
 
   function failed(res: { error: string; fieldErrors?: Record<string, string>; code?: string; report?: CompletenessReport }): false {
-    if (res.code && LOCKED_CODES.includes(res.code)) setLocked(true);
+    if (res.code === "ROUND_CHANGED") setStale(true);
+    else if (res.code && LOCKED_CODES.includes(res.code)) setLocked(true);
     else if (res.code === "UNAUTHENTICATED") setBanner("Your session ended. Sign in again, then come back; your saved progress is kept.");
     else {
       const fields = normalizeFieldErrors(res.fieldErrors);
@@ -196,31 +254,46 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
       setBanner("Some answers need attention (see below).");
       return false;
     }
-    if (stepKey === "teams") {
-      const teamsResult = await setTeamsAction(round.id, state.teams);
-      if (!teamsResult.ok) return failed(teamsResult);
-    }
-    const res = await saveProgressAction(round.id, built.patch);
-    if (!res.ok) return failed(res);
-    setLastSaved(JSON.stringify(state));
-    setSavedAt(res.data.savedAt);
+    const result = await persist(stepKey, state);
+    if (!result.ok) return failed(result.res);
     setErrors({});
     return true;
   }
 
+  /** Leaves the form for good (after Submit): drops the form's history entries, so Back goes to where the applicant came from. */
+  function leaveForm(url: string) {
+    const depth = historyDepth();
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      window.removeEventListener("popstate", finish);
+      router.replace(url);
+      router.refresh();
+    };
+    if (depth <= 0) return finish();
+    window.addEventListener("popstate", finish);
+    window.history.go(-depth);
+    setTimeout(finish, 600); // if the browser never reports the move
+  }
+
   function goTo(target: StepKey) {
+    const from = stepKey;
     startTransition(async () => {
-      if (dirty && !(await saveCurrent())) return;
+      if (currentDirty && !(await saveCurrent())) return;
+      // Back pressed while this was saving: don't push a page on top of where the applicant went
+      const now = new URLSearchParams(window.location.search).get("step");
+      if (now !== null && now !== from) return;
       setErrors({});
       setBanner(null);
-      window.history.pushState(null, "", `?step=${encodeURIComponent(target)}`);
+      window.history.pushState(null, "", stepUrl(target, historyDepth() + 1));
       window.scrollTo({ top: 0 });
     });
   }
 
   function saveAndExit() {
     startTransition(async () => {
-      if (dirty && !(await saveCurrent())) return;
+      if (currentDirty && !(await saveCurrent())) return;
       router.push("/apply");
     });
   }
@@ -230,8 +303,7 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
       setBanner(null);
       const res = await submitApplicationAction(round.id);
       if (res.ok) {
-        router.replace("/apply/status?submitted=1");
-        router.refresh();
+        leaveForm("/apply/status?submitted=1");
         return;
       }
       if (res.code === "INCOMPLETE") {
@@ -261,6 +333,21 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
       return { ...s, teams: s.teams.filter((t) => t !== key), trackAnswers: rest };
     });
     setRemoving(null);
+  }
+
+  if (stale) {
+    return (
+      <ApplyNotice
+        tone="bad"
+        action={
+          <Button className={primaryButton} onClick={() => window.location.assign("/apply/start")}>
+            Reload
+          </Button>
+        }
+      >
+        Applications have moved on to a different round since you opened this page, so nothing here was saved. Reload to continue.
+      </ApplyNotice>
+    );
   }
 
   if (locked) {
@@ -383,7 +470,15 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
                 Save and finish later
               </button>
               {stepKey === "teams" && state.teams.length === 0 && <p className="w-full font-sans text-xs text-white/50">Choose at least one team to continue.</p>}
-              {savedAt && !dirty && <p className="ml-auto font-sans text-xs text-green-400/80" role="status">Saved {new Date(savedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</p>}
+              {saveFailed && (
+                <p className="ml-auto flex items-center gap-2 font-sans text-xs text-red-300" role="alert">
+                  Not saved.
+                  <button type="button" disabled={pending} onClick={() => startTransition(async () => void (await saveCurrent()))} className="font-bold uppercase tracking-widest underline underline-offset-4 hover:text-lsr-orange">
+                    Retry
+                  </button>
+                </p>
+              )}
+              {savedAt && !dirty && !saveFailed && <p className="ml-auto font-sans text-xs text-green-400/80" role="status">Saved {new Date(savedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</p>}
             </div>
           )}
           {stepKey === "review" && prev && (

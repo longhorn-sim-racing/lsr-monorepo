@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import type { TrackStatus } from "@prisma/client";
 import { Badge, Button, Notice, Panel, PanelBody, PanelHeader, Select, Textarea } from "@/components/admin/kit";
 import { addReviewAction, resendEmailAction } from "@/app/admin/recruiting/actions";
-import { EMAIL_STATUS_TONE, EMAIL_TEMPLATE_LABEL, OFFICER_SETTABLE, TRACK_STATUS_LABEL, formatCentral } from "@/lib/recruiting/labels";
+import { EMAIL_STATUS_TONE, EMAIL_TEMPLATE_LABEL, OFFICER_SETTABLE, STATUSES_WITH_EMAIL, TRACK_STATUS_LABEL, formatCentral } from "@/lib/recruiting/labels";
 import { DecisionDialog } from "./decision-dialog";
 import { StatusBadge } from "./status-badge";
 
@@ -89,6 +89,7 @@ export function TrackPanel({
         teamLabel={teamLabel}
         applicantName={applicantName}
         currentStatus={status}
+        sentEmails={emails.filter((m) => m.status === "SENT" && STATUSES_WITH_EMAIL.includes(m.template as TrackStatus))}
         status={target}
         onClose={(changed) => {
           setTarget(null);
@@ -175,6 +176,7 @@ export function EmailsSection({ emails, canResend, title = "Emails to the applic
       const res = await resendEmailAction(id);
       if (!res.ok) return void toast.error(res.error);
       if (res.data.status === "SENT") toast.success("Email sent.");
+      else if (res.data.status === "CANCELLED") toast.warning(res.data.error ?? "Cancelled: the decision changed.");
       else toast.warning(`Still not sent: ${res.data.error ?? "unknown reason"}`);
       router.refresh();
     });

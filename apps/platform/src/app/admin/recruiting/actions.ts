@@ -68,13 +68,13 @@ export async function previewDecisionAction(applicationTrackId: string, status: 
 export async function decideAction(
   applicationTrackId: string,
   status: string,
-  options: { sendEmail?: boolean; override?: { subject: string; body: string }; expectedStatus?: string } = {},
+  options: { sendEmail?: boolean; override?: { subject: string; body: string }; expectedStatus: string },
 ) {
   return run(async (officerId) =>
     decideAndNotify(officerId, idSchema.parse(applicationTrackId), statusSchema.parse(status), {
       sendEmail: z.boolean().optional().parse(options.sendEmail),
       override: overrideSchema.parse(options.override),
-      expectedStatus: expectedStatusSchema.optional().parse(options.expectedStatus),
+      expectedStatus: expectedStatusSchema.parse(options.expectedStatus),
     }),
   );
 }
@@ -82,12 +82,12 @@ export async function decideAction(
 export async function bulkDecideAction(
   applicationTrackIds: string[],
   status: string,
-  options: { sendEmail?: boolean; ignoreLimit?: boolean; expectedStatuses?: Record<string, string> } = {},
+  options: { sendEmail?: boolean; ignoreLimit?: boolean; expectedStatuses: Record<string, string> },
 ) {
   return run(async (officerId) =>
     bulkDecide(officerId, applicationTrackIds, statusSchema.parse(status), {
       sendEmail: z.boolean().optional().parse(options.sendEmail),
-      expectedStatuses: z.record(idSchema, expectedStatusSchema).optional().parse(options.expectedStatuses),
+      expectedStatuses: z.record(idSchema, expectedStatusSchema).parse(options.expectedStatuses),
       ignoreLimit: z.boolean().optional().parse(options.ignoreLimit),
     }),
   );

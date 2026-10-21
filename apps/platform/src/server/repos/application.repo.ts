@@ -59,8 +59,9 @@ export type TrackListFilters = {
   /**
    * The officer looking. Reviews and scores of their OWN application are left out (rows,
    * counts and averages), so an officer who applies can't read what colleagues wrote about them.
+   * Required so no caller can forget it; null only for code with no viewer (scripts).
    */
-  viewerId?: string;
+  viewerId: string | null;
   /** Matches the applicant's name or email, case-insensitively. */
   q?: string;
   take?: number;
@@ -160,7 +161,7 @@ export async function countSubmittedTracks(cycleId: string, db: Db = prisma) {
  * id, so a draft can never be opened by guessing its id. The applicant is selected
  * narrowly (no full User row).
  */
-export async function findSubmittedApplicationDetail(applicationId: string, viewerId?: string, db: Db = prisma) {
+export async function findSubmittedApplicationDetail(applicationId: string, viewerId: string | null, db: Db = prisma) {
   const app = await db.application.findFirst({
     where: { id: applicationId, state: "SUBMITTED" },
     include: {

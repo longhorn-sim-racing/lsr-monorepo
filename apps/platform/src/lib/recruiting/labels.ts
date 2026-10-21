@@ -41,7 +41,6 @@ export const EMAIL_TEMPLATE_LABEL: Record<string, string> = {
   INTERVIEW: "Interview invitation",
   ACCEPTED: "Accepted",
   REJECTED: "Not moving forward",
-  DEADLINE_REMINDER: "Deadline reminder",
 };
 
 const isTrackStatus = (v: string): v is TrackStatus => (TRACK_STATUS_ORDER as string[]).includes(v);

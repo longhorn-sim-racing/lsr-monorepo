@@ -64,6 +64,7 @@ export function RecruitingConsole({
   pageSize,
   filters,
   attentionCount,
+  replyToMissing,
 }: {
   viewerId: string;
   cycles: Array<{ id: string; slug: string; name: string; isActive: boolean }>;
@@ -76,6 +77,8 @@ export function RecruitingConsole({
   pageSize: number;
   filters: Filters;
   attentionCount: number;
+  /** Production without RECRUITING_REPLY_TO: replies to the emails would go nowhere */
+  replyToMissing: boolean;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -305,6 +308,7 @@ export function RecruitingConsole({
           status={bulkStatus}
           rows={selectedRows}
           teamByKey={teamByKey}
+          replyToMissing={replyToMissing}
           onClose={(changed) => {
             setBulkOpen(false);
             if (changed) {
@@ -324,18 +328,21 @@ function BulkDialog({
   status,
   rows,
   teamByKey,
+  replyToMissing,
   onClose,
 }: {
   status: TrackStatus;
   rows: ConsoleRow[];
   teamByKey: Map<string, Team>;
+  replyToMissing: boolean;
   onClose: (changed: boolean) => void;
 }) {
   const canEmail = STATUSES_WITH_EMAIL.includes(status);
   const [sendEmail, setSendEmail] = useState(canEmail);
   const [ignoreLimit, setIgnoreLimit] = useState(false);
   const [limitHit, setLimitHit] = useState(false);
-  const reversing = rows.filter((r) => r.status === "ACCEPTED" || r.status === "REJECTED");
+  // Rows already at the target status are refused anyway, so they aren't "changed" and need no warning
+  const reversing = rows.filter((r) => (r.status === "ACCEPTED" || r.status === "REJECTED") && r.status !== status);
   const [confirmedReversal, setConfirmedReversal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BulkDecisionResult | null>(null);
@@ -439,6 +446,11 @@ function BulkDialog({
               />
             ) : (
               <p className="text-xs text-admin-subtle">No email is sent for this status.</p>
+            )}
+            {sendEmail && replyToMissing && (
+              <Notice tone="warning">
+                RECRUITING_REPLY_TO is not set, so replies to these emails go to the noreply address and nobody sees them. Ask a tech officer to set it before sending.
+              </Notice>
             )}
             {limitHit && (
               <CheckboxField

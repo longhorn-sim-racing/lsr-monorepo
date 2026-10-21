@@ -138,6 +138,11 @@ describe("setActiveCycle", () => {
     expect(db.recruitingCycle.update).not.toHaveBeenCalled();
   });
 
+  it("turns two officers switching at once (the unique index refusing the second) into a clear message", async () => {
+    db.recruitingCycle.update.mockRejectedValue(new Prisma.PrismaClientKnownRequestError("Unique constraint failed", { code: "P2002", clientVersion: "test" }));
+    await expect(setActiveCycle(OFFICER, "c2")).rejects.toMatchObject({ code: "BAD_STATUS", message: expect.stringContaining("Another officer just changed the active round") });
+  });
+
   it("reports an unknown round without switching the current one off", async () => {
     db.recruitingCycle.findUnique.mockResolvedValue(null);
     await expect(setActiveCycle(OFFICER, "nope")).rejects.toMatchObject({ code: "NOT_FOUND" });

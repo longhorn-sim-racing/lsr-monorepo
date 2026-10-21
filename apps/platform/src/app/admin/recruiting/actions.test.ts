@@ -38,8 +38,8 @@ beforeEach(() => {
 describe("access", () => {
   const everyAction: Array<[string, () => Promise<unknown>]> = [
     ["previewDecisionAction", () => previewDecisionAction("t1", "ACCEPTED")],
-    ["decideAction", () => decideAction("t1", "ACCEPTED", { sendEmail: true })],
-    ["bulkDecideAction", () => bulkDecideAction(["t1"], "ACCEPTED", { sendEmail: true })],
+    ["decideAction", () => decideAction("t1", "ACCEPTED", { sendEmail: true, expectedStatus: "IN_REVIEW" })],
+    ["bulkDecideAction", () => bulkDecideAction(["t1"], "ACCEPTED", { sendEmail: true, expectedStatuses: { t1: "IN_REVIEW" } })],
     ["addReviewAction", () => addReviewAction("t1", { score: 3 })],
     ["resendEmailAction", () => resendEmailAction("e1")],
     ["resendAllFailedAction", () => resendAllFailedAction("c1")],
@@ -63,9 +63,9 @@ describe("access", () => {
 describe("decisions and email", () => {
   it("passes the officer's id (never one from the client) and returns the service's data", async () => {
     email.decideAndNotify.mockResolvedValue({ status: "ACCEPTED", emailId: "e1", delivery: { emailId: "e1", status: "SENT" } });
-    const result = await decideAction("t1", "ACCEPTED", { sendEmail: true, override: { subject: "Hi", body: "Edited" } });
+    const result = await decideAction("t1", "ACCEPTED", { sendEmail: true, override: { subject: "Hi", body: "Edited" }, expectedStatus: "IN_REVIEW" });
     expect(result).toEqual({ ok: true, data: { status: "ACCEPTED", emailId: "e1", delivery: { emailId: "e1", status: "SENT" } } });
-    expect(email.decideAndNotify).toHaveBeenCalledWith("officer-1", "t1", "ACCEPTED", { sendEmail: true, override: { subject: "Hi", body: "Edited" } });
+    expect(email.decideAndNotify).toHaveBeenCalledWith("officer-1", "t1", "ACCEPTED", { sendEmail: true, override: { subject: "Hi", body: "Edited" }, expectedStatus: "IN_REVIEW" });
     expect(cache.revalidatePath).toHaveBeenCalledWith("/admin/recruiting", "layout");
   });
 
@@ -75,22 +75,22 @@ describe("decisions and email", () => {
     ["a lowercase status", "accepted"],
     ["an empty status", ""],
   ])("rejects %s before touching the service", async (_name, status) => {
-    const result = await decideAction("t1", status, { sendEmail: true });
+    const result = await decideAction("t1", status, { sendEmail: true, expectedStatus: "IN_REVIEW" });
     expect(result.ok).toBe(false);
     expect(email.decideAndNotify).not.toHaveBeenCalled();
   });
 
   it("rejects bad ids and a malformed edit", async () => {
-    expect((await decideAction("", "ACCEPTED")).ok).toBe(false);
-    expect((await decideAction("t".repeat(65), "ACCEPTED")).ok).toBe(false);
-    expect((await decideAction("t1", "ACCEPTED", { override: { subject: "s", body: "b", extra: "x" } as never })).ok).toBe(false);
-    expect((await decideAction("t1", "ACCEPTED", { sendEmail: "yes" as never })).ok).toBe(false);
+    expect((await decideAction("", "ACCEPTED", { expectedStatus: "IN_REVIEW" })).ok).toBe(false);
+    expect((await decideAction("t".repeat(65), "ACCEPTED", { expectedStatus: "IN_REVIEW" })).ok).toBe(false);
+    expect((await decideAction("t1", "ACCEPTED", { override: { subject: "s", body: "b", extra: "x" } as never, expectedStatus: "IN_REVIEW" })).ok).toBe(false);
+    expect((await decideAction("t1", "ACCEPTED", { sendEmail: "yes" as never, expectedStatus: "IN_REVIEW" })).ok).toBe(false);
     expect(email.decideAndNotify).not.toHaveBeenCalled();
   });
 
   it("turns a rule from the service into a message the form can show, with its field errors", async () => {
     email.decideAndNotify.mockRejectedValue(new RecruitingError("MISSING_SCHEDULING_LINK", "This team has no booking link yet.", { fieldErrors: { body: "No value for {{schedulingLink}}" } }));
-    const result = await decideAction("t1", "INTERVIEW", { sendEmail: true });
+    const result = await decideAction("t1", "INTERVIEW", { sendEmail: true, expectedStatus: "IN_REVIEW" });
     expect(result).toEqual({ ok: false, error: "This team has no booking link yet.", fieldErrors: { body: "No value for {{schedulingLink}}" }, code: "MISSING_SCHEDULING_LINK" });
     expect(cache.revalidatePath).not.toHaveBeenCalled();
   });
@@ -98,7 +98,7 @@ describe("decisions and email", () => {
   it("never leaks an unexpected error's details in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     email.decideAndNotify.mockRejectedValue(new Error("connection to 10.0.0.5 refused"));
-    const result = await decideAction("t1", "ACCEPTED");
+    const result = await decideAction("t1", "ACCEPTED", { expectedStatus: "IN_REVIEW" });
     expect(result.ok).toBe(false);
     expect(JSON.stringify(result)).not.toContain("10.0.0.5");
   });
@@ -112,14 +112,14 @@ describe("decisions and email", () => {
 
   it("bulk: passes the ids, status and flags, and refuses a non-boolean flag", async () => {
     email.bulkDecide.mockResolvedValue({ total: 2, decided: 2, emailsSent: 2, emailsFailed: 0, failures: [] });
-    await bulkDecideAction(["t1", "t2"], "REJECTED", { sendEmail: true, ignoreLimit: false });
-    expect(email.bulkDecide).toHaveBeenCalledWith("officer-1", ["t1", "t2"], "REJECTED", { sendEmail: true, ignoreLimit: false });
-    expect((await bulkDecideAction(["t1"], "REJECTED", { ignoreLimit: "true" as never })).ok).toBe(false);
+    await bulkDecideAction(["t1", "t2"], "REJECTED", { sendEmail: true, ignoreLimit: false, expectedStatuses: { t1: "IN_REVIEW", t2: "ACCEPTED" } });
+    expect(email.bulkDecide).toHaveBeenCalledWith("officer-1", ["t1", "t2"], "REJECTED", { sendEmail: true, ignoreLimit: false, expectedStatuses: { t1: "IN_REVIEW", t2: "ACCEPTED" } });
+    expect((await bulkDecideAction(["t1"], "REJECTED", { ignoreLimit: "true" as never, expectedStatuses: { t1: "IN_REVIEW" } })).ok).toBe(false);
   });
 
   it("bulk: shows the daily-limit message to the officer", async () => {
     email.bulkDecide.mockRejectedValue(new RecruitingError("EMAIL_LIMIT", "This would send 30 emails, but only 10 of today's 100 are left."));
-    expect(await bulkDecideAction(["t1"], "ACCEPTED", { sendEmail: true })).toEqual({ ok: false, error: "This would send 30 emails, but only 10 of today's 100 are left.", code: "EMAIL_LIMIT" });
+    expect(await bulkDecideAction(["t1"], "ACCEPTED", { sendEmail: true, expectedStatuses: { t1: "IN_REVIEW" } })).toEqual({ ok: false, error: "This would send 30 emails, but only 10 of today's 100 are left.", code: "EMAIL_LIMIT" });
   });
 
   it("reviews: forwards the officer's id and returns only the new id", async () => {

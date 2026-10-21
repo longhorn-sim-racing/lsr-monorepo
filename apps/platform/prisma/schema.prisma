@@ -1054,7 +1054,6 @@ model RecruitingCycle {
 
   applications   Application[]
   trackConfigs   RecruitingTrackConfig[]
-  emailTemplates RecruitingEmailTemplate[]
 }
 
 model Application {
@@ -1140,7 +1139,7 @@ model ApplicationEmail {
   resendMessageId    String?
   error              String?
   sentAt             DateTime?
-  claimedAt          DateTime? // when a send (first or resend) started; an unfinished one is "interrupted" only after a timeout from here
+  claimedAt          DateTime? // when the current send was claimed (just before it goes to Resend, and by a resend); an unfinished one is "interrupted" only after a timeout from here
   idempotencyKey     String? // the key the current send uses; a retry after a crash reuses it
   createdAt          DateTime           @default(now())
 
@@ -1163,22 +1162,4 @@ model RecruitingTrackConfig {
   cycle RecruitingCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
 
   @@unique([cycleId, track])
-}
-
-// Optional overrides of the default email drafts that live in code.
-// `track` is a team key, or '*' for "all teams" (not NULL: Postgres treats NULLs as
-// distinct in unique indexes, so a nullable column would allow duplicates).
-model RecruitingEmailTemplate {
-  id          String   @id @default(uuid())
-  cycleId     String
-  track       String
-  template    String // INTERVIEW | ACCEPTED | REJECTED | RECEIVED
-  subject     String
-  body        String // plain text with {{tokens}}
-  updatedById String?
-  updatedAt   DateTime @updatedAt
-
-  cycle RecruitingCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
-
-  @@unique([cycleId, track, template])
 }

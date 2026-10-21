@@ -44,6 +44,7 @@ export function EmailsConsole({
       setBusyId(null);
       if (!res.ok) return void toast.error(res.error);
       if (res.data.status === "SENT") toast.success("Email sent.");
+      else if (res.data.status === "CANCELLED") toast.warning(res.data.error ?? "Cancelled: the decision changed.");
       else toast.warning(`Still not sent: ${res.data.error ?? "unknown reason"}`);
       router.refresh();
     });
@@ -163,9 +164,11 @@ function ResendAllDialog({ cycleId, count, onClose }: { cycleId: string; count: 
         setLimitHit(res.code === "EMAIL_LIMIT");
         return;
       }
-      const { sent, failed, total } = res.data;
-      if (failed === 0) toast.success(`Sent ${sent} of ${total}.`);
-      else toast.warning(`Sent ${sent} of ${total}; ${failed} still failed (see the reasons in the list).`);
+      const { sent, failed, cancelled, total } = res.data;
+      const cancelledNote = cancelled > 0 ? ` ${cancelled} ${cancelled === 1 ? "was" : "were"} cancelled because the decision had changed.` : "";
+      if (failed === 0 && cancelled === 0) toast.success(`Sent ${sent} of ${total}.`);
+      else if (failed === 0) toast.warning(`Sent ${sent} of ${total}.${cancelledNote}`);
+      else toast.warning(`Sent ${sent} of ${total}; ${failed} still failed (see the reasons in the list).${cancelledNote}`);
       onClose(true);
     });
   }
@@ -176,7 +179,7 @@ function ResendAllDialog({ cycleId, count, onClose }: { cycleId: string; count: 
       size="sm"
       onOpenChange={(open) => !open && !pending && onClose(false)}
       title={`Resend ${count} failed email${count === 1 ? "" : "s"}?`}
-      description="Each goes to the applicant it was written for, with the same message. Up to 100 are sent at a time."
+      description="Each goes to the applicant's current account email with the message it was written with. A decision that has changed since is cancelled instead of sent. Up to 100 are sent at a time."
       footer={
         <>
           <Button disabled={pending} onClick={() => onClose(false)}>

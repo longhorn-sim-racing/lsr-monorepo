@@ -13,7 +13,7 @@ import { listSubmittedTracksForExport, type TrackListFilters } from "@/server/re
 export async function exportRound(
   officerId: string,
   cycleSlug: string,
-  filters: Omit<TrackListFilters, "cycleId" | "take" | "skip">,
+  filters: Omit<TrackListFilters, "cycleId" | "take" | "skip" | "viewerId">,
   options: { adminBaseUrl: string; now?: Date },
 ) {
   const cycle = await prisma.recruitingCycle.findUnique({ where: { slug: cycleSlug }, select: { id: true, slug: true, name: true } });

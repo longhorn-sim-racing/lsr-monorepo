@@ -5,8 +5,9 @@ import { toast } from "sonner";
 import type { TrackStatus } from "@prisma/client";
 import { Button, CheckboxField, Dialog, Field, Input, Notice, Textarea } from "@/components/admin/kit";
 import { decideAction, previewDecisionAction } from "@/app/admin/recruiting/actions";
-import { STATUSES_WITH_EMAIL, TRACK_STATUS_LABEL } from "@/lib/recruiting/labels";
+import { STATUSES_WITH_EMAIL, TRACK_STATUS_LABEL, formatCentral } from "@/lib/recruiting/labels";
 
+type SentEmail = { id: string; template: string; subject: string; sentAt: string | null; createdAt: string };
 type Preview = { to: string; subject: string; body: string; html: string; replyToMissing: boolean };
 
 /**
@@ -19,6 +20,7 @@ export function DecisionDialog({
   teamLabel,
   applicantName,
   currentStatus,
+  sentEmails,
   status,
   onClose,
 }: {
@@ -27,6 +29,8 @@ export function DecisionDialog({
   applicantName: string;
   /** The status the officer is looking at; the change is refused if someone else changed it since */
   currentStatus: TrackStatus;
+  /** Decision emails already delivered to this applicant for this team */
+  sentEmails: SentEmail[];
   /** The status being set; null keeps the dialog closed */
   status: TrackStatus | null;
   /** `changed` is true after a successful save, so the page can refresh */
@@ -40,6 +44,7 @@ export function DecisionDialog({
       teamLabel={teamLabel}
       applicantName={applicantName}
       currentStatus={currentStatus}
+      sentEmails={sentEmails}
       status={status}
       onClose={onClose}
     />
@@ -51,6 +56,7 @@ function DecisionForm({
   teamLabel,
   applicantName,
   currentStatus,
+  sentEmails,
   status,
   onClose,
 }: {
@@ -58,6 +64,7 @@ function DecisionForm({
   teamLabel: string;
   applicantName: string;
   currentStatus: TrackStatus;
+  sentEmails: SentEmail[];
   status: TrackStatus;
   onClose: (changed: boolean) => void;
 }) {
@@ -138,6 +145,17 @@ function DecisionForm({
       }
     >
       <div className="space-y-4">
+        {sentEmails.length > 0 && (
+          <Notice tone="info" title="Already emailed">
+            <ul className="space-y-0.5">
+              {sentEmails.map((m) => (
+                <li key={m.id}>
+                  {applicantName} was sent &ldquo;{m.subject}&rdquo; on {formatCentral(m.sentAt ?? m.createdAt)}.
+                </li>
+              ))}
+            </ul>
+          </Notice>
+        )}
         {reversing && (
           <Notice tone="warning" title={`This team is currently ${TRACK_STATUS_LABEL[currentStatus]}`}>
             <p>The applicant may already have been told. Changing it can send them a second, different email.</p>

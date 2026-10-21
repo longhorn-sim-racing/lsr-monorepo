@@ -212,7 +212,7 @@ New posts from the club Instagram show up on the News page within the hour, with
 
 ## Recruiting
 
-Applications, decisions and the emails to applicants are handled in **Admin > Recruiting**; the full walkthrough is in [recruiting-officer-guide.md](./recruiting-officer-guide.md). The short version:
+Applications, decisions and the emails to applicants are handled in **Admin > Recruiting**; the short version:
 
 - **Rounds** (Recruiting > Rounds): create a round, set when it opens and closes (Central time), paste each team's booking link, and make it active. Applicants can only apply to the active round.
 - **Applications**: filter by team and status, open one to read the answers, add a score or note, and set a team's status (In review, Interview, Accepted, Not moving forward). Each status that has an email shows you the exact message first, and you can edit it for that person.

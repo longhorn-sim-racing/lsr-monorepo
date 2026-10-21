@@ -4,7 +4,9 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
+import { fromZonedTime } from "date-fns-tz";
 import { toast } from "sonner";
+import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import {
   Badge,
   Button,
@@ -276,6 +278,8 @@ function RoundDialog({ editing, onClose, onSaved }: { editing: CycleRow | "new" 
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [pending, startTransition] = useTransition();
+  // The inputs are Central time; compare them as such
+  const closesInPast = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(closesAt) && fromZonedTime(closesAt, DEFAULT_TIMEZONE).getTime() < Date.now();
 
   function save() {
     setError(null);
@@ -363,6 +367,11 @@ function RoundDialog({ editing, onClose, onSaved }: { editing: CycleRow | "new" 
             <Input id="round-closes" type="datetime-local" value={closesAt} onChange={(e) => setClosesAt(e.target.value)} />
           </Field>
         </FieldGrid>
+        {closesInPast && (
+          <Notice tone="warning">
+            This deadline has already passed. Applicants can&apos;t start, edit or submit once you save, and complete drafts are submitted for them within about 15 minutes. Incomplete drafts are never submitted.
+          </Notice>
+        )}
         {error && <Notice tone="danger">{error}</Notice>}
       </div>
     </Dialog>
