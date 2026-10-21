@@ -283,7 +283,8 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
       if (currentDirty && !(await saveCurrent())) return;
       // Back pressed while this was saving: don't push a page on top of where the applicant went
       const now = new URLSearchParams(window.location.search).get("step");
-      if (now !== null && now !== from) return;
+      // (compare the page that resolves, not the raw param: a stale team URL shows another page)
+      if (now !== null && resolveStep(now, steps) !== from) return;
       setErrors({});
       setBanner(null);
       window.history.pushState(null, "", stepUrl(target, historyDepth() + 1));
