@@ -104,7 +104,9 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
   const [state, setState] = useState<FormState>(initial);
   // What each page last saved (a page missing here still holds what the server gave us)
   const [saved, setSaved] = useState<Record<string, string>>({});
-  const [saveFailed, setSaveFailed] = useState(false);
+  // Pages whose background save failed: each is cleared only by saving THAT page, so saving another one never hides it
+  const [failedPages, setFailedPages] = useState<string[]>([]);
+  const saveFailed = failedPages.length > 0;
   const [stale, setStale] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<string | null>(null);
@@ -162,7 +164,7 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
       const slice = sliceOf(step, st);
       setSaved((prev) => ({ ...prev, [step]: slice }));
       setSavedAt(res.data.savedAt);
-      setSaveFailed(false);
+      setFailedPages((prev) => prev.filter((k) => k !== step));
       return { ok: true };
     } catch {
       return { ok: false, res: { error: "We couldn't reach the server." } };
@@ -170,10 +172,10 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
   }
 
   /** A background save went wrong: say so, so the applicant doesn't think it was kept. */
-  function backgroundFailed(res: Parameters<typeof failed>[0]) {
+  function backgroundFailed(step: StepKey, res: Parameters<typeof failed>[0]) {
     if (res.code === "ROUND_CHANGED") setStale(true);
     else if (res.code && LOCKED_CODES.includes(res.code)) setLocked(true);
-    else setSaveFailed(true);
+    else setFailedPages((prev) => (prev.includes(step) ? prev : [...prev, step]));
   }
 
   // Save the current page a moment after the applicant stops typing, so leaving the form any way
@@ -185,7 +187,7 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
     if (!patchForStep(stepKey, state).ok) return;
     const timer = setTimeout(async () => {
       const result = await persist(stepKey, state);
-      if (!result.ok) backgroundFailed(result.res);
+      if (!result.ok) backgroundFailed(stepKey, result.res);
     }, 2000);
     return () => clearTimeout(timer);
     // persist and backgroundFailed only use setters and the round id
@@ -208,7 +210,7 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
     if (left !== "teams" && Object.keys(questionErrors(left, current)).length > 0) return;
     void persist(left, current).then((result) => {
       if (result.ok) return;
-      backgroundFailed(result.res);
+      backgroundFailed(left, result.res);
       setBanner("Your changes on the page you just left weren't saved. Go back to it and press Save and continue.");
     });
     // only when the page changes
@@ -260,6 +262,29 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
     return true;
   }
 
+  /**
+   * Saves every page that has changes the server hasn't got (a failed autosave, a page left by Back),
+   * so Submit can't send older answers than Review shows. False, with a banner, at the first page that
+   * can't be saved.
+   */
+  async function flushUnsaved(): Promise<boolean> {
+    for (const step of steps) {
+      if (!isDirty(step.key, state, saved)) continue;
+      const bad = step.key !== "teams" && Object.keys(questionErrors(step.key, state)).length > 0;
+      if (bad || !patchForStep(step.key, state).ok) {
+        setBanner(`The "${step.label}" page has answers that need attention. Go to it and press Save and continue.`);
+        return false;
+      }
+      const result = await persist(step.key, state);
+      if (!result.ok) {
+        backgroundFailed(step.key, result.res);
+        setBanner(`The "${step.label}" page wasn't saved (${result.res.error}). Try again.`);
+        return false;
+      }
+    }
+    return true;
+  }
+
   /** Leaves the form for good (after Submit): drops the form's history entries, so Back goes to where the applicant came from. */
   function leaveForm(url: string) {
     const depth = historyDepth();
@@ -302,6 +327,7 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
   function submit() {
     startTransition(async () => {
       setBanner(null);
+      if (!(await flushUnsaved())) return;
       const res = await submitApplicationAction(round.id);
       if (res.ok) {
         leaveForm("/apply/status?submitted=1");
@@ -474,7 +500,7 @@ export function ApplyForm({ initial, initialStep, accountEmail, round, teams }: 
               {saveFailed && (
                 <p className="ml-auto flex items-center gap-2 font-sans text-xs text-red-300" role="alert">
                   Not saved.
-                  <button type="button" disabled={pending} onClick={() => startTransition(async () => void (await saveCurrent()))} className="font-bold uppercase tracking-widest underline underline-offset-4 hover:text-lsr-orange">
+                  <button type="button" disabled={pending} onClick={() => startTransition(async () => void (await flushUnsaved()))} className="font-bold uppercase tracking-widest underline underline-offset-4 hover:text-lsr-orange">
                     Retry
                   </button>
                 </p>

@@ -12,9 +12,11 @@ const audit = vi.hoisted(() => ({ createAuditLog: vi.fn() }));
 vi.mock("@/server/db", () => ({ prisma: db }));
 vi.mock("@/server/audit/log", () => audit);
 
+import { addNoInterviewTeam } from "@/lib/recruiting/test-teams";
 import { FORM_VERSION, tracks } from "@/schemas/recruiting.schema";
 import { createCycle, deleteCycle, getTrackConfigs, listCycles, saveTrackConfig, setActiveCycle, updateCycle } from "./recruiting-cycle.service";
 
+addNoInterviewTeam();
 const interviewTeam = tracks.find((t) => t.interviewRequired)!;
 const noInterviewTeam = tracks.find((t) => !t.interviewRequired)!;
 const OFFICER = "officer-1";

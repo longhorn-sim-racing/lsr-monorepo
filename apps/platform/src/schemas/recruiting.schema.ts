@@ -33,11 +33,10 @@ export const RECRUITING_LIMITS = {
 export const FORM_VERSION = 1;
 
 /**
- * True while the tracks and questions below are placeholders. Launch checklist (Push 10):
- * set to false only after every team's real content is in. The apply pages must refuse
- * to open for real applicants while this is true.
+ * True while the tracks and questions below are placeholders. The apply pages refuse to open for real
+ * applicants on the production site while this is true. Every team's real content is in, so it is false.
  */
-export const PLACEHOLDER_CONTENT = true;
+export const PLACEHOLDER_CONTENT = false;
 
 // ---------------------------------------------------------------------------
 // Question types
@@ -102,16 +101,13 @@ export type TrackDefinition = {
 };
 
 // The blurbs for the real teams are the ones on the /about page (src/app/about/roster.ts); keep them in step.
-// Technology, Community, Media, Competition and Business are real (transcribed from the leads' questions). The one
-// "(placeholder)" team is a stand-in kept only because the tests and integration script use it as the team without
-// interviews; remove it (and flip PLACEHOLDER_CONTENT) before launch.
+// Technology, Community, Media, Competition and Business are real (transcribed from the leads' questions).
 export const tracks = [
   { key: 'technology', label: 'Technology', blurb: 'Builds and runs this website and the tools behind it: events, payments, results and the member database.', interviewRequired: true },
   { key: 'community', label: 'Community', blurb: 'Brings people in and keeps them around: watch parties, sim nights, socials, tabling and volunteering at track events.', interviewRequired: true },
   { key: 'media', label: 'Media', blurb: 'Photos, video, race highlights and the LSR brand across every channel.', interviewRequired: true },
   { key: 'competition', label: 'Competition', blurb: 'Runs the Lone Star Cup: race control, stewarding, sporting regulations and the sim servers we race on.', interviewRequired: true },
   { key: 'business', label: 'Business', blurb: 'Funds the club: sponsorships, partnerships, fundraising, budgeting and marketing.', interviewRequired: true },
-  { key: 'team-b', label: 'Team B (placeholder)', blurb: 'Placeholder for a team whose questions are not in yet. No interview.', interviewRequired: false },
 ] as const satisfies readonly TrackDefinition[];
 
 export type TrackKey = (typeof tracks)[number]['key'];
@@ -126,7 +122,7 @@ export type TrackKey = (typeof tracks)[number]['key'];
 export const genericQuestions: readonly GenericQuestion[] = [];
 
 // Team questions. Ids must be unique across every list in this file, so prefix them with the team.
-// Technology, Community, Media, Competition and Business are the leads' wording, verbatim; the `[Placeholder]` ones are stand-ins.
+// The leads' wording, verbatim.
 export const trackQuestions: Record<TrackKey, Upto6<TrackQuestion>> = {
   technology: [
     {
@@ -256,9 +252,6 @@ export const trackQuestions: Record<TrackKey, Upto6<TrackQuestion>> = {
       options: ['Less than 2 hours', '2–4 hours', '5–7 hours', '8 or more hours'],
       required: true,
     },
-  ],
-  'team-b': [
-    { id: 'b_tools', type: 'multi_choice', label: '[Placeholder] Which tools do you use?', options: ['Tool 1', 'Tool 2', 'Tool 3', 'Other'], required: false },
   ],
 };
 

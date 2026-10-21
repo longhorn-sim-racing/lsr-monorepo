@@ -18,10 +18,12 @@ vi.mock("@/server/db", () => ({ prisma: db }));
 vi.mock("@/server/audit/log", () => audit);
 vi.mock("@/server/repos/application.repo", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/server/repos/application.repo")>()), ...repo }));
 
+import { addNoInterviewTeam } from "@/lib/recruiting/test-teams";
 import { questionsForTrack, tracks } from "@/schemas/recruiting.schema";
 import { getApplicantStatus, sweepCycle } from "./recruiting.service";
 
-// Whatever team ships with nothing required, so the draft below counts as complete
+// A team with nothing required, so the draft below counts as complete
+addNoInterviewTeam();
 const easyTeam = tracks.find((t) => questionsForTrack(t.key).every((q) => !q.required))!.key;
 
 const CLOSES = new Date("2026-10-17T04:59:00Z");

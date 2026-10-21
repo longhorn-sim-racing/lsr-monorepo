@@ -352,11 +352,11 @@ describe("formStateFromSaved", () => {
       profile: { fullName: "A", eid: "abc1", gradYear: 2028, major: "CS" },
       resumeUrl: "https://example.com/r",
       genericAnswers: { a: "b" },
-      tracks: [{ track: "media", answers: { q: "x" } }, { track: "team-b", answers: null }],
+      tracks: [{ track: "media", answers: { q: "x" } }, { track: "technology", answers: null }],
     });
     expect(state.profile.gradYear).toBe("2028");
-    expect(state.teams).toEqual(["media", "team-b"]);
-    expect(state.trackAnswers).toEqual({ "media": { q: "x" }, "team-b": {} });
+    expect(state.teams).toEqual(["media", "technology"]);
+    expect(state.trackAnswers).toEqual({ "media": { q: "x" }, "technology": {} });
   });
 
   it("turns an empty draft into empty strings", () => {

@@ -75,7 +75,7 @@ A second job (`.github/workflows/recruiting-cron.yml`) calls `/api/cron/recruiti
 Shipping the recruiting code changes nothing for visitors until all of these are done:
 
 1. Create the feature flag row by hand in production (there is no admin toggle; the seed only creates it locally): `INSERT INTO "FeatureFlag" (id, key, enabled) VALUES (gen_random_uuid()::text, 'recruiting', true) ON CONFLICT (key) DO UPDATE SET enabled = true;`
-2. Set `PLACEHOLDER_CONTENT` to `false` in `src/schemas/recruiting.schema.ts` once the real teams and questions are in. While it is `true`, `/apply` stays closed on the production site (`VERCEL_ENV=production`), but not on Vercel previews. If previews ever point at the production database, they share the flag row and skip that placeholder gate, so don't turn the flag on until the placeholders are gone.
+2. `PLACEHOLDER_CONTENT` in `src/schemas/recruiting.schema.ts` is `false` now the real teams and questions are in. While it is `true`, `/apply` stays closed on the production site (`VERCEL_ENV=production`), but not on Vercel previews, so set it back to `true` if placeholder content is ever added again.
 3. Set `RECRUITING_REPLY_TO`, `CRON_SECRET` and `SITE_URL` (below), and pick a Resend plan if the free daily limit is too small.
 4. Create the round on **Admin > Recruiting > Rounds**, add each team's booking link, and make it active.
 

@@ -19,6 +19,7 @@ vi.mock("@/lib/email/resend", () => mail);
 vi.mock("@/server/audit/log", () => audit);
 vi.mock("@/server/services/notification.service", () => notifications);
 
+import { addNoInterviewTeam } from "@/lib/recruiting/test-teams";
 import { questionsForTrack, tracks } from "@/schemas/recruiting.schema";
 import {
   DAILY_LIMIT_ERROR,
@@ -38,7 +39,8 @@ import {
   sweepAndNotify,
 } from "./recruiting-email.service";
 
-// Use whatever teams ship, so these tests don't break when the placeholder teams are replaced
+// Every shipped team interviews, so add one that doesn't
+addNoInterviewTeam();
 const interviewTeam = tracks.find((t) => t.interviewRequired)!;
 const noInterviewTeam = tracks.find((t) => !t.interviewRequired)!;
 
@@ -728,7 +730,7 @@ describe("sweepAndNotify email handling", () => {
 
   it("retries confirmations an earlier run never sent", async () => {
     notifications.getEmailUsage.mockResolvedValue({ sentToday: 0, dailyLimit: 100 });
-    db.applicationEmail.findMany.mockResolvedValueOnce([{ id: "email-1" }]).mockResolvedValue([]);
+    db.applicationEmail.findMany.mockResolvedValueOnce([{ id: "email-1", claimedAt: new Date("2026-11-01T11:00:00Z") }]).mockResolvedValue([]);
     db.applicationEmail.findUnique.mockResolvedValue({ id: "email-1", status: "PENDING", toEmail: "a@b.test", subject: "s", body: "b", idempotencyKey: null });
     const summary = await sweepAndNotify({ now: new Date("2026-11-01T12:00:00Z") });
     expect(summary.emailsSent).toBe(1);
@@ -736,13 +738,26 @@ describe("sweepAndNotify email handling", () => {
 
   it("retries an earlier run's row even when today's limit is used up: it keeps its key, so nothing is sent twice", async () => {
     notifications.getEmailUsage.mockResolvedValue({ sentToday: 95, dailyLimit: 100 }); // inside the receipts headroom: nothing left
-    db.applicationEmail.findMany.mockResolvedValueOnce([{ id: "email-1" }]).mockResolvedValue([]);
+    db.applicationEmail.findMany.mockResolvedValueOnce([{ id: "email-1", claimedAt: new Date("2026-11-01T11:00:00Z") }]).mockResolvedValue([]);
     db.applicationEmail.findUnique.mockResolvedValue({ id: "email-1", status: "PENDING", toEmail: "a@b.test", subject: "s", body: "b", idempotencyKey: "recruiting-email:email-1" });
     const summary = await sweepAndNotify({ now: new Date("2026-11-01T12:00:00Z") });
     expect(summary).toMatchObject({ emailsSent: 1, emailsOverLimit: 0 });
     expect(mail.sendEmail.mock.calls[0][1]).toEqual({ idempotencyKey: "recruiting-email:email-1" });
     // never marked failed for the limit: it may already have been delivered
     expect(db.applicationEmail.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ error: DAILY_LIMIT_ERROR }) }));
+  });
+
+  it("treats a row the last run was cut off before sending as new: it respects today's limit instead of skipping it", async () => {
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 95, dailyLimit: 100 }); // inside the receipts headroom: nothing left
+    db.applicationEmail.findMany.mockResolvedValueOnce([{ id: "email-1", claimedAt: null }]).mockResolvedValue([]);
+    const summary = await sweepAndNotify({ now: new Date("2026-11-01T12:00:00Z") });
+    expect(summary).toMatchObject({ emailsSent: 0, emailsOverLimit: 1 });
+    expect(mail.sendEmail).not.toHaveBeenCalled();
+    // it was never attempted, so marking it failed is safe (and only while it is still PENDING)
+    expect(db.applicationEmail.updateMany).toHaveBeenCalledWith({
+      where: { id: "email-1", status: "PENDING" },
+      data: { status: "FAILED", error: DAILY_LIMIT_ERROR },
+    });
   });
 
   it("retries rows marked interrupted with their stored key, claiming each first", async () => {
