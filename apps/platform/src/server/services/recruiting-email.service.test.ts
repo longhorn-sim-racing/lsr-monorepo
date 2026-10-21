@@ -19,6 +19,7 @@ vi.mock("@/lib/email/resend", () => mail);
 vi.mock("@/server/audit/log", () => audit);
 vi.mock("@/server/services/notification.service", () => notifications);
 
+import { addNoInterviewTeam } from "@/lib/recruiting/test-teams";
 import { questionsForTrack, tracks } from "@/schemas/recruiting.schema";
 import {
   DAILY_LIMIT_ERROR,
@@ -38,7 +39,8 @@ import {
   sweepAndNotify,
 } from "./recruiting-email.service";
 
-// Use whatever teams ship, so these tests don't break when the placeholder teams are replaced
+// Every shipped team interviews, so add one that doesn't
+addNoInterviewTeam();
 const interviewTeam = tracks.find((t) => t.interviewRequired)!;
 const noInterviewTeam = tracks.find((t) => !t.interviewRequired)!;
 

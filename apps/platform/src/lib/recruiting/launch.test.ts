@@ -17,7 +17,7 @@ describe("launchBlocked", () => {
     expect(launchBlocked(false, {})).toBe(false);
   });
 
-  it("reads the real placeholder flag by default (still true until launch)", () => {
-    expect(launchBlocked(undefined, { VERCEL_ENV: "production" })).toBe(true);
+  it("reads the real placeholder flag by default (false now the real content is in)", () => {
+    expect(launchBlocked(undefined, { VERCEL_ENV: "production" })).toBe(false);
   });
 });

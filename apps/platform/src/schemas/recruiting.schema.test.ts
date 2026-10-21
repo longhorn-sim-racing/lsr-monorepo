@@ -235,11 +235,12 @@ describe("checkCompleteness", () => {
   const profile = { fullName: "Ada Lovelace", email: "ada@example.com", eid: "al123", gradYear: 2028, major: "Math" };
   const generic = {}; // there are no general questions
   const resume = "https://example.com/r.pdf";
+  const TECH_FULL = { tech_areas: ["Back end and databases"], tech_experience: "Classes or tutorials", tech_built: "x", tech_hours: "1–3" };
   const draft = (over: Partial<DraftSnapshot> = {}): DraftSnapshot => ({
     ...profile,
     genericAnswers: generic,
     resumeUrl: resume,
-    tracks: [{ track: "team-b", answers: {} }],
+    tracks: [{ track: "technology", answers: TECH_FULL }],
     ...over,
   });
   const incompleteKeys = (d: DraftSnapshot) => checkCompleteness(d).sections.filter((s) => !s.complete).map((s) => s.key);
@@ -258,7 +259,7 @@ describe("checkCompleteness", () => {
   it("ignores stored answers to questions that were removed since, so they can't block Submit", () => {
     const d = draft({
       genericAnswers: { removed_question: "x" },
-      tracks: [{ track: "team-b", answers: { removed_question: "x" } }],
+      tracks: [{ track: "technology", answers: { ...TECH_FULL, removed_question: "x" } }],
     });
     expect(checkCompleteness(d).complete).toBe(true);
   });
@@ -267,7 +268,7 @@ describe("checkCompleteness", () => {
     const d = draft({
       tracks: [
         { track: "media", answers: { media_tools: ["Canva"], media_social: "x", media_portfolio: "https://example.com", media_favorite: "x", media_hours: "1–3" } },
-        { track: "team-b", answers: {} },
+        { track: "technology", answers: TECH_FULL },
         { track: "competition", answers: { comp_skills: ["Commentating races/events"], comp_exec: "x", comp_challenge: "x", comp_endurance: "Yes", comp_hours: "2" } },
       ],
     });
@@ -275,7 +276,7 @@ describe("checkCompleteness", () => {
   });
 
   it("is all-or-nothing across teams: one incomplete team blocks everything", () => {
-    const d = draft({ tracks: [{ track: "team-b", answers: {} }, { track: "media", answers: {} }] });
+    const d = draft({ tracks: [{ track: "technology", answers: TECH_FULL }, { track: "media", answers: {} }] });
     expect(checkCompleteness(d).complete).toBe(false);
     expect(incompleteKeys(d)).toEqual(["track:media"]);
     expect(checkCompleteness(d).sections.find((s) => s.key === "track:media")?.problems[0]).toMatch(/^Missing: /);
@@ -283,7 +284,7 @@ describe("checkCompleteness", () => {
 
   it.each([
     ["an unknown team", { tracks: [{ track: "nope", answers: {} }] }],
-    ["the same team twice", { tracks: [{ track: "team-b", answers: {} }, { track: "team-b", answers: {} }] }],
+    ["the same team twice", { tracks: [{ track: "technology", answers: TECH_FULL }, { track: "technology", answers: TECH_FULL }] }],
     ["an http resume link", { resumeUrl: "http://example.com/r.pdf" }],
     ["a missing graduation year", { gradYear: null }],
     ["an invalid email", { email: "not-an-email" }],
@@ -299,7 +300,6 @@ describe("lookups and shipped content", () => {
     expect(isTrackKey(5)).toBe(false);
     expect(isTrackKey("__proto__")).toBe(false);
     expect(getTrack("media")?.interviewRequired).toBe(true);
-    expect(getTrack("team-b")?.interviewRequired).toBe(false);
     expect(isTrackKey("technology")).toBe(true);
     expect(isTrackKey("community")).toBe(true);
     expect(getTrack("technology")?.interviewRequired).toBe(true);
@@ -357,20 +357,17 @@ describe("lookups and shipped content", () => {
     expect(incompleteKeys(draft({ tracks: [{ track: "community", answers: {} }] }))).toEqual(["track:community"]);
   });
 
-  it("keeps the launch gates visible: placeholder content must be replaced before launch", () => {
-    // When the real teams are in, set PLACEHOLDER_CONTENT to false and update this expectation.
-    expect(PLACEHOLDER_CONTENT).toBe(true);
+  it("keeps the launch gates visible: the real content is in", () => {
+    expect(PLACEHOLDER_CONTENT).toBe(false);
     expect(FORM_VERSION).toBe(1);
   });
 
-  it("when the placeholder flag is turned off, no placeholder team or question may be left", () => {
-    // Fails the moment someone flips PLACEHOLDER_CONTENT to false with a stand-in still in the content.
+  it("no placeholder team or question is left in the shipped content", () => {
     const leftovers = [
       ...tracks.filter((t) => /placeholder/i.test(`${t.label} ${t.blurb}`)).map((t) => t.key),
       ...Object.values(trackQuestions).flatMap((qs) => qs.filter((q) => /placeholder/i.test(q.label)).map((q) => q.id)),
     ];
-    if (!PLACEHOLDER_CONTENT) expect(leftovers).toEqual([]);
-    else expect(leftovers.length).toBeGreaterThan(0);
+    expect(leftovers).toEqual([]);
   });
 });
 

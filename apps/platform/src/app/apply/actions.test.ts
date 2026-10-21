@@ -120,10 +120,10 @@ describe("saving progress", () => {
 
 describe("choosing teams", () => {
   it("passes the list to the service for the signed-in applicant and reports what changed", async () => {
-    recruiting.setSelectedTracks.mockResolvedValue({ added: ["media"], removed: ["team-b"], application: { secret: "not returned" } });
+    recruiting.setSelectedTracks.mockResolvedValue({ added: ["media"], removed: ["technology"], application: { secret: "not returned" } });
     const result = await setTeamsAction("r1", ["media"]);
     expect(recruiting.setSelectedTracks).toHaveBeenCalledWith("applicant-1", ["media"], expect.any(Date), "r1");
-    expect(result).toEqual({ ok: true, data: { added: ["media"], removed: ["team-b"] } });
+    expect(result).toEqual({ ok: true, data: { added: ["media"], removed: ["technology"] } });
   });
 
   it("explains an unknown team", async () => {
