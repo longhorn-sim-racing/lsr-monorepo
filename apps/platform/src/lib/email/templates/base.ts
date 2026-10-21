@@ -12,6 +12,8 @@ export type BaseTemplateProps = {
   actionUrl?: string;
   actionText?: string;
   footerText?: string;
+  /** Leave out the "Manage email preferences" link (for mail that ignores those preferences) */
+  hidePreferencesLink?: boolean;
 };
 
 export function baseTemplate({
@@ -21,6 +23,7 @@ export function baseTemplate({
   actionUrl,
   actionText,
   footerText,
+  hidePreferencesLink = false,
 }: BaseTemplateProps): { html: string; text: string } {
   const currentYear = new Date().getFullYear();
 
@@ -136,13 +139,13 @@ export function baseTemplate({
                       </p>
                     </td>
                   </tr>
-                  <tr>
+                  ${hidePreferencesLink ? "" : `<tr>
                     <td align="center">
                       <a href="https://www.longhornsimracing.org/account" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:12px;color:${colors.accent};text-decoration:none;">
                         Manage email preferences
                       </a>
                     </td>
-                  </tr>
+                  </tr>`}
                 </table>
               </td>
             </tr>

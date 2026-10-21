@@ -5,8 +5,14 @@ import { useCallback, useEffect, useState } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { AuthForms, AuthNotice, type AuthMode } from "@/components/auth/auth-forms"
+import { safeNextPath } from "@/lib/safe-redirect"
 
-/** The header's "Sign in / Create account" button and its dialog (also opened by an "open-auth-dialog" event). */
+/**
+ * The header's "Sign in / Create account" button and its dialog (also opened by an "open-auth-dialog" event).
+ * A page can say where people should go once they're signed in:
+ * `window.dispatchEvent(new CustomEvent("open-auth-dialog", { detail: { next: "/apply/start" } }))`.
+ * Otherwise a `?next=` on the current URL is used (e.g. /?verified=true&next=… after cross-device confirmation).
+ */
 export function AuthDialog() {
   const searchParams = useSearchParams()
   const [open, setOpen] = useState(false)
@@ -14,6 +20,9 @@ export function AuthDialog() {
   // Bumped each time the dialog opens, so the forms start fresh in the right tab
   const [session, setSession] = useState(0)
   const [notice, setNotice] = useState<string | null>(null)
+  const [nextOverride, setNextOverride] = useState<string | undefined>()
+  // Only same-site paths survive safeNextPath; undefined means "stay where you are"
+  const returnTo = safeNextPath(nextOverride ?? searchParams?.get("next"), "") || undefined
 
   const openAs = useCallback((next: AuthMode) => {
     setMode(next)
@@ -21,9 +30,16 @@ export function AuthDialog() {
     setOpen(true)
   }, [])
 
+  // Closing also forgets the destination, so one page's doesn't leak into the next open
+  const close = useCallback(() => {
+    setOpen(false)
+    setNextOverride(undefined)
+  }, [])
+
   useEffect(() => {
-    const handleOpen = () => {
+    const handleOpen = (e: Event) => {
       setNotice(null)
+      setNextOverride((e as CustomEvent<{ next?: string } | undefined>).detail?.next)
       openAs("signup")
     }
     window.addEventListener("open-auth-dialog", handleOpen)
@@ -39,7 +55,7 @@ export function AuthDialog() {
   }, [searchParams, openAs])
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(isOpen) => (isOpen ? setOpen(true) : close())}>
       <DialogTrigger asChild>
         <Button
           size="sm"
@@ -78,8 +94,10 @@ export function AuthDialog() {
             key={session}
             initialMode={mode}
             onModeChange={setMode}
-            onSignedIn={() => setOpen(false)}
-            onNavigate={() => setOpen(false)}
+            next={returnTo}
+            googleNext={returnTo}
+            onSignedIn={close}
+            onNavigate={close}
           />
         </div>
       </DialogContent>

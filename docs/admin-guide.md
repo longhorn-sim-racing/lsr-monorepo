@@ -210,6 +210,18 @@ New posts from the club Instagram show up on the News page within the hour, with
 
 ---
 
+## Recruiting
+
+Applications, decisions and the emails to applicants are handled in **Admin > Recruiting**; the short version:
+
+- **Rounds** (Recruiting > Rounds): create a round, set when it opens and closes (Central time), paste each team's booking link, and make it active. Applicants can only apply to the active round.
+- **Applications**: filter by team and status, open one to read the answers, add a score or note, and set a team's status (In review, Interview, Accepted, Not moving forward). Each status that has an email shows you the exact message first, and you can edit it for that person.
+- **If someone else changed the status first**, your change is refused instead of overwriting theirs; reload and look again. Moving a team off Accepted or Not moving forward asks you to confirm, because the applicant may already have been told.
+- **Your own application**: if you apply, you can read it but not review or decide it, and you won't see other officers' reviews of it.
+- **Emails** (Recruiting > Emails): anything that failed to send, with a Resend button. Recruiting mail shares the daily Resend limit with announcements and receipts. An email about a decision that has since changed is cancelled, never resent.
+
+---
+
 ## Audit Log
 
 The main admin dashboard shows an activity log of all admin actions. Use this to:

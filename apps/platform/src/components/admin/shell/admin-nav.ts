@@ -39,7 +39,10 @@ export const ADMIN_NAV: AdminNavGroup[] = [
   },
   {
     label: "Members",
-    items: [{ title: "Members and roles", href: "/admin/users", keywords: ["users", "officers", "badges", "eid"] }],
+    items: [
+      { title: "Members and roles", href: "/admin/users", keywords: ["users", "officers", "badges", "eid"] },
+      { title: "Recruiting", href: "/admin/recruiting", keywords: ["applications", "apply", "rounds", "interviews", "decisions"] },
+    ],
   },
   {
     label: "Money",

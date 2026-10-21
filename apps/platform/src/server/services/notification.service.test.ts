@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 // A stand-in for the Prisma client: only what the notification service touches
 const db = vi.hoisted(() => ({
   user: { findUnique: vi.fn(), findMany: vi.fn() },
+  applicationEmail: { count: vi.fn() },
   notification: {
     create: vi.fn(),
     createManyAndReturn: vi.fn(),
@@ -432,9 +433,11 @@ describe("getEmailUsage", () => {
   it("counts emails Resend accepted since midnight UTC, when its daily limit resets", async () => {
     vi.useFakeTimers({ now: new Date("2026-10-16T23:30:00Z") }) // 6:30 pm Central
     vi.stubEnv("RESEND_DAILY_LIMIT", "")
-    db.notification.count.mockResolvedValue(37)
+    db.notification.count.mockResolvedValue(30)
+    db.applicationEmail.count.mockResolvedValue(7) // recruiting mail counts against the same limit
 
     await expect(getEmailUsage()).resolves.toEqual({ sentToday: 37, dailyLimit: 100 })
+    expect(db.applicationEmail.count).toHaveBeenCalledWith({ where: { status: "SENT", sentAt: { gte: new Date("2026-10-16T00:00:00Z") } } })
     expect(db.notification.count.mock.calls[0][0].where).toEqual({
       channel: "EMAIL",
       emailMessageId: { not: null },
@@ -444,6 +447,7 @@ describe("getEmailUsage", () => {
 
   it("uses RESEND_DAILY_LIMIT, and 'none' or 0 for a plan without a limit", async () => {
     db.notification.count.mockResolvedValue(0)
+    db.applicationEmail.count.mockResolvedValue(0)
     for (const [value, limit] of [["3000", 3000], ["none", null], ["0", null], ["junk", 100]] as const) {
       vi.stubEnv("RESEND_DAILY_LIMIT", value)
       expect((await getEmailUsage()).dailyLimit, value).toBe(limit)

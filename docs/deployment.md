@@ -68,6 +68,23 @@ Environment variables (Supabase credentials, Stripe keys, etc.) are configured i
 
 A GitHub Actions cron job (`.github/workflows/notification-cron.yml`) runs every 15 minutes to process queued notifications. It calls the `/api/cron/notifications` endpoint with a bearer token. This is independent of deployments.
 
+A second job (`.github/workflows/recruiting-cron.yml`) calls `/api/cron/recruiting` every 15 minutes. After a recruiting round's deadline it submits every complete draft for its applicant (and emails a confirmation); before the deadline it does nothing, and running it again changes nothing. Unlike the other cron routes it **refuses every request when `CRON_SECRET` is not set**, so the secret must exist in both Vercel and the repo's GitHub secrets (with `SITE_URL`) before the first recruiting deadline.
+
+### Turning recruiting on
+
+Shipping the recruiting code changes nothing for visitors until all of these are done:
+
+1. Create the feature flag row by hand in production (there is no admin toggle; the seed only creates it locally): `INSERT INTO "FeatureFlag" (id, key, enabled) VALUES (gen_random_uuid()::text, 'recruiting', true) ON CONFLICT (key) DO UPDATE SET enabled = true;`
+2. Set `PLACEHOLDER_CONTENT` to `false` in `src/schemas/recruiting.schema.ts` once the real teams and questions are in. While it is `true`, `/apply` stays closed on the production site (`VERCEL_ENV=production`), but not on Vercel previews. If previews ever point at the production database, they share the flag row and skip that placeholder gate, so don't turn the flag on until the placeholders are gone.
+3. Set `RECRUITING_REPLY_TO`, `CRON_SECRET` and `SITE_URL` (below), and pick a Resend plan if the free daily limit is too small.
+4. Create the round on **Admin > Recruiting > Rounds**, add each team's booking link, and make it active.
+
+### Recruiting emails
+
+Set `RECRUITING_REPLY_TO` in Vercel to an inbox officers read. Recruiting emails are sent from the noreply address and every one tells the applicant to "just reply"; the interview email for a team without a booking link relies on replies entirely. Unset, replies go nowhere (the decision dialog warns about this in production).
+
+Recruiting mail counts against the same daily Resend limit as announcements and receipts (`RESEND_DAILY_LIMIT`, 100 on the free plan), and 10 emails a day are held back for registration confirmations and LSC receipts. A round costs roughly 3 to 4 emails per applicant (confirmation, interview, decision), so 60 applicants is about 240 emails, or 2.5+ days of the free plan. Decide on a Resend plan before launch.
+
 ## Database migrations
 
 Migrations are applied automatically via the **Database Migrate** workflow (`.github/workflows/migrate.yml`). The process:

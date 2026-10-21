@@ -169,6 +169,26 @@ async function main() {
     },
   });
 
+  // ---- Recruiting: a test round and the feature flag (local dev only; this script is
+  // not run in production) ----
+  await prisma.recruitingCycle.upsert({
+    where: { slug: "fall-2026" },
+    update: {},
+    create: {
+      slug: "fall-2026",
+      name: "Fall 2026",
+      opensAt: new Date("2026-10-01T00:00:00Z"),
+      closesAt: new Date("2026-12-31T23:59:00Z"),
+      isActive: true,
+    },
+  });
+
+  await prisma.featureFlag.upsert({
+    where: { key: "recruiting" },
+    update: {},
+    create: { key: "recruiting", enabled: true },
+  });
+
   console.log("✅ Seed complete.");
 }
 
