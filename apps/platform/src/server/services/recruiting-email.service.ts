@@ -372,16 +372,20 @@ export async function failInterruptedEmails(now: Date = new Date()): Promise<num
   return res.count;
 }
 
-/** Ids of rows that have been PENDING for a couple of minutes, so a cron run can finish what a dead request started. */
-async function stalePendingEmailIds(now: Date, take = 50): Promise<string[]> {
+/**
+ * Rows that have been PENDING for a couple of minutes, so a cron run can finish what a dead request
+ * started. `reachedResend`: the row was claimed (sendRow does that right before calling Resend), so it
+ * may have been delivered. A row never claimed was cut off by the time limit and was never attempted.
+ */
+async function stalePendingEmails(now: Date, take = 50): Promise<{ id: string; reachedResend: boolean }[]> {
   const cutoff = new Date(now.getTime() - PENDING_RETRY_AFTER_MS);
   const rows = await prisma.applicationEmail.findMany({
     where: { status: "PENDING", OR: [{ claimedAt: { lt: cutoff } }, { claimedAt: null, createdAt: { lt: cutoff } }] },
     orderBy: { createdAt: "asc" },
     take,
-    select: { id: true },
+    select: { id: true, claimedAt: true },
   });
-  return rows.map((r) => r.id);
+  return rows.map((r) => ({ id: r.id, reachedResend: r.claimedAt !== null }));
 }
 
 /** Moves a few interrupted rows back to PENDING (claimed now) so the cron can retry them; returns the ones it won. */
@@ -482,10 +486,11 @@ export async function sweepAndNotify(options: { cycleId?: string; now?: Date } =
   // One quota check for the whole run; each NEW confirmation below spends from it
   let allowance = (await getEmailQuota()).left;
   /**
-   * `retry`: a row an earlier run left PENDING. It may already have been delivered, so it is always
-   * retried with its own key (Resend hands back the original and sends nothing) and never marked as
-   * over the limit. A new row that doesn't fit today's limit was never attempted, so it is safe to
-   * mark failed. Out of time: leave the row PENDING; the next run retries it.
+   * `retry`: a row that already reached Resend in an earlier run (it was claimed). It may have been
+   * delivered, so it is always retried with its own key (Resend hands back the original and sends
+   * nothing) and never marked as over the limit. A row that was never claimed (cut off by the time
+   * limit) is as good as new: it spends from today's allowance, and one that doesn't fit was never
+   * attempted, so it is safe to mark failed. Out of time: leave the row PENDING; the next run retries it.
    */
   const send = async (emailId: string, retry: boolean) => {
     if (Date.now() - started > SEND_DEADLINE_MS) {
@@ -505,7 +510,7 @@ export async function sweepAndNotify(options: { cycleId?: string; now?: Date } =
     else if (delivery.status === "FAILED") summary.emailsFailed += 1;
   };
 
-  for (const emailId of await stalePendingEmailIds(now)) await send(emailId, true);
+  for (const { id, reachedResend } of await stalePendingEmails(now)) await send(id, reachedResend);
   summary.interruptedEmails = await failInterruptedEmails(now);
   // Rows just marked interrupted (and any from earlier) are retried here with their stored key, so
   // nobody has to find them on the Emails page. If the retry fails again the row gets the real error
