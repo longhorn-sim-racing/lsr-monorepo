@@ -1,6 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Jack renders slides in headless Chromium (src/server/jack/decks/renderer.ts). The Chromium build
+  // finds its binary next to its own files, so neither package can be bundled, and the binary has to
+  // be traced into the functions that render: the room page (Jack's reply loop runs there) and the
+  // deck image and export routes.
+  serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core"],
+  outputFileTracingIncludes: {
+    "/admin/jack/**": ["./node_modules/@sparticuz/chromium/bin/**"],
+    "/api/admin/jack/**": ["./node_modules/@sparticuz/chromium/bin/**"],
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "res.cloudinary.com" },
