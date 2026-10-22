@@ -74,7 +74,7 @@ const GRADE_SCHEMA = {
       type: "boolean",
       description: "true unless it states data no tool returned and the facts don't support, claims to have done something it didn't, or claims abilities it doesn't have.",
     },
-    clear: { type: "boolean", description: "Leads with the answer, plain text, no filler, a sensible length for the question." },
+    clear: { type: "boolean", description: "Leads with the answer, plain language with light formatting at most, no filler, a sensible length for the question." },
     tool_use: {
       type: "string",
       enum: ["good", "none_needed", "wasteful", "wrong_tool", "too_few", "failed"],

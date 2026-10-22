@@ -19,6 +19,7 @@ import { JACK_TITLE_MAX } from "@/schemas/jack.schema"
 import type { JackSpend } from "@/lib/jack/spend"
 import { JackToolPartView } from "./parts/tool-part"
 import { PersonaAvatar } from "./persona-avatar"
+import { ReplyText } from "./reply-text"
 import { JackRoomRail } from "./room-list"
 import { SpendMeter } from "./spend-meter"
 import type { JackConnection, JackStall } from "./use-jack-room"
@@ -388,16 +389,11 @@ function ReplyBody({ message }: { message: JackMessageView }) {
   const endsInText = pieces.at(-1)?.kind === "text"
   return (
     <div className="flex max-w-3xl flex-col gap-2">
-      {pieces.map((piece, i) =>
-        piece.kind === "part" ? (
-          <JackToolPartView key={piece.key} part={piece.part} />
-        ) : (
-          <p key={piece.key} className="whitespace-pre-wrap break-words leading-relaxed text-foreground">
-            {piece.text}
-            {streaming && i === pieces.length - 1 ? streamingCursor : null}
-          </p>
-        )
-      )}
+      {pieces.map((piece, i) => {
+        if (piece.kind === "part") return <JackToolPartView key={piece.key} part={piece.part} />
+        const end = streaming && i === pieces.length - 1
+        return <ReplyText key={piece.key} text={piece.text} streaming={end} tail={end ? streamingCursor : null} />
+      })}
       {streaming && !endsInText ? <p className="leading-relaxed">{streamingCursor}</p> : null}
     </div>
   )
