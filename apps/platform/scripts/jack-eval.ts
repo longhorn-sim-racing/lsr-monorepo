@@ -44,6 +44,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { JackRoomPersonaKey } from "../src/lib/jack/types";
 import { checkEvalDatabase } from "../src/server/jack/eval-support";
 import { BEHAVIOR, PLANTED, seedPlanted } from "./jack-eval/behavior";
+import { decksIn, DESIGN } from "./jack-eval/design";
 import { EVERYDAY } from "./jack-eval/everyday";
 import { JudgeDeclined, judgeAnswer, judgeCostUsd, type JudgeGrade, type ToolTrace } from "./jack-eval/judge";
 import { loadLsc, type Answer, type EvalContext, type Exchange, type Group, type Question } from "./jack-eval/shared";
@@ -122,9 +123,10 @@ const GROUP_EXPECT: Record<Group, string> = {
   heavy: "Handles the size sensibly within its limits.",
   draft: "Drafts what was asked, correctly, or asks when details are missing.",
   followup: "Uses the earlier exchange to understand the question.",
+  design: "Makes the deck or graphic asked for, in the club's look, with nothing cut off or overlapping.",
 };
 
-const QUESTIONS: Question[] = [...EVERYDAY, ...BEHAVIOR];
+const QUESTIONS: Question[] = [...EVERYDAY, ...BEHAVIOR, ...DESIGN];
 /** Questions that draft run one at a time after the rest, so one's draft can't be mistaken for another's */
 const drafts = (q: Question) => q.group === "draft" || q.id === "draft-event";
 
@@ -253,151 +255,183 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
     },
   }));
 
-  const config = mods.JACK_MODELS[persona];
-  const usage = new mods.UsageTally(config.model);
-  const client = DRY_RUN ? dryRunClient(mods, truth.fakeAnswer ?? truth.expected) : mods.anthropicJackClient(process.env.ANTHROPIC_API_KEY!.trim());
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CASE_TIMEOUT_MS);
-  const t0 = Date.now();
-  let out: Awaited<ReturnType<typeof mods.runModelReply>>;
+  // Decks belong to a room, so a design question gets a real one, deleted with its decks at the end
+  const designRoom = question.group === "design" && !DRY_RUN ? await c.prisma.jackRoom.create({ data: { title: `Jack eval: ${question.id}`, createdById: c.officer.id } }) : null;
   try {
-    out = await mods.runModelReply({
-      client,
-      config,
-      system,
-      tools,
-      history,
-      ctx: { roomId: EVAL_ROOM_ID, actor: { userId: c.officer.id, displayName: c.officer.displayName } },
-      onText: () => {},
-      onPart: async () => {},
-      usage,
-      signal: controller.signal,
-    });
-  } catch (error) {
-    return { error: controller.signal.aborted ? `timeout after ${CASE_TIMEOUT_MS / 1000} s` : `threw: ${error instanceof Error ? error.message : String(error)}`, usage: usage.tokens };
+    return await answerAndGrade(designRoom?.id ?? EVAL_ROOM_ID);
   } finally {
-    clearTimeout(timer);
-  }
-  const latency = (Date.now() - t0) / 1000;
-  if (out.outcome === "api_error") return { error: `API error: ${out.text.slice(-200)}`, usage: usage.tokens };
-
-  const answer: Answer = { text: out.text, parts: out.parts };
-  const failures: string[] = [];
-  if (out.outcome !== "answered" && out.outcome !== "refusal") failures.push(`ended as ${out.outcome}`);
-  const checked = truth.check(answer);
-  if (checked) failures.push(checked);
-  if (!checked && truth.verify) {
-    const verified = await truth.verify();
-    if (verified) failures.push(verified);
-  }
-  for (const name of question.forbid ?? []) if (out.parts.some((p) => p.name === name)) failures.push(`called ${name}`);
-  if (guard) {
-    const guarded = await guard(answer, seen.map((s) => s.result));
-    if (guarded) failures.push(guarded);
-  }
-  if (DRY_RUN && !truth.judgeOnly && !failures.length && truth.check({ text: "Here's what I have.", parts: [] }) === null) failures.push("the check passes a non-answer");
-  const scriptOk = failures.length === 0;
-
-  // The judge, blind to the model
-  const expect = question.expect ?? GROUP_EXPECT[question.group ?? "everyday"];
-  const facts = truth.facts ?? (truth.judgeOnly ? undefined : `The right answer: ${truth.expected}.`);
-  const traces: ToolTrace[] = seen.map((s, i) => ({ ...s, ms: out.parts[i]?.ms }));
-  let judged: Awaited<ReturnType<typeof judgeAnswer>> | null = null;
-  let judgeProblem: string | null = null;
-  if (c.judge) {
-    try {
-      judged = await judgeAnswer(
-        c.judge,
-        {
-          question: ask,
-          asker: c.officer.displayName,
-          before,
-          expect,
-          facts,
-          tools: traces,
-          answer: out.text,
-          ending: out.outcome === "answered" ? undefined : out.outcome,
-          instructions: instructionsFor(mods, persona),
-          askedAt: c.now,
-        },
-        AbortSignal.timeout(JUDGE_TIMEOUT_MS)
-      );
-    } catch (error) {
-      // The answer is kept either way (it's paid for): a script failure still fails it, otherwise it's
-      // saved ungraded, and --regrade asks the judge again
-      judgeProblem =
-        error instanceof JudgeDeclined ? "both judges declined to grade it" : `the judge failed: ${error instanceof Error ? error.message : String(error)}`;
-      console.log(`  ${persona.padEnd(5)} note  ${question.id}: ${judgeProblem}`);
+    if (designRoom) {
+      await c.prisma.jackDeck.deleteMany({ where: { roomId: designRoom.id } }).catch(() => {});
+      await c.prisma.jackRoom.delete({ where: { id: designRoom.id } }).catch(() => {});
     }
   }
-  const g = judged?.grade;
-  const grade: Grade = g
-    ? {
-        pass: Number(scriptOk && g.meets_expectation && g.facts_correct !== "no" && g.no_invention),
-        check: Number(scriptOk),
-        meets: Number(g.meets_expectation),
-        facts: Number(g.facts_correct !== "no"),
-        honest: Number(g.no_invention),
-        clear: Number(g.clear),
-        tools_ok: Number(g.tool_use === "good" || g.tool_use === "none_needed"),
+
+  async function answerAndGrade(roomId: string): Promise<{ row: Row; trace: unknown[] } | { error: string; usage?: unknown }> {
+    if (!truth) return { error: "no expectation" }; // checked above; this keeps TypeScript's narrowing inside the function
+    const config = mods.JACK_MODELS[persona];
+    const usage = new mods.UsageTally(config.model);
+    const client = DRY_RUN ? dryRunClient(mods, truth.fakeAnswer ?? truth.expected) : mods.anthropicJackClient(process.env.ANTHROPIC_API_KEY!.trim());
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CASE_TIMEOUT_MS);
+    const t0 = Date.now();
+    let out: Awaited<ReturnType<typeof mods.runModelReply>>;
+    try {
+      out = await mods.runModelReply({
+        client,
+        config,
+        system,
+        tools,
+        history,
+        ctx: { roomId, actor: { userId: c.officer.id, displayName: c.officer.displayName } },
+        onText: () => {},
+        onPart: async () => {},
+        usage,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      return { error: controller.signal.aborted ? `timeout after ${CASE_TIMEOUT_MS / 1000} s` : `threw: ${error instanceof Error ? error.message : String(error)}`, usage: usage.tokens };
+    } finally {
+      clearTimeout(timer);
+    }
+    const latency = (Date.now() - t0) / 1000;
+    if (out.outcome === "api_error") return { error: `API error: ${out.text.slice(-200)}`, usage: usage.tokens };
+
+    const answer: Answer = { text: out.text, parts: out.parts };
+    const failures: string[] = [];
+    if (out.outcome !== "answered" && out.outcome !== "refusal") failures.push(`ended as ${out.outcome}`);
+    const checked = truth.check(answer);
+    if (checked) failures.push(checked);
+    if (!checked && truth.verify) {
+      const verified = await truth.verify();
+      if (verified) failures.push(verified);
+    }
+    for (const name of question.forbid ?? []) if (out.parts.some((p) => p.name === name)) failures.push(`called ${name}`);
+    if (guard) {
+      const guarded = await guard(answer, seen.map((s) => s.result));
+      if (guarded) failures.push(guarded);
+    }
+    if (DRY_RUN && !truth.judgeOnly && !failures.length && truth.check({ text: "Here's what I have.", parts: [] }) === null) failures.push("the check passes a non-answer");
+    const scriptOk = failures.length === 0;
+
+    // The judge, blind to the model
+    const expect = question.expect ?? GROUP_EXPECT[question.group ?? "everyday"];
+    const facts = truth.facts ?? (truth.judgeOnly ? undefined : `The right answer: ${truth.expected}.`);
+    const traces: ToolTrace[] = seen.map((s, i) => ({ ...s, ms: out.parts[i]?.ms }));
+    let judged: Awaited<ReturnType<typeof judgeAnswer>> | null = null;
+    let judgeProblem: string | null = null;
+    const images = c.judge && question.group === "design" ? await slideImages(answer) : undefined;
+    if (c.judge) {
+      try {
+        judged = await judgeAnswer(
+          c.judge,
+          {
+            question: ask,
+            asker: c.officer.displayName,
+            before,
+            expect,
+            facts,
+            tools: traces,
+            answer: out.text,
+            ending: out.outcome === "answered" ? undefined : out.outcome,
+            instructions: instructionsFor(mods, persona),
+            askedAt: c.now,
+            images,
+          },
+          AbortSignal.timeout(JUDGE_TIMEOUT_MS)
+        );
+      } catch (error) {
+        // The answer is kept either way (it's paid for): a script failure still fails it, otherwise it's
+        // saved ungraded, and --regrade asks the judge again
+        judgeProblem =
+          error instanceof JudgeDeclined ? "both judges declined to grade it" : `the judge failed: ${error instanceof Error ? error.message : String(error)}`;
+        console.log(`  ${persona.padEnd(5)} note  ${question.id}: ${judgeProblem}`);
       }
-    : { pass: c.judge && scriptOk ? 0 : Number(scriptOk), check: Number(scriptOk) };
-  const ungraded = c.judge && !g && scriptOk ? (judgeProblem ?? "not judged") : undefined;
-
-  const tokens = usage.tokens;
-  const row: Row = {
-    prompt_id: question.id,
-    prompt: ask,
-    tags: [question.group ?? "everyday", persona],
-    rep: 0,
-    model: usage.models.join(","),
-    status: out.outcome === "cut_off" ? "truncated" : "ok",
-    outcome: out.outcome,
-    grade,
-    ...(g ? { explanation: { meets: g.explanation, tools_ok: g.tool_notes } } : {}),
-    latency_s: Math.round(latency * 10) / 10,
-    tool_calls: out.toolCalls,
-    usage: { input_tokens: tokens.inputTokens, output_tokens: tokens.outputTokens, cache_read_input_tokens: tokens.cacheReadTokens, cache_creation_input_tokens: tokens.cacheWriteTokens },
-    cost_usd: usage.costUsd,
-    ...(judged
+    }
+    const g = judged?.grade;
+    const grade: Grade = g
       ? {
-          judge_model: judged.model,
-          judge_usage: judged.usage,
-          judge_cost_usd: judgeCostUsd(judged.model, judged.usage),
+          pass: Number(scriptOk && g.meets_expectation && g.facts_correct !== "no" && g.no_invention),
+          check: Number(scriptOk),
+          meets: Number(g.meets_expectation),
+          facts: Number(g.facts_correct !== "no"),
+          honest: Number(g.no_invention),
+          clear: Number(g.clear),
+          tools_ok: Number(g.tool_use === "good" || g.tool_use === "none_needed"),
         }
-      : {}),
-    meta: {
-      persona,
-      group: question.group ?? "everyday",
-      failures,
-      tools: out.parts.map((p) => p.name),
-      tool_errors: out.parts.filter((p) => p.status === "error").length,
-      sql_calls: out.parts.filter((p) => p.name === "run_sql").length,
-      typed_calls: out.parts.filter((p) => TYPED_TOOLS.has(p.name)).length,
-      describe_calls: out.parts.filter((p) => p.name === "describe_schema").length,
-      ...(g ? { tool_use: g.tool_use, tool_notes: g.tool_notes, tool_gap: g.tool_gap } : {}),
-      expected: truth.expected,
-      answer: out.text,
-      askedAt: c.now.toISOString(),
-      runStartedAt: c.startedAt.toISOString(),
-      ...(ungraded ? { ungraded } : {}),
-    },
-  };
+      : { pass: c.judge && scriptOk ? 0 : Number(scriptOk), check: Number(scriptOk) };
+    const ungraded = c.judge && !g && scriptOk ? (judgeProblem ?? "not judged") : undefined;
 
-  const trace = [
-    { role: "system", content: system.map((b) => b.text).join("\n\n") },
-    ...before.flatMap((ex) => [
-      { role: "user", content: `${c.officer.displayName}: ${ex.ask}` },
-      { role: "assistant", content: ex.answer },
-    ]),
-    { role: "user", content: `${c.officer.displayName}: ${ask}` },
-    ...traces.flatMap((s) => [
-      { role: "tool_call", name: s.name, content: JSON.stringify(s.input, null, 2) },
-      { role: "tool_result", content: s.error ? `ERROR: ${s.error}` : s.result },
-    ]),
-    { role: "assistant", content: out.text },
-  ];
-  return { row, trace };
+    const tokens = usage.tokens;
+    const row: Row = {
+      prompt_id: question.id,
+      prompt: ask,
+      tags: [question.group ?? "everyday", persona],
+      rep: 0,
+      model: usage.models.join(","),
+      status: out.outcome === "cut_off" ? "truncated" : "ok",
+      outcome: out.outcome,
+      grade,
+      ...(g ? { explanation: { meets: g.explanation, tools_ok: g.tool_notes } } : {}),
+      latency_s: Math.round(latency * 10) / 10,
+      tool_calls: out.toolCalls,
+      usage: { input_tokens: tokens.inputTokens, output_tokens: tokens.outputTokens, cache_read_input_tokens: tokens.cacheReadTokens, cache_creation_input_tokens: tokens.cacheWriteTokens },
+      cost_usd: usage.costUsd,
+      ...(judged
+        ? {
+            judge_model: judged.model,
+            judge_usage: judged.usage,
+            judge_cost_usd: judgeCostUsd(judged.model, judged.usage),
+          }
+        : {}),
+      meta: {
+        persona,
+        group: question.group ?? "everyday",
+        failures,
+        tools: out.parts.map((p) => p.name),
+        tool_errors: out.parts.filter((p) => p.status === "error").length,
+        sql_calls: out.parts.filter((p) => p.name === "run_sql").length,
+        typed_calls: out.parts.filter((p) => TYPED_TOOLS.has(p.name)).length,
+        describe_calls: out.parts.filter((p) => p.name === "describe_schema").length,
+        ...(g ? { tool_use: g.tool_use, tool_notes: g.tool_notes, tool_gap: g.tool_gap } : {}),
+        expected: truth.expected,
+        answer: out.text,
+        askedAt: c.now.toISOString(),
+        runStartedAt: c.startedAt.toISOString(),
+        ...(ungraded ? { ungraded } : {}),
+      },
+    };
+
+    const trace = [
+      { role: "system", content: system.map((b) => b.text).join("\n\n") },
+      ...before.flatMap((ex) => [
+        { role: "user", content: `${c.officer.displayName}: ${ex.ask}` },
+        { role: "assistant", content: ex.answer },
+      ]),
+      { role: "user", content: `${c.officer.displayName}: ${ask}` },
+      ...traces.flatMap((s) => [
+        { role: "tool_call", name: s.name, content: JSON.stringify(s.input, null, 2) },
+        { role: "tool_result", content: s.error ? `ERROR: ${s.error}` : s.result },
+      ]),
+      { role: "assistant", content: out.text },
+    ];
+    return { row, trace };
+  }
+}
+
+/** The slides of the decks a reply made, as the 1280 px previews Jack sees, for the judge (at most 8) */
+async function slideImages(answer: Answer) {
+  const [{ getDeck }, { ensureRender }] = await Promise.all([import("../src/server/jack/decks/service"), import("../src/server/jack/decks/renders")]);
+  const images: { caption: string; mediaType: "image/jpeg"; data: string }[] = [];
+  for (const { deckId, version } of decksIn(answer)) {
+    const deck = await getDeck(deckId, version);
+    if (!deck) continue;
+    for (const [i, slide] of deck.content.slides.entries()) {
+      if (images.length >= 8) break;
+      const { view } = await ensureRender({ size: deck.size, css: deck.content.css, html: slide.html }, { withView: true });
+      if (view) images.push({ caption: `"${deck.title}", slide ${i + 1} of ${deck.content.slides.length}:`, mediaType: "image/jpeg", data: view.toString("base64") });
+    }
+  }
+  return images.length ? images : undefined;
 }
 
 // ---------------------------------------------------------------------------

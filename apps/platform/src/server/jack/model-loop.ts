@@ -43,6 +43,14 @@ export type ReplyLimits = {
   maxToolCalls: number
   /** Output tokens (thinking included) across the reply's calls before it's told to wrap up */
   maxOutputTokens: number
+  /**
+   * The same two limits once the reply calls a deck tool (#177): a deck takes a dozen or more calls
+   * (the guide, photos, writes, checks, a render, fixes) and writes a lot of HTML
+   */
+  maxDesignToolCalls: number
+  maxDesignOutputTokens: number
+  /** Wall time before a design reply is told to wrap up: its hand-off note is short, so it can work longer */
+  maxDesignElapsedMs: number
   /** Wall time before it's told to wrap up, well inside the function's maxDuration */
   maxElapsedMs: number
   toolTimeoutMs: number
@@ -53,6 +61,9 @@ export type ReplyLimits = {
 export const REPLY_LIMITS: ReplyLimits = {
   maxToolCalls: 12,
   maxOutputTokens: 64_000,
+  maxDesignToolCalls: 30,
+  maxDesignOutputTokens: 120_000,
+  maxDesignElapsedMs: 200_000,
   maxElapsedMs: 150_000,
   toolTimeoutMs: 45_000,
   maxJsonRetries: 2,
@@ -105,6 +116,10 @@ export type ModelReplyResult = {
   outcome: ReplyOutcome
   usage: UsageTally
   toolCalls: number
+  /** The reply called a deck tool (#177) */
+  design: boolean
+  /** It was told to stop and wrap up (tool calls, output or time ran out) rather than finishing on its own */
+  wrappedUp: boolean
 }
 
 /**
@@ -132,6 +147,11 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
   let toolCalls = 0
   let wrapUp = false
   let jsonRetries = 0
+  // Set once the reply calls a deck tool; from then on it has the design limits
+  let design = false
+  const toolCap = () => (design ? limits.maxDesignToolCalls : limits.maxToolCalls)
+  const outputCap = () => (design ? limits.maxDesignOutputTokens : limits.maxOutputTokens)
+  const elapsedCap = () => (design ? limits.maxDesignElapsedMs : limits.maxElapsedMs)
 
   const say = (piece: string) => {
     if (!piece) return
@@ -171,10 +191,10 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
   }
   const result = async (status: "done" | "error", outcome: ReplyOutcome): Promise<ModelReplyResult> => {
     await partChain
-    return { text, parts, status, outcome, usage, toolCalls }
+    return { text, parts, status, outcome, usage, toolCalls, design, wrappedUp: wrapUp }
   }
 
-  for (let call = 0; call < limits.maxToolCalls + 4; call++) {
+  for (let call = 0; call < Math.max(limits.maxToolCalls, limits.maxDesignToolCalls) + 4; call++) {
     const textBefore = text.length
     let message: BetaMessage
     // What the call has reported about its usage so far, for a call that fails partway
@@ -269,22 +289,28 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
       return result("done", "tool_limit")
     }
 
-    const allowance = Math.max(0, limits.maxToolCalls - toolCalls)
+    if (toolUses.some((use) => findTool(tools, use.name)?.design)) design = true
+    const allowance = Math.max(0, toolCap() - toolCalls)
     const results = await Promise.all(
       toolUses.map((use, i) => (i < allowance ? runTool(use) : skipTool(use)))
     )
     toolCalls += Math.min(toolUses.length, allowance)
 
     const reason =
-      toolCalls >= limits.maxToolCalls
-        ? `You've used this reply's ${limits.maxToolCalls} tool calls.`
-        : usage.tokens.outputTokens >= limits.maxOutputTokens || now() - started >= limits.maxElapsedMs
+      toolCalls >= toolCap()
+        ? `You've used this reply's ${toolCap()} tool calls.`
+        : usage.tokens.outputTokens >= outputCap() || now() - started >= elapsedCap()
           ? "This reply is running long."
           : null
     const content: BetaContentBlockParam[] = [...results]
     if (reason) {
       wrapUp = true
-      content.push({ type: "text", text: `${reason} Don't call any more tools: answer now with what you have, and say what you couldn't check.` })
+      content.push({
+        type: "text",
+        text: design
+          ? `${reason} Don't call any more tools: in a few sentences, say what's done (with the deck's link) and what's left. You'll pick it up in your next reply.`
+          : `${reason} Don't call any more tools: answer now with what you have, and say what you couldn't check.`,
+      })
     }
     messages.push({ role: "assistant", content: echo })
     messages.push({ role: "user", content })
@@ -315,7 +341,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
 
     upsertPart({ ...base, name: tool.name, input: use.input, status: "running", displays: [] })
     try {
-      const out = await withTimeout((signal) => tool.run(parsed.data, { ...ctx, signal }), limits.toolTimeoutMs, options.signal)
+      const out = await withTimeout((signal) => tool.run(parsed.data, { ...ctx, signal }), tool.timeoutMs ?? limits.toolTimeoutMs, options.signal)
       upsertPart({
         ...base,
         name: tool.name,
@@ -339,7 +365,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
     const base = parts.find((p) => p.id === use.id) ?? { id: use.id, name: use.name, at: text.length, displays: [] }
     const label = "Skipped: tool limit reached"
     upsertPart({ ...base, label, input: use.input, status: "error", error: label, displays: [] })
-    return { type: "tool_result", tool_use_id: use.id, is_error: true, content: `Not run: this reply already used its ${limits.maxToolCalls} tool calls.` }
+    return { type: "tool_result", tool_use_id: use.id, is_error: true, content: `Not run: this reply already used its ${toolCap()} tool calls.` }
   }
 }
 

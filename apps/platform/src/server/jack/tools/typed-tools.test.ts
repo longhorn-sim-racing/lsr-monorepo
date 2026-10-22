@@ -420,14 +420,25 @@ describe("the tool list", () => {
       "run_sql",
       "chart",
       "draft_event",
+      "deck_guide",
+      "deck_assets",
+      "deck_create",
+      "deck_write",
+      "deck_edit",
+      "deck_arrange",
+      "deck_view",
+      "deck_render",
+      "deck_restore",
+      "deck_screenshot",
     ])
     for (const name of names) expect(name).toMatch(/^[a-z][a-z_]*$/)
     expect(findJackTool("run_sql")?.name).toBe("run_sql")
     expect(findJackTool("nope")).toBeUndefined()
   })
 
-  it("marks only draft_event as writing", () => {
-    expect(JACK_TOOLS.filter((t) => t.writes).map((t) => t.name)).toEqual(["draft_event"])
+  it("marks only draft_event and the deck changes as writing; only draft_event touches club data", () => {
+    expect(JACK_TOOLS.filter((t) => t.writes).map((t) => t.name)).toEqual(["draft_event", "deck_create", "deck_write", "deck_edit", "deck_arrange", "deck_restore"])
+    expect(JACK_TOOLS.filter((t) => t.design).map((t) => t.name)).toEqual(JACK_TOOLS.filter((t) => t.name.startsWith("deck_")).map((t) => t.name))
   })
 
   it("gives every tool an input the model loop can send as JSON Schema, and defaults that parse from {}", () => {

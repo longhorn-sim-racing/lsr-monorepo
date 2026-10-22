@@ -16,7 +16,8 @@ export type JackModelConfig = {
 
 export const JACK_MODELS: Record<JackPersonaKey, JackModelConfig> = {
   // Every answer by default: data questions with a few tool calls each
-  jack: { persona: "jack", model: "claude-sonnet-5-5", effort: "medium", maxTokens: 16_000, fallbacks: true },
+  // Deck writes put several slides of HTML in one tool call, so a call can run long
+  jack: { persona: "jack", model: "claude-sonnet-5-5", effort: "medium", maxTokens: 32_000, fallbacks: true },
   // Hard questions, chosen per room
   lift: { persona: "lift", model: "claude-opus-5-5", effort: "high", maxTokens: 32_000, fallbacks: true },
   // Quick, simple questions, chosen per room; the cheapest

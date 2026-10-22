@@ -7,6 +7,7 @@ import { ArrowRight, CalendarPlus, CheckCircle2, ChevronRight, Loader2, XCircle 
 import { Badge, Button, JsonView, Table, TD, TH, THead, TR } from "@/components/admin/kit"
 import type { JackCellValue, JackToolDisplay, JackToolPart } from "@/lib/jack/parts"
 import { cn } from "@/lib/utils"
+import { DeckCard } from "./deck-card"
 
 /* recharts is heavy; load it only when a reply has a chart */
 const ChartView = dynamic(() => import("./chart-view").then((m) => m.ChartView), {
@@ -88,6 +89,8 @@ function DisplayView({ display }: { display: JackToolDisplay }) {
       return <p className="whitespace-pre-wrap break-words text-muted-foreground">{display.text}</p>
     case "sql":
       return <SqlBlock display={display} />
+    case "deck":
+      return <DeckCard display={display} />
     default:
       return null
   }

@@ -1,6 +1,7 @@
 import { auditLogTool } from "./audit-log"
 import { chartTool } from "./chart"
 import { clubMembersTool } from "./club-members"
+import { DECK_TOOLS } from "./decks"
 import { describeSchemaTool } from "./describe-schema"
 import { draftEventTool } from "./draft-event"
 import { eventsOverviewTool } from "./events-overview"
@@ -17,7 +18,7 @@ import type { AnyJackTool } from "./types"
  *
  * Typed tools first, since they carry the definitions (what "paid for LSC" means, effective event
  * status, attendance); describe_schema and run_sql for everything else; chart draws; draft_event is
- * the only write.
+ * the only write to club data. The deck tools (#177) make slides and graphics, which are Jack's own.
  */
 export const JACK_TOOLS: AnyJackTool[] = [
   clubMembersTool,
@@ -31,6 +32,7 @@ export const JACK_TOOLS: AnyJackTool[] = [
   runSqlTool,
   chartTool,
   draftEventTool,
+  ...DECK_TOOLS,
 ]
 
 export function findJackTool(name: string): AnyJackTool | undefined {

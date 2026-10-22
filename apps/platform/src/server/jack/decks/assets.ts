@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db"
+import { cloudinaryCloudName } from "./document"
 
 /**
  * The images Jack may put on slides (#177): the site's own photos and logos (relative paths, served
@@ -56,11 +57,9 @@ export const SITE_ASSETS: DeckAsset[] = [
   site("/partners/orange-dames.png", 320, 320, "partner", "Orange Dames logo"),
 ]
 
-const CLOUD_NAME = () => process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME?.trim() || "daklxjoxr"
-
 /** A gallery photo sized for slides: at most 2000 px on its long side, Cloudinary's automatic quality */
 export function galleryPhotoUrl(publicId: string) {
-  return `https://res.cloudinary.com/${CLOUD_NAME()}/image/upload/c_limit,w_2000,h_2000,q_auto:good/${publicId}`
+  return `https://res.cloudinary.com/${cloudinaryCloudName()}/image/upload/c_limit,w_2000,h_2000,q_auto:good/${publicId}`
 }
 
 export type GalleryAssetQuery = { query?: string; album?: string; limit?: number }

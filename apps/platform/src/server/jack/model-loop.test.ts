@@ -79,7 +79,7 @@ describe("runModelReply", () => {
 
     expect(params).toMatchObject({
       model: "claude-sonnet-5-5",
-      max_tokens: 16_000,
+      max_tokens: 32_000,
       thinking: { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
       output_config: { effort: "medium" },
       cache_control: { type: "ephemeral" },
@@ -257,6 +257,27 @@ describe("runModelReply", () => {
     expect(toolResults(last.messages.at(-1)!).map((r) => r.tool_use_id)).toEqual(["t3", "t4"])
     expect(lastUser.at(-1)).toMatchObject({ type: "text", text: expect.stringContaining("Don't call any more tools") })
     expect(fake.calls[1].tool_choice).toBeUndefined()
+  })
+
+  it("gives a reply the design limits once it calls a deck tool, and asks for a hand-off note at the end", async () => {
+    const design: AnyJackTool = { ...countTool(), name: "deck_write", design: true }
+    const call = (id: string, name: string) => ({ id, name, input: { table: "x" } })
+    const { run, fake } = setup(
+      [
+        { tools: [call("t1", "count_rows"), call("t2", "deck_write")] },
+        { tools: [call("t3", "deck_write"), call("t4", "deck_write")] },
+        { text: "Slides 1-3 are done; 4 is left." },
+      ],
+      [countTool(), design],
+      { limits: { maxToolCalls: 2, maxDesignToolCalls: 4 } }
+    )
+
+    const result = await run()
+
+    expect(result.toolCalls).toBe(4)
+    expect(result.parts.map((p) => p.status)).toEqual(["done", "done", "done", "done"])
+    const last = fake.calls[2].messages.at(-1)!.content as { type: string; text?: string }[]
+    expect(last.at(-1)?.text).toMatch(/^You've used this reply's 4 tool calls\. Don't call any more tools: in a few sentences, say what's done \(with the deck's link\)/)
   })
 
   it("ends with a note if the model keeps calling tools after it's told to stop", async () => {
