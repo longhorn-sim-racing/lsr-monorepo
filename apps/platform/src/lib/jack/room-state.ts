@@ -321,7 +321,7 @@ export const STUCK_QUIET_MS = ROOM_LOCK_STALE_MS + 15_000
  */
 export function stallCandidate(messages: JackMessageView[]): "unanswered" | "stuck" | null {
   if (messages.some((m) => m.status === "streaming")) return "stuck"
-  return messages.some((m) => m.author.kind === "user" && !m.answered) ? "unanswered" : null
+  return messages.some((m) => (m.author.kind === "user" || m.continues) && !m.answered) ? "unanswered" : null
 }
 
 /** How long a stall candidate has to stay quiet before the room offers to ask Jack to continue */

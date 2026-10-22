@@ -429,6 +429,7 @@ describe("the tool list", () => {
       "deck_view",
       "deck_render",
       "deck_restore",
+      "deck_screenshot",
     ])
     for (const name of names) expect(name).toMatch(/^[a-z][a-z_]*$/)
     expect(findJackTool("run_sql")?.name).toBe("run_sql")

@@ -27,23 +27,24 @@ export default async function JackDecksPage() {
           <EmptyState title="No decks yet" description="Ask Jack in a room for slides or a graphic, e.g. “make a 4-slide deck for GM 2” or “an Instagram story for recruiting”." />
         </Panel>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] items-start gap-4">
           {decks.map((deck) => {
             const { width, height, label } = JACK_DECK_SIZES[deck.size]
             return (
               <Link key={deck.id} href={deckPageUrl(deck.id)} className="group flex flex-col overflow-hidden rounded-lg border bg-card outline-none hover:border-foreground/30 focus-visible:ring-2 focus-visible:ring-ring/40">
-                <div className="flex items-center justify-center bg-[#0B0B0B]" style={{ aspectRatio: "16 / 10" }}>
+                <div className="relative bg-[#0B0B0B]" style={{ aspectRatio: "16 / 10" }}>
                   {deck.firstSlideId ? (
                     // eslint-disable-next-line @next/next/no-img-element -- an officer-only route renders it; next/image can't pass the session
                     <img
                       src={slideImageUrl(deck.id, deck.version, deck.firstSlideId, "thumb")}
                       alt=""
                       loading="lazy"
-                      className="max-h-full max-w-full object-contain"
-                      style={{ aspectRatio: `${width} / ${height}` }}
+                      width={width}
+                      height={height}
+                      className="absolute inset-0 size-full object-contain"
                     />
                   ) : (
-                    <span className="text-xs text-white/50">No slides yet</span>
+                    <span className="absolute inset-0 flex items-center justify-center text-xs text-white/50">No slides yet</span>
                   )}
                 </div>
                 <div className="flex flex-col gap-0.5 border-t px-3 py-2.5">

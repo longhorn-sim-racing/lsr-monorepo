@@ -27,7 +27,8 @@ export function toMessageView(row: JackMessageRow): JackMessageView {
     tools: parseToolParts(row.toolCalls),
     status: row.status,
     streamSeq: row.streamSeq,
-    answered: row.kind !== "user" || row.answeredById !== null,
+    answered: row.kind === "user" || row.continues ? row.answeredById !== null : true,
+    ...(row.continues ? { continues: true } : {}),
     createdAt: row.createdAt.toISOString(),
   }
 }

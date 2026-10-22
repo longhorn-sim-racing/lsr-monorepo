@@ -970,3 +970,71 @@ describe("resumeRoom", () => {
     expect(await resumeRoom("room-missing", { replyDeps: deps })).toBeNull()
   })
 })
+
+describe("deck jobs that hit a reply's limits", () => {
+  const deckWrite: JackTool<Record<string, never>> = {
+    name: "deck_write",
+    description: "Writes slides.",
+    input: z.object({}),
+    design: true,
+    run: async () => ({ forModel: "Saved.", label: "Wrote slides" }),
+  }
+  /** Every reply calls deck_write once, is told to wrap up (one design tool call allowed), then hands off */
+  const handOffClaude = () =>
+    fakeClaude((_params: BetaMessageStreamParams, call: number): FakeTurn =>
+      call % 2 === 0 ? { tools: [{ name: "deck_write", input: {} }] } : { text: "Slides 1-2 are done; 3-4 are left." }
+    )
+
+  it("leave a note that the run answers, as the officer who asked, at most three times in a row", async () => {
+    claude = handOffClaude()
+    ask("Make a 4-slide deck for GM 2")
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [deckWrite], limits: { maxDesignToolCalls: 1 } }))
+
+    const notes = db.state.messages.filter((m) => m.kind === "system" && m.continues)
+    expect(notes).toHaveLength(3)
+    expect(notes.map((n) => n.content)).toEqual(
+      [1, 2, 3].map((n) => `Jack hit this reply's limits partway through the deck and is picking up where he left off (automatic, ${n} of 3). Changes from the last reply may have been saved even where a tool shows as failed, so check the deck with deck_view first`)
+    )
+    expect(notes.every((n) => n.authorUserId === "officer-gray" && n.answeredById !== null)).toBe(true)
+    expect(replies()).toHaveLength(4)
+    // The next reply reads the note in its turn
+    expect(lastUserText(claude.calls[2])).toContain("(Room note: Jack hit this reply's limits partway through the deck")
+    expect(radio.of("message.created").filter((e) => e.message.continues)).toHaveLength(3)
+  })
+
+  it("start counting again after an officer posts", async () => {
+    claude = handOffClaude()
+    ask("Make a 4-slide deck for GM 2")
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [deckWrite], limits: { maxDesignToolCalls: 1 } }))
+    ask("Keep going")
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [deckWrite], limits: { maxDesignToolCalls: 1 } }))
+    expect(db.state.messages.filter((m) => m.kind === "system" && m.continues)).toHaveLength(6)
+  })
+
+  it("leave a note when a deck reply is cut off at its time limit, not only when it wraps up", async () => {
+    deps.timing = { runDeadlineMs: 100_000, minAnswerMs: 1_000, replyDeadlineMs: 2_000 }
+    // The deck reply writes slides, then spends too long on its next call and is cancelled; the reply that
+    // answers the note is slow too, but never touches a deck, so it leaves no note of its own
+    claude = fakeClaude(
+      (_params: BetaMessageStreamParams, call: number): FakeTurn => (call === 0 ? { tools: [{ name: "deck_write", input: {} }] } : { text: "y".repeat(400) }),
+      undefined,
+      { chunkSize: 2, chunkDelayMs: 100 }
+    )
+    ask("Make a 6-slide deck for GM 2")
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [deckWrite] }))
+
+    expect(replies().map((r) => r.status)).toEqual(["error", "error"])
+    const notes = db.state.messages.filter((m) => m.kind === "system" && m.continues)
+    expect(notes).toHaveLength(1)
+    expect(notes[0].answeredById).toBe(replies()[1].id)
+  })
+
+  it("don't leave a note when the deck reply finishes on its own, or a reply never touched a deck", async () => {
+    claude = fakeClaude([{ tools: [{ name: "deck_write", input: {} }] }, { text: "All four slides are done." }, { text: "There are 13 members." }])
+    ask("Make a 4-slide deck for GM 2")
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [deckWrite] }))
+    ask("How many members?")
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [deckWrite] }))
+    expect(db.state.messages.some((m) => m.continues)).toBe(false)
+  })
+})

@@ -7,7 +7,7 @@ import { Download, MessageSquare } from "lucide-react"
 import { toast } from "sonner"
 import { Badge, Button, DetailList, Notice, PageHeader, Panel, PanelBody, PanelHeader, SplitLayout, useConfirm } from "@/components/admin/kit"
 import { unexpectedError } from "@/lib/action-result"
-import { deckPageUrl, JACK_DECK_SIZES, slideImageUrl, type JackDeckSizeKey } from "@/lib/jack/decks"
+import { deckExportUrl, deckPageUrl, JACK_DECK_SIZES, slideImageUrl, type JackDeckSizeKey } from "@/lib/jack/decks"
 import { formatUsd } from "@/lib/jack/spend"
 import { cn } from "@/lib/utils"
 import { restoreJackDeckVersion } from "../actions"
@@ -75,14 +75,35 @@ export function JackDeckClient({ deck, versions }: { deck: DeckPageData; version
         back={{ href: "/admin/jack/decks", label: "Decks and graphics" }}
         description={`${deck.sizeLabel} · ${deck.slides.length === 1 ? "1 slide" : `${deck.slides.length} slides`} · version ${deck.version}`}
         actions={
-          deck.room ? (
-            <Button asChild size="sm">
-              <Link href={`/admin/jack/${deck.room.id}`}>
-                <MessageSquare aria-hidden />
-                Ask Jack for changes
-              </Link>
-            </Button>
-          ) : null
+          <>
+            {deck.slides.length > 0 && (
+              <div className="flex items-center gap-1" role="group" aria-label="Download the whole deck">
+                <span className="mr-1 text-xs text-admin-subtle">Download</span>
+                {(
+                  [
+                    ["pdf", "PDF", "Every slide, with real text"],
+                    ["pptx", "PPTX", "For Google Slides or PowerPoint; each slide is a picture, with the notes"],
+                    ["zip", "PNGs", "Every slide as a full-size PNG, in a ZIP"],
+                  ] as const
+                ).map(([format, label, hint]) => (
+                  <Button key={format} asChild size="sm" title={hint}>
+                    <a href={deckExportUrl(deck.id, deck.version, format)}>
+                      <Download aria-hidden />
+                      {label}
+                    </a>
+                  </Button>
+                ))}
+              </div>
+            )}
+            {deck.room && (
+              <Button asChild size="sm" variant="primary">
+                <Link href={`/admin/jack/${deck.room.id}`}>
+                  <MessageSquare aria-hidden />
+                  Ask Jack for changes
+                </Link>
+              </Button>
+            )}
+          </>
         }
       />
 

@@ -53,6 +53,13 @@ const AFTER_DONE_RESYNC_MS = 1_500
 /** Joining again after the server closed the channel: the first wait, doubling up to the last */
 const REJOIN_FIRST_MS = 1_000
 const REJOIN_MAX_MS = 30_000
+/**
+ * A note asking Jack to keep going on a deck (#177) gets a run started this long after the room goes
+ * quiet; a run still letting go of the room answers "busy", so try again a few times, further apart
+ */
+const AUTO_CONTINUE_MS = 1_500
+const AUTO_CONTINUE_RETRY_MS = 8_000
+const AUTO_CONTINUE_TRIES = 4
 
 /**
  * Channels still leaving, by topic. supabase-js hands back the existing channel for a topic until the
@@ -88,6 +95,9 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
   const [quietResync, setQuietResync] = useState({ at: 0, count: 0 })
   /** When a fresh snapshot last confirmed the room looked stuck */
   const [stallCheckedAt, setStallCheckedAt] = useState(0)
+  /** Tries to start a run for each waiting continue note, by note id, and a counter to try again */
+  const autoContinued = useRef<Record<string, number>>({})
+  const [autoRetry, setAutoRetry] = useState(0)
   const afterDone = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const resync = useCallback(async () => {
@@ -199,6 +209,26 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
     return () => clearTimeout(timer)
   }, [candidate, lastEventAt, resync])
   const stall: JackStall = candidate && stallCheckedAt > lastEventAt ? candidate : null
+
+  // A deck job that hit a reply's limits left a note asking Jack to keep going: start the next run as
+  // soon as nothing is streaming, instead of waiting for the stall offer. Every open tab tries; the
+  // room lock lets one run through and the others hear "busy"
+  const waitingNote = state.messages.find((m) => m.continues && !m.answered)?.id ?? null
+  useEffect(() => {
+    if (!waitingNote || streaming) return
+    const tries = autoContinued.current[waitingNote] ?? 0
+    if (tries >= AUTO_CONTINUE_TRIES) return
+    const timer = setTimeout(
+      async () => {
+        autoContinued.current[waitingNote] = tries + 1
+        const result = await resume(roomId).catch(() => null)
+        if (result?.ok) setLastEventAt(Date.now())
+        else setAutoRetry((n) => n + 1)
+      },
+      tries === 0 ? AUTO_CONTINUE_MS : AUTO_CONTINUE_RETRY_MS
+    )
+    return () => clearTimeout(timer)
+  }, [waitingNote, streaming, roomId, resume, autoRetry])
 
   const send = useCallback(
     async (content: string) => {

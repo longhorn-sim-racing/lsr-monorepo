@@ -6,11 +6,12 @@
  *   pnpm --filter @lsr/platform exec tsx scripts/try-jack-deck.ts "Make a 5-slide deck for GM 2"
  *   pnpm --filter @lsr/platform exec tsx scripts/try-jack-deck.ts --as=lift "An Instagram story for recruiting"
  *   pnpm --filter @lsr/platform exec tsx scripts/try-jack-deck.ts --room=<id> "Make slide 2 light"   # a follow-up
+ *   pnpm --filter @lsr/platform exec tsx scripts/try-jack-deck.ts --deck=<id> --exports              # no Claude: save a deck and its downloads
  *
  * Opens a new room (titled "Deck try-out") as the first officer or admin, unless --room continues one.
  * The answer runs through the real reply loop (runRoom) with Realtime broadcasts switched off. Slides
- * go to .jack-renders/try/<room id>/. Needs ANTHROPIC_API_KEY. Refuses unless DATABASE_URL points at
- * 127.0.0.1 or localhost.
+ * go to .jack-renders/try/; --exports also writes the deck's PDF, PPTX and ZIP downloads there. Asking
+ * Jack needs ANTHROPIC_API_KEY. Refuses unless DATABASE_URL points at 127.0.0.1 or localhost.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
@@ -38,17 +39,19 @@ if (!["127.0.0.1", "localhost"].includes(host)) {
   console.error(`Refusing to run: DATABASE_URL points at "${host || "nothing"}", not the local database.`)
   process.exit(1)
 }
-if (!process.env.ANTHROPIC_API_KEY?.trim()) {
-  console.error("Set ANTHROPIC_API_KEY first.")
-  process.exit(1)
-}
 
 const args = process.argv.slice(2)
 const persona = (args.find((a) => a.startsWith("--as="))?.slice(5) ?? "jack") as "jack" | "lift" | "stand"
 const roomArg = args.find((a) => a.startsWith("--room="))?.slice(7)
+const deckArg = args.find((a) => a.startsWith("--deck="))?.slice(7)
+const withExports = args.includes("--exports")
 const prompt = args.filter((a) => !a.startsWith("--")).join(" ").trim()
-if (!prompt) {
-  console.error('Say what to make, e.g. "Make a 5-slide deck for GM 2"')
+if (!prompt && !deckArg) {
+  console.error('Say what to make, e.g. "Make a 5-slide deck for GM 2", or pass --deck=<id>')
+  process.exit(1)
+}
+if (prompt && !process.env.ANTHROPIC_API_KEY?.trim()) {
+  console.error("Set ANTHROPIC_API_KEY first.")
   process.exit(1)
 }
 
@@ -59,6 +62,38 @@ async function main() {
   const { listDecks, getDeck } = await import("../src/server/jack/decks/service")
   const { getRenderFile, ensureRender } = await import("../src/server/jack/decks/renders")
   const { closeRenderer } = await import("../src/server/jack/decks/renderer")
+  const { buildDeckExport, exportFileName } = await import("../src/server/jack/decks/exports")
+  type Deck = NonNullable<Awaited<ReturnType<typeof getDeck>>>
+
+  async function saveDeck(deck: Deck, dir: string) {
+    mkdirSync(dir, { recursive: true })
+    console.log(`\nDeck "${deck.title}" ${deck.id}, version ${deck.version}, ${deck.content.slides.length} slides -> ${dir}`)
+    for (const [i, slide] of deck.content.slides.entries()) {
+      const source = { size: deck.size, css: deck.content.css, html: slide.html }
+      const { issues } = await ensureRender(source)
+      writeFileSync(resolve(dir, `${String(i + 1).padStart(2, "0")}.png`), (await getRenderFile(source, "png")).body)
+      writeFileSync(resolve(dir, `${String(i + 1).padStart(2, "0")}.view.jpg`), (await getRenderFile(source, "view")).body)
+      console.log(`  ${i + 1}: ${issues.length ? issues.join(" | ") : "no layout problems"}`)
+    }
+    if (deck.content.css) writeFileSync(resolve(dir, "deck.css"), deck.content.css)
+    writeFileSync(resolve(dir, "slides.html"), deck.content.slides.map((s, i) => `<!-- slide ${i + 1} -->\n${s.html}\n${s.notes ? `<!-- notes: ${s.notes} -->\n` : ""}`).join("\n"))
+    if (!withExports) return
+    for (const format of ["pdf", "pptx", "zip"] as const) {
+      const started = Date.now()
+      const { body } = await buildDeckExport(deck, format)
+      writeFileSync(resolve(dir, exportFileName(deck, format)), body)
+      console.log(`  ${format}: ${Math.round(body.length / 1024)} KB in ${((Date.now() - started) / 1000).toFixed(1)} s`)
+    }
+  }
+
+  if (deckArg) {
+    const deck = await getDeck(deckArg)
+    if (!deck) throw new Error(`No deck ${deckArg}`)
+    await saveDeck(deck, resolve(__dirname, `../.jack-renders/try/deck-${deck.id.slice(0, 8)}-v${deck.version}`))
+    await closeRenderer()
+    await prisma.$disconnect()
+    return
+  }
 
   const officer = await prisma.user.findFirst({ where: { roles: { some: { role: { key: { in: ["admin", "officer"] } } } } }, orderBy: { createdAt: "asc" } })
   if (!officer) throw new Error("No officer or admin in the local database; run pnpm set-role first.")
@@ -83,19 +118,7 @@ async function main() {
 
   for (const summary of await listDecks({ roomId: room.id })) {
     const deck = await getDeck(summary.id)
-    if (!deck) continue
-    const dir = resolve(__dirname, `../.jack-renders/try/${room.id}/${summary.id.slice(0, 8)}-v${deck.version}`)
-    mkdirSync(dir, { recursive: true })
-    console.log(`\nDeck "${deck.title}" ${deck.id}, version ${deck.version}, ${deck.content.slides.length} slides -> ${dir}`)
-    for (const [i, slide] of deck.content.slides.entries()) {
-      const source = { size: deck.size, css: deck.content.css, html: slide.html }
-      const { issues } = await ensureRender(source)
-      writeFileSync(resolve(dir, `${String(i + 1).padStart(2, "0")}.png`), (await getRenderFile(source, "png")).body)
-      writeFileSync(resolve(dir, `${String(i + 1).padStart(2, "0")}.view.jpg`), (await getRenderFile(source, "view")).body)
-      console.log(`  ${i + 1}: ${issues.length ? issues.join(" | ") : "no layout problems"}`)
-    }
-    if (deck.content.css) writeFileSync(resolve(dir, "deck.css"), deck.content.css)
-    writeFileSync(resolve(dir, "slides.html"), deck.content.slides.map((s, i) => `<!-- slide ${i + 1} -->\n${s.html}\n${s.notes ? `<!-- notes: ${s.notes} -->\n` : ""}`).join("\n"))
+    if (deck) await saveDeck(deck, resolve(__dirname, `../.jack-renders/try/${room.id}/${summary.id.slice(0, 8)}-v${deck.version}`))
   }
   await closeRenderer()
   await prisma.$disconnect()

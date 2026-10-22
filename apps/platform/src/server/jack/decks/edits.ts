@@ -47,30 +47,36 @@ export function applyWrites(content: JackDeckContent, writes: SlideWrite[], css?
   return { content: { css: nextCss, slides }, touched: [...touched], cssChanged: nextCss !== content.css }
 }
 
-/** A find-and-replace in one slide's HTML, or in the deck CSS when `slide` is left out */
-export type SlideEdit = { slide?: number; find: string; replace: string; all?: boolean }
+/** A find-and-replace in one slide's HTML (or its notes, with `notes`), or in the deck CSS when `slide` is left out */
+export type SlideEdit = { slide?: number; find: string; replace: string; all?: boolean; notes?: boolean }
 
 export function applyEdits(content: JackDeckContent, edits: SlideEdit[]): ApplyResult {
   const slides = content.slides.slice()
   let css = content.css
   const touched = new Set<string>()
   for (const [i, edit] of edits.entries()) {
-    const target = edit.slide === undefined ? "the deck CSS" : `slide ${edit.slide}`
+    const target = edit.slide === undefined ? "the deck CSS" : edit.notes ? `slide ${edit.slide}'s notes` : `slide ${edit.slide}`
     const where = `Edit ${i + 1} (${target})`
     if (!edit.find) return { error: `${where}: find can't be empty.` }
     if (edit.find === edit.replace) return { error: `${where}: find and replace are the same.` }
+    if (edit.notes && edit.slide === undefined) return { error: `${where}: say which slide's notes to edit.` }
     let text: string
     if (edit.slide === undefined) text = css
     else {
       if (!Number.isInteger(edit.slide) || edit.slide < 1 || edit.slide > slides.length) return { error: `${where}: the deck has ${slides.length} slides.` }
-      text = slides[edit.slide - 1].html
+      text = edit.notes ? (slides[edit.slide - 1].notes ?? "") : slides[edit.slide - 1].html
     }
     const count = text.split(edit.find).length - 1
     if (count === 0) return { error: `${where}: the find text isn't in ${target}. Call deck_view to see its current HTML, and copy the text exactly.` }
     if (count > 1 && !edit.all) return { error: `${where}: the find text appears ${count} times in ${target}. Add more of the surrounding text so it's unique, or set all to replace every one.` }
     const next = edit.all ? text.split(edit.find).join(edit.replace) : text.replace(edit.find, () => edit.replace)
     if (edit.slide === undefined) css = next
-    else {
+    else if (edit.notes) {
+      // Notes don't change the picture, so the slide isn't re-rendered
+      const { notes: _old, ...slide } = slides[edit.slide - 1]
+      void _old
+      slides[edit.slide - 1] = next.trim() ? { ...slide, notes: next.trim() } : slide
+    } else {
       const slide = slides[edit.slide - 1]
       slides[edit.slide - 1] = { ...slide, html: next }
       touched.add(slide.id)
