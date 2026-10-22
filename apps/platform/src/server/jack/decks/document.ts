@@ -22,15 +22,30 @@ export const JACK_ASSET_HOST = "jack.assets"
 export const FONTS_CSS_URL =
   "https://fonts.googleapis.com/css2?family=Kanit:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,500;1,600;1,700;1,800;1,900&family=Montserrat:ital,wght@0,400..900;1,400..900&display=block"
 
-/** Hosts a slide may load from, as the page's CSP says (renderer.ts enforces the same list on every request) */
-const CSP = [
-  "default-src 'none'",
-  `img-src data: https://res.cloudinary.com ${ASSET_ORIGIN} https://${JACK_ASSET_HOST}`,
-  "style-src 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src https://fonts.gstatic.com",
-  `base-uri ${ASSET_ORIGIN}`,
-  "form-action 'none'",
-].join("; ")
+/** The club's Cloudinary account (the gallery's photos). Slides may load images from it and no other account */
+export function cloudinaryCloudName(): string {
+  return process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME?.trim() || "daklxjoxr"
+}
+
+/** Where the club's own uploaded images live on Cloudinary. Only this prefix loads; Cloudinary's fetch delivery (which downloads any URL it's given) never does */
+export function cloudinaryUploadPrefix(): string {
+  return `/${cloudinaryCloudName()}/image/upload/`
+}
+
+/** The site's static image folders (apps/platform/public). Nothing else on the site loads from a slide */
+export const SITE_IMAGE_FOLDERS = ["/images/", "/brand/", "/sponsors/", "/partners/", "/jack/"]
+
+/** What a slide may load, as the page's CSP says (renderer.ts enforces the same on every request) */
+function contentSecurityPolicy(): string {
+  return [
+    "default-src 'none'",
+    `img-src data: https://res.cloudinary.com${cloudinaryUploadPrefix()} ${SITE_IMAGE_FOLDERS.map((folder) => `${ASSET_ORIGIN}${folder}`).join(" ")} https://${JACK_ASSET_HOST}`,
+    "style-src 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src https://fonts.gstatic.com",
+    `base-uri ${ASSET_ORIGIN}`,
+    "form-action 'none'",
+  ].join("; ")
+}
 
 /**
  * Tags a slide can't use: scripts (JavaScript is off anyway), and anything that would change the page
@@ -55,7 +70,7 @@ export function slideDocument({ size, css, html }: SlideSource): string {
 <html lang="en" data-size="${size}">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="${CSP}">
+<meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy()}">
 <base href="${ASSET_ORIGIN}/">
 <link rel="stylesheet" href="${FONTS_CSS_URL}">
 <style>${KIT_CSS}</style>

@@ -196,7 +196,7 @@ type Produced = {
   outcome: ReplyOutcome | "no_api_key" | "over_budget"
   parts: JackToolPart[]
   toolCalls: number
-  /** It worked on a deck and stopped at a limit with work left (#177) */
+  /** It worked on a deck and stopped at a limit with work left, or was cut off at its time limit (#177) */
   unfinishedDesign?: boolean
 }
 
@@ -295,7 +295,7 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   }
   await deps.broadcast(roomId, { type: JACK_EVENT.done, message: toMessageView(final) })
 
-  if (status === "done" && produced?.unfinishedDesign) {
+  if (produced?.unfinishedDesign) {
     await leaveContinueNote(roomId, persona, waiting, deps).catch((error) => console.error(`[jack] Couldn't leave a continue note in room ${roomId}:`, error))
   }
 
@@ -398,7 +398,9 @@ async function produce(
     outcome: out.outcome,
     parts: out.parts,
     toolCalls: out.toolCalls,
-    unfinishedDesign: out.design && (out.wrappedUp || out.outcome === "tool_limit"),
+    // A deck step can outlast the wrap-up margin (writing slides, or rendering them), so a deck reply
+    // cancelled at its time limit counts too: it ends as an error, but the work saved so far stands
+    unfinishedDesign: out.design && (out.wrappedUp || out.outcome === "tool_limit" || run.signal.aborted),
   }
 }
 
@@ -426,7 +428,7 @@ async function leaveContinueNote(roomId: string, persona: JackRoomPersonaKey, wa
       kind: "system",
       continues: true,
       authorUserId: asker.authorUserId,
-      content: `${JACK_PERSONA_NAME[persona]} hit this reply's limits partway through the deck and is picking up where he left off (automatic, ${count + 1} of ${MAX_AUTO_CONTINUES})`,
+      content: `${JACK_PERSONA_NAME[persona]} hit this reply's limits partway through the deck and is picking up where he left off (automatic, ${count + 1} of ${MAX_AUTO_CONTINUES}). Changes from the last reply may have been saved even where a tool shows as failed, so check the deck with deck_view first`,
     },
     include: jackMessageInclude,
   })

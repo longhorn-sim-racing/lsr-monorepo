@@ -10,6 +10,7 @@ vi.mock("./renderer", () => ({
     view: Buffer.from("view"),
     thumb: Buffer.from("thumb"),
     issues: ["Text \"x\" overlaps \"y\"."],
+    transient: false,
     ms: 12,
   })),
 }))
@@ -49,6 +50,26 @@ describe("ensureRender", () => {
     const other = { ...source, html: "<section>Other</section>" }
     await Promise.all([ensureRender(other), ensureRender(other), getRenderFile(other, "thumb")])
     expect(renderSlide).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("renders that may come out better next time", () => {
+  it("aren't cached, so the next request renders again, and say so", async () => {
+    const slow = { ...source, html: "<section>Slow photo</section>" }
+    const base = await vi.mocked(renderSlide).getMockImplementation()!(slow)
+    vi.mocked(renderSlide).mockResolvedValueOnce({ ...base, transient: true, issues: ["Some images were still loading after 20 s"] })
+    const first = await getRenderFile(slow, "png")
+    expect(first.transient).toBe(true)
+    const second = await getRenderFile(slow, "png")
+    expect(second.transient).toBe(false)
+    expect(renderSlide).toHaveBeenCalledTimes(2)
+  })
+
+  it("still come back when the store can't be written to", async () => {
+    setJackFileStore({ kind: "blob", get: async () => null, put: async () => { throw new Error("Blob auth failed") }, signedUrl: async () => null })
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const result = await ensureRender({ ...source, html: "<section>Store down</section>" }, { withView: true })
+    expect(result.view?.toString()).toBe("view")
   })
 })
 

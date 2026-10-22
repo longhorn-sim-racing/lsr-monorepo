@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import type { Browser, HTTPRequest, Page } from "puppeteer-core"
 import { JACK_DECK_SIZES, type JackDeckSizeKey } from "@/lib/jack/decks"
-import { ASSET_ORIGIN, JACK_ASSET_HOST, slideDocument, type SlideSource } from "./document"
+import { ASSET_ORIGIN, cloudinaryUploadPrefix, JACK_ASSET_HOST, SITE_IMAGE_FOLDERS, slideDocument, type SlideSource } from "./document"
 import { inspectSlide, INSPECT_KIT_FONTS } from "./inspect"
 import { MIN_TEXT_PX } from "./kit-css"
 
@@ -27,6 +27,12 @@ export type RenderedSlide = {
   view: Buffer
   thumb: Buffer
   issues: string[]
+  /**
+   * Something went wrong that may not happen next time (images or fonts still loading at the time
+   * limit, a 5xx or rate-limited response, a dropped connection). Such a render isn't cached, so the
+   * next request renders the slide again
+   */
+  transient: boolean
   ms: number
 }
 
@@ -72,8 +78,20 @@ export function routeRequest(rawUrl: string, options: { navigation: boolean }): 
   if (url.username || url.password || (url.port && url.port !== "443")) return { action: "block", reason: "URLs with logins or ports don't load" }
   if (url.host === JACK_ASSET_HOST) return { action: "asset" }
   if (url.host === "fonts.googleapis.com" || url.host === "fonts.gstatic.com") return { action: "continue" }
-  if (url.host === "res.cloudinary.com") return { action: "continue" }
+  if (url.host === "res.cloudinary.com") {
+    // Only the club's own uploads. Cloudinary can also fetch any URL for you (fetch delivery, l_fetch and
+    // u_fetch overlays), which would let a slide send data anywhere, so anything mentioning fetch is out
+    let path: string
+    try {
+      path = decodeURIComponent(url.pathname)
+    } catch {
+      return { action: "block", reason: "not a valid URL" }
+    }
+    if (!url.pathname.startsWith(cloudinaryUploadPrefix()) || /fetch/i.test(path)) return { action: "block", reason: "only the club's own Cloudinary photos load" }
+    return { action: "continue" }
+  }
   if (url.host === ASSET_HOST) {
+    if (!SITE_IMAGE_FOLDERS.some((folder) => url.pathname.startsWith(folder))) return { action: "block", reason: "only the site's image folders load" }
     if (OPTIMIZABLE.test(url.pathname) && !url.search) {
       return { action: "continue", url: `${ASSET_ORIGIN}/_next/image?url=${encodeURIComponent(url.pathname)}&w=2048&q=75` }
     }
@@ -157,14 +175,15 @@ export function scaleFor(size: JackDeckSizeKey, longSide: number): number {
 
 export async function renderSlide(source: SlideSource, options: { assets?: AssetResolver; signal?: AbortSignal } = {}): Promise<RenderedSlide> {
   const started = Date.now()
-  return withSlidePage(source, options, async (page, network) => {
+  return withSlidePage(source, options, async (page, { network, transient }) => {
     const { width, height } = JACK_DECK_SIZES[source.size]
     const issues = await page.evaluate(inspectSlide, { width, height, minFont: MIN_TEXT_PX[source.size], kitFonts: INSPECT_KIT_FONTS })
     const png = Buffer.from(await page.screenshot({ type: "png", clip: { x: 0, y: 0, width, height } }))
     const jpg = Buffer.from(await page.screenshot({ type: "jpeg", quality: 90, clip: { x: 0, y: 0, width, height } }))
     const view = Buffer.from(await page.screenshot({ type: "jpeg", quality: 85, clip: { x: 0, y: 0, width, height, scale: scaleFor(source.size, VIEW_LONG_SIDE) } }))
     const thumb = Buffer.from(await page.screenshot({ type: "jpeg", quality: 78, clip: { x: 0, y: 0, width, height, scale: scaleFor(source.size, THUMB_LONG_SIDE) } }))
-    return { png, jpg, view, thumb, issues: [...issues, ...network], ms: Date.now() - started }
+    const fontsLate = issues.some((issue) => issue.includes("didn't load in time"))
+    return { png, jpg, view, thumb, issues: [...issues, ...network], transient: transient || fontsLate, ms: Date.now() - started }
   })
 }
 
@@ -175,7 +194,7 @@ export async function renderSlide(source: SlideSource, options: { assets?: Asset
 async function withSlidePage<T>(
   source: SlideSource,
   options: { assets?: AssetResolver; signal?: AbortSignal },
-  work: (page: Page, network: string[]) => Promise<T>
+  work: (page: Page, loaded: LoadedSlide) => Promise<T>
 ): Promise<T> {
   return withPageSlot(async () => {
     const browser = await getBrowser()
@@ -201,9 +220,13 @@ async function withSlidePage<T>(
   })
 }
 
-async function loadSlide(page: Page, source: SlideSource, options: { assets?: AssetResolver }): Promise<string[]> {
+/** What loading a slide ran into: requests that failed or were blocked, and whether any of it may pass next time */
+type LoadedSlide = { network: string[]; transient: boolean }
+
+async function loadSlide(page: Page, source: SlideSource, options: { assets?: AssetResolver }): Promise<LoadedSlide> {
   const { width, height } = JACK_DECK_SIZES[source.size]
   const network: string[] = []
+  let transient = false
   const note = (line: string) => {
     if (network.length < 6 && !network.includes(line)) network.push(line)
   }
@@ -214,22 +237,29 @@ async function loadSlide(page: Page, source: SlideSource, options: { assets?: As
   page.on("request", (request) => void handleRequest(request, options.assets, note))
   page.on("requestfailed", (request) => {
     const reason = request.failure()?.errorText ?? "failed"
-    if (!reason.includes("BLOCKED_BY_CLIENT")) note(`Couldn't load ${shortUrl(request.url())} (${reason}).`)
+    if (reason.includes("BLOCKED_BY_CLIENT")) return
+    transient = true
+    note(`Couldn't load ${shortUrl(request.url())} (${reason}).`)
   })
   page.on("response", (response) => {
-    if (response.status() >= 400) note(`Couldn't load ${shortUrl(response.url())} (HTTP ${response.status()}).`)
+    const status = response.status()
+    if (status < 400) return
+    if (status >= 500 || status === 429 || status === 408) transient = true
+    note(`Couldn't load ${shortUrl(response.url())} (HTTP ${status}).`)
   })
 
   try {
     await page.setContent(slideDocument(source), { waitUntil: "load", timeout: LOAD_TIMEOUT_MS })
   } catch (error) {
     if (!(error instanceof Error && error.name === "TimeoutError")) throw error
+    transient = true
     note(`Some images were still loading after ${LOAD_TIMEOUT_MS / 1000} s, so this render may be missing them. Render it again.`)
   }
   // Bundlers can wrap functions in a __name() helper that doesn't exist inside the page
   await page.evaluate("globalThis.__name = (f) => f")
-  await Promise.race([page.evaluate(() => document.fonts.ready.then(() => true)), new Promise((resolve) => setTimeout(resolve, FONTS_TIMEOUT_MS))])
-  return network
+  const fontsReady = await Promise.race([page.evaluate(() => document.fonts.ready.then(() => true)), new Promise<false>((resolve) => setTimeout(() => resolve(false), FONTS_TIMEOUT_MS))])
+  if (!fontsReady) transient = true
+  return { network, transient }
 }
 
 async function handleRequest(request: HTTPRequest, assets: AssetResolver | undefined, note: (line: string) => void) {

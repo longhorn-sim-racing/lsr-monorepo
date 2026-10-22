@@ -35,13 +35,16 @@ export type SlideRenderResult = {
   view?: Buffer
   /** Whether it came from the store rather than a fresh render */
   cached: boolean
+  /** It ran into something that may pass next time, so it wasn't cached (RenderedSlide.transient) */
+  transient: boolean
   ms: number
 }
 
 type RenderMeta = { issues: string[]; ms: number; renderedAt: string }
+type Rendered = { issues: string[]; ms: number; transient: boolean; files: Record<RenderFileKind, Buffer> }
 
 /** Renders in progress in this instance, by key, so two callers wanting the same slide share one render */
-const inFlight = new Map<string, Promise<{ issues: string[]; ms: number; files: Record<RenderFileKind, Buffer> }>>()
+const inFlight = new Map<string, Promise<Rendered>>()
 
 /**
  * Makes sure a slide's render exists, rendering it if the store doesn't have it, and returns its
@@ -51,41 +54,50 @@ export async function ensureRender(source: SlideSource, options: { withView?: bo
   const key = renderKey(source)
   const store = jackFileStore()
   if (store.kind !== "none") {
-    const metaFile = await store.get(`${RENDERS}/${key}/meta.json`)
+    const metaFile = await store.get(`${RENDERS}/${key}/meta.json`).catch(() => null)
     if (metaFile) {
       const meta = JSON.parse(metaFile.toString("utf8")) as RenderMeta
-      const view = options.withView ? await store.get(`${RENDERS}/${key}/${FILES.view.name}`) : undefined
-      if (!options.withView || view) return { key, issues: meta.issues, view: view ?? undefined, cached: true, ms: 0 }
+      const view = options.withView ? await store.get(`${RENDERS}/${key}/${FILES.view.name}`).catch(() => null) : undefined
+      if (!options.withView || view) return { key, issues: meta.issues, view: view ?? undefined, cached: true, transient: false, ms: 0 }
     }
   }
   const made = await renderOnce(key, source, options.signal)
-  return { key, issues: made.issues, view: options.withView ? made.files.view : undefined, cached: false, ms: made.ms }
+  return { key, issues: made.issues, view: options.withView ? made.files.view : undefined, cached: false, transient: made.transient, ms: made.ms }
 }
 
-/** One of a slide's render files, rendering the slide first if needed */
-export async function getRenderFile(source: SlideSource, kind: RenderFileKind): Promise<{ key: string; body: Buffer }> {
+/** One of a slide's render files, rendering the slide first if needed. `transient`: it wasn't cached, so don't let anyone keep it */
+export async function getRenderFile(source: SlideSource, kind: RenderFileKind): Promise<{ key: string; body: Buffer; transient: boolean }> {
   const key = renderKey(source)
   const store = jackFileStore()
-  const stored = await store.get(`${RENDERS}/${key}/${FILES[kind].name}`)
-  if (stored) return { key, body: stored }
+  const stored = await store.get(`${RENDERS}/${key}/${FILES[kind].name}`).catch((error) => {
+    console.error(`[jack] Couldn't read render ${key} from the store:`, error)
+    return null
+  })
+  if (stored) return { key, body: stored, transient: false }
   const made = await renderOnce(key, source)
-  return { key, body: made.files[kind] }
+  return { key, body: made.files[kind], transient: made.transient }
 }
 
-function renderOnce(key: string, source: SlideSource, signal?: AbortSignal) {
+function renderOnce(key: string, source: SlideSource, signal?: AbortSignal): Promise<Rendered> {
   const running = inFlight.get(key)
   if (running) return running
   const work = (async () => {
     const rendered = await renderSlide(source, { assets: resolveJackAsset, signal })
     const files: Record<RenderFileKind, Buffer> = { png: rendered.png, jpg: rendered.jpg, view: rendered.view, thumb: rendered.thumb }
     const store = jackFileStore()
-    if (store.kind !== "none") {
-      const meta: RenderMeta = { issues: rendered.issues, ms: rendered.ms, renderedAt: new Date().toISOString() }
-      // The images first, then meta.json, which is what marks the render complete
-      await Promise.all((Object.keys(FILES) as RenderFileKind[]).map((kind) => store.put(`${RENDERS}/${key}/${FILES[kind].name}`, files[kind], FILES[kind].type)))
-      await store.put(`${RENDERS}/${key}/meta.json`, Buffer.from(JSON.stringify(meta)), "application/json")
+    // A render that may come out better next time isn't kept. A store that can't be written to (a
+    // misconfigured Blob store) shouldn't break rendering either: the render is served, just not cached
+    if (store.kind !== "none" && !rendered.transient) {
+      try {
+        const meta: RenderMeta = { issues: rendered.issues, ms: rendered.ms, renderedAt: new Date().toISOString() }
+        // The images first, then meta.json, which is what marks the render complete
+        await Promise.all((Object.keys(FILES) as RenderFileKind[]).map((kind) => store.put(`${RENDERS}/${key}/${FILES[kind].name}`, files[kind], FILES[kind].type)))
+        await store.put(`${RENDERS}/${key}/meta.json`, Buffer.from(JSON.stringify(meta)), "application/json")
+      } catch (error) {
+        console.error(`[jack] Couldn't save render ${key} to the ${store.kind} store:`, error)
+      }
     }
-    return { issues: rendered.issues, ms: rendered.ms, files }
+    return { issues: rendered.issues, ms: rendered.ms, transient: rendered.transient, files }
   })()
   inFlight.set(key, work)
   work.finally(() => inFlight.delete(key)).catch(() => {})

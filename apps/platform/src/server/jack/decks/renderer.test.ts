@@ -7,7 +7,7 @@ describe("routeRequest", () => {
   it("lets fonts, club photos and the site's own files load", () => {
     expect(routeRequest("https://fonts.googleapis.com/css2?family=Kanit", page)).toEqual({ action: "continue" })
     expect(routeRequest("https://fonts.gstatic.com/s/kanit/v1/x.woff2", page)).toEqual({ action: "continue" })
-    expect(routeRequest("https://res.cloudinary.com/demo/image/upload/c_limit,w_2000/gallery/x.jpg", page)).toEqual({ action: "continue" })
+    expect(routeRequest("https://res.cloudinary.com/daklxjoxr/image/upload/c_limit,w_2000/gallery/x.jpg", page)).toEqual({ action: "continue" })
     expect(routeRequest("https://www.longhornsimracing.org/brand/logos/white_logo.png", page)).toEqual({ action: "continue" })
     expect(routeRequest("data:image/svg+xml;base64,PHN2Zy8+", page)).toEqual({ action: "continue" })
   })
@@ -18,6 +18,23 @@ describe("routeRequest", () => {
       url: "https://www.longhornsimracing.org/_next/image?url=%2Fimages%2Fgal_03.jpeg&w=2048&q=75",
     })
     expect(routeRequest("https://www.longhornsimracing.org/images/liveries/le-mans-amg.webp", page)).toMatchObject({ url: expect.stringContaining("w=2048") })
+  })
+
+  it("blocks other Cloudinary accounts, Cloudinary's fetch delivery, and the rest of the site", () => {
+    for (const url of [
+      "https://res.cloudinary.com/demo/image/upload/sample.jpg",
+      "https://res.cloudinary.com/demo/image/fetch/https://evil.example/x.png?d=secret",
+      "https://res.cloudinary.com/daklxjoxr/image/fetch/https://evil.example/x.png",
+      "https://res.cloudinary.com/daklxjoxr/image/upload/l_fetch:aHR0cHM6Ly9ldmlsLmV4YW1wbGU=/gallery/x.jpg",
+      "https://res.cloudinary.com/daklxjoxr/image/upload/u_fe%74ch:aHR0cHM6/gallery/x.jpg",
+      "https://res.cloudinary.com/daklxjoxr/video/upload/clip.mp4",
+      "https://www.longhornsimracing.org/_next/image?url=https%3A%2F%2Fres.cloudinary.com%2Fdemo%2Fimage%2Ffetch%2Fhttps%3A%2F%2Fevil.example",
+      "https://www.longhornsimracing.org/api/admin/audit-logs",
+      "https://www.longhornsimracing.org/",
+      "https://res.cloudinary.com/daklxjoxr/image/upload/%E0%A4%A/x.jpg",
+    ]) {
+      expect(routeRequest(url, page).action, url).toBe("block")
+    }
   })
 
   it("answers jack.assets itself", () => {

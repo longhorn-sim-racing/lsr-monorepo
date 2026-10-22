@@ -80,7 +80,7 @@ async function main() {
     if (!withExports) return
     for (const format of ["pdf", "pptx", "zip"] as const) {
       const started = Date.now()
-      const body = await buildDeckExport(deck, format)
+      const { body } = await buildDeckExport(deck, format)
       writeFileSync(resolve(dir, exportFileName(deck, format)), body)
       console.log(`  ${format}: ${Math.round(body.length / 1024)} KB in ${((Date.now() - started) / 1000).toFixed(1)} s`)
     }

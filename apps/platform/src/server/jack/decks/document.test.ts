@@ -40,6 +40,8 @@ describe("slideDocument", () => {
     expect(order.every((index) => index >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
     expect(doc).toContain("default-src 'none'")
+    expect(doc).toContain("img-src data: https://res.cloudinary.com/daklxjoxr/image/upload/ https://www.longhornsimracing.org/images/ ")
+    expect(doc).not.toMatch(/img-src[^;]*https:\/\/res\.cloudinary\.com /)
   })
 })
 
