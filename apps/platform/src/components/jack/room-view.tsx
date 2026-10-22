@@ -213,7 +213,17 @@ function OfficerAvatar({ name, url, className }: { name: string; url: string | n
   if (url && failed !== url)
     return (
       // eslint-disable-next-line @next/next/no-img-element -- avatars come from several hosts
-      <img src={url} alt="" aria-hidden referrerPolicy="no-referrer" onError={() => setFailed(url)} className={cn("shrink-0 rounded-full bg-muted object-cover", className)} />
+      <img
+        src={url}
+        alt=""
+        aria-hidden
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(url)}
+        // A picture that failed before the page hydrated never fires onError
+        ref={(img) => {
+          if (img?.complete && !img.naturalWidth) setFailed(url)
+        }}
+        className={cn("shrink-0 rounded-full bg-muted object-cover", className)} />
     )
   return (
     <span aria-hidden className={cn("flex shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-tone-neutral-foreground", className)}>
