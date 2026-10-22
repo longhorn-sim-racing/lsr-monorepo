@@ -187,7 +187,7 @@ When the month's total reaches `JACK_MONTHLY_BUDGET_USD` (default $50), Jack sto
 3. **No secrets in database settings.** Any role can read them, so check (names only) that nothing secret is set at the database or role level: `SELECT split_part(s, '=', 1) FROM pg_db_role_setting, unnest(setconfig) AS s;`. `run_sql` refuses these reads by name, but that's defense in depth, not a permission; the secret shouldn't be there at all.
 4. **Vercel** (Production): add `ANTHROPIC_API_KEY`, `JACK_DATABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and `JACK_MONTHLY_BUDGET_USD` if the cap isn't $50. Add them to Preview only if previews should answer too (they share whatever database they point at). Redeploy.
 5. **Blob store for decks.** In the Vercel dashboard: Storage → Create → Blob, **private**, connected to the project for Production and Preview. That sets `BLOB_STORE_ID`; redeploy.
-6. **Check it.** Open a room, ask "How many members are there?", and watch the answer stream with a query part. The function log shows a `[jack] Reply …` line with the cost; the room gets a name from Stand. Then ask for "a one-slide Instagram story saying GM 2 is Monday": a deck card with a thumbnail appears, and **Open** shows the slide and its downloads.
+6. **Check it.** Open a room, ask "How many members are there?", and watch the answer stream with a query part. The function log shows a `[jack] Reply …` line with the cost; the room gets a name from Stand. Then open `/api/admin/jack/render-check` (signed in as an officer): it renders a slide with the real Chromium and should say `"ok": true` and `"store": "blob"` (`?image=1` shows the slide). Finally ask for "a one-slide Instagram story saying GM 2 is Monday": a deck card with a thumbnail appears, and **Open** shows the slide and its downloads.
 
 ### Function duration
 
@@ -204,7 +204,9 @@ A reply working on a deck that runs out of time (or tool calls) leaves a note as
 
 ## The eval
 
-`scripts/jack-eval.ts` (questions in `scripts/jack-eval/`) is Jack's test set: 52 questions in nine groups, from what officers ask every day to things he must refuse or could be tricked by. Everyday lookups, harder analysis, vague questions, things he can't do (refunds, email, role changes), things the data doesn't cover, attempts to break him (secrets, a `DELETE`, instructions hidden in an applicant's notes), very large requests, drafting, and follow-ups. Each goes through the same code a room reply does, on Stand, Jack and Lift.
+`scripts/jack-eval.ts` (questions in `scripts/jack-eval/`) is Jack's test set: 55 questions in ten groups, from what officers ask every day to things he must refuse or could be tricked by. Everyday lookups, harder analysis, vague questions, things he can't do (refunds, email, role changes), things the data doesn't cover, attempts to break him (secrets, a `DELETE`, instructions hidden in an applicant's notes), very large requests, drafting, follow-ups, and design (a GM deck, a recruiting story, a standings post: `scripts/jack-eval/design.ts`). Each goes through the same code a room reply does, on Stand, Jack and Lift.
+
+Design questions run in a throwaway room of their own (decks belong to a room; it and its decks are deleted after). The script checks the deck's size and slide count and renders every slide fresh, failing on any layout problem left; the judge also gets the slides as rendered and grades the design on what it sees. They need a real model and a local Chrome or Edge, so `--dry-run` skips them, and `--regrade` grades them without the images.
 
 Grading has two parts. A script checks what it can against the database: the right number or names, no forbidden tool, nothing changed, no secret in the answer. Opus 5.5 judges the rest against a written expectation and the database facts, blind to which model answered, and with the model's system prompt and each tool's description and inputs, so a claim that comes from them isn't counted as invented. It also grades tool use and notes tools that would have helped. If Opus declines to grade (a question about password hashes trips its checks), Fable 5.1 grades instead. If both decline and the script checks pass, the answer is saved ungraded: it's left out of the pass rate and listed apart, so read it yourself. (A script failure is still a failure.)
 
@@ -216,6 +218,7 @@ pnpm exec tsx scripts/jack-eval.ts                 # everything, all three model
 pnpm exec tsx scripts/jack-eval.ts --pilot         # five questions, under $1, to check grades and cost first
 pnpm exec tsx scripts/jack-eval.ts --only=jack     # one model
 pnpm exec tsx scripts/jack-eval.ts --group=safety  # one group (or --filter=<text> for question ids)
+pnpm exec tsx scripts/jack-eval.ts --group=design --only=jack  # the design questions on one model: about $1.50 with the judge
 pnpm exec tsx scripts/jack-eval.ts --variant=v1    # save beside the baseline after a change
 pnpm exec tsx scripts/jack-eval.ts --regrade       # grade saved answers again after a grader fix (judge calls only)
 pnpm exec tsx scripts/jack-eval.ts --regrade --no-judge  # rerun the answer-only checks (TEXT_RECHECK) on saved answers: free, no key
