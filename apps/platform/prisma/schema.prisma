@@ -1004,6 +1004,9 @@ model JackMessage {
   /// user messages: the reply that answered it. Null until Jack picks it up, so a message posted
   /// while he's answering waits for the next pass
   answeredById String?
+  /// A room note asking Jack to keep going (#177): a deck job that ran out of time or tool calls
+  /// leaves one, and it's answered like an officer message (answeredById), as the officer it names
+  continues    Boolean           @default(false)
 
   /// Assistant messages only (later steps)
   model           String?

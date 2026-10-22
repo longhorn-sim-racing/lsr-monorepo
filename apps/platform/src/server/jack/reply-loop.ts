@@ -73,6 +73,13 @@ export const RUN_TIMING: RunTiming = { runDeadlineMs: 280_000, minAnswerMs: 150_
 
 /** An answer is told to wrap up (REPLY_LIMITS.maxElapsedMs) at least this long before it would be cancelled */
 const WRAP_UP_MARGIN_MS = 60_000
+/** The same for a reply working on a deck: it only has to write a short hand-off note */
+const DESIGN_WRAP_UP_MARGIN_MS = 35_000
+/**
+ * A deck job that hits a reply's limits leaves a note asking Jack to keep going, at most this many
+ * times in a row without an officer posting (so one request can run a few replies, but never forever)
+ */
+export const MAX_AUTO_CONTINUES = 3
 /** Stand names a room only with at least this long left before the run's deadline (otherwise a later answer does) */
 const STAND_MIN_LEFT_MS = 20_000
 /** Stand's call ends at least this long before the run's deadline */
@@ -85,10 +92,13 @@ function deadline(ms: number, reason: string) {
   return { signal: controller.signal, clear: () => clearTimeout(timer) }
 }
 
-/** Officer messages nobody has answered yet, oldest first (system notes don't get answers) */
+/** What a reply answers: officer messages, and notes asking Jack to keep going on a deck (#177) */
+const ANSWERABLE = [{ kind: "user" as const }, { kind: "system" as const, continues: true }]
+
+/** Messages nobody has answered yet, oldest first (other room notes don't get answers) */
 function findUnanswered(roomId: string) {
   return prisma.jackMessage.findMany({
-    where: { roomId, kind: "user", answeredById: null },
+    where: { roomId, answeredById: null, OR: ANSWERABLE },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     include: jackMessageInclude,
   })
@@ -96,7 +106,7 @@ function findUnanswered(roomId: string) {
 
 async function hasUnanswered(roomId: string) {
   const first = await prisma.jackMessage.findFirst({
-    where: { roomId, kind: "user", answeredById: null },
+    where: { roomId, answeredById: null, OR: ANSWERABLE },
     select: { id: true },
   })
   return first !== null
@@ -186,6 +196,8 @@ type Produced = {
   outcome: ReplyOutcome | "no_api_key" | "over_budget"
   parts: JackToolPart[]
   toolCalls: number
+  /** It worked on a deck and stopped at a limit with work left (#177) */
+  unfinishedDesign?: boolean
 }
 
 /** The time an answer has: the run's deadline (as a signal and an instant), what's left of the run, and its own cap */
@@ -219,6 +231,7 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   const limits: Partial<ReplyLimits> = {
     ...deps.limits,
     maxElapsedMs: Math.min(deps.limits?.maxElapsedMs ?? REPLY_LIMITS.maxElapsedMs, Math.max(0, availableMs - WRAP_UP_MARGIN_MS)),
+    maxDesignElapsedMs: Math.min(deps.limits?.maxDesignElapsedMs ?? REPLY_LIMITS.maxDesignElapsedMs, Math.max(0, availableMs - DESIGN_WRAP_UP_MARGIN_MS)),
   }
 
   const stream = new DeltaStream({
@@ -281,6 +294,10 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
     final = { ...reply, ...result, status: "error", toolCalls: parts as unknown as Prisma.JsonValue }
   }
   await deps.broadcast(roomId, { type: JACK_EVENT.done, message: toMessageView(final) })
+
+  if (status === "done" && produced?.unfinishedDesign) {
+    await leaveContinueNote(roomId, persona, waiting, deps).catch((error) => console.error(`[jack] Couldn't leave a continue note in room ${roomId}:`, error))
+  }
 
   // Stand names an untitled room after its first real answer (one Claude wrote, not a notice or a
   // refusal), in the background, if the run has time left; its call ends before the run's deadline
@@ -375,7 +392,45 @@ async function produce(
     limits: run.limits,
     signal: run.signal,
   })
-  return { text: out.text, status: out.status, outcome: out.outcome, parts: out.parts, toolCalls: out.toolCalls }
+  return {
+    text: out.text,
+    status: out.status,
+    outcome: out.outcome,
+    parts: out.parts,
+    toolCalls: out.toolCalls,
+    unfinishedDesign: out.design && (out.wrappedUp || out.outcome === "tool_limit"),
+  }
+}
+
+/**
+ * A reply working on a deck stopped at its limits (#177): leave a note that asks Jack to keep going.
+ * The run answers it next if it has time; otherwise the room page starts a run for it as soon as
+ * it sees it. At most MAX_AUTO_CONTINUES in a row since an officer last posted; after that the
+ * reply's own hand-off note tells officers to ask him to keep going.
+ */
+async function leaveContinueNote(roomId: string, persona: JackRoomPersonaKey, waiting: JackMessageRow[], deps: ReplyLoopDeps) {
+  const recent = await prisma.jackMessage.findMany({
+    where: { roomId, OR: ANSWERABLE },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: MAX_AUTO_CONTINUES + 1,
+    select: { kind: true, continues: true },
+  })
+  const inARow = recent.findIndex((m) => !(m.kind === "system" && m.continues))
+  const count = inARow === -1 ? recent.length : inARow
+  if (count >= MAX_AUTO_CONTINUES) return
+  // Answered as the officer who asked, so the next reply's deck changes are theirs
+  const asker = waiting[waiting.length - 1]
+  const note = await prisma.jackMessage.create({
+    data: {
+      roomId,
+      kind: "system",
+      continues: true,
+      authorUserId: asker.authorUserId,
+      content: `${JACK_PERSONA_NAME[persona]} hit this reply's limits partway through the deck and is picking up where he left off (automatic, ${count + 1} of ${MAX_AUTO_CONTINUES})`,
+    },
+    include: jackMessageInclude,
+  })
+  await deps.broadcast(roomId, { type: JACK_EVENT.created, message: toMessageView(note) })
 }
 
 /** The messages a reply answered, as Stand reads them */

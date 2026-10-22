@@ -397,6 +397,12 @@ describe("stallCandidate", () => {
     expect(stallCandidate(race)).toBe("unanswered")
   })
 
+  it("counts a waiting note that asks Jack to keep going on a deck, until a reply picks it up", () => {
+    const keepGoing: JackMessageView = { ...note, id: "s2", continues: true, answered: false }
+    expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" }), keepGoing])).toBe("unanswered")
+    expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" }), { ...keepGoing, answered: true }])).toBeNull()
+  })
+
   it("ignores system notes, and answered messages after the last reply", () => {
     expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" }), note])).toBeNull()
     expect(stallCandidate([reply({ status: "done" }), officerMessage("m2", "2026-10-12T20:00:09.000Z")])).toBeNull()

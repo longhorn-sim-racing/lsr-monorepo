@@ -49,6 +49,8 @@ export type ReplyLimits = {
    */
   maxDesignToolCalls: number
   maxDesignOutputTokens: number
+  /** Wall time before a design reply is told to wrap up: its hand-off note is short, so it can work longer */
+  maxDesignElapsedMs: number
   /** Wall time before it's told to wrap up, well inside the function's maxDuration */
   maxElapsedMs: number
   toolTimeoutMs: number
@@ -61,6 +63,7 @@ export const REPLY_LIMITS: ReplyLimits = {
   maxOutputTokens: 64_000,
   maxDesignToolCalls: 30,
   maxDesignOutputTokens: 120_000,
+  maxDesignElapsedMs: 200_000,
   maxElapsedMs: 150_000,
   toolTimeoutMs: 45_000,
   maxJsonRetries: 2,
@@ -113,6 +116,10 @@ export type ModelReplyResult = {
   outcome: ReplyOutcome
   usage: UsageTally
   toolCalls: number
+  /** The reply called a deck tool (#177) */
+  design: boolean
+  /** It was told to stop and wrap up (tool calls, output or time ran out) rather than finishing on its own */
+  wrappedUp: boolean
 }
 
 /**
@@ -144,6 +151,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
   let design = false
   const toolCap = () => (design ? limits.maxDesignToolCalls : limits.maxToolCalls)
   const outputCap = () => (design ? limits.maxDesignOutputTokens : limits.maxOutputTokens)
+  const elapsedCap = () => (design ? limits.maxDesignElapsedMs : limits.maxElapsedMs)
 
   const say = (piece: string) => {
     if (!piece) return
@@ -183,7 +191,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
   }
   const result = async (status: "done" | "error", outcome: ReplyOutcome): Promise<ModelReplyResult> => {
     await partChain
-    return { text, parts, status, outcome, usage, toolCalls }
+    return { text, parts, status, outcome, usage, toolCalls, design, wrappedUp: wrapUp }
   }
 
   for (let call = 0; call < Math.max(limits.maxToolCalls, limits.maxDesignToolCalls) + 4; call++) {
@@ -291,7 +299,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
     const reason =
       toolCalls >= toolCap()
         ? `You've used this reply's ${toolCap()} tool calls.`
-        : usage.tokens.outputTokens >= outputCap() || now() - started >= limits.maxElapsedMs
+        : usage.tokens.outputTokens >= outputCap() || now() - started >= elapsedCap()
           ? "This reply is running long."
           : null
     const content: BetaContentBlockParam[] = [...results]
@@ -300,7 +308,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
       content.push({
         type: "text",
         text: design
-          ? `${reason} Don't call any more tools: in a few sentences, say what's done (with the deck's link) and what's left, so the next reply can pick it up.`
+          ? `${reason} Don't call any more tools: in a few sentences, say what's done (with the deck's link) and what's left. You'll pick it up in your next reply.`
           : `${reason} Don't call any more tools: answer now with what you have, and say what you couldn't check.`,
       })
     }

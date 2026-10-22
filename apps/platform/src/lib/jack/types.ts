@@ -47,12 +47,17 @@ export type JackMessageView = {
   /** The last streamed delta included in `content` */
   streamSeq: number
   /**
-   * Officer messages: whether a reply has picked it up (JackMessage.answeredById is set). Always true
-   * for other messages, which nobody answers. A message waiting for an answer can sort above the reply
+   * Officer messages and continue notes: whether a reply has picked it up (JackMessage.answeredById is
+   * set). Always true for other messages, which nobody answers. A message waiting for an answer can sort above the reply
    * that's streaming (it was posted while the reply was being set up), so this, not the order, says
    * what's still waiting
    */
   answered: boolean
+  /**
+   * A room note asking Jack to keep going on a deck (#177). Answered like an officer message; the
+   * room starts a run for it as soon as it sees one waiting
+   */
+  continues?: true
   /** ISO timestamp */
   createdAt: string
 }
