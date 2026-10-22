@@ -141,7 +141,7 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
           if (status === "SUBSCRIBED") {
             rejoins.current = 0
             setConnection("live")
-            void ch.track({ userId: me.userId, displayName: me.displayName })
+            void ch.track(me)
             // Catch up on whatever went out before this join (or during a reconnect)
             void resync()
           } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
@@ -165,7 +165,7 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
       })
       leaving.set(topic, left)
     }
-  }, [roomId, me.userId, me.displayName, resync, joinAttempt])
+  }, [roomId, me.userId, me.displayName, me.avatarUrl, resync, joinAttempt])
 
   // A streaming reply has a gap, or a done event came trimmed: fetch a fresh snapshot, waiting longer
   // each time while the database catches up (a failed fetch counts as a try too)
@@ -281,6 +281,6 @@ function presentOfficers(state: Record<string, JackPresence[]>): JackPresence[] 
   return Object.values(state)
     .map((metas) => metas[0])
     .filter((meta): meta is JackPresence => Boolean(meta?.userId))
-    .map(({ userId, displayName }) => ({ userId, displayName }))
+    .map(({ userId, displayName, avatarUrl }) => ({ userId, displayName, avatarUrl }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName))
 }

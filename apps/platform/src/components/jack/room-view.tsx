@@ -217,7 +217,12 @@ function PresenceStack({ present }: { present: JackPresence[] }) {
             key={p.userId}
             className={cn("flex size-6 items-center justify-center rounded-full border-2 border-card bg-muted text-[10px] font-semibold text-tone-neutral-foreground", i > 0 && "-ml-1.5")}
           >
-            {initials(p.displayName)}
+            {p.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- officer avatars may be served from various hosts
+              <img src={p.avatarUrl} alt="" className="size-full rounded-full object-cover" />
+            ) : (
+              initials(p.displayName)
+            )}
           </span>
         ))}
       </div>
@@ -352,7 +357,12 @@ const MessageRow = memo(function MessageRow({ message }: { message: JackMessageV
         <PersonaAvatar persona={message.author.persona} />
       ) : (
         <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-tone-neutral-foreground">
-          {initials(name)}
+          {message.author.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- officer avatars may be served from various hosts
+            <img src={message.author.avatarUrl} alt="" className="size-full rounded-full object-cover" />
+          ) : (
+            initials(name)
+          )}
         </span>
       )}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
