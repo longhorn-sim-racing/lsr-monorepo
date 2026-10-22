@@ -36,7 +36,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ deck
   if (!deck) return NextResponse.json({ error: "Not found" }, { status: 404 })
   if (!deck.content.slides.length) return NextResponse.json({ error: "This deck has no slides yet" }, { status: 409 })
 
-  let file: { pathname: string; body: Buffer }
+  let file: { pathname: string; body: Buffer; stored: boolean }
   try {
     file = await getDeckExport(deck, format)
   } catch (error) {
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ deck
     return NextResponse.json({ error: "Couldn't build that download" }, { status: 500 })
   }
 
-  if (file.body.length > MAX_INLINE_BYTES) {
+  if (file.body.length > MAX_INLINE_BYTES && file.stored) {
     const signed = await jackFileStore().signedUrl(file.pathname, 10 * 60_000).catch(() => null)
     if (signed) return NextResponse.redirect(signed, { status: 302, headers: { "cache-control": "no-store" } })
   }

@@ -43,7 +43,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ deck
   if (!deck || index === -1) return NextResponse.json({ error: "Not found" }, { status: 404 })
   const slide = deck.content.slides[index]
 
-  let file: { key: string; body: Buffer }
+  let file: { key: string; body: Buffer; transient: boolean }
   try {
     file = await getRenderFile({ size: deck.size, css: deck.content.css, html: slide.html }, kind)
   } catch (error) {
@@ -53,14 +53,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ deck
 
   const download = search.get("download") === "1"
   const name = `${slugify(deck.title) || "slide"}-${String(index + 1).padStart(2, "0")}.${kind === "png" ? "png" : "jpg"}`
-  if (file.body.length > MAX_INLINE_BYTES) {
+  // (a transient render wasn't stored, so it has no link; it goes out inline and may fail if it's that big)
+  if (file.body.length > MAX_INLINE_BYTES && !file.transient) {
     const signed = await jackFileStore().signedUrl(`jack/renders/${file.key}/${kind === "png" ? "full.png" : `${kind}.jpg`}`, 10 * 60_000).catch(() => null)
     if (signed) return NextResponse.redirect(signed, { status: 302, headers: { "cache-control": "no-store" } })
   }
   return new NextResponse(new Uint8Array(file.body), {
     headers: {
       "content-type": renderContentType(kind),
-      "cache-control": version ? "private, max-age=31536000, immutable" : "private, no-cache",
+      // A version never changes, so its render can be kept, unless this one may come out better next time
+      "cache-control": file.transient ? "no-store" : version ? "private, max-age=31536000, immutable" : "private, no-cache",
       "x-content-type-options": "nosniff",
       ...(download ? { "content-disposition": `attachment; filename="${name}"` } : {}),
     },

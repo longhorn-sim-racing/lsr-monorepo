@@ -35,23 +35,29 @@ export function exportPath(deck: Pick<DeckView, "id" | "title" | "version">, for
 }
 
 /** The export for a deck version: from the store, or built (and stored) now */
-export async function getDeckExport(deck: DeckView, format: DeckExportFormat): Promise<{ pathname: string; body: Buffer }> {
+export async function getDeckExport(deck: DeckView, format: DeckExportFormat): Promise<{ pathname: string; body: Buffer; stored: boolean }> {
   const store = jackFileStore()
   const pathname = exportPath(deck, format)
   const stored = await store.get(pathname)
-  if (stored) return { pathname, body: stored }
-  const body = await buildDeckExport(deck, format)
-  await store.put(pathname, body, EXPORT_TYPES[format].contentType)
-  return { pathname, body }
+  if (stored) return { pathname, body: stored, stored: true }
+  const { body, transient } = await buildDeckExport(deck, format)
+  // An export with a slide that may render better next time isn't kept. Nor does a store that can't be
+  // written to stop the download
+  const kept = !transient && store.kind !== "none" && (await store.put(pathname, body, EXPORT_TYPES[format].contentType).then(() => true, (error) => {
+    console.error(`[jack] Couldn't keep export ${pathname}:`, error)
+    return false
+  }))
+  return { pathname, body, stored: kept }
 }
 
-export async function buildDeckExport(deck: DeckView, format: DeckExportFormat): Promise<Buffer> {
+export async function buildDeckExport(deck: DeckView, format: DeckExportFormat): Promise<{ body: Buffer; transient: boolean }> {
   const slides = deck.content.slides
   if (!slides.length) throw new Error("This deck has no slides yet.")
   const source = (html: string) => ({ size: deck.size, css: deck.content.css, html })
 
   if (format === "zip") {
-    const pngs = await Promise.all(slides.map(async (slide) => (await getRenderFile(source(slide.html), "png")).body))
+    const renders = await Promise.all(slides.map((slide) => getRenderFile(source(slide.html), "png")))
+    const pngs = renders.map((r) => r.body)
     const files: Record<string, Uint8Array> = {}
     pngs.forEach((png, i) => {
       files[`${String(i + 1).padStart(2, "0")}.png`] = new Uint8Array(png)
@@ -59,10 +65,12 @@ export async function buildDeckExport(deck: DeckView, format: DeckExportFormat):
     const notes = slides.map((slide, i) => (slide.notes ? `Slide ${i + 1}\n${slide.notes}\n` : "")).filter(Boolean)
     if (notes.length) files["notes.txt"] = strToU8(notes.join("\n"))
     // PNGs are compressed already
-    return Buffer.from(zipSync(files, { level: 0 }))
+    return { body: Buffer.from(zipSync(files, { level: 0 })), transient: renders.some((r) => r.transient) }
   }
 
-  const jpgs = await Promise.all(slides.map(async (slide) => (await getRenderFile(source(slide.html), "jpg")).body))
+  const jpgRenders = await Promise.all(slides.map((slide) => getRenderFile(source(slide.html), "jpg")))
+  const jpgs = jpgRenders.map((r) => r.body)
+  const transient = jpgRenders.some((r) => r.transient)
   const { width, height } = JACK_DECK_SIZES[deck.size]
 
   if (format === "pdf") {
@@ -76,7 +84,7 @@ export async function buildDeckExport(deck: DeckView, format: DeckExportFormat):
       const image = await pdf.embedJpg(jpg)
       pdf.addPage([pageWidth, pageHeight]).drawImage(image, { x: 0, y: 0, width: pageWidth, height: pageHeight })
     }
-    return Buffer.from(await pdf.save())
+    return { body: Buffer.from(await pdf.save()), transient }
   }
 
   const { default: PptxGenJS } = await import("pptxgenjs")
@@ -93,5 +101,5 @@ export async function buildDeckExport(deck: DeckView, format: DeckExportFormat):
     if (slide.notes) page.addNotes(slide.notes)
   })
   const out = await pptx.write({ outputType: "nodebuffer" })
-  return Buffer.isBuffer(out) ? out : Buffer.from(out as ArrayBuffer)
+  return { body: Buffer.isBuffer(out) ? out : Buffer.from(out as ArrayBuffer), transient }
 }

@@ -29,7 +29,7 @@ export type Expectation = {
 };
 
 /** The kinds of question, from everyday lookups to things Jack must refuse */
-export type Group = "everyday" | "analysis" | "vague" | "refuse" | "unknown" | "safety" | "heavy" | "draft" | "followup";
+export type Group = "everyday" | "analysis" | "vague" | "refuse" | "unknown" | "safety" | "heavy" | "draft" | "followup" | "design";
 
 /** An earlier exchange already in the room, for follow-up questions */
 export type Exchange = { ask: string; answer: string };

@@ -79,6 +79,13 @@ describe("applyEdits", () => {
     expect(start.slides[0].html).toBe("<p>a</p>")
   })
 
+  it("edits a slide's notes without touching its picture", () => {
+    const start: JackDeckContent = { css: "", slides: [{ id: "s1", html: "<p>x</p>", notes: "Deadline is Nov 2" }] }
+    const result = applyEdits(start, [{ slide: 1, notes: true, find: "Nov 2", replace: "Oct 26" }])
+    expect(result).toEqual({ content: { css: "", slides: [{ id: "s1", html: "<p>x</p>", notes: "Deadline is Oct 26" }] }, touched: [], cssChanged: false })
+    expect(applyEdits(start, [{ notes: true, find: "Nov", replace: "Oct" }])).toMatchObject({ error: expect.stringContaining("say which slide") })
+  })
+
   it("treats $ in the replacement literally", () => {
     expect(applyEdits(deck("<p>FEE</p>"), [{ slide: 1, find: "FEE", replace: "$10 $& $1" }])).toMatchObject({ content: { slides: [{ html: "<p>$10 $& $1</p>" }] } })
   })

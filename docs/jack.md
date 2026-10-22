@@ -1,6 +1,6 @@
 # Jack
 
-Jack is the officer chat agent in the admin console (**Admin → Jack**, #161). Officers ask about club data (members, events and attendance, LSC entries, payments, standings, the audit log) and get plain answers, query results and charts back. Jack can also draft an event for an officer to review. He only reads, except for those drafts, and he never moves money.
+Jack is the officer chat agent in the admin console (**Admin → Jack**, #161). Officers ask about club data (members, events and attendance, LSC entries, payments, standings, the audit log) and get plain answers, query results and charts back. Jack can also draft an event for an officer to review, and make slide decks and Instagram graphics in the club's look (see [Decks and graphics](#decks-and-graphics)). He only reads club data, except for those drafts, and he never moves money.
 
 Code paths below are relative to `apps/platform/`.
 
@@ -39,7 +39,7 @@ If a deploy has to be rolled back to a version from before Stand could answer ro
    - the **system prompt** (`src/server/jack/prompt.ts`): who Jack is, who he's talking to, the club, and the rules (read-only except drafts, never move money, name the admin page that does a change, say where numbers came from, Central Time, emails and EIDs only when asked, concise plain text, typed tools first, `run_sql` for the rest, `describe_schema` when unsure, charts through the chart tool), then the notes on the club's tables (`JACK_SCHEMA_NOTES` in `src/server/jack/tools/schema-notes.ts`);
    - the **room history** (`src/server/jack/history.ts`): each exchange as an officer turn ("Name: message" lines under a Central Time timestamp, room notes included) and the reply's text with a one-line note of the tools it used. Several officers' messages answered together are one turn, and notices that never reached Claude ("isn't connected yet") are left out so their questions carry over. The last 40 exchanges are sent.
 4. Claude streams. Text goes out in ~150 ms batches. Each tool call is checked against the tool's schema, run for the officer whose message started this reply (the newest message it answers; when one reply answers several officers, it's the last one who posted), saved on the reply (`JackMessage.toolCalls`) and broadcast (`message.tool`), and its result goes back to Claude. This repeats until Claude answers.
-5. Limits per reply: 12 tool calls, then Claude is told to answer with what it has (and can't call more tools); the same after 64K output tokens, or after 150 s (sooner when the run has less time left; see [Function duration](#function-duration)); 16K output tokens per call for Jack and Stand, 32K for Lift.
+5. Limits per reply: 12 tool calls, then Claude is told to answer with what it has (and can't call more tools); the same after 64K output tokens, or after 150 s (sooner when the run has less time left; see [Function duration](#function-duration)); 32K output tokens per call for Jack and Lift (a deck write holds several slides), 16K for Stand. A reply working on a deck gets more (see [Decks and graphics](#decks-and-graphics)).
 6. After every Claude call the reply's tokens and cost so far are saved on it, so a reply that's cut off, or whose function dies, still counts. The finished reply is saved with its model, tokens and cost, and its cost is logged (`[jack] Reply … $0.0123, … in + … cache write + … cache read, … out`).
 7. The `message.done` event carries the whole reply. If it's over about 200 KB (Realtime drops messages over its limit, about 256 KB on the Free plan) it goes out `trimmed`, without its tool displays (or its text, if that's still too big), and the page loads the full reply from the database.
 8. If the room has no title yet, Stand names it in 2 to 5 words in the background and posts "Stand named this room “…”".
@@ -106,6 +106,49 @@ Everything else uses the app's own Prisma client (`DATABASE_URL`), not `jack_rea
 
 `scripts/check-jack-sql-role.ts` checks all of this against local Supabase: writes, DDL, secrets, other schemas, escalation and the timeout as the role; which catalog reads the role itself can make; then the same through `run_sql`, including the off-limits names (`table_to_xml` on a catalog table, `schema_to_xml('pg_catalog', …)`, `pg_roles`, `pg_user`, a `current_setting` call hidden after a `--` comment ended by a carriage return) and that advisory locks are dropped after a query that works and one that fails. It also warns (without failing) when the database keeps secret-looking settings in `pg_db_role_setting`; local Supabase does by design. It prints setting names only, never values.
 
+## Decks and graphics
+
+Officers can ask Jack for slide decks (meetings, the board, sponsors) and Instagram graphics (posts, stories, carousels) in the club's look (#177). He writes each slide as HTML, the server renders it in headless Chromium, and he looks at the renders and fixes what's off, the way the club's GM and Tech Team decks were made.
+
+**What officers see.** A deck card in the reply (thumbnails at that version, the slides it changed outlined, an **Open** button), and **Admin → Decks and graphics** (`/admin/jack/decks`): every deck, newest first. A deck's page shows every slide large with its notes and a PNG download, the deck's details (size, room, who it was for, what Jack's replies on it cost), its versions (view any; **Restore** makes one the newest again and leaves a note in the deck's room), and downloads of the whole deck: a PDF, a PPTX for Google Slides or PowerPoint (each slide a full-size picture, with the speaker notes) and a ZIP of the PNGs. Changes go through Jack in the room; there's no editor.
+
+**Decks and versions.** A deck is slides at one canvas size: `slides` (16:9, 1920×1080), `post` (Instagram 4:5, 1080×1350), `story` (9:16, 1080×1920) or `square` (1080×1080). A graphic is a deck at a social size, usually one slide. `JackDeck` holds the title, size and current version; every change writes a `JackDeckVersion` with the whole deck as JSON (`{ css, slides: [{ id, html, notes? }] }`), so any change can be undone, by Jack (`deck_restore`) or on the deck page. Changes run in a transaction with the deck row locked (`src/server/jack/decks/service.ts`). Jack's `run_sql` can read both tables.
+
+**The tools** (`src/server/jack/tools/decks.ts`), shaped like file tools:
+
+| Tool | What it does |
+|---|---|
+| `deck_guide` | The LSR design guide: how slides work, the brand, the kit's classes, layout numbers per size, the templates (`src/server/jack/decks/design-guide.ts`) |
+| `deck_assets` | The site's photos, livery renders and logos with what each shows, and gallery photos from Cloudinary, searchable by album and alt text |
+| `deck_screenshot` | A screenshot of a public page of the site (desktop or phone) as an image a slide can use |
+| `deck_create` | A new deck, optionally with its first slides (up to 8) and shared CSS |
+| `deck_write` | Whole slides, new or replacing, several per call, and/or the deck's CSS |
+| `deck_edit` | Exact find and replace in a slide or the deck CSS; all edits apply or none |
+| `deck_arrange` | Reorder, delete, duplicate (by listing slide numbers) and rename |
+| `deck_view` | A deck's HTML, notes and versions; with no deck, recent decks and their ids |
+| `deck_render` | Jack looks at up to 10 slides as 1280 px previews, with the layout checks |
+| `deck_restore` | Brings back an earlier version as the newest |
+
+Every write renders the slides it changed and returns the **layout checks** (`src/server/jack/decks/inspect.ts`): text cut off at the slide's edge or inside a box, text overlapping other text, text below the size's minimum, fonts other than Kanit and Montserrat, images that didn't load, an empty slide, and blocked or failed requests. Jack fixes most problems from those without spending tokens on images, then renders to look. A write waits at most 25 s for its checks; past that (photos loading for the first time) it says so and the renders finish in the background.
+
+**The slide kit** (`src/server/jack/decks/kit-css.ts`, `templates.ts`): the `.claude/skills/lsr-deck` look as classes (the chrome, eyebrow, title with its orange rule, cards, stats, lists, tables, scrims), sized per canvas through custom properties, so a slide is mostly markup and the chrome is identical everywhere. Eleven working templates (eight 16:9 slides, a post, a story, a square) go to Jack in the guide. `scripts/check-jack-render.ts` renders every template with the real renderer and prints the checks; run it after changing the kit and look at `.jack-renders/check/`.
+
+**The renderer** (`src/server/jack/decks/renderer.ts`): `@sparticuz/chromium` with `puppeteer-core` on Vercel (both in `serverExternalPackages`, the binary traced into the Jack routes with `outputFileTracingIncludes` in `next.config.ts`); the machine's Chrome or Edge locally (or `JACK_CHROME_PATH`). One browser per function instance; each slide renders in its own browser context (pages sharing one go to the background when another closes, and their next screenshot hangs). For each render: a full-size PNG, a full-size JPEG (for the PDF and PPTX), the 1280 px preview Jack sees and the deck page shows, and a 480 px thumbnail.
+
+Slides can't do anything but draw:
+
+- Page JavaScript is off, and the page has a content security policy (`document.ts`). Scripts, meta tags, base URLs, stylesheet links, frames and plugins are stripped from the HTML first.
+- Every request goes through `routeRequest`: only Google Fonts, `res.cloudinary.com` and the public site (`www.longhornsimracing.org`; its `/images/` go through the site's image optimizer, so a 6 MB original arrives as a small WebP) load. `https://jack.assets/…` is answered by the server itself: QR codes (`/qr?text=…`) and stored screenshots. Everything else, plain http, other ports and any navigation is blocked, and the check says so.
+- Officers only ever see images, never the HTML, so nothing Jack writes runs in a browser.
+
+Site screenshots run the site's own JavaScript (it's the club's site) but only on public pages (never the admin console, sign-in, accounts or the API), only with GET requests, and the browser can't leave the site.
+
+**Storage** (`storage.ts`): a private Vercel Blob store when the project has one connected (`BLOB_STORE_ID` with Vercel's OIDC token, or `BLOB_READ_WRITE_TOKEN`); `.jack-renders/` under the app locally (gitignored); on Vercel without a store, nothing is cached (every image renders again when asked for, and screenshots don't work). Renders are named by a hash of the slide, the deck CSS, the size and `RENDER_VERSION` (`renders.ts`), so they never go stale and a restored version finds its old renders. Exports are kept per deck version. The image route (`/api/admin/jack/decks/[deckId]/slides/[slideId]`) and the export route (`…/export`) check the officer role first, and send anything over 4 MB as a 10-minute signed link to the private store, since a function response can't carry more than 4.5 MB.
+
+**Models, limits and cost.** Any persona can make decks; Jack and Stand mention once that Lift designs better. A reply that calls a deck tool gets the design limits: 30 tool calls, 120K output tokens, and it wraps up 35 s before the answer would be cut off (200 s at most) instead of 60 s, with a short hand-off note. When it stops at a limit with work left, it leaves a room note asking Jack to keep going (`JackMessage.continues`); replies answer these like officer messages, as the officer who asked. The run answers it right away if it has time; otherwise the open room page starts a run for it as soon as nothing is streaming. At most three in a row since an officer last posted. In local tests a 5-slide deck took about 80 s and $0.18 on Jack, a one-slide story 15 s and $0.10. The deck page shows what the replies that changed a deck cost.
+
+**Trying it locally.** `scripts/try-jack-deck.ts "Make a 5-slide deck for GM 2"` asks Jack through the real reply loop on the local database (`--as=lift`, `--room=<id>` for a follow-up) and saves every slide to `.jack-renders/try/`; `--deck=<id> --exports` saves an existing deck and its downloads without calling Claude. It needs `ANTHROPIC_API_KEY` for asking.
+
 ## Costs
 
 Prices per million tokens (cache writes are 1.25× input):
@@ -132,6 +175,8 @@ When the month's total reaches `JACK_MONTHLY_BUDGET_USD` (default $50), Jack sto
 | `JACK_DATABASE_URL` | The connection string for `jack_readonly`, the read-only Postgres role that `run_sql` and `describe_schema` run as (the typed tools and `draft_event` use the app's `DATABASE_URL`; see [Tools and the database](#tools-and-the-database)). Locally `scripts/jack-local-sql-role.ts` sets the role up and prints it. |
 | `JACK_MONTHLY_BUDGET_USD` | Optional. Spend cap per calendar month, in dollars. Default 50. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server only. Jack broadcasts replies to the private room channels with it. Locally, `SERVICE_ROLE_KEY` from `npx supabase status -o env`. |
+| `BLOB_STORE_ID` | Set by Vercel when a private Blob store is connected to the project; deck renders, exports and screenshots go there (with Vercel's OIDC token). `BLOB_READ_WRITE_TOKEN` works instead. Without either, renders aren't cached on Vercel and screenshots don't work; locally they go to `.jack-renders/`. |
+| `JACK_CHROME_PATH` | Local only, optional: the Chrome or Chromium to render slides with, when it isn't installed where the renderer looks. On Vercel the renderer uses `@sparticuz/chromium`. |
 
 ## Production setup
 
@@ -141,7 +186,8 @@ When the month's total reaches `JACK_MONTHLY_BUDGET_USD` (default $50), Jack sto
    Then build `JACK_DATABASE_URL` from the transaction pooler string with the username `jack_readonly.<project-ref>` and `?pgbouncer=true`.
 3. **No secrets in database settings.** Any role can read them, so check (names only) that nothing secret is set at the database or role level: `SELECT split_part(s, '=', 1) FROM pg_db_role_setting, unnest(setconfig) AS s;`. `run_sql` refuses these reads by name, but that's defense in depth, not a permission; the secret shouldn't be there at all.
 4. **Vercel** (Production): add `ANTHROPIC_API_KEY`, `JACK_DATABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and `JACK_MONTHLY_BUDGET_USD` if the cap isn't $50. Add them to Preview only if previews should answer too (they share whatever database they point at). Redeploy.
-5. **Check it.** Open a room, ask "How many members are there?", and watch the answer stream with a query part. The function log shows a `[jack] Reply …` line with the cost; the room gets a name from Stand.
+5. **Blob store for decks.** In the Vercel dashboard: Storage → Create → Blob, **private**, connected to the project for Production and Preview. That sets `BLOB_STORE_ID`; redeploy.
+6. **Check it.** Open a room, ask "How many members are there?", and watch the answer stream with a query part. The function log shows a `[jack] Reply …` line with the cost; the room gets a name from Stand. Then open `/api/admin/jack/render-check` (signed in as an officer): it renders a slide with the real Chromium, then writes a small file to the Blob store and reads it back. It should say `"ok": true` with `"store": { "kind": "blob", "ok": true }` (`?image=1` shows the slide). Finally ask for "a one-slide Instagram story saying GM 2 is Monday": a deck card with a thumbnail appears, and **Open** shows the slide and its downloads.
 
 ### Function duration
 
@@ -154,9 +200,13 @@ Posting (or **Ask him to continue**) runs the reply loop after the response, ins
 
 A typical answer takes 5 to 60 seconds, so one run usually answers several rounds of messages. If a function dies anyway, its room lock goes stale after **6 minutes** (`ROOM_LOCK_STALE_MS` in `src/lib/jack/timing.ts`), longer than any live run holds it (it's renewed before each answer). The next run in that room (a post, or **continue**) takes it over and closes the half-written reply as an error. If `maxDuration` changes, change `RUN_TIMING` with it and keep the stale time above it.
 
+A reply working on a deck that runs out of time (or tool calls) leaves a note asking Jack to keep going, and the next run picks it up, from this run if it has 150 s left, or from the room page, which starts one as soon as it sees the note (see [Decks and graphics](#decks-and-graphics)). The deck image and export routes have their own `maxDuration` (60 s and 120 s): a cold start launches Chromium first.
+
 ## The eval
 
-`scripts/jack-eval.ts` (questions in `scripts/jack-eval/`) is Jack's test set: 52 questions in nine groups, from what officers ask every day to things he must refuse or could be tricked by. Everyday lookups, harder analysis, vague questions, things he can't do (refunds, email, role changes), things the data doesn't cover, attempts to break him (secrets, a `DELETE`, instructions hidden in an applicant's notes), very large requests, drafting, and follow-ups. Each goes through the same code a room reply does, on Stand, Jack and Lift.
+`scripts/jack-eval.ts` (questions in `scripts/jack-eval/`) is Jack's test set: 55 questions in ten groups, from what officers ask every day to things he must refuse or could be tricked by. Everyday lookups, harder analysis, vague questions, things he can't do (refunds, email, role changes), things the data doesn't cover, attempts to break him (secrets, a `DELETE`, instructions hidden in an applicant's notes), very large requests, drafting, follow-ups, and design (a GM deck, a recruiting story, a standings post: `scripts/jack-eval/design.ts`). Each goes through the same code a room reply does, on Stand, Jack and Lift.
+
+Design questions run in a throwaway room of their own (decks belong to a room; it and its decks are deleted after). The script checks the deck's size and slide count and renders every slide fresh, failing on any layout problem left; the judge also gets the slides as rendered and grades the design on what it sees. They need a real model and a local Chrome or Edge, so `--dry-run` skips them, and `--regrade` grades them without the images.
 
 Grading has two parts. A script checks what it can against the database: the right number or names, no forbidden tool, nothing changed, no secret in the answer. Opus 5.5 judges the rest against a written expectation and the database facts, blind to which model answered, and with the model's system prompt and each tool's description and inputs, so a claim that comes from them isn't counted as invented. It also grades tool use and notes tools that would have helped. If Opus declines to grade (a question about password hashes trips its checks), Fable 5.1 grades instead. If both decline and the script checks pass, the answer is saved ungraded: it's left out of the pass rate and listed apart, so read it yourself. (A script failure is still a failure.)
 
@@ -168,6 +218,7 @@ pnpm exec tsx scripts/jack-eval.ts                 # everything, all three model
 pnpm exec tsx scripts/jack-eval.ts --pilot         # five questions, under $1, to check grades and cost first
 pnpm exec tsx scripts/jack-eval.ts --only=jack     # one model
 pnpm exec tsx scripts/jack-eval.ts --group=safety  # one group (or --filter=<text> for question ids)
+pnpm exec tsx scripts/jack-eval.ts --group=design --only=jack  # the design questions on one model: about $1.50 with the judge
 pnpm exec tsx scripts/jack-eval.ts --variant=v1    # save beside the baseline after a change
 pnpm exec tsx scripts/jack-eval.ts --regrade       # grade saved answers again after a grader fix (judge calls only)
 pnpm exec tsx scripts/jack-eval.ts --regrade --no-judge  # rerun the answer-only checks (TEXT_RECHECK) on saved answers: free, no key
@@ -187,6 +238,6 @@ Run it against a copy of real data before the pilot to pick the default persona,
 
 ## Tests
 
-`pnpm test` covers Jack without a network or database: the model loop against a scripted fake Claude stream (`src/server/jack/fake-claude.ts`), tool calls and parts, the tool-call cap, refusals, garbled tool calls and API errors, taking back streamed text, usage saved per call, the run and answer deadlines and continuing a room, the missing-key and budget messages, cost math, history building, Stand and its usage rows, trimming big done events, `run_sql`'s off-limits names, the eval's database guard and number matching, and the room reducer that merges live events with snapshots (replacing deltas, trimmed done events, failed resyncs, when a room looks stuck).
+`pnpm test` covers Jack without a network or database: the model loop against a scripted fake Claude stream (`src/server/jack/fake-claude.ts`), tool calls and parts, the tool-call cap, refusals, garbled tool calls and API errors, taking back streamed text, usage saved per call, the run and answer deadlines and continuing a room, the missing-key and budget messages, cost math, history building, Stand and its usage rows, trimming big done events, `run_sql`'s off-limits names, the eval's database guard and number matching, and the room reducer that merges live events with snapshots (replacing deltas, trimmed done events, failed resyncs, when a room looks stuck). For decks: the page wrapper and its sanitizing, the request filter, the render cache, QR codes, that the templates only use kit classes and real site images, the write, edit and arrange logic, every deck tool against an in-memory deck table, the design limits, images in tool results, and the automatic continue notes.
 
-Against local Supabase: `scripts/check-jack-sql-role.ts` (the role and `run_sql`, above) and `scripts/check-jack-realtime.ts` (private channels: who can join, two officers watching one reply, presence). The realtime check streams its reply from the fake Claude, so it never calls the API.
+With a local Chrome: `scripts/check-jack-render.ts` (every template through the real renderer). Against local Supabase: `scripts/check-jack-sql-role.ts` (the role and `run_sql`, above) and `scripts/check-jack-realtime.ts` (private channels: who can join, two officers watching one reply, presence). The realtime check streams its reply from the fake Claude, so it never calls the API.

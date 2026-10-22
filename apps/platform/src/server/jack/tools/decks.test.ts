@@ -186,6 +186,19 @@ describe("deck_edit", () => {
     expect((out.displays![0] as JackDeckDisplay).version).toBe(2)
   })
 
+  it("takes one edit sent flat instead of in a list, and edits notes", async () => {
+    const { id } = await newDeck()
+    const flat = deckEditTool.input.parse({ deck: id, slide: 2, find: "Two", replace: "Second" })
+    expect(flat).toEqual({ deck: id, edits: [{ slide: 2, find: "Two", replace: "Second" }] })
+    await deckWriteTool.run({ deck: id, slides: [{ slide: 1, notes: "Meeting is Nov 2" }] }, ctx)
+    vi.mocked(ensureRender).mockClear()
+    const out = await deckEditTool.run(deckEditTool.input.parse({ deck: id, slide: 1, notes: true, find: "Nov 2", replace: "Oct 26" }), ctx)
+    expect(out.label).toBe("Edited the notes on slide 1 of “GM 2”")
+    expect(out.forModel).toContain("Only the notes changed")
+    expect(ensureRender).not.toHaveBeenCalled()
+    expect(contentOf(id).slides[0].notes).toBe("Meeting is Oct 26")
+  })
+
   it("applies all of the edits or none of them", async () => {
     const { id } = await newDeck()
     const out = await deckEditTool.run({ deck: id, edits: [{ slide: 1, find: "One", replace: "First" }, { slide: 2, find: "missing", replace: "x" }] }, ctx)

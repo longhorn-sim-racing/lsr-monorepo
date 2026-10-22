@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { z } from "zod"
 import { deckPageUrl, JACK_DECK_SIZE_KEYS, JACK_DECK_SIZES, MAX_DECK_SLIDES, type JackDeckContent } from "@/lib/jack/decks"
 import type { JackDeckDisplay } from "@/lib/jack/parts"
@@ -5,8 +6,10 @@ import { getSiteUrl } from "@/lib/site-url"
 import { findGalleryAssets, orientation, SITE_ASSETS } from "@/server/jack/decks/assets"
 import { DESIGN_GUIDE } from "@/server/jack/decks/design-guide"
 import { applyEdits, applyOrder, applyWrites, newSlideId, type Applied } from "@/server/jack/decks/edits"
-import { ensureRender } from "@/server/jack/decks/renders"
+import { isScreenshotPath, SCREENSHOT_DEVICES, screenshotSite } from "@/server/jack/decks/renderer"
+import { ASSET_FILES, ensureRender } from "@/server/jack/decks/renders"
 import { changeDeck, createDeck, getDeck, listDecks, listDeckVersions, restoreDeckVersion, slideRange, type DeckView } from "@/server/jack/decks/service"
+import { jackFileStore } from "@/server/jack/decks/storage"
 import { ct } from "./time"
 import type { JackModelImage, JackTool, JackToolContext, JackToolResult } from "./types"
 
@@ -231,26 +234,31 @@ export const deckWriteTool: JackTool<z.infer<typeof deckWriteInput>> = {
   },
 }
 
-export const deckEditInput = z.object({
-  deck: deckId,
-  edits: z
-    .array(
-      z.object({
-        slide: slideNumber.optional().describe("The slide to edit. Leave out to edit the deck's shared CSS"),
-        find: z.string().min(1).max(20_000).describe("Exact text to find, copied from deck_view (enough of it to be unique)"),
-        replace: z.string().max(20_000).describe("What to put in its place"),
-        all: z.boolean().optional().describe("Replace every match instead of requiring exactly one"),
-      })
-    )
-    .min(1)
-    .max(20)
-    .describe("Find-and-replace edits, applied in order. All of them apply, or none"),
+const oneEdit = z.object({
+  slide: slideNumber.optional().describe("The slide to edit. Leave out to edit the deck's shared CSS"),
+  find: z.string().min(1).max(20_000).describe("Exact text to find, copied from deck_view (enough of it to be unique)"),
+  replace: z.string().max(20_000).describe("What to put in its place"),
+  all: z.boolean().optional().describe("Replace every match instead of requiring exactly one"),
+  notes: z.boolean().optional().describe("Edit the slide's speaker notes instead of its HTML"),
 })
+
+export const deckEditInput = z.preprocess(
+  // A single edit sent flat ({ deck, slide, find, replace }) instead of in a list is still one edit
+  (value) => {
+    if (typeof value !== "object" || value === null || "edits" in value || !("find" in value)) return value
+    const { deck, ...edit } = value as Record<string, unknown>
+    return { deck, edits: [edit] }
+  },
+  z.object({
+    deck: deckId,
+    edits: z.array(oneEdit).min(1).max(20).describe("Find-and-replace edits, applied in order. All of them apply, or none"),
+  })
+)
 
 export const deckEditTool: JackTool<z.infer<typeof deckEditInput>> = {
   name: "deck_edit",
   description:
-    "Change part of a slide (or the deck CSS) by exact find and replace, like fixing a word, a color, a size or one card. Cheaper and safer than rewriting the slide. Returns the layout checks for what changed.",
+    "Change part of a slide (its HTML or its notes) or the deck CSS by exact find and replace, like fixing a word, a color, a size or one card. Cheaper and safer than rewriting the slide. Returns the layout checks for what changed.",
   input: deckEditInput,
   design: true,
   writes: true,
@@ -258,7 +266,8 @@ export const deckEditTool: JackTool<z.infer<typeof deckEditInput>> = {
     let applied: Applied | null = null
     const slides = [...new Set(input.edits.flatMap((e) => (e.slide === undefined ? [] : [e.slide])))]
     const cssEdited = input.edits.some((e) => e.slide === undefined)
-    const what = [slides.length ? `slide${slides.length === 1 ? "" : "s"} ${slideRange(slides)}` : null, cssEdited ? "the deck CSS" : null].filter(Boolean).join(" and ")
+    const onlyNotes = input.edits.every((e) => e.notes)
+    const what = [slides.length ? `${onlyNotes ? "the notes on " : ""}slide${slides.length === 1 ? "" : "s"} ${slideRange(slides)}` : null, cssEdited ? "the deck CSS" : null].filter(Boolean).join(" and ")
     const change = await changeDeck(input.deck, meta(ctx, `Edited ${what}`), ({ content }) => {
       const result = applyEdits(content, input.edits)
       if ("error" in result) return result
@@ -271,7 +280,7 @@ export const deckEditTool: JackTool<z.infer<typeof deckEditInput>> = {
     const ids = affected(applied)
     const checks = await checkSlides(deck, ids, ctx.signal)
     return {
-      forModel: [header(deck), checks].filter(Boolean).join("\n\n"),
+      forModel: [header(deck), checks || "Only the notes changed, so nothing was re-rendered."].filter(Boolean).join("\n\n"),
       label: `Edited ${what} of “${deck.title}”`,
       displays: [deckDisplay(deck, ids)],
     }
@@ -399,7 +408,10 @@ export const deckRenderTool: JackTool<z.infer<typeof deckRenderInput>> = {
     return {
       forModel: `${header(deck)}\n\nLayout checks:\n${lines.join("\n")}${more}`,
       images,
-      label: `Looked at ${targets.length === all.length ? `all ${all.length} slide${all.length === 1 ? "" : "s"}` : `slide${targets.length === 1 ? "" : "s"} ${slideRange(targets.map((t) => t.n))}`} of “${deck.title}”`,
+      label:
+        all.length === 1
+          ? `Looked at “${deck.title}”`
+          : `Looked at ${targets.length === all.length ? `all ${all.length} slides` : `slide${targets.length === 1 ? "" : "s"} ${slideRange(targets.map((t) => t.n))}`} of “${deck.title}”`,
       displays: [deckDisplay(deck, targets.map((t) => t.slide.id))],
     }
   },
@@ -429,5 +441,49 @@ export const deckRestoreTool: JackTool<z.infer<typeof deckRestoreInput>> = {
   },
 }
 
+export const deckScreenshotInput = z.object({
+  page: z.string().trim().min(1).max(200).describe('A public page of the club site, as a path: "/", "/events", "/lone-star-cup", "/gallery", "/apply", "/drivers", "/news", "/sponsors"…'),
+  device: z.enum(["desktop", "phone"]).optional().describe("desktop (1440 wide, the default) or phone (390 wide at 2x)"),
+  fullPage: z.boolean().optional().describe("The whole page, up to 4 screens tall, instead of just the first screen"),
+})
+
+export const deckScreenshotTool: JackTool<z.infer<typeof deckScreenshotInput>> = {
+  name: "deck_screenshot",
+  description:
+    "Take a screenshot of one of the club site's public pages, as a signed-out visitor sees it, to put on a slide (a feature, the events page, the apply page). Shows you the screenshot and returns its image URL. Frame it on the slide (object-fit: cover with object-position: top, or contain); a phone shot sits well in a rounded rectangle.",
+  input: deckScreenshotInput,
+  design: true,
+  timeoutMs: 60_000,
+  async run(input) {
+    if (!isScreenshotPath(input.page)) {
+      return fail(`${input.page} isn't a public page of the site. Use a path like "/", "/events", "/lone-star-cup", "/gallery", "/apply", "/drivers", "/news" or "/sponsors".`, "Screenshot not taken")
+    }
+    const store = jackFileStore()
+    if (store.kind === "none") return fail("Screenshots need the private Blob store, which isn't connected yet. Tell the officers an admin needs to connect it.", "Screenshot not taken")
+    const device = input.device ?? "desktop"
+    const shot = await screenshotSite(input.page, { device, fullPage: input.fullPage })
+    const name = `shot-${createHash("sha256").update(shot.png).digest("hex").slice(0, 20)}.png`
+    await store.put(`${ASSET_FILES}/${name}`, shot.png, "image/png")
+    const url = `https://jack.assets/files/${name}`
+    const { width } = SCREENSHOT_DEVICES[device]
+    return {
+      forModel: `Screenshot of ${input.page} (${device}, ${width} CSS px wide): ${shot.width}×${shot.height} px. Use it on a slide as <img src="${url}">.`,
+      images: [{ caption: `${input.page} on ${device}:`, mediaType: "image/jpeg", data: shot.preview.toString("base64") }],
+      label: `Took a screenshot of ${input.page}${device === "phone" ? " on a phone" : ""}`,
+    }
+  },
+}
+
 /** The deck tools, in the order they're registered (part of the cached prompt) */
-export const DECK_TOOLS = [deckGuideTool, deckAssetsTool, deckCreateTool, deckWriteTool, deckEditTool, deckArrangeTool, deckViewTool, deckRenderTool, deckRestoreTool]
+export const DECK_TOOLS = [
+  deckGuideTool,
+  deckAssetsTool,
+  deckCreateTool,
+  deckWriteTool,
+  deckEditTool,
+  deckArrangeTool,
+  deckViewTool,
+  deckRenderTool,
+  deckRestoreTool,
+  deckScreenshotTool,
+]
