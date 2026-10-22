@@ -19,6 +19,7 @@ import { JACK_TITLE_MAX } from "@/schemas/jack.schema"
 import type { JackSpend } from "@/lib/jack/spend"
 import { JackToolPartView } from "./parts/tool-part"
 import { PersonaAvatar } from "./persona-avatar"
+import { ReplyText } from "./reply-text"
 import { JackRoomRail } from "./room-list"
 import { SpendMeter } from "./spend-meter"
 import type { JackConnection, JackStall } from "./use-jack-room"
@@ -206,6 +207,31 @@ function initials(name: string) {
   return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?"
 }
 
+/** An officer's profile picture, or their initials when they have none or it doesn't load. Hidden from screen readers: the name is always beside it */
+function OfficerAvatar({ name, url, className }: { name: string; url: string | null; className?: string }) {
+  const [failed, setFailed] = useState<string | null>(null)
+  if (url && failed !== url)
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- avatars come from several hosts
+      <img
+        src={url}
+        alt=""
+        aria-hidden
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(url)}
+        // A picture that failed before the page hydrated never fires onError
+        ref={(img) => {
+          if (img?.complete && !img.naturalWidth) setFailed(url)
+        }}
+        className={cn("shrink-0 rounded-full bg-muted object-cover", className)} />
+    )
+  return (
+    <span aria-hidden className={cn("flex shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-tone-neutral-foreground", className)}>
+      {initials(name)}
+    </span>
+  )
+}
+
 function PresenceStack({ present }: { present: JackPresence[] }) {
   if (!present.length) return null
   const names = present.map((p) => p.displayName).join(", ")
@@ -213,12 +239,7 @@ function PresenceStack({ present }: { present: JackPresence[] }) {
     <div className="flex items-center gap-2" title={names}>
       <div className="flex" aria-hidden>
         {present.slice(0, 4).map((p, i) => (
-          <span
-            key={p.userId}
-            className={cn("flex size-6 items-center justify-center rounded-full border-2 border-card bg-muted text-[10px] font-semibold text-tone-neutral-foreground", i > 0 && "-ml-1.5")}
-          >
-            {initials(p.displayName)}
-          </span>
+          <OfficerAvatar key={p.userId} name={p.displayName} url={p.avatarUrl} className={cn("size-6 border-2 border-card text-[10px]", i > 0 && "-ml-1.5")} />
         ))}
       </div>
       <span className="text-xs text-muted-foreground">
@@ -351,9 +372,7 @@ const MessageRow = memo(function MessageRow({ message }: { message: JackMessageV
       {message.author.kind === "assistant" ? (
         <PersonaAvatar persona={message.author.persona} />
       ) : (
-        <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-tone-neutral-foreground">
-          {initials(name)}
-        </span>
+        <OfficerAvatar name={name} url={message.author.avatarUrl} className="size-7 text-[11px]" />
       )}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="text-[13px]">
@@ -380,16 +399,11 @@ function ReplyBody({ message }: { message: JackMessageView }) {
   const endsInText = pieces.at(-1)?.kind === "text"
   return (
     <div className="flex max-w-3xl flex-col gap-2">
-      {pieces.map((piece, i) =>
-        piece.kind === "part" ? (
-          <JackToolPartView key={piece.key} part={piece.part} />
-        ) : (
-          <p key={piece.key} className="whitespace-pre-wrap break-words leading-relaxed text-foreground">
-            {piece.text}
-            {streaming && i === pieces.length - 1 ? streamingCursor : null}
-          </p>
-        )
-      )}
+      {pieces.map((piece, i) => {
+        if (piece.kind === "part") return <JackToolPartView key={piece.key} part={piece.part} />
+        const end = streaming && i === pieces.length - 1
+        return <ReplyText key={piece.key} text={piece.text} streaming={end} tail={end ? streamingCursor : null} />
+      })}
       {streaming && !endsInText ? <p className="leading-relaxed">{streamingCursor}</p> : null}
     </div>
   )

@@ -35,5 +35,5 @@ export default async function JackRoomPage({ params }: JackRoomPageArgs) {
   ])
   if (!snapshot) notFound()
 
-  return <JackRoomClient initial={snapshot} rooms={rooms} spend={spend} me={{ userId: officer.id, displayName: officer.displayName }} />
+  return <JackRoomClient initial={snapshot} rooms={rooms} spend={spend} me={{ userId: officer.id, displayName: officer.displayName, avatarUrl: officer.avatarUrl }} />
 }

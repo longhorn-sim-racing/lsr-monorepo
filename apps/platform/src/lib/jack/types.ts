@@ -31,7 +31,7 @@ export function isJackRoomPersona(value: unknown): value is JackRoomPersonaKey {
 
 /** Who a message is from, matching JackMessage.kind: an officer, a model, or the room itself */
 export type JackAuthor =
-  | { kind: "user"; userId: string | null; displayName: string }
+  | { kind: "user"; userId: string | null; displayName: string; avatarUrl: string | null }
   | { kind: "assistant"; persona: JackPersonaKey }
   | { kind: "system" }
 
@@ -121,4 +121,4 @@ export type JackRoomUpdatedEvent = { type: typeof JACK_EVENT.room; room: JackRoo
 export type JackRoomEvent = JackCreatedEvent | JackDeltaEvent | JackDoneEvent | JackToolEvent | JackRoomUpdatedEvent
 
 /** Who's in a room right now, as each officer's tab tracks it on the channel */
-export type JackPresence = { userId: string; displayName: string }
+export type JackPresence = { userId: string; displayName: string; avatarUrl: string | null }
