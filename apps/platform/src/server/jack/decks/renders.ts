@@ -14,13 +14,17 @@ const RENDERS = "jack/renders"
 /** Private images Jack placed (site screenshots), served to the renderer at https://jack.assets/files/<name> */
 export const ASSET_FILES = "jack/assets"
 
-const FILES: Record<JackRenderKind, { name: string; type: string }> = {
+/** What a render keeps: the three the image route serves, and a full-size JPEG for the downloads */
+export type RenderFileKind = JackRenderKind | "jpg"
+
+const FILES: Record<RenderFileKind, { name: string; type: string }> = {
   png: { name: "full.png", type: "image/png" },
+  jpg: { name: "full.jpg", type: "image/jpeg" },
   view: { name: "view.jpg", type: "image/jpeg" },
   thumb: { name: "thumb.jpg", type: "image/jpeg" },
 }
 
-export function renderContentType(kind: JackRenderKind) {
+export function renderContentType(kind: RenderFileKind) {
   return FILES[kind].type
 }
 
@@ -37,7 +41,7 @@ export type SlideRenderResult = {
 type RenderMeta = { issues: string[]; ms: number; renderedAt: string }
 
 /** Renders in progress in this instance, by key, so two callers wanting the same slide share one render */
-const inFlight = new Map<string, Promise<{ issues: string[]; ms: number; files: Record<JackRenderKind, Buffer> }>>()
+const inFlight = new Map<string, Promise<{ issues: string[]; ms: number; files: Record<RenderFileKind, Buffer> }>>()
 
 /**
  * Makes sure a slide's render exists, rendering it if the store doesn't have it, and returns its
@@ -59,7 +63,7 @@ export async function ensureRender(source: SlideSource, options: { withView?: bo
 }
 
 /** One of a slide's render files, rendering the slide first if needed */
-export async function getRenderFile(source: SlideSource, kind: JackRenderKind): Promise<{ key: string; body: Buffer }> {
+export async function getRenderFile(source: SlideSource, kind: RenderFileKind): Promise<{ key: string; body: Buffer }> {
   const key = renderKey(source)
   const store = jackFileStore()
   const stored = await store.get(`${RENDERS}/${key}/${FILES[kind].name}`)
@@ -73,12 +77,12 @@ function renderOnce(key: string, source: SlideSource, signal?: AbortSignal) {
   if (running) return running
   const work = (async () => {
     const rendered = await renderSlide(source, { assets: resolveJackAsset, signal })
-    const files: Record<JackRenderKind, Buffer> = { png: rendered.png, view: rendered.view, thumb: rendered.thumb }
+    const files: Record<RenderFileKind, Buffer> = { png: rendered.png, jpg: rendered.jpg, view: rendered.view, thumb: rendered.thumb }
     const store = jackFileStore()
     if (store.kind !== "none") {
       const meta: RenderMeta = { issues: rendered.issues, ms: rendered.ms, renderedAt: new Date().toISOString() }
       // The images first, then meta.json, which is what marks the render complete
-      await Promise.all((Object.keys(FILES) as JackRenderKind[]).map((kind) => store.put(`${RENDERS}/${key}/${FILES[kind].name}`, files[kind], FILES[kind].type)))
+      await Promise.all((Object.keys(FILES) as RenderFileKind[]).map((kind) => store.put(`${RENDERS}/${key}/${FILES[kind].name}`, files[kind], FILES[kind].type)))
       await store.put(`${RENDERS}/${key}/meta.json`, Buffer.from(JSON.stringify(meta)), "application/json")
     }
     return { issues: rendered.issues, ms: rendered.ms, files }

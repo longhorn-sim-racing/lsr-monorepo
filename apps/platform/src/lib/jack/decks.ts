@@ -61,6 +61,11 @@ export function slideImageUrl(deckId: string, version: number, slideId: string, 
   return `/api/admin/jack/decks/${deckId}/slides/${slideId}?${params}`
 }
 
+/** A whole deck version as one download: PDF, PPTX (slides as pictures) or a ZIP of the PNGs */
+export function deckExportUrl(deckId: string, version: number, format: "pdf" | "pptx" | "zip"): string {
+  return `/api/admin/jack/decks/${deckId}/export?${new URLSearchParams({ format, v: String(version) })}`
+}
+
 export function deckPageUrl(deckId: string): string {
   return `/admin/jack/decks/${deckId}`
 }

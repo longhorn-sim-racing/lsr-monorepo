@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 vi.mock("./renderer", () => ({
   renderSlide: vi.fn(async () => ({
     png: Buffer.from("png"),
+    jpg: Buffer.from("jpg"),
     view: Buffer.from("view"),
     thumb: Buffer.from("thumb"),
     issues: ["Text \"x\" overlaps \"y\"."],

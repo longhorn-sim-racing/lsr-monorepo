@@ -10,17 +10,20 @@ import { MIN_TEXT_PX } from "./kit-css"
  *
  * - On Vercel it's @sparticuz/chromium (a Chromium built for serverless functions); locally, the
  *   machine's Chrome or Edge, or JACK_CHROME_PATH.
- * - One browser per function instance, kept between renders; each slide gets its own page.
+ * - One browser per function instance, kept between renders; each slide gets its own context and page.
  * - JavaScript is off for the page. Every request goes through `routeRequest`: the public site, club
  *   photos on Cloudinary and Google Fonts load; QR codes and private images (jack.assets) are answered
  *   here; everything else, and any navigation, is blocked. No file:// access.
- * - Each render makes the full-size PNG, a JPEG preview at most 1280 px on its long side (what Jack
- *   looks at, and what the deck page shows), a small JPEG thumbnail, and a list of problems
+ * - Each render makes the full-size PNG (and a JPEG of it for the downloads), a JPEG preview at most
+ *   1280 px on its long side (what Jack looks at, and what the deck page shows), a small JPEG
+ *   thumbnail, and a list of problems
  *   (inspect.ts) plus anything that didn't load.
  */
 
 export type RenderedSlide = {
   png: Buffer
+  /** Full size as a JPEG, for the PDF and PPTX downloads (a fraction of the PNG's size) */
+  jpg: Buffer
   view: Buffer
   thumb: Buffer
   issues: string[]
@@ -158,17 +161,10 @@ export async function renderSlide(source: SlideSource, options: { assets?: Asset
     const { width, height } = JACK_DECK_SIZES[source.size]
     const issues = await page.evaluate(inspectSlide, { width, height, minFont: MIN_TEXT_PX[source.size], kitFonts: INSPECT_KIT_FONTS })
     const png = Buffer.from(await page.screenshot({ type: "png", clip: { x: 0, y: 0, width, height } }))
+    const jpg = Buffer.from(await page.screenshot({ type: "jpeg", quality: 90, clip: { x: 0, y: 0, width, height } }))
     const view = Buffer.from(await page.screenshot({ type: "jpeg", quality: 85, clip: { x: 0, y: 0, width, height, scale: scaleFor(source.size, VIEW_LONG_SIDE) } }))
     const thumb = Buffer.from(await page.screenshot({ type: "jpeg", quality: 78, clip: { x: 0, y: 0, width, height, scale: scaleFor(source.size, THUMB_LONG_SIDE) } }))
-    return { png, view, thumb, issues: [...issues, ...network], ms: Date.now() - started }
-  })
-}
-
-/** A slide as a one-page PDF at its canvas size, with real text and embedded fonts (for the deck's PDF download) */
-export async function printSlide(source: SlideSource, options: { assets?: AssetResolver; signal?: AbortSignal } = {}): Promise<Buffer> {
-  return withSlidePage(source, { ...options, print: true }, async (page) => {
-    const { width, height } = JACK_DECK_SIZES[source.size]
-    return Buffer.from(await page.pdf({ width: `${width}px`, height: `${height}px`, printBackground: true, pageRanges: "1", preferCSSPageSize: true }))
+    return { png, jpg, view, thumb, issues: [...issues, ...network], ms: Date.now() - started }
   })
 }
 
@@ -178,12 +174,15 @@ export async function printSlide(source: SlideSource, options: { assets?: AssetR
  */
 async function withSlidePage<T>(
   source: SlideSource,
-  options: { assets?: AssetResolver; signal?: AbortSignal; print?: boolean },
+  options: { assets?: AssetResolver; signal?: AbortSignal },
   work: (page: Page, network: string[]) => Promise<T>
 ): Promise<T> {
   return withPageSlot(async () => {
     const browser = await getBrowser()
-    const page = await browser.newPage()
+    // Each slide gets its own context (its own window). Pages sharing one go to the background when
+    // another is closed, and a background page's next screenshot waits for a frame that never comes
+    const context = await browser.createBrowserContext()
+    const page = await context.newPage()
     let timer: ReturnType<typeof setTimeout> | undefined
     const stop = () => void page.close().catch(() => {})
     options.signal?.addEventListener("abort", stop, { once: true })
@@ -197,11 +196,12 @@ async function withSlidePage<T>(
       clearTimeout(timer)
       options.signal?.removeEventListener("abort", stop)
       await page.close().catch(() => {})
+      await context.close().catch(() => {})
     }
   })
 }
 
-async function loadSlide(page: Page, source: SlideSource, options: { assets?: AssetResolver; print?: boolean }): Promise<string[]> {
+async function loadSlide(page: Page, source: SlideSource, options: { assets?: AssetResolver }): Promise<string[]> {
   const { width, height } = JACK_DECK_SIZES[source.size]
   const network: string[] = []
   const note = (line: string) => {
@@ -221,7 +221,7 @@ async function loadSlide(page: Page, source: SlideSource, options: { assets?: As
   })
 
   try {
-    await page.setContent(slideDocument(source, { print: options.print }), { waitUntil: "load", timeout: LOAD_TIMEOUT_MS })
+    await page.setContent(slideDocument(source), { waitUntil: "load", timeout: LOAD_TIMEOUT_MS })
   } catch (error) {
     if (!(error instanceof Error && error.name === "TimeoutError")) throw error
     note(`Some images were still loading after ${LOAD_TIMEOUT_MS / 1000} s, so this render may be missing them. Render it again.`)
