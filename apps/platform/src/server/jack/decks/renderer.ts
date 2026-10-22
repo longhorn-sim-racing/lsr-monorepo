@@ -10,7 +10,7 @@ import { MIN_TEXT_PX } from "./kit-css"
  *
  * - On Vercel it's @sparticuz/chromium (a Chromium built for serverless functions); locally, the
  *   machine's Chrome or Edge, or JACK_CHROME_PATH.
- * - One browser per function instance, kept between renders; each slide gets its own page.
+ * - One browser per function instance, kept between renders; each slide gets its own context and page.
  * - JavaScript is off for the page. Every request goes through `routeRequest`: the public site, club
  *   photos on Cloudinary and Google Fonts load; QR codes and private images (jack.assets) are answered
  *   here; everything else, and any navigation, is blocked. No file:// access.
@@ -183,7 +183,10 @@ async function withSlidePage<T>(
 ): Promise<T> {
   return withPageSlot(async () => {
     const browser = await getBrowser()
-    const page = await browser.newPage()
+    // Each slide gets its own context (its own window). Pages sharing one go to the background when
+    // another is closed, and a background page's next screenshot waits for a frame that never comes
+    const context = await browser.createBrowserContext()
+    const page = await context.newPage()
     let timer: ReturnType<typeof setTimeout> | undefined
     const stop = () => void page.close().catch(() => {})
     options.signal?.addEventListener("abort", stop, { once: true })
@@ -197,6 +200,7 @@ async function withSlidePage<T>(
       clearTimeout(timer)
       options.signal?.removeEventListener("abort", stop)
       await page.close().catch(() => {})
+      await context.close().catch(() => {})
     }
   })
 }
