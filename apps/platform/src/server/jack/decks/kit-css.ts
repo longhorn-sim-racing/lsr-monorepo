@@ -62,6 +62,7 @@ ul,ol{padding-left:1.2em}
 li+li{margin-top:0.3em}
 b,strong{font-weight:800}
 .slide{position:relative;width:var(--w);height:var(--h);overflow:hidden;display:flex;flex-direction:column;gap:var(--gap);padding:var(--pad-top) var(--pad-x) var(--pad-bottom);background:var(--dark);color:var(--ground)}
+.slide.dark{background:var(--dark);color:var(--ground)}
 .slide.light{background:var(--ground);color:var(--charcoal)}
 .slide.center{justify-content:center}
 .slide.end{justify-content:flex-end}

@@ -1,0 +1,90 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+vi.mock("./renderer", () => ({
+  renderSlide: vi.fn(async () => ({
+    png: Buffer.from("png"),
+    view: Buffer.from("view"),
+    thumb: Buffer.from("thumb"),
+    issues: ["Text \"x\" overlaps \"y\"."],
+    ms: 12,
+  })),
+}))
+
+import { renderKey } from "./document"
+import { renderSlide } from "./renderer"
+import { ensureRender, getRenderFile, resolveJackAsset } from "./renders"
+import { fileStore, setJackFileStore } from "./storage"
+
+const source = { size: "slides" as const, css: "", html: '<section class="slide dark">Hi</section>' }
+let root: string
+
+beforeEach(() => {
+  root = mkdtempSync(path.join(tmpdir(), "jack-renders-"))
+  setJackFileStore(fileStore(root))
+  vi.mocked(renderSlide).mockClear()
+})
+
+afterEach(() => {
+  setJackFileStore(null)
+  rmSync(root, { recursive: true, force: true })
+})
+
+describe("ensureRender", () => {
+  it("renders once, stores the files, and reuses them after that", async () => {
+    const first = await ensureRender(source, { withView: true })
+    expect(first).toMatchObject({ key: renderKey(source), issues: ['Text "x" overlaps "y".'], cached: false })
+    expect(first.view?.toString()).toBe("view")
+
+    const again = await ensureRender(source, { withView: true })
+    expect(again).toMatchObject({ cached: true, issues: ['Text "x" overlaps "y".'] })
+    expect(again.view?.toString()).toBe("view")
+    expect(renderSlide).toHaveBeenCalledTimes(1)
+  })
+
+  it("shares one render between two callers asking at once", async () => {
+    const other = { ...source, html: "<section>Other</section>" }
+    await Promise.all([ensureRender(other), ensureRender(other), getRenderFile(other, "thumb")])
+    expect(renderSlide).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("getRenderFile", () => {
+  it("serves a stored file, rendering the slide first when it's missing", async () => {
+    const thumb = await getRenderFile(source, "thumb")
+    expect(thumb.body.toString()).toBe("thumb")
+    const png = await getRenderFile(source, "png")
+    expect(png.body.toString()).toBe("png")
+    expect(renderSlide).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("resolveJackAsset", () => {
+  it("makes QR codes", async () => {
+    const qr = await resolveJackAsset(new URL("https://jack.assets/qr?text=https%3A%2F%2Fwww.longhornsimracing.org%2Fapply"))
+    expect(qr?.contentType).toBe("image/png")
+    expect(qr?.body.subarray(1, 4).toString()).toBe("PNG")
+  })
+
+  it("serves stored private images by safe names only", async () => {
+    await fileStore(root).put("jack/assets/shot-1.png", Buffer.from("shot"), "image/png")
+    expect((await resolveJackAsset(new URL("https://jack.assets/files/shot-1.png")))?.body.toString()).toBe("shot")
+    expect(await resolveJackAsset(new URL("https://jack.assets/files/../../secret.png"))).toBeNull()
+    expect(await resolveJackAsset(new URL("https://jack.assets/files/missing.png"))).toBeNull()
+  })
+
+  it("refuses empty or oversized QR text and unknown paths", async () => {
+    expect(await resolveJackAsset(new URL("https://jack.assets/qr"))).toBeNull()
+    expect(await resolveJackAsset(new URL(`https://jack.assets/qr?text=${"a".repeat(700)}`))).toBeNull()
+    expect(await resolveJackAsset(new URL("https://jack.assets/other"))).toBeNull()
+  })
+})
+
+describe("fileStore", () => {
+  it("keeps paths inside its folder", async () => {
+    await expect(fileStore(root).put("../escape.png", Buffer.from("x"), "image/png")).rejects.toThrow("Bad store path")
+    expect(await fileStore(root).get("nothing/here.png")).toBeNull()
+  })
+})

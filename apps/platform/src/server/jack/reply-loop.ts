@@ -352,7 +352,7 @@ async function produce(
     tools: deps.tools,
     history,
     // Tools run as the officer whose message started this reply: the newest one it answers
-    ctx: { roomId, actor: { userId: latest.authorUserId, displayName: latest.author?.displayName ?? FORMER_OFFICER } },
+    ctx: { roomId, messageId: reply.id, actor: { userId: latest.authorUserId, displayName: latest.author?.displayName ?? FORMER_OFFICER } },
     onText: (text) => stream.write(text),
     onReset: (text) => stream.reset(text),
     onPart: (part, all) => {

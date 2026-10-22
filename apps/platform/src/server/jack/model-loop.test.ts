@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { z } from "zod"
 import type { JackToolPart } from "@/lib/jack/parts"
 import { fakeClaude, type FakeTurn } from "./fake-claude"
-import { runModelReply, toolDefinitions, type ModelReplyOptions } from "./model-loop"
+import { MAX_TOOL_RESULT_IMAGES, resultContent, runModelReply, toolDefinitions, type ModelReplyOptions } from "./model-loop"
 import { JACK_MODELS } from "./models"
 import { buildSystemPrompt } from "./prompt"
 import type { AnyJackTool, JackTool, JackToolContext } from "./tools/types"
@@ -142,6 +142,32 @@ describe("runModelReply", () => {
     // both calls add up: 900 + 60 in, 3000 written, 3900 read, 80 out on Sonnet 5.5
     expect(result.usage.tokens).toEqual({ inputTokens: 960, cacheWriteTokens: 3000, cacheReadTokens: 3900, outputTokens: 80 })
     expect(result.usage.costUsd).toBeCloseTo((960 * 2 + 3000 * 2.5 + 3900 * 0.2 + 80 * 10) / 1e6, 6)
+  })
+
+  it("shows the model a tool's images after its text, each after its caption, and keeps them out of the part", async () => {
+    const tool = countTool(async () => ({
+      forModel: "Rendered 2 slides.",
+      label: "Rendered 2 slides",
+      images: [
+        { caption: "Slide 1:", mediaType: "image/jpeg", data: "AAAA" },
+        { caption: "Slide 2:", mediaType: "image/png", data: "BBBB" },
+      ],
+    }))
+    const { run, fake } = setup(
+      [{ tools: [{ id: "toolu_r", name: "count_rows", input: { table: "Deck" } }] }, { text: "Both slides look right." }],
+      [tool]
+    )
+
+    const result = await run()
+
+    expect(toolResults(fake.calls[1].messages.at(-1)!)[0].content).toEqual([
+      { type: "text", text: "Rendered 2 slides." },
+      { type: "text", text: "Slide 1:" },
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "AAAA" } },
+      { type: "text", text: "Slide 2:" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "BBBB" } },
+    ])
+    expect(JSON.stringify(result.parts)).not.toContain("AAAA")
   })
 
   it("turns input that doesn't match the tool's schema into an error result, without running it", async () => {
@@ -449,6 +475,19 @@ describe("cancelling a reply", () => {
     expect(streamed.mock.calls[0][1]).toEqual({ signal: cancel.signal })
     expect(result).toMatchObject({ status: "error", outcome: "api_error" })
     expect(result.text).toMatch(/stopped before it finished/)
+  })
+})
+
+describe("resultContent", () => {
+  it("is plain text when there are no images", () => {
+    expect(resultContent("42 rows")).toBe("42 rows")
+  })
+
+  it(`caps the images at ${MAX_TOOL_RESULT_IMAGES} and says how many were left out`, () => {
+    const images = Array.from({ length: MAX_TOOL_RESULT_IMAGES + 2 }, (_, i) => ({ caption: `Slide ${i + 1}:`, mediaType: "image/jpeg" as const, data: "x" }))
+    const content = resultContent("Rendered.", images) as { type: string; text?: string }[]
+    expect(content.filter((block) => block.type === "image")).toHaveLength(MAX_TOOL_RESULT_IMAGES)
+    expect(content.at(-1)).toEqual({ type: "text", text: "(2 more images left out; ask for fewer at a time.)" })
   })
 })
 

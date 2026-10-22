@@ -17,7 +17,7 @@ import type { JackToolPart } from "@/lib/jack/parts"
 import { JACK_PERSONA_NAME } from "@/lib/jack/types"
 import { UsageTally } from "./cost"
 import { SERVER_FALLBACK_BETA, THINKING_BINDING_BETA, type JackModelConfig } from "./models"
-import type { AnyJackTool, JackToolContext } from "./tools/types"
+import type { AnyJackTool, JackModelImage, JackToolContext } from "./tools/types"
 
 /** What the loop needs from the Anthropic SDK: a streamed call (replies) and a plain one (Stand). Tests pass a fake */
 export type JackModelStream = AsyncIterable<BetaRawMessageStreamEvent> & { finalMessage(): Promise<BetaMessage> }
@@ -327,7 +327,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
         error: out.isError ? clip(out.forModel, MAX_PART_ERROR_CHARS) : undefined,
         ms: now() - startedAt,
       })
-      return { type: "tool_result", tool_use_id: use.id, content: clip(out.forModel, MAX_TOOL_RESULT_CHARS), ...(out.isError ? { is_error: true } : {}) }
+      return { type: "tool_result", tool_use_id: use.id, content: resultContent(out.forModel, out.images), ...(out.isError ? { is_error: true } : {}) }
     } catch (error) {
       console.error(`[jack] Tool ${tool.name} failed in room ${ctx.roomId}:`, error)
       const reason = error instanceof Error ? error.message : String(error)
@@ -434,6 +434,25 @@ function findTool(tools: AnyJackTool[], name: string): AnyJackTool | undefined {
 
 function clip(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max)}\n[cut off at ${max} characters]` : text
+}
+
+/** Most images one tool result shows the model (a deck render's slides); each is about 1,200 to 1,800 tokens */
+export const MAX_TOOL_RESULT_IMAGES = 12
+
+/**
+ * A tool's result as the API takes it: its text clipped to MAX_TOOL_RESULT_CHARS, then any images,
+ * each after its caption (at most MAX_TOOL_RESULT_IMAGES)
+ */
+export function resultContent(forModel: string, images: JackModelImage[] = []): BetaToolResultBlockParam["content"] {
+  const text = clip(forModel, MAX_TOOL_RESULT_CHARS)
+  if (!images.length) return text
+  const blocks: Exclude<BetaToolResultBlockParam["content"], string | undefined> = [{ type: "text", text: text || "(no text)" }]
+  for (const image of images.slice(0, MAX_TOOL_RESULT_IMAGES)) {
+    blocks.push({ type: "text", text: image.caption })
+    blocks.push({ type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } })
+  }
+  if (images.length > MAX_TOOL_RESULT_IMAGES) blocks.push({ type: "text", text: `(${images.length - MAX_TOOL_RESULT_IMAGES} more images left out; ask for fewer at a time.)` })
+  return blocks
 }
 
 /**
