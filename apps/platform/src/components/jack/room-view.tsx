@@ -206,6 +206,21 @@ function initials(name: string) {
   return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?"
 }
 
+/** An officer's profile picture, or their initials when they have none or it doesn't load. Hidden from screen readers: the name is always beside it */
+function OfficerAvatar({ name, url, className }: { name: string; url: string | null; className?: string }) {
+  const [failed, setFailed] = useState<string | null>(null)
+  if (url && failed !== url)
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- avatars come from several hosts
+      <img src={url} alt="" aria-hidden referrerPolicy="no-referrer" onError={() => setFailed(url)} className={cn("shrink-0 rounded-full bg-muted object-cover", className)} />
+    )
+  return (
+    <span aria-hidden className={cn("flex shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-tone-neutral-foreground", className)}>
+      {initials(name)}
+    </span>
+  )
+}
+
 function PresenceStack({ present }: { present: JackPresence[] }) {
   if (!present.length) return null
   const names = present.map((p) => p.displayName).join(", ")
@@ -213,12 +228,7 @@ function PresenceStack({ present }: { present: JackPresence[] }) {
     <div className="flex items-center gap-2" title={names}>
       <div className="flex" aria-hidden>
         {present.slice(0, 4).map((p, i) => (
-          <span
-            key={p.userId}
-            className={cn("flex size-6 items-center justify-center rounded-full border-2 border-card bg-muted text-[10px] font-semibold text-tone-neutral-foreground", i > 0 && "-ml-1.5")}
-          >
-            {initials(p.displayName)}
-          </span>
+          <OfficerAvatar key={p.userId} name={p.displayName} url={p.avatarUrl} className={cn("size-6 border-2 border-card text-[10px]", i > 0 && "-ml-1.5")} />
         ))}
       </div>
       <span className="text-xs text-muted-foreground">
@@ -351,9 +361,7 @@ const MessageRow = memo(function MessageRow({ message }: { message: JackMessageV
       {message.author.kind === "assistant" ? (
         <PersonaAvatar persona={message.author.persona} />
       ) : (
-        <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-tone-neutral-foreground">
-          {initials(name)}
-        </span>
+        <OfficerAvatar name={name} url={message.author.avatarUrl} className="size-7 text-[11px]" />
       )}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="text-[13px]">

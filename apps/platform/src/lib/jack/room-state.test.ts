@@ -7,7 +7,7 @@ import type { JackMessageView, JackRoomView } from "./types"
 const officerMessage = (id: string, createdAt: string, content = "How many LSC applications?", answered = true): JackMessageView => ({
   id,
   roomId: "room-1",
-  author: { kind: "user", userId: "officer-1", displayName: "Gray" },
+  author: { kind: "user", userId: "officer-1", displayName: "Gray", avatarUrl: null },
   content,
   tools: [],
   status: "done",
