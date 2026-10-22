@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { routeRequest, scaleFor, THUMB_LONG_SIDE, VIEW_LONG_SIDE } from "./renderer"
+import { isScreenshotPath, routeRequest, scaleFor, THUMB_LONG_SIDE, VIEW_LONG_SIDE } from "./renderer"
 
 const page = { navigation: false }
 
@@ -47,5 +47,19 @@ describe("scaleFor", () => {
     expect(scaleFor("story", VIEW_LONG_SIDE)).toBeCloseTo(1280 / 1920)
     expect(scaleFor("square", VIEW_LONG_SIDE)).toBe(1)
     expect(scaleFor("post", THUMB_LONG_SIDE)).toBeCloseTo(480 / 1350)
+  })
+})
+
+describe("isScreenshotPath", () => {
+  it("allows the site's public pages", () => {
+    for (const path of ["/", "/events", "/events/gm-2", "/lone-star-cup", "/lone-star-cup/enter", "/gallery?album=cota", "/apply", "/drivers/gray", "/news/", "/sponsors"]) {
+      expect(isScreenshotPath(path), path).toBe(true)
+    }
+  })
+
+  it("refuses the admin console, sign-in, accounts, the API, other hosts and odd paths", () => {
+    for (const path of ["/admin", "/admin/jack", "/api/admin/audit-logs", "/auth/sign-in", "/account", "/check-in/x", "//evil.example", "https://evil.example", "events", "/events\\..","/eventsx", "/ apply"]) {
+      expect(isScreenshotPath(path), path).toBe(false)
+    }
   })
 })

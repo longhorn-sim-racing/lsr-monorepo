@@ -26,7 +26,7 @@ export const DESIGN_GUIDE = `# LSR slide kit
 - A deck is slides at one canvas size. Each slide is HTML: one root \`<section class="slide dark">\` (or \`light\`). Its children stack top to bottom (a flex column with the size's padding and gap); \`end\` pushes them to the bottom, \`center\` to the middle.
 - Every slide renders with the kit stylesheet below, then the deck's CSS (deck_write \`css\`), then the slide. Put classes you reuse across slides in the deck CSS; use inline styles for one-offs. A \`<style>\` inside a slide only affects that slide.
 - No JavaScript. Fonts: only Kanit and Montserrat load. No emoji (they render as empty boxes); use plain text, or an inline \`<svg>\` for a simple icon.
-- Images load only from: the club site (relative paths from deck_assets, like /images/lsr-hero.webp), club photos on res.cloudinary.com (from deck_assets), and QR codes from https://jack.assets/qr?text=<URL-encoded link>. Never invent an image URL or use one from elsewhere; it's blocked.
+- Images load only from: the club site (relative paths from deck_assets, like /images/lsr-hero.webp), club photos on res.cloudinary.com (from deck_assets), QR codes from https://jack.assets/qr?text=<URL-encoded link>, and screenshots of the site from deck_screenshot. Never invent an image URL or use one from elsewhere; it's blocked.
 - After each write you get the layout checks (cut-off or overlapping text, text too small, wrong fonts, images that didn't load). Fix every one unless it's deliberate. Then deck_render the slides and look at them before you call the work done.
 
 ## Brand
@@ -72,6 +72,8 @@ ${(Object.keys(JACK_DECK_SIZES) as JackDeckSizeKey[]).map(sizeLine).join("\n")}
 ## Photos
 - deck_assets lists the club's photos and logos with what each shows. Use action and people shots for events and recruiting, livery renders for racing and the LSC, logos for sponsor slides.
 - Photos fill their box (\`object-fit:cover\`). A portrait photo works as a side panel (see the wrap template).
+- On posts and stories, let the photo show: a bright photo, \`scrim bottom\`, and the text at the bottom (\`slide dark end\`). A photo shaded almost to black wastes it.
+- To show a feature of the club site, take a deck_screenshot and frame it (a card with a thin border and a soft shadow, or a phone outline) beside the text that explains it.
 
 ## Templates
 Copy one, replace the bracketed text, and adapt freely: add or drop cards, change the photo, rebalance. The cover, stats and grid templates are the core of most decks.

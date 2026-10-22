@@ -178,14 +178,14 @@ export const SLIDE_TEMPLATES: SlideTemplate[] = [
     name: "announcement-story",
     size: "story",
     use: "Instagram story announcing something, with a call to action",
-    html: `<section class="slide dark center">
-<img class="photo" src="/images/liveries/daytona-grid-pair.webp" alt="">
-<div class="scrim even"></div>
+    html: `<section class="slide dark end">
+<img class="photo" src="/images/liveries/daytona-grid-pair.webp" alt="" style="object-position:30% center">
+<div class="scrim bottom"></div>
 <header class="chrome">Longhorn Sim Racing</header>
 <p class="eyebrow">[Applications open]</p>
 <h1 class="title xl">[Join the <span class="o">team</span>]</h1>
 <p class="lead">[Two short lines on who should apply and what they'll do.]</p>
-<p class="pill" style="font-size:34px;padding:12px 24px">[Apply by Fri 10/31]</p>
+<p class="pill" style="font-size:34px;padding:12px 24px">[Apply by Oct 31]</p>
 <img class="qr" src="https://jack.assets/qr?text=https%3A%2F%2Fwww.longhornsimracing.org%2Fapply" alt="" style="width:260px;height:260px">
 </section>`,
   },

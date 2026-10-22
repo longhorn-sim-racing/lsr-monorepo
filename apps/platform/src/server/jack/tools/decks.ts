@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { z } from "zod"
 import { deckPageUrl, JACK_DECK_SIZE_KEYS, JACK_DECK_SIZES, MAX_DECK_SLIDES, type JackDeckContent } from "@/lib/jack/decks"
 import type { JackDeckDisplay } from "@/lib/jack/parts"
@@ -5,8 +6,10 @@ import { getSiteUrl } from "@/lib/site-url"
 import { findGalleryAssets, orientation, SITE_ASSETS } from "@/server/jack/decks/assets"
 import { DESIGN_GUIDE } from "@/server/jack/decks/design-guide"
 import { applyEdits, applyOrder, applyWrites, newSlideId, type Applied } from "@/server/jack/decks/edits"
-import { ensureRender } from "@/server/jack/decks/renders"
+import { isScreenshotPath, SCREENSHOT_DEVICES, screenshotSite } from "@/server/jack/decks/renderer"
+import { ASSET_FILES, ensureRender } from "@/server/jack/decks/renders"
 import { changeDeck, createDeck, getDeck, listDecks, listDeckVersions, restoreDeckVersion, slideRange, type DeckView } from "@/server/jack/decks/service"
+import { jackFileStore } from "@/server/jack/decks/storage"
 import { ct } from "./time"
 import type { JackModelImage, JackTool, JackToolContext, JackToolResult } from "./types"
 
@@ -429,5 +432,49 @@ export const deckRestoreTool: JackTool<z.infer<typeof deckRestoreInput>> = {
   },
 }
 
+export const deckScreenshotInput = z.object({
+  page: z.string().trim().min(1).max(200).describe('A public page of the club site, as a path: "/", "/events", "/lone-star-cup", "/gallery", "/apply", "/drivers", "/news", "/sponsors"…'),
+  device: z.enum(["desktop", "phone"]).optional().describe("desktop (1440 wide, the default) or phone (390 wide at 2x)"),
+  fullPage: z.boolean().optional().describe("The whole page, up to 4 screens tall, instead of just the first screen"),
+})
+
+export const deckScreenshotTool: JackTool<z.infer<typeof deckScreenshotInput>> = {
+  name: "deck_screenshot",
+  description:
+    "Take a screenshot of one of the club site's public pages, as a signed-out visitor sees it, to put on a slide (a feature, the events page, the apply page). Shows you the screenshot and returns its image URL. Frame it on the slide (object-fit: cover with object-position: top, or contain); a phone shot sits well in a rounded rectangle.",
+  input: deckScreenshotInput,
+  design: true,
+  timeoutMs: 60_000,
+  async run(input) {
+    if (!isScreenshotPath(input.page)) {
+      return fail(`${input.page} isn't a public page of the site. Use a path like "/", "/events", "/lone-star-cup", "/gallery", "/apply", "/drivers", "/news" or "/sponsors".`, "Screenshot not taken")
+    }
+    const store = jackFileStore()
+    if (store.kind === "none") return fail("Screenshots need the private Blob store, which isn't connected yet. Tell the officers an admin needs to connect it.", "Screenshot not taken")
+    const device = input.device ?? "desktop"
+    const shot = await screenshotSite(input.page, { device, fullPage: input.fullPage })
+    const name = `shot-${createHash("sha256").update(shot.png).digest("hex").slice(0, 20)}.png`
+    await store.put(`${ASSET_FILES}/${name}`, shot.png, "image/png")
+    const url = `https://jack.assets/files/${name}`
+    const { width } = SCREENSHOT_DEVICES[device]
+    return {
+      forModel: `Screenshot of ${input.page} (${device}, ${width} CSS px wide): ${shot.width}×${shot.height} px. Use it on a slide as <img src="${url}">.`,
+      images: [{ caption: `${input.page} on ${device}:`, mediaType: "image/jpeg", data: shot.preview.toString("base64") }],
+      label: `Took a screenshot of ${input.page}${device === "phone" ? " on a phone" : ""}`,
+    }
+  },
+}
+
 /** The deck tools, in the order they're registered (part of the cached prompt) */
-export const DECK_TOOLS = [deckGuideTool, deckAssetsTool, deckCreateTool, deckWriteTool, deckEditTool, deckArrangeTool, deckViewTool, deckRenderTool, deckRestoreTool]
+export const DECK_TOOLS = [
+  deckGuideTool,
+  deckAssetsTool,
+  deckCreateTool,
+  deckWriteTool,
+  deckEditTool,
+  deckArrangeTool,
+  deckViewTool,
+  deckRenderTool,
+  deckRestoreTool,
+  deckScreenshotTool,
+]
