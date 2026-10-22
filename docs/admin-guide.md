@@ -222,6 +222,17 @@ Applications, decisions and the emails to applicants are handled in **Admin > Re
 
 ---
 
+## Slides and Instagram graphics (Jack)
+
+Ask Jack in any room for a deck or a graphic: "a 6-slide deck for GM 2 on Mon 10/26", "an Instagram story saying recruiting closes Friday", "a square post with the Round 6 results". He uses the club's real data, photos and look, checks his own work, and posts a card with the slides.
+
+- **Open** on the card (or **Admin > Decks and graphics**) shows every slide large, with its speaker notes.
+- **Changes:** ask in the same room ("make slide 2 lighter", "swap the photo on the cover", "add a slide about the COTA trip"). Every change is a new version; the deck page can view or **Restore** any earlier one.
+- **Downloads:** **PNG** under each slide (ready to post), or the whole deck as **PDF**, **PPTX** (for Google Slides or PowerPoint; each slide is a picture, with the notes) or a ZIP of **PNGs**.
+- **Better design:** switch the room to **Lift** for a whole deck or a polished graphic. It costs about twice as much.
+- **Big decks** can take a few replies. Jack keeps going on his own (up to three times), so leave the room open.
+- **Check before posting:** dates, names and anything in [brackets], which Jack leaves for you to fill in.
+
 ## Audit Log
 
 The main admin dashboard shows an activity log of all admin actions. Use this to:

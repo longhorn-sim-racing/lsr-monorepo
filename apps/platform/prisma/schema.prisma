@@ -173,8 +173,10 @@ model User {
   notificationPrefs NotificationPreference?
 
   // Jack (officer chat agent)
-  jackRoomsCreated JackRoom[]    @relation("JackRoomCreator")
-  jackMessages     JackMessage[] @relation("JackMessageAuthor")
+  jackRoomsCreated JackRoom[]        @relation("JackRoomCreator")
+  jackMessages     JackMessage[]     @relation("JackMessageAuthor")
+  jackDecks        JackDeck[]        @relation("JackDeckCreator")
+  jackDeckVersions JackDeckVersion[] @relation("JackDeckVersionAuthor")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -951,6 +953,7 @@ model JackRoom {
   createdBy User?         @relation("JackRoomCreator", fields: [createdById], references: [id], onDelete: SetNull)
   messages  JackMessage[]
   usage     JackUsage[]
+  decks     JackDeck[]
 
   @@index([archivedAt, updatedAt])
 }
@@ -1001,6 +1004,9 @@ model JackMessage {
   /// user messages: the reply that answered it. Null until Jack picks it up, so a message posted
   /// while he's answering waits for the next pass
   answeredById String?
+  /// A room note asking Jack to keep going (#177): a deck job that ran out of time or tool calls
+  /// leaves one, and it's answered like an officer message (answeredById), as the officer it names
+  continues    Boolean           @default(false)
 
   /// Assistant messages only (later steps)
   model           String?
@@ -1012,14 +1018,73 @@ model JackMessage {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  room       JackRoom      @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  author     User?         @relation("JackMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
-  answeredBy JackMessage?  @relation("JackAnswer", fields: [answeredById], references: [id], onDelete: SetNull)
-  answers    JackMessage[] @relation("JackAnswer")
+  room         JackRoom          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  author       User?             @relation("JackMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  answeredBy   JackMessage?      @relation("JackAnswer", fields: [answeredById], references: [id], onDelete: SetNull)
+  answers      JackMessage[]     @relation("JackAnswer")
+  /// Deck changes this reply made
+  deckVersions JackDeckVersion[]
 
   @@index([roomId, createdAt])
   @@index([roomId, kind, answeredById])
   @@index([authorUserId])
+}
+
+/// A deck's canvas: 16:9 slides (1920x1080), an Instagram post (1080x1350), an Instagram story
+/// (1080x1920) or a square post (1080x1080). Sizes live in src/lib/jack/decks.ts
+enum JackDeckSize {
+  slides
+  post
+  story
+  square
+}
+
+/// A slide deck or social graphic Jack made in a room (#177). A graphic is a deck at a social size:
+/// usually one slide, or several for a carousel. Its slides live in versions: every change saves a
+/// new JackDeckVersion and moves `version` to it, so an officer can undo a change
+model JackDeck {
+  id          String       @id @default(uuid())
+  title       String
+  size        JackDeckSize
+  /// The current JackDeckVersion.version
+  version     Int          @default(1)
+  /// The room it was made in. Null once the room is deleted
+  roomId      String?
+  /// The officer whose message started the reply that made it. Null once they delete their account
+  createdById String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  room      JackRoom?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  createdBy User?             @relation("JackDeckCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  versions  JackDeckVersion[]
+
+  @@index([updatedAt])
+  @@index([roomId])
+}
+
+/// One saved state of a deck, never changed once written. `content` is the deck's shared CSS and its
+/// slides in order: { css, slides: [{ id, html, notes? }] } (JackDeckContent in src/lib/jack/decks.ts).
+/// Undo restores an older version as a new one
+model JackDeckVersion {
+  id        String   @id @default(uuid())
+  deckId    String
+  version   Int
+  /// What the change did, e.g. "Wrote slides 1-4" or "Restored version 3"
+  summary   String
+  content   Json
+  /// The reply that made the change. Null when an officer restored a version from the deck page
+  messageId String?
+  /// The officer it was made for: whose message started the reply, or who restored it
+  userId    String?
+  createdAt DateTime @default(now())
+
+  deck    JackDeck     @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  message JackMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  user    User?        @relation("JackDeckVersionAuthor", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([deckId, version])
+  @@index([messageId])
 }
 
 // ---------- Recruiting ----------
@@ -1052,8 +1117,8 @@ model RecruitingCycle {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  applications   Application[]
-  trackConfigs   RecruitingTrackConfig[]
+  applications Application[]
+  trackConfigs RecruitingTrackConfig[]
 }
 
 model Application {

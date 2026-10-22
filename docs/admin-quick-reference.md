@@ -14,6 +14,15 @@ Fast answers for common admin tasks.
 | Manual check-in | Attendance tab > "Add Attendee" button > Search member |
 | Promote from waitlist | Registration tab > Waitlist section > Click promote icon |
 
+## Jack decks and graphics
+
+| Task | Steps |
+|------|-------|
+| Make slides or a graphic | Admin > Jack > a room > ask, e.g. "a 5-slide deck for GM 2" |
+| See or download a deck | The deck card's Open button, or Admin > Decks and graphics |
+| Change a deck | Ask Jack in the same room |
+| Undo a change | The deck's page > Versions > Restore |
+
 ## Results
 
 | Task | Steps |

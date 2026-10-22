@@ -66,3 +66,6 @@ nul
 **/supabase/.temp
 **/supabase/.branches
 .env*.local
+
+# Jack deck renders cached locally (src/server/jack/decks/storage.ts)
+.jack-renders/
