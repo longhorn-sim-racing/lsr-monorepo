@@ -17,6 +17,7 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     items: [
       { title: "Overview", href: "/admin", keywords: ["home", "dashboard"] },
       { title: "Jack", href: "/admin/jack", keywords: ["ai", "assistant", "ask", "chat", "rooms"] },
+      { title: "Decks and graphics", href: "/admin/jack/decks", keywords: ["slides", "presentation", "instagram", "story", "post", "promo", "jack"] },
     ],
   },
   {

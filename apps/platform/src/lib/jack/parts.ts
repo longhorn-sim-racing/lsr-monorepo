@@ -23,6 +23,21 @@ export type JackToolDisplay =
   | { kind: "chart"; chart: JackChartSpec }
   | { kind: "event_draft"; eventId: string; title: string; startsAt: string; endsAt: string; venue: string | null; editUrl: string }
   | { kind: "note"; text: string }
+  | JackDeckDisplay
+
+/**
+ * A deck or graphic Jack made or changed (#177): the room shows its slides as thumbnails at `version`
+ * and links to the deck page. `focus` lists the slides this call wrote, edited or rendered
+ */
+export type JackDeckDisplay = {
+  kind: "deck"
+  deckId: string
+  title: string
+  size: "slides" | "post" | "story" | "square"
+  version: number
+  slideIds: string[]
+  focus?: string[]
+}
 
 /** A tool call inside a reply, saved in order in JackMessage.toolCalls */
 export type JackToolPart = {
