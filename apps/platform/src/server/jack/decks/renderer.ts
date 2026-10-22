@@ -10,7 +10,8 @@ import { MIN_TEXT_PX } from "./kit-css"
  *
  * - On Vercel it's @sparticuz/chromium (a Chromium built for serverless functions); locally, the
  *   machine's Chrome or Edge, or JACK_CHROME_PATH.
- * - One browser per function instance, kept between renders; each slide gets its own context and page.
+ * - One browser per function instance, kept between renders; each slide gets its own page (and, with
+ *   desktop Chrome locally, its own context; see openPage).
  * - JavaScript is off for the page. Every request goes through `routeRequest`: the public site, club
  *   photos on Cloudinary and Google Fonts load; QR codes and private images (jack.assets) are answered
  *   here; everything else, and any navigation, is blocked. No file:// access.
@@ -102,13 +103,23 @@ export function routeRequest(rawUrl: string, options: { navigation: boolean }): 
 
 let browserPromise: Promise<Browser> | null = null
 
+/** On Vercel (or Lambda) the renderer runs @sparticuz/chromium; locally, the machine's Chrome */
+const SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME)
+
+/**
+ * @sparticuz/chromium's flags, less two that loosen security and that slides don't need. It runs in
+ * --single-process mode, which can't open a second browser context (openPage)
+ */
+const DROPPED_SERVERLESS_FLAGS = new Set(["--disable-web-security", "--allow-running-insecure-content"])
+
 async function launchBrowser(): Promise<Browser> {
   const puppeteer = (await import("puppeteer-core")).default
-  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  if (SERVERLESS) {
     const chromium = (await import("@sparticuz/chromium")).default
     chromium.setGraphicsMode = false
+    const args = (await puppeteer.defaultArgs({ args: chromium.args, headless: "shell" })).filter((arg) => !DROPPED_SERVERLESS_FLAGS.has(arg))
     return puppeteer.launch({
-      args: await puppeteer.defaultArgs({ args: chromium.args, headless: "shell" }),
+      args,
       executablePath: await chromium.executablePath(),
       headless: "shell",
       defaultViewport: null,
@@ -151,6 +162,29 @@ async function getBrowser(): Promise<Browser> {
     if (browserPromise === launching) browserPromise = null
   })
   return launching
+}
+
+/**
+ * A fresh page for one render, and how to close it. Desktop Chrome's headless mode backgrounds pages
+ * that share a context when another one closes, and a background page's next screenshot waits for a
+ * frame that never comes, so locally each page gets its own context. @sparticuz/chromium runs
+ * --single-process, where opening a second context crashes the browser ("Target closed"), and its
+ * headless shell doesn't background pages, so on Vercel pages share the default context
+ */
+async function openPage(browser: Browser): Promise<{ page: Page; close: () => Promise<void> }> {
+  if (SERVERLESS) {
+    const page = await browser.newPage()
+    return { page, close: () => page.close().catch(() => {}) }
+  }
+  const context = await browser.createBrowserContext()
+  const page = await context.newPage()
+  return {
+    page,
+    close: async () => {
+      await page.close().catch(() => {})
+      await context.close().catch(() => {})
+    },
+  }
 }
 
 /** A tiny semaphore: at most MAX_PAGES slides render at once */
@@ -198,10 +232,7 @@ async function withSlidePage<T>(
 ): Promise<T> {
   return withPageSlot(async () => {
     const browser = await getBrowser()
-    // Each slide gets its own context (its own window). Pages sharing one go to the background when
-    // another is closed, and a background page's next screenshot waits for a frame that never comes
-    const context = await browser.createBrowserContext()
-    const page = await context.newPage()
+    const { page, close } = await openPage(browser)
     let timer: ReturnType<typeof setTimeout> | undefined
     const stop = () => void page.close().catch(() => {})
     options.signal?.addEventListener("abort", stop, { once: true })
@@ -214,8 +245,7 @@ async function withSlidePage<T>(
     } finally {
       clearTimeout(timer)
       options.signal?.removeEventListener("abort", stop)
-      await page.close().catch(() => {})
-      await context.close().catch(() => {})
+      await close()
     }
   })
 }
@@ -316,8 +346,7 @@ export async function screenshotSite(
   const device = SCREENSHOT_DEVICES[options.device]
   return withPageSlot(async () => {
     const browser = await getBrowser()
-    const context = await browser.createBrowserContext()
-    const page = await context.newPage()
+    const { page, close } = await openPage(browser)
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       const work = async () => {
@@ -352,8 +381,7 @@ export async function screenshotSite(
       return await Promise.race([work(), timeout])
     } finally {
       clearTimeout(timer)
-      await page.close().catch(() => {})
-      await context.close().catch(() => {})
+      await close()
     }
   })
 }
