@@ -234,26 +234,31 @@ export const deckWriteTool: JackTool<z.infer<typeof deckWriteInput>> = {
   },
 }
 
-export const deckEditInput = z.object({
-  deck: deckId,
-  edits: z
-    .array(
-      z.object({
-        slide: slideNumber.optional().describe("The slide to edit. Leave out to edit the deck's shared CSS"),
-        find: z.string().min(1).max(20_000).describe("Exact text to find, copied from deck_view (enough of it to be unique)"),
-        replace: z.string().max(20_000).describe("What to put in its place"),
-        all: z.boolean().optional().describe("Replace every match instead of requiring exactly one"),
-      })
-    )
-    .min(1)
-    .max(20)
-    .describe("Find-and-replace edits, applied in order. All of them apply, or none"),
+const oneEdit = z.object({
+  slide: slideNumber.optional().describe("The slide to edit. Leave out to edit the deck's shared CSS"),
+  find: z.string().min(1).max(20_000).describe("Exact text to find, copied from deck_view (enough of it to be unique)"),
+  replace: z.string().max(20_000).describe("What to put in its place"),
+  all: z.boolean().optional().describe("Replace every match instead of requiring exactly one"),
+  notes: z.boolean().optional().describe("Edit the slide's speaker notes instead of its HTML"),
 })
+
+export const deckEditInput = z.preprocess(
+  // A single edit sent flat ({ deck, slide, find, replace }) instead of in a list is still one edit
+  (value) => {
+    if (typeof value !== "object" || value === null || "edits" in value || !("find" in value)) return value
+    const { deck, ...edit } = value as Record<string, unknown>
+    return { deck, edits: [edit] }
+  },
+  z.object({
+    deck: deckId,
+    edits: z.array(oneEdit).min(1).max(20).describe("Find-and-replace edits, applied in order. All of them apply, or none"),
+  })
+)
 
 export const deckEditTool: JackTool<z.infer<typeof deckEditInput>> = {
   name: "deck_edit",
   description:
-    "Change part of a slide (or the deck CSS) by exact find and replace, like fixing a word, a color, a size or one card. Cheaper and safer than rewriting the slide. Returns the layout checks for what changed.",
+    "Change part of a slide (its HTML or its notes) or the deck CSS by exact find and replace, like fixing a word, a color, a size or one card. Cheaper and safer than rewriting the slide. Returns the layout checks for what changed.",
   input: deckEditInput,
   design: true,
   writes: true,
@@ -261,7 +266,8 @@ export const deckEditTool: JackTool<z.infer<typeof deckEditInput>> = {
     let applied: Applied | null = null
     const slides = [...new Set(input.edits.flatMap((e) => (e.slide === undefined ? [] : [e.slide])))]
     const cssEdited = input.edits.some((e) => e.slide === undefined)
-    const what = [slides.length ? `slide${slides.length === 1 ? "" : "s"} ${slideRange(slides)}` : null, cssEdited ? "the deck CSS" : null].filter(Boolean).join(" and ")
+    const onlyNotes = input.edits.every((e) => e.notes)
+    const what = [slides.length ? `${onlyNotes ? "the notes on " : ""}slide${slides.length === 1 ? "" : "s"} ${slideRange(slides)}` : null, cssEdited ? "the deck CSS" : null].filter(Boolean).join(" and ")
     const change = await changeDeck(input.deck, meta(ctx, `Edited ${what}`), ({ content }) => {
       const result = applyEdits(content, input.edits)
       if ("error" in result) return result
@@ -274,7 +280,7 @@ export const deckEditTool: JackTool<z.infer<typeof deckEditInput>> = {
     const ids = affected(applied)
     const checks = await checkSlides(deck, ids, ctx.signal)
     return {
-      forModel: [header(deck), checks].filter(Boolean).join("\n\n"),
+      forModel: [header(deck), checks || "Only the notes changed, so nothing was re-rendered."].filter(Boolean).join("\n\n"),
       label: `Edited ${what} of “${deck.title}”`,
       displays: [deckDisplay(deck, ids)],
     }
@@ -402,7 +408,10 @@ export const deckRenderTool: JackTool<z.infer<typeof deckRenderInput>> = {
     return {
       forModel: `${header(deck)}\n\nLayout checks:\n${lines.join("\n")}${more}`,
       images,
-      label: `Looked at ${targets.length === all.length ? `all ${all.length} slide${all.length === 1 ? "" : "s"}` : `slide${targets.length === 1 ? "" : "s"} ${slideRange(targets.map((t) => t.n))}`} of “${deck.title}”`,
+      label:
+        all.length === 1
+          ? `Looked at “${deck.title}”`
+          : `Looked at ${targets.length === all.length ? `all ${all.length} slides` : `slide${targets.length === 1 ? "" : "s"} ${slideRange(targets.map((t) => t.n))}`} of “${deck.title}”`,
       displays: [deckDisplay(deck, targets.map((t) => t.slide.id))],
     }
   },
