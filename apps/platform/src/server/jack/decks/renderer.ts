@@ -35,8 +35,12 @@ export const THUMB_LONG_SIDE = 480
 /** Slides rendering at once per function instance */
 const MAX_PAGES = 3
 /** One slide's whole render: load, fonts, checks and screenshots */
-const RENDER_TIMEOUT_MS = 30_000
-const LOAD_TIMEOUT_MS = 15_000
+const RENDER_TIMEOUT_MS = 45_000
+/**
+ * Waiting for the page's images. The first time a photo is asked for at slide size, the site's image
+ * optimizer can take a while; past this the render goes ahead with what loaded and says so
+ */
+const LOAD_TIMEOUT_MS = 20_000
 const FONTS_TIMEOUT_MS = 6_000
 
 /** Answers a jack.assets request: a QR code, or a stored private image. Null means not found */
@@ -149,8 +153,35 @@ export function scaleFor(size: JackDeckSizeKey, longSide: number): number {
 }
 
 export async function renderSlide(source: SlideSource, options: { assets?: AssetResolver; signal?: AbortSignal } = {}): Promise<RenderedSlide> {
+  const started = Date.now()
+  return withSlidePage(source, options, async (page, network) => {
+    const { width, height } = JACK_DECK_SIZES[source.size]
+    const issues = await page.evaluate(inspectSlide, { width, height, minFont: MIN_TEXT_PX[source.size], kitFonts: INSPECT_KIT_FONTS })
+    const png = Buffer.from(await page.screenshot({ type: "png", clip: { x: 0, y: 0, width, height } }))
+    const view = Buffer.from(await page.screenshot({ type: "jpeg", quality: 85, clip: { x: 0, y: 0, width, height, scale: scaleFor(source.size, VIEW_LONG_SIDE) } }))
+    const thumb = Buffer.from(await page.screenshot({ type: "jpeg", quality: 78, clip: { x: 0, y: 0, width, height, scale: scaleFor(source.size, THUMB_LONG_SIDE) } }))
+    return { png, view, thumb, issues: [...issues, ...network], ms: Date.now() - started }
+  })
+}
+
+/** A slide as a one-page PDF at its canvas size, with real text and embedded fonts (for the deck's PDF download) */
+export async function printSlide(source: SlideSource, options: { assets?: AssetResolver; signal?: AbortSignal } = {}): Promise<Buffer> {
+  return withSlidePage(source, { ...options, print: true }, async (page) => {
+    const { width, height } = JACK_DECK_SIZES[source.size]
+    return Buffer.from(await page.pdf({ width: `${width}px`, height: `${height}px`, printBackground: true, pageRanges: "1", preferCSSPageSize: true }))
+  })
+}
+
+/**
+ * Loads a slide on its own page (fonts ready, every request filtered) and hands the page to `work`,
+ * with the list of what didn't load. One slot of MAX_PAGES; the whole thing times out at RENDER_TIMEOUT_MS
+ */
+async function withSlidePage<T>(
+  source: SlideSource,
+  options: { assets?: AssetResolver; signal?: AbortSignal; print?: boolean },
+  work: (page: Page, network: string[]) => Promise<T>
+): Promise<T> {
   return withPageSlot(async () => {
-    const started = Date.now()
     const browser = await getBrowser()
     const page = await browser.newPage()
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -160,7 +191,8 @@ export async function renderSlide(source: SlideSource, options: { assets?: Asset
       const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(`rendering took over ${RENDER_TIMEOUT_MS / 1000} s`)), RENDER_TIMEOUT_MS)
       })
-      return await Promise.race([renderOnPage(page, source, options.assets), timeout]).then((out) => ({ ...out, ms: Date.now() - started }))
+      const run = async () => work(page, await loadSlide(page, source, options))
+      return await Promise.race([run(), timeout])
     } finally {
       clearTimeout(timer)
       options.signal?.removeEventListener("abort", stop)
@@ -169,7 +201,7 @@ export async function renderSlide(source: SlideSource, options: { assets?: Asset
   })
 }
 
-async function renderOnPage(page: Page, source: SlideSource, assets?: AssetResolver): Promise<Omit<RenderedSlide, "ms">> {
+async function loadSlide(page: Page, source: SlideSource, options: { assets?: AssetResolver; print?: boolean }): Promise<string[]> {
   const { width, height } = JACK_DECK_SIZES[source.size]
   const network: string[] = []
   const note = (line: string) => {
@@ -179,7 +211,7 @@ async function renderOnPage(page: Page, source: SlideSource, assets?: AssetResol
   await page.setJavaScriptEnabled(false)
   await page.setViewport({ width, height, deviceScaleFactor: 1 })
   await page.setRequestInterception(true)
-  page.on("request", (request) => void handleRequest(request, assets, note))
+  page.on("request", (request) => void handleRequest(request, options.assets, note))
   page.on("requestfailed", (request) => {
     const reason = request.failure()?.errorText ?? "failed"
     if (!reason.includes("BLOCKED_BY_CLIENT")) note(`Couldn't load ${shortUrl(request.url())} (${reason}).`)
@@ -188,16 +220,16 @@ async function renderOnPage(page: Page, source: SlideSource, assets?: AssetResol
     if (response.status() >= 400) note(`Couldn't load ${shortUrl(response.url())} (HTTP ${response.status()}).`)
   })
 
-  await page.setContent(slideDocument(source), { waitUntil: "load", timeout: LOAD_TIMEOUT_MS })
+  try {
+    await page.setContent(slideDocument(source, { print: options.print }), { waitUntil: "load", timeout: LOAD_TIMEOUT_MS })
+  } catch (error) {
+    if (!(error instanceof Error && error.name === "TimeoutError")) throw error
+    note(`Some images were still loading after ${LOAD_TIMEOUT_MS / 1000} s, so this render may be missing them. Render it again.`)
+  }
   // Bundlers can wrap functions in a __name() helper that doesn't exist inside the page
   await page.evaluate("globalThis.__name = (f) => f")
   await Promise.race([page.evaluate(() => document.fonts.ready.then(() => true)), new Promise((resolve) => setTimeout(resolve, FONTS_TIMEOUT_MS))])
-
-  const issues = await page.evaluate(inspectSlide, { width, height, minFont: MIN_TEXT_PX[source.size], kitFonts: INSPECT_KIT_FONTS })
-  const png = Buffer.from(await page.screenshot({ type: "png", clip: { x: 0, y: 0, width, height } }))
-  const view = Buffer.from(await page.screenshot({ type: "jpeg", quality: 85, clip: { x: 0, y: 0, width, height, scale: scaleFor(source.size, VIEW_LONG_SIDE) } }))
-  const thumb = Buffer.from(await page.screenshot({ type: "jpeg", quality: 78, clip: { x: 0, y: 0, width, height, scale: scaleFor(source.size, THUMB_LONG_SIDE) } }))
-  return { png, view, thumb, issues: [...issues, ...network] }
+  return network
 }
 
 async function handleRequest(request: HTTPRequest, assets: AssetResolver | undefined, note: (line: string) => void) {

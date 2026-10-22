@@ -333,7 +333,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
 
     upsertPart({ ...base, name: tool.name, input: use.input, status: "running", displays: [] })
     try {
-      const out = await withTimeout((signal) => tool.run(parsed.data, { ...ctx, signal }), limits.toolTimeoutMs, options.signal)
+      const out = await withTimeout((signal) => tool.run(parsed.data, { ...ctx, signal }), tool.timeoutMs ?? limits.toolTimeoutMs, options.signal)
       upsertPart({
         ...base,
         name: tool.name,

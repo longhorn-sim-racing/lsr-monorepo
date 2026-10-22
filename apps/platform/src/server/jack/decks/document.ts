@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import type { JackDeckSizeKey } from "@/lib/jack/decks"
+import { JACK_DECK_SIZES, type JackDeckSizeKey } from "@/lib/jack/decks"
 import { CANONICAL_SITE_URL } from "@/lib/site-url"
 import { KIT_CSS } from "./kit-css"
 
@@ -50,7 +50,11 @@ export function cleanCss(css: string): string {
 
 export type SlideSource = { size: JackDeckSizeKey; css: string; html: string }
 
-export function slideDocument({ size, css, html }: SlideSource): string {
+/** With `print`, the page is sized for a one-page PDF at the canvas size, backgrounds and all */
+export function slideDocument({ size, css, html }: SlideSource, options: { print?: boolean } = {}): string {
+  const { width, height } = JACK_DECK_SIZES[size]
+  const print = options.print ? `
+<style>@page{size:${width}px ${height}px;margin:0}html{-webkit-print-color-adjust:exact;print-color-adjust:exact}</style>` : ""
   return `<!doctype html>
 <html lang="en" data-size="${size}">
 <head>
@@ -59,7 +63,7 @@ export function slideDocument({ size, css, html }: SlideSource): string {
 <base href="${ASSET_ORIGIN}/">
 <link rel="stylesheet" href="${FONTS_CSS_URL}">
 <style>${KIT_CSS}</style>
-<style>${cleanCss(css)}</style>
+<style>${cleanCss(css)}</style>${print}
 </head>
 <body>
 ${cleanSlideHtml(html)}

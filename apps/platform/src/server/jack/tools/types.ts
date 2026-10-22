@@ -44,6 +44,8 @@ export type JackTool<I = unknown> = {
   writes?: boolean
   /** A deck tool (#177): a reply that calls one gets the design limits (more tool calls and output; REPLY_LIMITS) */
   design?: boolean
+  /** How long one call may run, when it needs longer than REPLY_LIMITS.toolTimeoutMs (rendering many slides) */
+  timeoutMs?: number
   run: (input: I, ctx: JackToolContext) => Promise<JackToolResult>
 }
 

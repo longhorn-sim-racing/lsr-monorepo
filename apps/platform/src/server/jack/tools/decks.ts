@@ -49,12 +49,27 @@ function header(deck: DeckView): string {
   return `Deck "${deck.title}" (id ${deck.id}): ${label}, ${width}×${height}, ${count} slide${count === 1 ? "" : "s"}, version ${deck.version}. Link: ${deckLink(deck.id)}`
 }
 
+/**
+ * How long a write waits for its slides' checks. Past this the renders carry on in the background
+ * (and land in the cache), and Jack is told to look with deck_render, so a slow first render never
+ * makes a saved change look like a failed one
+ */
+export const CHECK_WAIT_MS = 25_000
+
 /** Renders the given slides (from the store when they're cached) and lists what the layout checks found */
 async function checkSlides(deck: DeckView, ids: string[], signal?: AbortSignal): Promise<string> {
   const targets = deck.content.slides.map((slide, i) => ({ slide, n: i + 1 })).filter(({ slide }) => ids.includes(slide.id))
   if (!targets.length) return ""
   try {
-    const results = await Promise.all(targets.map(({ slide }) => ensureRender({ size: deck.size, css: deck.content.css, html: slide.html }, { signal })))
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const slow = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), CHECK_WAIT_MS)
+    })
+    const renders = Promise.all(targets.map(({ slide }) => ensureRender({ size: deck.size, css: deck.content.css, html: slide.html })))
+    renders.catch(() => {})
+    const results = await Promise.race([renders, slow]).finally(() => clearTimeout(timer))
+    if (signal?.aborted) return ""
+    if (!results) return "The slides are saved. Rendering them for the layout checks is taking a while (photos loading for the first time); call deck_render to check them."
     const lines: string[] = []
     const clean: number[] = []
     results.forEach((result, i) => {
@@ -358,6 +373,8 @@ export const deckRenderInput = z.object({
 
 export const deckRenderTool: JackTool<z.infer<typeof deckRenderInput>> = {
   name: "deck_render",
+  // Up to ten slides from a cold browser, with photos loading for the first time
+  timeoutMs: 100_000,
   description: `Look at slides as images (1280 px previews) to check the design: balance, contrast, crowding, photos, anything the layout checks can't see. Also returns the checks. At most ${MAX_RENDER_SLIDES} slides per call.`,
   input: deckRenderInput,
   design: true,
