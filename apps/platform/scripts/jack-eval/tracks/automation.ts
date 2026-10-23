@@ -46,8 +46,10 @@ const mondaysAtNine: Guard = async (ctx) => async () => {
 /** The room's recurring questions: a proposal mustn't make one */
 const recurringInRoom = ({ prisma, roomId }: GuardContext) => prisma.recurringQuestion.count({ where: { roomId } });
 
-/** A made-up week for the digest (no member's name: the officers are "Officer A" and "Officer B") */
+/** A made-up week for the digest (no member's name: the officers are "Officer A" and "Officer B"), dated back from `at` */
 export function digestFixture(at: Date): DigestReport {
+  const ago = (days: number) => new Date(at.getTime() - days * 86_400_000);
+  const due = (days: number) => `Oldest due ${formatInTimeZone(ago(days), TZ, "yyyy-MM-dd")} (${days} days ago)`;
   return {
     at,
     outcomes: [
@@ -62,15 +64,15 @@ export function digestFixture(at: Date): DigestReport {
           count: 5,
           severity: "warning",
           items: [
-            { title: "Officer A: 3 overdue", href: "/admin/action-items?owner=officer-a&status=overdue", detail: "Oldest due 2026-10-09 (17 days ago)" },
-            { title: "Officer B: 2 overdue", href: "/admin/action-items?owner=officer-b&status=overdue", detail: "Oldest due 2026-10-20 (6 days ago)" },
+            { title: "Officer A: 3 overdue", href: "/admin/action-items?owner=officer-a&status=overdue", detail: due(17) },
+            { title: "Officer B: 2 overdue", href: "/admin/action-items?owner=officer-b&status=overdue", detail: due(6) },
           ],
         },
         error: null,
       },
       {
         check: { id: "results.missing", label: "Race results not uploaded", href: "/admin/results", order: 30 },
-        result: { count: 1, severity: "warning", items: [{ title: "LSC Round 5 @ Monza", href: "/admin/results?upload=1", detail: "No upload · ended Sat, Oct 24" }] },
+        result: { count: 1, severity: "warning", items: [{ title: "LSC Round 5 @ Monza", href: "/admin/results?upload=1", detail: `No upload · ended ${formatInTimeZone(ago(2), TZ, "EEE, MMM d")}` }] },
         error: null,
       },
       {

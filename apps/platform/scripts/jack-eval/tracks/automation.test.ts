@@ -42,7 +42,7 @@ describe("the automation track's questions", () => {
     const question = byId("recurring-run-new-accounts");
     const ctx = context({});
     expect(typeof question.ask === "function" ? question.ask(ctx) : question.ask).toBe("Recurring question “Weekly new accounts” (set up by Dylan): How many new accounts were made on the site in the last 7 days?");
-    expect(await question.before!(ctx)).toEqual([{ ask: expect.stringMatching(/^Recurring question “Weekly new accounts”/), answer: "9 new accounts were made in the last 7 days." }]);
+    expect(await question.before!(ctx)).toEqual([{ ask: expect.stringMatching(/^Recurring question “Weekly new accounts”/), answer: "9 new accounts were made in the last 7 days.", agoMs: 7 * 86_400_000 }]);
   });
 
   it("grade the run by the week's new accounts, any fair reading of it", async () => {
