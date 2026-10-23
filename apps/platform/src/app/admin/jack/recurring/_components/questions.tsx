@@ -287,7 +287,7 @@ function QuestionDialog({ rooms, question, othersQuestion = false, onClose }: { 
         ) : null}
         {question && othersQuestion ? (
           <Notice tone="info" className="py-2">
-            It&apos;s asked as {question.owner?.name ?? "a former officer"}. Changing the question, the room or who answers makes you its owner: it&apos;s asked as you from then on.
+            It&apos;s asked as {question.owner?.name ?? "a former officer"}. Changing the title, the question, the room or who answers makes you its owner: it&apos;s asked as you from then on.
           </Notice>
         ) : null}
         <FieldGrid>

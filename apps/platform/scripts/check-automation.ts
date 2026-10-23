@@ -228,8 +228,8 @@ async function main() {
       const owned = await prisma.recurringQuestion.findUnique({ where: { id: createdId } });
       const entry = await prisma.auditLog.findFirst({ where: { entityType: "RECURRING_QUESTION", entityId: createdId, actionType: "UPDATE" }, orderBy: { createdAt: "desc" } });
       check("takeover: another officer rewording it makes them its owner, audited", edited.ok && owned?.createdById === dylan.id && Boolean(entry?.summary.endsWith("and took it over")));
-      const renamed = await updateRecurringQuestion(createdId, { title: `Drafts ${tag}` }, { userId: gray.id });
-      check("takeover: renaming it doesn't", renamed.ok && (await prisma.recurringQuestion.findUnique({ where: { id: createdId } }))?.createdById === dylan.id);
+      const rescheduled = await updateRecurringQuestion(createdId, { schedule: { every: "day", time: "07:30" } }, { userId: gray.id });
+      check("takeover: rescheduling it doesn't", rescheduled.ok && (await prisma.recurringQuestion.findUnique({ where: { id: createdId } }))?.createdById === dylan.id);
       // Proposed for Gray, applied by Dylan: Gray asked for the wording, so it's asked as Gray
       const change = recurringUpsertSchema.parse({ id: createdId, prompt: `Any drafts this week ${tag}?` });
       const proposed = await recurringUpsertKind.prepare(change, { roomId: room, officer: { userId: gray.id, displayName: gray.displayName } });
@@ -243,6 +243,9 @@ async function main() {
         auditMetadata: { via: "jack", proposalId: `check-edit-${tag}`, roomId: room, proposedFor: gray.id },
       });
       check("takeover: a proposal's change goes to the officer it was for, whoever applies it", (await prisma.recurringQuestion.findUnique({ where: { id: createdId } }))?.createdById === gray.id);
+      // The note that asks it starts with its title, and Jack reads that as part of the question
+      const renamed = await updateRecurringQuestion(createdId, { title: `Drafts ${tag}` }, { userId: dylan.id });
+      check("takeover: renaming it takes it over too", renamed.ok && (await prisma.recurringQuestion.findUnique({ where: { id: createdId } }))?.createdById === dylan.id);
     }
 
     // ----- the weekly digest -----

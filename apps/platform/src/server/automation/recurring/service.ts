@@ -20,9 +20,10 @@ import { officerIdSet } from "@/server/services/officers"
  * - On and off is the job's `enabled`. A question starts off unless the caller turns it on. When a run
  *   pauses one itself (its owner isn't an officer any more, its room was archived), `pausedReason` says
  *   why; turning it back on clears that.
- * - It runs as `createdById`: whoever set it up, or whoever last changed what it asks, its room or who
- *   answers (the room note and the reply's tools name them, so they must have written it). Turning a
- *   question back on whose owner isn't an officer any more makes the officer who turns it on its owner.
+ * - It runs as `createdById`: whoever set it up, or whoever last changed its title, what it asks, its room
+ *   or who answers (the room note, title included, and the reply's tools name them, so they must have
+ *   written it). Turning a question back on whose owner isn't an officer any more makes the officer who
+ *   turns it on its owner.
  * - With `expected` (a snapshot read earlier) a write locks the rows and refuses (reason "changed") when
  *   the question moved on since, so a stale proposal never overwrites an officer's edit.
  * Callers revalidate (RECURRING_PATHS): revalidatePath only works inside a request.
@@ -135,13 +136,16 @@ function movedFields(current: QuestionWithJob, expected: Partial<RecurringSnapsh
 
 const changedMessage = (title: string, moved: string[]) => `The recurring question “${title}” changed since this was read (${moved.join(", ")}).`
 
-/** The fields that make a run ask something else, somewhere else, or of someone else: changing one takes the question over */
-export const TAKES_OVER: readonly string[] = ["prompt", "roomId", "persona"]
+/**
+ * The fields that make a run ask something else, somewhere else, or of someone else: changing one takes the
+ * question over. The title too: the note that asks it starts with it, and Jack reads that note as the question
+ */
+export const TAKES_OVER: readonly string[] = ["title", "prompt", "roomId", "persona"]
 
 /**
  * Changes a question: only the fields given. A new schedule moves its next run (from now, when it's on).
- * A change to what it asks, its room or who answers makes `owner` (default: the actor) its owner, so
- * its runs are asked as, and credited to, the officer who wrote that version, never someone else
+ * A change to its title, what it asks, its room or who answers makes `owner` (default: the actor) its
+ * owner, so its runs are asked as, and credited to, the officer who wrote that version, never someone else
  */
 export async function updateRecurringQuestionTx(
   tx: Db,

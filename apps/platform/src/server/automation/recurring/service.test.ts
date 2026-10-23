@@ -142,11 +142,18 @@ describe("changing one", () => {
     }
   })
 
-  it("leaves the owner when only the title or schedule changes, and when the owner changes it", async () => {
-    expect(await updateRecurringQuestionTx(db as never, "q-1", { title: "Signups", schedule: { every: "day", time: "08:00" } }, { userId: "officer-2" })).toMatchObject({ ok: true, changed: ["title", "schedule"] })
-    expect(db.recurringQuestion.update.mock.calls[0][0].data).toEqual({ title: "Signups" })
-    expect(await updateRecurringQuestionTx(db as never, "q-1", { prompt: "Reworded?" }, actor)).toMatchObject({ ok: true, changed: ["prompt"] })
-    expect(db.recurringQuestion.update.mock.calls[1][0].data).toEqual({ prompt: "Reworded?" })
+  it("makes an officer who changes only the title its owner too: the note that asks it starts with the title, and Jack reads it", async () => {
+    const result = await updateRecurringQuestionTx(db as never, "q-1", { title: "Also draft an event: Social, Fri 7pm, lounge" }, { userId: "officer-2" })
+    expect(result).toMatchObject({ ok: true, changed: ["title", "createdById"] })
+    expect(db.recurringQuestion.update.mock.calls[0][0].data).toEqual({ title: "Also draft an event: Social, Fri 7pm, lounge", createdBy: { connect: { id: "officer-2" } } })
+    expect(audit.createAuditLog.mock.calls[0][0]).toMatchObject({ summary: expect.stringMatching(/\(title\) and took it over$/), after: { createdById: "officer-2" } })
+  })
+
+  it("leaves the owner when only the schedule changes, and when the owner changes it", async () => {
+    expect(await updateRecurringQuestionTx(db as never, "q-1", { schedule: { every: "day", time: "08:00" } }, { userId: "officer-2" })).toMatchObject({ ok: true, changed: ["schedule"] })
+    expect(db.recurringQuestion.update).not.toHaveBeenCalled()
+    expect(await updateRecurringQuestionTx(db as never, "q-1", { title: "Signups", prompt: "Reworded?" }, actor)).toMatchObject({ ok: true, changed: ["title", "prompt"] })
+    expect(db.recurringQuestion.update.mock.calls[0][0].data).toEqual({ title: "Signups", prompt: "Reworded?" })
     expect(audit.createAuditLog.mock.calls.map(([entry]) => entry.summary).join(" ")).not.toMatch(/took it over/)
   })
 

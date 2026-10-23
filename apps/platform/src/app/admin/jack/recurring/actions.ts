@@ -79,7 +79,7 @@ export async function createRecurringQuestionAction(input: RecurringFormInput): 
   return { ok: true, data: { id: result.question.id } }
 }
 
-/** Changes one. Changing what it asks, its room or who answers makes this officer its owner (it's asked as them) */
+/** Changes one. Changing its title, what it asks, its room or who answers makes this officer its owner (it's asked as them) */
 export async function updateRecurringQuestionAction(id: string, input: RecurringFormInput): Promise<ActionResult<{ tookOver: boolean }>> {
   const user = await officer()
   if (!user) return { ok: false, error: SIGNED_OUT }
