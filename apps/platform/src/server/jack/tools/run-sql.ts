@@ -42,7 +42,7 @@ export function prepareSql(raw: string): { ok: true; sql: string } | { ok: false
   if (offLimits) {
     return {
       ok: false,
-      error: `Catalog and settings access is off-limits to Jack: ${offLimits} isn't allowed in run_sql (system catalogs and pg_ functions, server settings, XML exports, large objects and other databases). Query the club's tables in schema public instead; describe_schema lists them.`,
+      error: `Catalog and settings access is off-limits to Jack: ${offLimits} isn't allowed in run_sql (system catalogs and pg_ functions, server settings, XML exports, large objects, other databases, and the net, cron, vault and scheduler schemas). Query the club's tables in schema public instead; describe_schema lists them. If ${offLimits} is only an alias you chose, rename it.`,
     }
   }
   return { ok: true, sql }
@@ -61,10 +61,14 @@ export function prepareSql(raw: string): { ok: true; sql: string } | { ok: false
  * - the XML export functions (*_to_xml*, *xmlschema*), which read a table, a schema, a whole
  *   database or a query named in a string, where the name check can't see it;
  * - the names below: settings functions, catalog columns that hold settings or source, ts_stat
- *   (also runs a query from a string), large-object functions, and dblink (other databases).
+ *   (also runs a query from a string), large-object functions, and dblink (other databases);
+ * - the schemas and functions of pg_net (outbound HTTP; every role can read its request queue and
+ *   responses, and that can't be revoked), pg_cron, Vault and our own scheduler schema, so a query
+ *   can't make a web request or read the queue, the job list or a stored secret.
  *
  * Names count as identifiers only: in a string or a comment they're fine, and an alias like
- * "notify" or "lo_count" is fine too.
+ * "notify" or "lo_count" is fine too. An alias that is one of these names (say "net") is refused
+ * like the real thing.
  */
 export const ALLOWED_PG_NAMES = new Set(["pg_typeof", "pg_size_pretty"])
 
@@ -99,6 +103,17 @@ export const OFF_LIMITS_NAMES = new Set([
   "loread",
   "lowrite",
   "lo_manage",
+  // outbound HTTP (pg_net): its schema, request functions, queue and stored responses
+  "net",
+  "http_get",
+  "http_post",
+  "http_delete",
+  "http_request_queue",
+  "_http_response",
+  // pg_cron's jobs and run log, Vault's secrets, and the scheduler's tick and signing
+  "cron",
+  "vault",
+  "scheduler",
 ])
 
 /** Whether run_sql refuses an identifier (lowercased) */
@@ -413,7 +428,7 @@ export const runSqlTool: JackTool<z.infer<typeof input>> = {
     `At most ${MAX_SQL_ROWS} rows come back, and long results are trimmed: aggregate (COUNT, SUM, GROUP BY) rather than listing when you can.`,
     `Queries stop after ${STATEMENT_TIMEOUT}. Duplicate column names collapse, so alias them. Cast unusual types (interval, regclass, point) to text.`,
     "Money is stored in cents (amountCents): divide by 100 for dollars. The room sees the SQL and a table of the rows.",
-    "The system catalogs and pg_ functions (except pg_typeof and pg_size_pretty), server settings, XML exports and large objects are off-limits.",
+    "The system catalogs and pg_ functions (except pg_typeof and pg_size_pretty), server settings, XML exports, large objects, and the net, cron, vault and scheduler schemas are off-limits.",
   ].join(" "),
   input,
   async run({ sql, purpose }, ctx) {

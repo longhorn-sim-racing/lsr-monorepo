@@ -16,9 +16,9 @@
  *   - run_sql refuses catalog and settings access the role itself is allowed: every pg_ name but
  *     pg_typeof and pg_size_pretty (pg_settings, pg_db_role_setting, pg_roles, pg_user, pg_trigger,
  *     pg_proc, advisory locks, notifications, file reads, ending other sessions), current_setting and
- *     set_config, the XML exports that read a table or schema named in a string, large objects and
- *     dblink, including after a -- comment ended by a carriage return. The check shows which of them
- *     the role itself could reach
+ *     set_config, the XML exports that read a table or schema named in a string, large objects,
+ *     dblink, and the net (pg_net), cron, vault and scheduler schemas, including after a -- comment
+ *     ended by a carriage return. The check shows which of them the role itself could reach
  *   - run_sql drops session advisory locks after every query, failing ones included
  *
  * Warns (doesn't fail) when the database keeps secret-looking settings in pg_db_role_setting, which any
@@ -250,6 +250,11 @@ async function main() {
     ["row_to_json over pg_user (useconfig)", `SELECT row_to_json(u)::text AS r FROM pg_user u`],
     ["pg_sleep (any pg_ function)", `SELECT pg_sleep(0)::text AS s`],
     ["a -- comment ended by a carriage return", `SELECT 1 AS a -- note\r, length(current_setting('app.settings.jwt_secret', true)) AS secret_len`],
+    ["net.http_get (outbound HTTP)", `SELECT net.http_get('https://example.com') AS id`],
+    ["net._http_response (pg_net's stored responses)", `SELECT count(*) AS n FROM net._http_response`],
+    ["cron.job", `SELECT count(*) AS n FROM cron.job`],
+    ["vault.decrypted_secrets", `SELECT count(*) AS n FROM vault.decrypted_secrets`],
+    ["scheduler.tick", `SELECT scheduler.tick()::text AS t`],
   ];
   for (const [name, sql] of offLimits) {
     r = await tool(sql);
