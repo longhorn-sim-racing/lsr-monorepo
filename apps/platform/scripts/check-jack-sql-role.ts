@@ -156,7 +156,7 @@ async function main() {
   // Read through the app's own connection, since the catalog query needs no special rights
   const app = new PrismaClient({ log: [], errorFormat: "minimal" });
   const personal = [
-    "JackFile", "JackProposal", "EmailEvent", "ExternalDocument", "DiscordMessage", "DiscordMember", "TeamsMessage",
+    "JackFile", "JackProposal", "EmailEvent", "ExternalDocument", "DiscordChannel", "DiscordMessage", "DiscordMember", "TeamsMessage",
     "SponsorProspect", "SponsorActivity", "Meeting", "MeetingDecision", "ActionItem", "KnowledgeEntry", "KnowledgeEntryVersion",
   ];
   const rls = await app.$queryRawUnsafe<{ table: string; rls: boolean; policy: boolean; api: boolean }[]>(

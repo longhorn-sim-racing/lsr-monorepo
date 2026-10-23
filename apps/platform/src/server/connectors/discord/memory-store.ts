@@ -1,12 +1,14 @@
 import { compareSnowflakes } from "./snowflake"
-import type { MessageRow, PurgedList } from "./metadata"
+import { PURGED_THREAD_NAME, withoutPurgedOwner, type MessageRow, type PurgedList } from "./metadata"
 import type { DailyCount, DiscordStore, MemberInput, StoredChannel } from "./store"
 
 /**
  * An in-memory DiscordStore for the sync's tests (tests only; the app uses prismaDiscordStore). It keeps
  * the same rules the database does: new channels arrive switched off, inserts skip ids already stored,
  * a page is written only while its channel is opted in, daily counts leave deleted rows out and count
- * threads toward their channel, and only opted-in channels get daily stats.
+ * threads toward their channel, only opted-in channels get daily stats, and every write checks the
+ * purged list as it is then (and the links as they are then), as the database's writes do under the
+ * purge lock. `purge()` does what purgeDiscordData does to the tables, for a purge in the middle of a run.
  */
 
 export type MemoryMessage = MessageRow & { deletedAt: Date | null }
@@ -21,8 +23,15 @@ export function memoryDiscordStore(seed: { channels?: Partial<StoredChannel>[]; 
   const guildDays = new Map<number, { memberCount: number; joinedCount: number; leftCount: number }>()
   const linked = new Map(Object.entries(seed.linked ?? {}))
   const purged = new Set(seed.purged ?? [])
+  /** The list as it is now (purgedAuthors gives a copy, as a run reads it once) */
+  const live: PurgedList = {
+    has: (discordUserId) => purged.has(discordUserId),
+    get size() {
+      return purged.size
+    },
+  }
   for (const c of seed.channels ?? []) {
-    channels.set(c.id!, { name: c.id!, type: 0, parentId: null, parentName: null, synced: false, lastMessageId: null, lastSyncedAt: null, rescanFrom: null, ...c } as StoredChannel)
+    channels.set(c.id!, { name: c.id!, type: 0, parentId: null, parentName: null, ownerId: null, synced: false, lastMessageId: null, lastSyncedAt: null, rescanFrom: null, ...c } as StoredChannel)
   }
   /** Whether a channel, or a thread's channel, is opted in */
   const optedIn = (id: string) => {
@@ -44,20 +53,22 @@ export function memoryDiscordStore(seed: { channels?: Partial<StoredChannel>[]; 
       return [...channels.values()].map((c) => ({ ...c })).sort((a, b) => compareSnowflakes(a.id, b.id))
     },
     async saveChannels(list) {
-      for (const c of list) {
+      for (const input of list) {
+        const c = withoutPurgedOwner(input, live)
         const was = channels.get(c.id)
         channels.set(c.id, was ? { ...was, ...c } : { ...c, synced: false, lastMessageId: null, lastSyncedAt: null, rescanFrom: null })
       }
     },
     async savePage(channelId, page) {
       if (!optedIn(channelId)) return null
+      const kept = (row: MessageRow) => !purged.has(row.authorId)
       let added = 0
-      for (const row of page.insert ?? []) {
+      for (const row of (page.insert ?? []).filter(kept)) {
         if (messages.has(row.id)) continue
         messages.set(row.id, { ...row, deletedAt: null })
         added++
       }
-      for (const row of page.update ?? []) {
+      for (const row of (page.update ?? []).filter(kept)) {
         const was = messages.get(row.id)
         if (was) messages.set(row.id, { ...was, ...row, createdAt: was.createdAt, channelId: was.channelId, authorId: was.authorId, deletedAt: null })
       }
@@ -128,12 +139,13 @@ export function memoryDiscordStore(seed: { channels?: Partial<StoredChannel>[]; 
     async currentMemberIds() {
       return [...members.values()].filter((m) => !m.leftAt).map((m) => m.id)
     },
-    async saveMembers(list, now, links) {
+    async saveMembers(list, now) {
       let joined = 0
       for (const m of list) {
+        if (purged.has(m.id)) continue
         const was = members.get(m.id)
         if (!was) joined++
-        members.set(m.id, { ...m, userId: links.get(m.id) ?? null, firstSeenAt: was?.firstSeenAt ?? now, lastSeenAt: now, leftAt: null })
+        members.set(m.id, { ...m, userId: linked.get(m.id) ?? null, firstSeenAt: was?.firstSeenAt ?? now, lastSeenAt: now, leftAt: null })
       }
       return { joined }
     },
@@ -166,5 +178,15 @@ export function memoryDiscordStore(seed: { channels?: Partial<StoredChannel>[]; 
       return { has: (discordUserId) => ids.has(discordUserId), size: ids.size }
     },
   }
-  return { store, channels, messages, members, daily, guildDays, linked, purged }
+
+  /** What purgeDiscordData does to the tables: their messages, member row, link and thread titles go, and they're listed */
+  function purge(discordUserId: string): void {
+    for (const [id, m] of messages) if (m.authorId === discordUserId) messages.delete(id)
+    members.delete(discordUserId)
+    linked.delete(discordUserId)
+    for (const [id, c] of channels) if (c.ownerId === discordUserId) channels.set(id, { ...c, name: PURGED_THREAD_NAME, ownerId: null })
+    purged.add(discordUserId)
+  }
+
+  return { store, channels, messages, members, daily, guildDays, linked, purged, purge }
 }

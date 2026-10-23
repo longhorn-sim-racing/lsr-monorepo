@@ -195,8 +195,8 @@ export function buildFakeServer(now = Date.now()): FakeServer {
     { id: FAKE_CHANNELS.lscChat, type: CHANNEL_TYPE.text, name: "lsc-chat", parent_id: FAKE_CHANNELS.racingCategory, position: 0 },
     { id: FAKE_CHANNELS.setups, type: CHANNEL_TYPE.forum, name: "setups", parent_id: FAKE_CHANNELS.racingCategory, position: 1 },
     { id: FAKE_CHANNELS.officers, type: CHANNEL_TYPE.text, name: "officers", parent_id: FAKE_CHANNELS.clubCategory, position: 3, hidden: true },
-    { id: threadMonza, type: CHANNEL_TYPE.publicThread, name: "Monza setup help", parent_id: FAKE_CHANNELS.setups, thread_metadata: { archived: false, archive_timestamp: new Date(now - 6 * DAY).toISOString() } },
-    { id: threadSpa, type: CHANNEL_TYPE.publicThread, name: "Spa wet setup", parent_id: FAKE_CHANNELS.setups, thread_metadata: { archived: true, archive_timestamp: new Date(now - 3 * DAY).toISOString() } },
+    { id: threadMonza, type: CHANNEL_TYPE.publicThread, name: "Monza setup help", parent_id: FAKE_CHANNELS.setups, owner_id: posters[2].id, thread_metadata: { archived: false, archive_timestamp: new Date(now - 6 * DAY).toISOString() } },
+    { id: threadSpa, type: CHANNEL_TYPE.publicThread, name: "Spa wet setup", parent_id: FAKE_CHANNELS.setups, owner_id: posters[7].id, thread_metadata: { archived: true, archive_timestamp: new Date(now - 3 * DAY).toISOString() } },
   ]
 
   const messages = new Map<string, DiscordMessage[]>(channels.map((c) => [c.id, []]))

@@ -55,6 +55,17 @@ export function purgedList(key: string | null, hashes: Iterable<string>): Purged
   return { has: (discordUserId) => Boolean(key && stored.size && stored.has(purgedHash(key, discordUserId))), size: stored.size }
 }
 
+/** What a thread a purged member started is called instead of its title */
+export const PURGED_THREAD_NAME = "a thread"
+
+/**
+ * A thread as it's stored: one a purged member started keeps counting under its channel (others reply
+ * in it), but without their title or their id
+ */
+export function withoutPurgedOwner<T extends { name: string; ownerId: string | null }>(channel: T, purged: PurgedList): T {
+  return channel.ownerId && purged.has(channel.ownerId) ? { ...channel, name: PURGED_THREAD_NAME, ownerId: null } : channel
+}
+
 /**
  * Whether the sync keeps a message: members' ordinary messages and replies, and any message with a poll
  * (the bot's own polls included). Not system messages (joins, pins), not other bots or webhooks, and

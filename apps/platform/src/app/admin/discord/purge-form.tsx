@@ -4,14 +4,15 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Button, Field, Input, useConfirm } from "@/components/admin/kit"
+import type { PurgeResult } from "@/server/services/discord-link.service"
 import { purgeDiscordMemberAction } from "./actions"
 
-const done = (messages: number, unlinked: boolean) =>
-  `Deleted ${messages} message ${messages === 1 ? "record" : "records"}${unlinked ? " and the member's account link" : ""}. They won't be collected again.`
+const done = ({ messages, threads, unlinkedUserId }: PurgeResult) =>
+  `Deleted ${messages} message ${messages === 1 ? "record" : "records"}${threads ? `, ${threads} thread ${threads === 1 ? "title" : "titles"}` : ""}${unlinkedUserId ? " and the member's account link" : ""}. They won't be collected again.`
 
 const CONFIRM = {
   description:
-    "Their message records, their member record and any account link are deleted, and the sync never collects them again. Daily totals are recounted without them. This can't be undone.",
+    "Their message records, their member record, the titles of threads they started and any account link are deleted, and the sync never collects them again. Daily totals are recounted without them. This can't be undone.",
   confirmLabel: "Delete their data",
   tone: "danger" as const,
 }
@@ -35,7 +36,7 @@ export function PurgeForm() {
           toast.error(result.error)
           return
         }
-        toast.success(done(result.data.messages, Boolean(result.data.unlinkedUserId)))
+        toast.success(done(result.data))
         setWho("")
         router.refresh()
       } catch {
@@ -72,7 +73,7 @@ export function PurgeLinkedButton({ userId, username }: { userId: string; userna
           toast.error(result.error)
           return
         }
-        toast.success(done(result.data.messages, Boolean(result.data.unlinkedUserId)))
+        toast.success(done(result.data))
         router.refresh()
       } catch {
         toast.error("Couldn't delete it. Try again.")

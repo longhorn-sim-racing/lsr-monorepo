@@ -1608,6 +1608,9 @@ model DiscordChannel {
   /// activity counts toward it. Its name is a member's title, so threads are kept only in opted-in
   /// channels (switching one off deletes them) and never private ones
   parentId      String?
+  /// For a thread: who started it (Discord user id), so a purge on request can remove their titles. A
+  /// thread a purged member started is kept as "a thread" with no owner. Personal data (RLS)
+  ownerId       String?
   synced        Boolean   @default(false)
   lastMessageId String?
   lastSyncedAt  DateTime?

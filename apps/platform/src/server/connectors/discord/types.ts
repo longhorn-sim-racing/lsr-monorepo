@@ -45,6 +45,8 @@ export type DiscordChannel = {
   name?: string | null
   guild_id?: string
   parent_id?: string | null
+  /** A thread's: who started it (for a forum post, its author) */
+  owner_id?: string | null
   position?: number
   last_message_id?: string | null
   thread_metadata?: { archived: boolean; archive_timestamp: string; locked?: boolean }
