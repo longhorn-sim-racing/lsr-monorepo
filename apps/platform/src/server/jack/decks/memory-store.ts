@@ -5,10 +5,10 @@ import type { JackFileStore, JackFileStoreKind } from "./storage"
  * Supabase by default (signed links and signed uploads included) so the room-file code takes its
  * production path.
  */
-export type MemoryStore = JackFileStore & { files: Map<string, { body: Buffer; contentType: string }>; signedUploads: string[] }
+export type MemoryStore = JackFileStore & { files: Map<string, { body: Buffer; contentType: string; uploadedAt: Date }>; signedUploads: string[] }
 
 export function memoryStore(kind: JackFileStoreKind = "supabase"): MemoryStore {
-  const files = new Map<string, { body: Buffer; contentType: string }>()
+  const files = new Map<string, { body: Buffer; contentType: string; uploadedAt: Date }>()
   const signedUploads: string[] = []
   return {
     kind,
@@ -18,7 +18,7 @@ export function memoryStore(kind: JackFileStoreKind = "supabase"): MemoryStore {
       return files.get(pathname)?.body ?? null
     },
     async put(pathname, body, contentType) {
-      files.set(pathname, { body, contentType })
+      files.set(pathname, { body, contentType, uploadedAt: new Date() })
     },
     async head(pathname) {
       const file = files.get(pathname)
@@ -30,7 +30,7 @@ export function memoryStore(kind: JackFileStoreKind = "supabase"): MemoryStore {
     async list(prefix, { cursor, limit = 1_000 } = {}) {
       const names = [...files.keys()].filter((name) => name.startsWith(prefix) && (!cursor || name > cursor)).sort()
       const page = names.slice(0, limit)
-      return { items: page.map((pathname) => ({ pathname, size: files.get(pathname)!.body.length })), cursor: names.length > limit ? page[page.length - 1] : null }
+      return { items: page.map((pathname) => ({ pathname, size: files.get(pathname)!.body.length, uploadedAt: files.get(pathname)!.uploadedAt })), cursor: names.length > limit ? page[page.length - 1] : null }
     },
     async signedUrl(pathname, ttlMs, options = {}) {
       return `https://storage.test/signed/${pathname}?ttl=${ttlMs}${options.download ? `&download=${encodeURIComponent(options.download)}` : ""}`

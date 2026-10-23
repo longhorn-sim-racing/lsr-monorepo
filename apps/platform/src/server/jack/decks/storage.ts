@@ -9,12 +9,14 @@ import type { SupabaseClient } from "@supabase/supabase-js"
  * short-lived signed link.
  *
  * - Supabase: Supabase Storage, the private bucket `jack`, with the service-role key (server only).
- *   The default when SUPABASE_SERVICE_ROLE_KEY and NEXT_PUBLIC_SUPABASE_URL are set. It has no cap on
- *   operations (Vercel Blob on Hobby allows 2,000 writes a month) and takes signed uploads straight
- *   from the browser. `scripts/jack-storage-setup.ts` creates the bucket.
+ *   The default when SUPABASE_SERVICE_ROLE_KEY and a hosted NEXT_PUBLIC_SUPABASE_URL are set. It has
+ *   no cap on operations (Vercel Blob on Hobby allows 2,000 writes a month) and takes signed uploads
+ *   straight from the browser. `scripts/jack-storage-setup.ts` creates the bucket. Local Supabase
+ *   (127.0.0.1 or localhost) is only used when JACK_FILE_STORE=supabase asks for it: it needs the
+ *   bucket created first, so it isn't a silent default for every developer.
  * - Blob: a private Vercel Blob store (BLOB_STORE_ID with Vercel's OIDC token, or BLOB_READ_WRITE_TOKEN),
  *   kept for a later move to Pro. No signed uploads, so room files need Supabase.
- * - Files: `.jack-renders/` under the app (gitignored), when not on Vercel and nothing else is set.
+ * - Files: `.jack-renders/` under the app (gitignored), when not on Vercel and nothing else is picked.
  * - None: on Vercel with no store. Nothing is cached, so every image is rendered again when asked
  *   for; slower, but it works until a store is connected.
  *
@@ -24,7 +26,8 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 export type JackFileStoreKind = "supabase" | "blob" | "files" | "none"
 
 export type StoredFileInfo = { size: number; contentType: string | null }
-export type StoredFileItem = { pathname: string; size: number }
+/** `uploadedAt` when the store says */
+export type StoredFileItem = { pathname: string; size: number; uploadedAt?: Date }
 
 export type JackFileStore = {
   kind: JackFileStoreKind
@@ -71,9 +74,18 @@ export function storeKindFor(env: StoreEnv): JackFileStoreKind {
   if (choice === "blob" && blob) return "blob"
   // A folder on disk is for local development: Vercel's file system is read-only
   if (choice === "files" && !env.VERCEL) return "files"
-  if (supabase) return "supabase"
+  if (supabase && !isLocalUrl(env.NEXT_PUBLIC_SUPABASE_URL)) return "supabase"
   if (blob) return "blob"
   return env.VERCEL ? "none" : "files"
+}
+
+/** The local Supabase stack (`supabase start`), not a hosted project */
+function isLocalUrl(url: string | undefined): boolean {
+  try {
+    return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(url ?? "").hostname)
+  } catch {
+    return false
+  }
 }
 
 function createStore(env: StoreEnv): JackFileStore {
@@ -87,23 +99,37 @@ function createStore(env: StoreEnv): JackFileStore {
   return noStore()
 }
 
-/** Supabase answers a missing object with a 400 whose body says 404, or (downloads) a bare 400/404 response */
-async function isNotFound(error: unknown): Promise<boolean> {
-  const e = error as { status?: number; statusCode?: string; message?: string; originalError?: unknown }
-  if (e.status === 404 || e.statusCode === "404" || /not.?found/i.test(e.message ?? "")) return true
+type StorageErrorBody = { error?: string; code?: string; message?: string }
+
+/** Storage's words for a missing object. A missing bucket is a 404 too ("Bucket not found"), and must fail loudly */
+const objectMissing = (e: StorageErrorBody) => e.error === "not_found" || e.code === "NoSuchKey" || /^object not found$/i.test(e.message?.trim() ?? "")
+
+/**
+ * Whether Supabase said the object isn't there (get and head answer null). Errors carry Storage's
+ * message ("Object not found"); a download's error carries the response, whose JSON body says which
+ * 404 it is. A bare 404 with no body to say counts as missing
+ */
+async function isMissingObject(error: unknown): Promise<boolean> {
+  const e = error as StorageErrorBody & { originalError?: unknown }
+  if (objectMissing(e)) return true
   const response = e.originalError
-  if (response instanceof Response) {
-    if (response.status === 404) return true
-    const body = (await response.clone().json().catch(() => null)) as { statusCode?: string; error?: string } | null
-    return body?.statusCode === "404" || body?.error === "not_found"
-  }
-  return false
+  if (!(response instanceof Response)) return false
+  const body = (await response.clone().json().catch(() => null)) as StorageErrorBody | null
+  return body && typeof body === "object" ? objectMissing(body) : response.status === 404
 }
 
 function storageError(what: string, error: unknown): Error {
   const e = error as { message?: string; statusCode?: string; status?: number }
   const detail = e.message && e.message !== "{}" ? e.message : `status ${e.statusCode ?? e.status ?? "unknown"}`
   return new Error(`Supabase Storage couldn't ${what}: ${detail}`)
+}
+
+/** A download's error is the bare response; its JSON body has Storage's message */
+async function downloadError(error: unknown): Promise<unknown> {
+  const response = (error as { originalError?: unknown }).originalError
+  if (!(response instanceof Response)) return error
+  const body = (await response.clone().json().catch(() => null)) as StorageErrorBody | null
+  return { message: body?.message ?? body?.error, status: response.status }
 }
 
 /** Supabase's remove() takes at most 1,000 paths a call */
@@ -125,8 +151,8 @@ export function supabaseStore({ url, serviceKey, bucket = JACK_BUCKET, fetch }: 
     async get(pathname) {
       const { data, error } = await (await files()).download(pathname)
       if (error) {
-        if (await isNotFound(error)) return null
-        throw storageError(`read ${pathname}`, error)
+        if (await isMissingObject(error)) return null
+        throw storageError(`read ${pathname}`, await downloadError(error))
       }
       return Buffer.from(await data.arrayBuffer())
     },
@@ -137,7 +163,7 @@ export function supabaseStore({ url, serviceKey, bucket = JACK_BUCKET, fetch }: 
     async head(pathname) {
       const { data, error } = await (await files()).info(pathname)
       if (error) {
-        if (await isNotFound(error)) return null
+        if (await isMissingObject(error)) return null
         throw storageError(`look up ${pathname}`, error)
       }
       const info = data as { size?: number | null; contentType?: string | null; metadata?: { size?: number; mimetype?: string } | null }
@@ -154,8 +180,8 @@ export function supabaseStore({ url, serviceKey, bucket = JACK_BUCKET, fetch }: 
       const { data, error } = await (await files()).listV2({ prefix, cursor, limit, with_delimiter: false })
       if (error) throw storageError(`list ${prefix}`, error)
       const items = data.objects.map((object) => {
-        const named = object as { key?: string; name: string; metadata?: { size?: number } | null }
-        return { pathname: named.key ?? named.name, size: Number(named.metadata?.size ?? 0) }
+        const named = object as { key?: string; name: string; metadata?: { size?: number } | null; created_at?: string | null }
+        return { pathname: named.key ?? named.name, size: Number(named.metadata?.size ?? 0), ...(named.created_at ? { uploadedAt: new Date(named.created_at) } : {}) }
       })
       return { items, cursor: data.hasNext ? (data.nextCursor ?? null) : null }
     },
@@ -206,7 +232,7 @@ function blobStore(): JackFileStore {
     async list(prefix, { cursor, limit = 1_000 } = {}) {
       const { list } = await sdk()
       const page = await list({ prefix, cursor, limit })
-      return { items: page.blobs.map((blob) => ({ pathname: blob.pathname, size: blob.size })), cursor: page.hasMore ? (page.cursor ?? null) : null }
+      return { items: page.blobs.map((blob) => ({ pathname: blob.pathname, size: blob.size, uploadedAt: blob.uploadedAt })), cursor: page.hasMore ? (page.cursor ?? null) : null }
     },
     async signedUrl(pathname, ttlMs) {
       const { issueSignedToken, presignUrl } = await sdk()
@@ -256,7 +282,12 @@ export function fileStore(root: string): JackFileStore {
       const all = (await walk(base)).map((full) => path.relative(base, full).split(path.sep).join("/")).filter((name) => name.startsWith(prefix)).sort()
       const start = cursor ? all.findIndex((name) => name > cursor) : 0
       const page = start < 0 ? [] : all.slice(start, start + limit)
-      const items = await Promise.all(page.map(async (name) => ({ pathname: name, size: (await stat(resolve(name))).size })))
+      const items = await Promise.all(
+        page.map(async (name) => {
+          const info = await stat(resolve(name))
+          return { pathname: name, size: info.size, uploadedAt: info.mtime }
+        })
+      )
       return { items, cursor: start >= 0 && start + limit < all.length ? page[page.length - 1] : null }
     },
     async signedUrl() {

@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { fileStore, storeKindFor, supabaseStore } from "./storage"
 
 describe("storeKindFor: which store the environment picks", () => {
-  const supabase = { SUPABASE_SERVICE_ROLE_KEY: "service-key", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321" }
+  const supabase = { SUPABASE_SERVICE_ROLE_KEY: "service-key", NEXT_PUBLIC_SUPABASE_URL: "https://abcdefgh.supabase.co" }
+  const localSupabase = { SUPABASE_SERVICE_ROLE_KEY: "service-key", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321" }
   const blob = { BLOB_STORE_ID: "store_1" }
 
   it("defaults to Supabase when its key and URL are set, then Blob, then a local folder, then nothing on Vercel", () => {
@@ -26,16 +27,26 @@ describe("storeKindFor: which store the environment picks", () => {
     expect(storeKindFor({ ...supabase, JACK_FILE_STORE: "files", VERCEL: "1" })).toBe("supabase")
     expect(storeKindFor({ JACK_FILE_STORE: "files", VERCEL: "1" })).toBe("none")
   })
+
+  it("leaves local Supabase (supabase start) alone unless JACK_FILE_STORE=supabase asks for it", () => {
+    // It needs the `jack` bucket made first; developers with the service key for broadcasts keep the files store
+    expect(storeKindFor(localSupabase)).toBe("files")
+    expect(storeKindFor({ ...localSupabase, NEXT_PUBLIC_SUPABASE_URL: "http://localhost:54321" })).toBe("files")
+    expect(storeKindFor({ ...localSupabase, ...blob })).toBe("blob")
+    expect(storeKindFor({ ...localSupabase, JACK_FILE_STORE: "supabase" })).toBe("supabase")
+  })
 })
 
 /**
  * Supabase Storage's REST API as @supabase/storage-js 2.98 calls it, with its error shapes (a missing
  * object is a 400 whose body says statusCode "404"), so the store runs the real SDK code
  */
-function fakeStorage() {
+function fakeStorage({ bucket = true }: { bucket?: boolean } = {}) {
   const objects = new Map<string, { body: Buffer; contentType: string }>()
   const calls: { method: string; path: string; headers: Headers; body?: unknown }[] = []
   const notFound = () => Response.json({ statusCode: "404", error: "not_found", message: "Object not found" }, { status: 400 })
+  // storage-api's NoSuchBucket: a 404 as well, which must not read as "no such object"
+  const noBucket = () => Response.json({ statusCode: "404", error: "Bucket not found", message: "Bucket not found" }, { status: 400 })
   const fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = new URL(String(input))
     const method = (init.method ?? "GET").toUpperCase()
@@ -44,6 +55,7 @@ function fakeStorage() {
     const json = typeof init.body === "string" ? JSON.parse(init.body) : undefined
     calls.push({ method, path: route, headers, body: json })
     if (headers.get("authorization") !== "Bearer service-key") return Response.json({ statusCode: "403", error: "Unauthorized", message: "invalid key" }, { status: 400 })
+    if (!bucket) return noBucket()
     let match: RegExpExecArray | null
     if ((match = /^\/object\/info\/jack\/(.+)$/.exec(route)) && method === "GET") {
       const object = objects.get(match[1])
@@ -52,7 +64,12 @@ function fakeStorage() {
     if ((match = /^\/object\/list-v2\/jack$/.exec(route))) {
       const names = [...objects.keys()].filter((name) => name.startsWith(json.prefix ?? "") && (!json.cursor || name > json.cursor)).sort()
       const page = names.slice(0, json.limit)
-      return Response.json({ hasNext: names.length > json.limit, nextCursor: names.length > json.limit ? page.at(-1) : undefined, folders: [], objects: page.map((name) => ({ id: name, name, metadata: { size: objects.get(name)!.body.length } })) })
+      return Response.json({
+        hasNext: names.length > json.limit,
+        nextCursor: names.length > json.limit ? page.at(-1) : undefined,
+        folders: [],
+        objects: page.map((name) => ({ id: name, name, metadata: { size: objects.get(name)!.body.length }, created_at: "2026-10-20T12:00:00.000Z" })),
+      })
     }
     if ((match = /^\/object\/upload\/sign\/jack\/(.+)$/.exec(route)) && method === "POST") return Response.json({ url: `/object/upload/sign/jack/${match[1]}?token=upload-token` })
     if ((match = /^\/object\/sign\/jack\/(.+)$/.exec(route))) return objects.has(match[1]) ? Response.json({ signedURL: `/object/sign/jack/${match[1]}?token=read-token` }) : notFound()
@@ -111,7 +128,14 @@ describe("supabaseStore", () => {
     expect(first.items.map((i) => i.pathname)).toEqual(["jack/assets/a.png", "jack/assets/b.png"])
     expect(first.items[0].size).toBe("jack/assets/a.png".length)
     const rest = await store.list("jack/assets/", { limit: 2, cursor: first.cursor! })
-    expect(rest).toEqual({ items: [{ pathname: "jack/assets/c.png", size: 17 }], cursor: null })
+    expect(rest).toEqual({ items: [{ pathname: "jack/assets/c.png", size: 17, uploadedAt: new Date("2026-10-20T12:00:00.000Z") }], cursor: null })
+  })
+
+  it("fails loudly when the bucket is missing, instead of reading as an empty store", async () => {
+    const missing = fakeStorage({ bucket: false })
+    const noBucket = supabaseStore({ url: "http://supabase.test", serviceKey: "service-key", fetch: missing.fetch })
+    await expect(noBucket.head("jack/assets/a.png")).rejects.toThrow("couldn't look up jack/assets/a.png: Bucket not found")
+    await expect(noBucket.get("jack/assets/a.png")).rejects.toThrow("Supabase Storage couldn't read jack/assets/a.png: Bucket not found")
   })
 
   it("signs a read link (optionally as a named download) and a one-path upload", async () => {
