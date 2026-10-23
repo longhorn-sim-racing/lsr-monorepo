@@ -101,6 +101,10 @@ export type JackRoomSummary = {
   createdByName: string | null
   createdAt: string
   updatedAt: string
+  /** ISO timestamp when pinned (pinned rooms sort first); null or absent when not */
+  pinnedAt?: string | null
+  /** ISO timestamp when archived; null or absent when not */
+  archivedAt?: string | null
 }
 
 export function jackRoomTitle(room: { title: string | null }): string {
@@ -163,7 +167,12 @@ export type JackProposalResult = {
 }
 
 /** A proposal's live status, as a room keeps it (the card reads it; the reply's display never changes) */
-export type JackProposalState = { status: JackProposalStatusKey; result?: JackProposalResult }
+export type JackProposalState = {
+  status: JackProposalStatusKey
+  result?: JackProposalResult
+  /** JackProposal.updatedAt as an ISO timestamp (toISOString); the newer copy wins when an event and a snapshot cross */
+  updatedAt: string
+}
 
 /** A proposal in this room was claimed, applied, discarded or went stale (G4) */
 export type JackProposalUpdatedEvent = { type: typeof JACK_EVENT.proposal; roomId: string; proposal: { id: string } & JackProposalState }

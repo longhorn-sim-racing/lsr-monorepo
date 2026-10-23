@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { memo, useEffect, useRef, useState, type ReactNode } from "react"
+import { memo, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode } from "react"
 import { ChevronLeft, Pencil } from "lucide-react"
 import { Button, Input, Notice, Select, Textarea } from "@/components/admin/kit"
 import { cn } from "@/lib/utils"
@@ -55,12 +55,28 @@ type RoomViewProps = {
    * two functions run for every message row, which is memoized: pass stable functions (useCallback),
    * or every row redraws while a reply streams.
    */
-  /** Drawn beside the composer's Send button (attach files, the mention-mode hint) */
-  composerAddons?: ReactNode
+  /** Attachments, mention mode and archived rooms plug in here */
+  composer?: JackComposerOptions
   /** Drawn under each officer message and reply (feedback, pin, copy link); not under room notes */
   messageActions?: (message: JackMessageView) => ReactNode
   /** Draws a message's attachments in place of the default (its `files` as tiles, when it has any) */
   renderAttachments?: (message: JackMessageView) => ReactNode
+}
+
+/** Options for the room's composer (#188); each one left out keeps today's behavior */
+export type JackComposerOptions = {
+  /** Drawn beside the Send button (an attach button, chips for files waiting to go) */
+  addons?: ReactNode
+  /** Runs on paste into the message box (files pasted in); call preventDefault to keep the paste out of the text */
+  onPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void
+  /** Runs when something is dropped on the composer (files dragged in); the composer only accepts drops when this is set */
+  onDrop?: (event: DragEvent<HTMLFormElement>) => void
+  /** Send works with no text (files are attached); the room is then sent an empty message */
+  canSendEmpty?: boolean
+  /** Replaces the message box's placeholder (mention mode: "Mention @Jack to ask him") */
+  placeholder?: string
+  /** The room takes no messages (archived): this note shows in place of the composer, and the room doesn't offer to continue */
+  readOnly?: ReactNode
 }
 
 export function JackRoomView({
@@ -75,7 +91,7 @@ export function JackRoomView({
   onSwitchPersona,
   onRename,
   onContinue,
-  composerAddons,
+  composer = {},
   messageActions,
   renderAttachments,
 }: RoomViewProps) {
@@ -114,8 +130,12 @@ export function JackRoomView({
         </header>
         <MessageList messages={messages} followSignal={sentCount} messageActions={messageActions} renderAttachments={renderAttachments} />
         <AnswerStatus messages={messages} />
-        {stall ? <ContinueBar stall={stall} name={stalledName(stall, messages, room.persona)} onContinue={onContinue} /> : null}
-        <Composer persona={room.persona} onSend={send} addons={composerAddons} />
+        {stall && !composer.readOnly ? <ContinueBar stall={stall} name={stalledName(stall, messages, room.persona)} onContinue={onContinue} /> : null}
+        {composer.readOnly ? (
+          <div className="border-t border-admin-row px-4 py-3 text-[13px] text-muted-foreground md:px-5">{composer.readOnly}</div>
+        ) : (
+          <Composer persona={room.persona} onSend={send} options={composer} />
+        )}
       </section>
     </div>
   )
@@ -505,15 +525,17 @@ function ContinueBar({ stall, name, onContinue }: { stall: "unanswered" | "stuck
   )
 }
 
-function Composer({ persona, onSend, addons }: { persona: JackRoomPersonaKey; onSend: RoomViewProps["onSend"]; addons?: ReactNode }) {
+function Composer({ persona, onSend, options }: { persona: JackRoomPersonaKey; onSend: RoomViewProps["onSend"]; options: JackComposerOptions }) {
+  const { addons, onPaste, onDrop, canSendEmpty = false, placeholder } = options
   const [content, setContent] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const canSend = canSendEmpty || content.trim().length > 0
 
   async function send() {
-    if (sending || !content.trim()) return
+    if (sending || !canSend) return
     // Cleared right away, so whatever's typed while it sends is kept; put back if the send fails
-    const sent = content
+    const sent = content.trim() ? content : ""
     setContent("")
     setSending(true)
     setError(null)
@@ -521,12 +543,12 @@ function Composer({ persona, onSend, addons }: { persona: JackRoomPersonaKey; on
     setSending(false)
     if (problem) {
       setError(problem)
-      setContent((typed) => (typed.trim() ? `${sent}\n${typed}` : sent))
+      if (sent) setContent((typed) => (typed.trim() ? `${sent}\n${typed}` : sent))
     }
   }
 
   const sendButton = (
-    <Button type="submit" variant="primary" pending={sending} disabled={!content.trim()}>
+    <Button type="submit" variant="primary" pending={sending} disabled={!canSend}>
       Send
     </Button>
   )
@@ -538,6 +560,9 @@ function Composer({ persona, onSend, addons }: { persona: JackRoomPersonaKey; on
         e.preventDefault()
         void send()
       }}
+      // Dropping only works where a track takes the files; otherwise the browser does what it always did
+      onDragOver={onDrop ? (e) => e.preventDefault() : undefined}
+      onDrop={onDrop}
     >
       <label htmlFor="jack-message" className="sr-only">
         Message the room
@@ -546,7 +571,8 @@ function Composer({ persona, onSend, addons }: { persona: JackRoomPersonaKey; on
         id="jack-message"
         rows={2}
         value={content}
-        placeholder={`Message the room. ${JACK_PERSONA_NAME[persona]} answers every message.`}
+        placeholder={placeholder ?? `Message the room. ${JACK_PERSONA_NAME[persona]} answers every message.`}
+        onPaste={onPaste}
         onChange={(e) => setContent(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {

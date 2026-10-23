@@ -22,8 +22,9 @@ import type { JackMessageView, JackProposalState, JackProposalStatusKey, JackRoo
  * The room's own settings (its persona) come the same two ways; the newer copy wins.
  *
  * Proposals' live statuses (#188) come from `proposal.updated` events and, once G4 sends them, from
- * snapshots. A status only moves forward (pending, then applying, then a final one), so a late or
- * stale copy never takes a proposal back.
+ * snapshots. The newer copy (by the proposal's updatedAt) wins, like the room's settings; two copies
+ * from the same moment go by stage (pending, then applying, then a final one), so a late or stale copy
+ * never takes a proposal back.
  */
 /** A delta held until it can be applied: its text, and whether it replaces the text so far */
 export type HeldDelta = { text: string; replace?: true }
@@ -91,8 +92,8 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
 
     case "proposal.updated": {
       if (action.roomId !== state.room.id) return state
-      const { id, status, result } = action.proposal
-      const proposals = mergeProposals(state.proposals, { [id]: result === undefined ? { status } : { status, result } })
+      const { id, ...incoming } = action.proposal
+      const proposals = mergeProposals(state.proposals, { [id]: incoming })
       return proposals === state.proposals ? state : { ...state, proposals }
     }
 
@@ -157,17 +158,23 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
   }
 }
 
-/** How far along a status is: a proposal never goes back to an earlier stage */
+/** How far along a status is, to break a tie between two copies from the same moment */
 function proposalStage(status: JackProposalStatusKey): number {
   return status === "PENDING" ? 0 : status === "APPLYING" ? 1 : 2
 }
 
-/** Takes each incoming status unless it's behind the one this viewer has; returns `known` itself when nothing changes */
+/** Whether an incoming copy of a proposal's status replaces the one this viewer has: newer wins, then further along */
+function newerProposal(current: JackProposalState, next: JackProposalState): boolean {
+  if (next.updatedAt !== current.updatedAt) return next.updatedAt > current.updatedAt
+  return proposalStage(next.status) > proposalStage(current.status)
+}
+
+/** Takes each incoming status that's newer than the one this viewer has; returns `known` itself when nothing changes */
 function mergeProposals(known: Record<string, JackProposalState>, incoming: Record<string, JackProposalState>): Record<string, JackProposalState> {
   let merged: Record<string, JackProposalState> | null = null
   for (const [id, next] of Object.entries(incoming)) {
     const current = known[id]
-    if (current && (proposalStage(next.status) < proposalStage(current.status) || JSON.stringify(current) === JSON.stringify(next))) continue
+    if (current && !newerProposal(current, next)) continue
     merged ??= { ...known }
     merged[id] = next
   }
@@ -229,8 +236,11 @@ function sameFinal(a: JackMessageView, b: JackMessageView): boolean {
     a.status === b.status &&
     a.streamSeq === b.streamSeq &&
     a.answered === b.answered &&
+    a.continues === b.continues &&
+    a.expectsAnswer === b.expectsAnswer &&
     a.createdAt === b.createdAt &&
     JSON.stringify(a.author) === JSON.stringify(b.author) &&
+    JSON.stringify(a.files ?? []) === JSON.stringify(b.files ?? []) &&
     a.tools.length === b.tools.length &&
     a.tools.every((part, i) => {
       const other = b.tools[i]
