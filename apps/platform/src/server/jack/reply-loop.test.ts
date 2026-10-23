@@ -1153,3 +1153,20 @@ describe("deck jobs that hit a reply's limits", () => {
     expect(db.state.messages.some((m) => m.continues)).toBe(false)
   })
 })
+
+describe("who's asking and the turn's files", () => {
+  it("sends the officer's label and the files posted with the message, summarized after the turn's text", async () => {
+    const file = { id: "file-1", filename: "laps.csv", kind: "CSV" as const, sizeBytes: 48_200, pageCount: null }
+    const row = { ...file, status: "READY", storagePath: "rooms/r/file-1/laps.csv", modelCopyPath: null, anthropicFileId: null, textStatus: "ok", text: "driver,best\nSam,1:41.2", width: null, height: null }
+    Object.assign(db, { jackFile: { findMany: vi.fn(async () => [row]), updateMany: vi.fn(async () => ({ count: 0 })) } })
+    const message = ask("Who was fastest?")
+    Object.assign(message, { authorLabel: "Gray (Technology Director · Technology · CS) [@gray-marshall]", files: [file] })
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const blocks = claude.calls[0].messages.at(-1)!.content as { type: string; text: string }[]
+    expect(blocks[0].text).toMatch(/\nGray \(Technology Director · Technology · CS\) \[@gray-marshall\]: Who was fastest\?\n\[Attached: "laps\.csv" \(CSV, 48 KB; id file-1\)\. Shown below\.\]$/)
+    expect(blocks[1].text).toMatch(/^<attached_file id="file-1" name="laps\.csv" kind="CSV" size="48 KB">\n1 row under a header row\./)
+    expect(replies()[0].status).toBe("done")
+  })
+})

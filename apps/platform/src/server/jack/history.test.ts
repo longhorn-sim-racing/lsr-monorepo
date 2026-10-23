@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildHistory, formatTurnTime, windowStart, type HistoryRow } from "./history"
+import { buildConversation, buildHistory, formatTurnTime, windowStart, type HistoryRow } from "./history"
 
 let clock = Date.parse("2026-10-13T20:00:00.000Z")
 let ids = 0
@@ -189,6 +189,70 @@ describe("buildHistory", () => {
     // 45 turns: the first 10 go
     expect(history[0].content).toMatch(/^\(Earlier messages in this room aren't included\.\)\n\[.+\]\nGray: Q10$/)
     expect(history).toHaveLength(35 * 2 - 1)
+  })
+})
+
+describe("who's asking", () => {
+  it("writes each officer as their label from when they posted, and older messages by name", () => {
+    const rows = room([{ ask: [["Gray", "Old question"]] }, { ask: [["Gray", "New question"], ["Dylan", "Me too"]], reply: { status: "streaming", content: "" } }])
+    rows[2].authorLabel = "Gray (Technology Director · Technology · CS) [@gray-marshall]"
+    rows[3].authorLabel = "Dylan (President · Executive) [@dylan]"
+
+    const history = buildHistory(rows, rows.at(-1)!.id)
+
+    expect(history[0].content).toMatch(/\nGray: Old question$/)
+    expect(history[2].content).toMatch(/\nGray \(Technology Director · Technology · CS\) \[@gray-marshall\]: New question\nDylan \(President · Executive\) \[@dylan\]: Me too$/)
+  })
+
+  it("shows a deleted account as a former officer, label or not", () => {
+    const rows = room([{ ask: [["Gray", "Hi"]], reply: { status: "streaming", content: "" } }])
+    Object.assign(rows[0], { author: null, authorLabel: "Gray (CS) [@gray-marshall]" })
+    expect(buildHistory(rows, rows.at(-1)!.id)[0].content).toMatch(/\nFormer officer: Hi$/)
+  })
+})
+
+describe("files in the history", () => {
+  const pdf = { id: "f-pdf", filename: "packet.pdf", kind: "PDF" as const, sizeBytes: 2_140_000, pageCount: 12 }
+  const photo = { id: "f-img", filename: "grid.jpg", kind: "IMAGE" as const, sizeBytes: 900_000 }
+
+  it("lists the turn's files under their message and hands them over; earlier turns' files get a note", () => {
+    const rows = room([{ ask: [["Gray", "Here's the packet"]] }, { ask: [["Dylan", "And a photo"]], reply: { status: "streaming", content: "" } }])
+    rows[0].files = [pdf]
+    rows[2].files = [photo]
+
+    const { history, attached } = buildConversation(rows, rows.at(-1)!.id)
+
+    expect(history[0].content).toMatch(/\nGray: Here's the packet\n\[Attached: "packet\.pdf" \(PDF, 2\.1 MB, 12 pages; id f-pdf\)\. Not shown again; room_files reads it by id\.\]$/)
+    expect(history[2].content).toMatch(/\nDylan: And a photo\n\[Attached: "grid\.jpg" \(photo, 900 KB; id f-img\)\. Shown below\.\]$/)
+    expect(attached).toEqual([photo])
+    expect(buildHistory(rows, rows.at(-1)!.id)).toEqual(history)
+  })
+
+  it("treats files a notice got (Claude never saw them) as this turn's", () => {
+    const rows = room([
+      { ask: [["Gray", "Read this"]], reply: { content: "Jack isn't connected yet", model: null } },
+      { ask: [["Gray", "Now?"]], reply: { status: "streaming", content: "" } },
+    ])
+    rows[0].files = [pdf]
+    const { history, attached } = buildConversation(rows, rows.at(-1)!.id)
+    expect(history).toHaveLength(1)
+    expect(history[0].content).toContain("Shown below.")
+    expect(attached).toEqual([pdf])
+  })
+
+  it("names a file-only message by its files", () => {
+    const rows = room([{ ask: [["Gray", ""]], reply: { status: "streaming", content: "" } }])
+    rows[0].files = [photo]
+    expect(buildHistory(rows, rows.at(-1)!.id)[0].content).toMatch(/\nGray:\n\[Attached: "grid\.jpg"/)
+  })
+
+  it("keeps earlier turns the same bytes once they're answered, apart from their files' note", () => {
+    const rows = room([{ ask: [["Gray", "One"]] }, { ask: [["Gray", "Two"]], reply: { status: "streaming", content: "" } }])
+    const before = buildHistory(rows, rows.at(-1)!.id)
+    rows.at(-1)!.status = "done"
+    rows.at(-1)!.content = "Answer"
+    rows.push(...room([{ ask: [["Gray", "Three"]], reply: { status: "streaming", content: "" } }]))
+    expect(buildHistory(rows, rows.at(-1)!.id).slice(0, before.length)).toEqual(before)
   })
 })
 

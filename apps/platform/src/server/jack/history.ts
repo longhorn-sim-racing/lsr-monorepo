@@ -2,8 +2,11 @@ import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages
 import { linkHost } from "@/lib/jack/links"
 import { parseToolParts, type JackToolPart } from "@/lib/jack/parts"
 import type { JackPersonaKey } from "@/lib/jack/types"
+import { attachmentLine, type HistoryFile } from "./files/describe"
 import { FORMER_OFFICER } from "./messages"
 import { WEB_FETCH, WEB_SEARCH } from "./web-tools"
+
+export type { HistoryFile } from "./files/describe"
 
 /** The fields of a JackMessage row the history needs (a JackMessageRow fits) */
 export type HistoryRow = {
@@ -20,6 +23,14 @@ export type HistoryRow = {
   model: string | null
   createdAt: Date
   author: { displayName: string } | null
+  /**
+   * Officer messages: who posted it as Jack reads it, snapshotted when it was posted
+   * ("Gray (Technology Director · Technology · CS) [@gray-marshall]"). Older messages have none and
+   * show the author's name
+   */
+  authorLabel?: string | null
+  /** Officer messages: the READY files posted with it, in order */
+  files?: HistoryFile[]
 }
 
 export type HistoryLimits = {
@@ -50,8 +61,19 @@ const EARLIER_LEFT_OUT = "(Earlier messages in this room aren't included.)"
  *   is rebuilt as plain text, so no thinking block is ever replayed into a changed conversation.
  * - It's a pure function of the saved rows, so the same room builds the same bytes every time and
  *   the previous turns stay a cacheable prefix. Only the window start moves, and only in steps.
+ * - An officer's line is their label as it was when they posted (`authorLabel`), or their name for
+ *   older messages. Under a message with files is a line naming each one by id (design §5); the
+ *   files themselves go only with the turn being answered (buildConversation, then files/turn.ts).
  */
 export function buildHistory(rows: HistoryRow[], replyId: string, limits: HistoryLimits = HISTORY_LIMITS): BetaMessageParam[] {
+  return buildConversation(rows, replyId, limits).history
+}
+
+/** The history a reply sends, and the files posted in the turn it answers, which files/turn.ts adds to that turn */
+export type Conversation = { history: BetaMessageParam[]; attached: HistoryFile[] }
+
+/** buildHistory, plus the files the turn being answered carries */
+export function buildConversation(rows: HistoryRow[], replyId: string, limits: HistoryLimits = HISTORY_LIMITS): Conversation {
   const sorted = [...rows].sort(byTime)
   const current = sorted.find((row) => row.id === replyId)
   const cutoff = current?.createdAt ?? new Date(8.64e15)
@@ -77,13 +99,20 @@ export function buildHistory(rows: HistoryRow[], replyId: string, limits: Histor
   }
 
   const start = windowStart(turns.map(turnSize), limits)
+  const shown = turns.slice(start)
+  const replyTexts = shown.map((turn) => (turn.reply && !isNotice(turn.reply) ? renderReply(turn.reply) : ""))
+  // Every turn after the last reply Claude wrote merges into the turn being answered (a notice's
+  // questions carry over), so their files are the ones it shows
+  const lastReply = replyTexts.findLastIndex(Boolean)
+  const attached: HistoryFile[] = []
   const entries: { role: "user" | "assistant"; text: string }[] = []
-  turns.slice(start).forEach((turn, index) => {
+  shown.forEach((turn, index) => {
+    const current = index > lastReply
     const lead = index === 0 && start > 0 ? `${EARLIER_LEFT_OUT}\n` : ""
-    const officers = renderOfficerTurn(turn.items)
+    const officers = renderOfficerTurn(turn.items, current)
+    if (current) attached.push(...turn.items.flatMap((item) => (item.kind === "user" ? (item.files ?? []) : [])))
     if (officers || lead) entries.push({ role: "user", text: lead + officers })
-    const reply = turn.reply && !isNotice(turn.reply) ? renderReply(turn.reply) : ""
-    if (reply) entries.push({ role: "assistant", text: reply })
+    if (replyTexts[index]) entries.push({ role: "assistant", text: replyTexts[index] })
   })
 
   // Same-role neighbors (a reply that said nothing, an officer turn with no messages) merge
@@ -96,7 +125,7 @@ export function buildHistory(rows: HistoryRow[], replyId: string, limits: Histor
   while (merged[0]?.role === "assistant") merged.shift()
   if (merged.at(-1)?.role !== "user") merged.push({ role: "user", text: "(No new messages.)" })
 
-  return merged.map(({ role, text }) => ({ role, content: text }))
+  return { history: merged.map(({ role, text }) => ({ role, content: text })), attached }
 }
 
 function byTime(a: HistoryRow, b: HistoryRow) {
@@ -105,7 +134,8 @@ function byTime(a: HistoryRow, b: HistoryRow) {
 }
 
 function turnSize(turn: { reply: HistoryRow | null; items: HistoryRow[] }): number {
-  return turn.items.reduce((sum, item) => sum + item.content.length + 40, 0) + (turn.reply && !isNotice(turn.reply) ? renderReply(turn.reply).length : 0)
+  const items = turn.items.reduce((sum, item) => sum + item.content.length + 40 + (item.authorLabel?.length ?? 0) + (item.files?.length ?? 0) * 120, 0)
+  return items + (turn.reply && !isNotice(turn.reply) ? renderReply(turn.reply).length : 0)
 }
 
 /** Index of the first turn sent: the last `maxTurns`, cut further while the history is too big. Always keeps the newest */
@@ -133,12 +163,25 @@ export function formatTurnTime(date: Date): string {
   return `${turnTime.format(date).replace(/ /g, " ")} CT`
 }
 
-function renderOfficerTurn(items: HistoryRow[]): string {
+/** `current`: the turn being answered, whose files follow it */
+function renderOfficerTurn(items: HistoryRow[], current: boolean): string {
   if (!items.length) return ""
-  const lines = items.map((item) =>
-    item.kind === "system" ? `(Room note: ${item.content})` : `${item.author?.displayName ?? FORMER_OFFICER}: ${item.content}`
-  )
+  const lines = items.flatMap((item) => {
+    if (item.kind === "system") return [`(Room note: ${item.content})`]
+    const line = `${officerName(item)}:${item.content ? ` ${item.content}` : ""}`
+    return item.files?.length ? [line, attachmentLine(item.files, { current })] : [line]
+  })
   return `[${formatTurnTime(items[items.length - 1].createdAt)}]\n${lines.join("\n")}`
+}
+
+/**
+ * Who wrote an officer message: the label it was posted with ("Gray (Technology Director · Technology ·
+ * CS) [@gray-marshall]"), or the name for messages from before labels. Once the account is deleted,
+ * "Former officer", as the room shows it
+ */
+function officerName(item: HistoryRow): string {
+  if (!item.author) return FORMER_OFFICER
+  return item.authorLabel?.trim() || item.author.displayName
 }
 
 /** A finished reply with no model never reached Claude: a notice, or a pre-model placeholder */
