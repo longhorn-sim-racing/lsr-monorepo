@@ -8,6 +8,12 @@ import { Badge, Button, JsonView, Table, TD, TH, THead, TR } from "@/components/
 import type { JackCellValue, JackToolDisplay, JackToolPart } from "@/lib/jack/parts"
 import { cn } from "@/lib/utils"
 import { DeckCard } from "./deck-card"
+import { FilesView } from "./files-view"
+import { LinksView } from "./links-view"
+import { ProposalCard } from "./proposal-card"
+import { StatsView } from "./stats-view"
+import { TextDraft } from "./text-draft"
+import { WebSourcesView } from "./web-sources"
 
 /* recharts is heavy; load it only when a reply has a chart */
 const ChartView = dynamic(() => import("./chart-view").then((m) => m.ChartView), {
@@ -20,7 +26,8 @@ const PREVIEW_ROWS = 10
 
 /**
  * One tool call inside a reply: a header line with its status, label and time; collapsed details with
- * the input and any SQL; then what it shows (a table, a chart, an event draft, a note). Memoized: a part
+ * the input and any SQL; then what it shows (a table, a chart, an event draft, a note, a deck, and Jack
+ * 2.0's proposals, links, drafts, stats, files and web sources). Memoized: a part
  * keeps its object until it changes, so text streaming into the reply doesn't redraw its tables and charts.
  */
 export const JackToolPartView = memo(function JackToolPartView({ part }: { part: JackToolPart }) {
@@ -91,6 +98,18 @@ function DisplayView({ display }: { display: JackToolDisplay }) {
       return <SqlBlock display={display} />
     case "deck":
       return <DeckCard display={display} />
+    case "proposal":
+      return <ProposalCard display={display} />
+    case "links":
+      return <LinksView display={display} />
+    case "text_draft":
+      return <TextDraft display={display} />
+    case "stats":
+      return <StatsView display={display} />
+    case "files":
+      return <FilesView files={display.files} />
+    case "web_sources":
+      return <WebSourcesView display={display} />
     default:
       return null
   }

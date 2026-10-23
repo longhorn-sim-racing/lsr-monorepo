@@ -46,6 +46,8 @@ export type JackTool<I = unknown> = {
   design?: boolean
   /** How long one call may run, when it needs longer than REPLY_LIMITS.toolTimeoutMs (rendering many slides) */
   timeoutMs?: number
+  /** Loaded through tool search instead of up front, for rarely used tools (design §7.1); wired in G8, ignored until then */
+  deferred?: boolean
   run: (input: I, ctx: JackToolContext) => Promise<JackToolResult>
 }
 

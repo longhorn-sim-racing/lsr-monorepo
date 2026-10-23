@@ -6,6 +6,7 @@ import { formatCentsShort } from "@/lib/money"
 import { Badge, PageHeader, StatRow, type Tone } from "@/components/admin/kit"
 import { humanizeCode } from "./audit/_components/audit-format"
 import { getOverview, RESULTS_LOOKBACK_DAYS } from "./_overview/get-overview"
+import { OverviewCards } from "./_overview/overview-cards"
 import { OverviewPanel, StatLink } from "./_overview/overview-list"
 
 // The admin layout's " | LSR Admin" template only reaches pages below /admin, not its own page
@@ -168,6 +169,9 @@ export default async function AdminOverviewPage() {
           />
         </div>
       </div>
+
+      {/* Cards the Jack 2.0 tracks add (site traffic, streams, Discord, needs attention); nothing while there are none */}
+      <OverviewCards />
     </>
   )
 }
