@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 import type { JackRegisterResult } from "@/lib/jack/files"
 import { requireOfficer } from "@/server/auth/guards"
-import { registerFile, type FileProblem } from "@/server/jack/files/service"
+import { registerFile } from "@/server/jack/files/register"
+import type { FileProblem } from "@/server/jack/files/service"
 
 /**
  * Finishes an upload (#188, design §5): after the browser uploaded the bytes, this checks them (size,

@@ -11,7 +11,8 @@ vi.mock("@/server/db", () => ({
 }))
 
 import { docxFile, imageFile, pdfFile } from "./fixtures"
-import { createUpload, MAX_PENDING_UPLOADS, registerFile, removeUpload, storeLocalUpload } from "./service"
+import { registerFile } from "./register"
+import { createUpload, MAX_PENDING_UPLOADS, removeUpload, storeLocalUpload } from "./service"
 
 const ROOM = "11111111-1111-4111-8111-111111111111"
 const OFFICER = "officer-1"
@@ -162,6 +163,23 @@ describe("registerFile", () => {
     const again = await registerFile(row.id, OFFICER, store)
     expect(again).toMatchObject({ ok: true, data: { id: row.id } })
     expect(await registerFile("nope", OFFICER, store)).toMatchObject({ ok: false, code: "not_found" })
+  })
+
+  it("deletes the photo copies it stored when the file was removed while it was being checked", async () => {
+    const row = await uploaded("IMG_1.JPG", await imageFile("jpeg"), "image/jpeg")
+    const put = store.put.bind(store)
+    let removed = false
+    store.put = async (pathname, body, contentType) => {
+      // The officer removes the chip ("Checking…") just before the copies are stored
+      if (!removed) {
+        removed = true
+        await removeUpload(row.id, OFFICER, store)
+      }
+      await put(pathname, body, contentType)
+    }
+    expect(await registerFile(row.id, OFFICER, store)).toMatchObject({ ok: false, code: "not_found" })
+    expect(fake.file(row.id)).toBeUndefined()
+    expect([...store.files.keys()]).toEqual([])
   })
 
   it("marks the file FAILED when the store breaks, with a plain message", async () => {

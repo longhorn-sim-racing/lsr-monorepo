@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const guards = vi.hoisted(() => ({ requireOfficer: vi.fn() }))
-const service = vi.hoisted(() => ({ registerFile: vi.fn() }))
+const register = vi.hoisted(() => ({ registerFile: vi.fn() }))
 vi.mock("@/server/auth/guards", () => guards)
-vi.mock("@/server/jack/files/service", () => service)
+vi.mock("@/server/jack/files/register", () => register)
 
 import { POST } from "./route"
 
@@ -13,7 +13,7 @@ const file = { id: ID, filename: "a.png", kind: "IMAGE", sizeBytes: 10, url: `/a
 
 beforeEach(() => {
   guards.requireOfficer.mockResolvedValue({ id: "officer-1" })
-  service.registerFile.mockResolvedValue({ ok: true, data: file })
+  register.registerFile.mockResolvedValue({ ok: true, data: file })
 })
 
 describe("POST /api/admin/jack/files/[id]/register", () => {
@@ -22,12 +22,12 @@ describe("POST /api/admin/jack/files/[id]/register", () => {
     const res = await call()
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ ok: false, error: "Officers only" })
-    expect(service.registerFile).not.toHaveBeenCalled()
+    expect(register.registerFile).not.toHaveBeenCalled()
   })
 
   it("registers the file as the signed-in officer and returns it", async () => {
     const res = await call()
-    expect(service.registerFile).toHaveBeenCalledWith(ID, "officer-1")
+    expect(register.registerFile).toHaveBeenCalledWith(ID, "officer-1")
     expect(res.status).toBe(200)
     expect(res.headers.get("cache-control")).toBe("no-store")
     expect(await res.json()).toEqual({ ok: true, file })
@@ -35,7 +35,7 @@ describe("POST /api/admin/jack/files/[id]/register", () => {
 
   it("passes the reason on, with a status for each kind of problem", async () => {
     for (const [code, status] of [["bad_request", 422], ["not_found", 404], ["forbidden", 403], ["unavailable", 503]] as const) {
-      service.registerFile.mockResolvedValue({ ok: false, code, error: `Problem: ${code}` })
+      register.registerFile.mockResolvedValue({ ok: false, code, error: `Problem: ${code}` })
       const res = await call()
       expect(res.status, code).toBe(status)
       expect(await res.json()).toEqual({ ok: false, error: `Problem: ${code}` })
@@ -44,6 +44,6 @@ describe("POST /api/admin/jack/files/[id]/register", () => {
 
   it("refuses an id that isn't one", async () => {
     expect((await call("nope")).status).toBe(404)
-    expect(service.registerFile).not.toHaveBeenCalled()
+    expect(register.registerFile).not.toHaveBeenCalled()
   })
 })

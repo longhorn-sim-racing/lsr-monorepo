@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { memoryStore, type MemoryStore } from "@/server/jack/decks/memory-store"
+import { derivedFilePath } from "./paths"
 import { createFakeFileDb, matches, type FakeFile } from "./test-db"
 
 const db = vi.hoisted(() => ({ current: null as unknown }))
@@ -10,10 +11,11 @@ vi.mock("@/server/db", () => ({
 }))
 
 import { JOBS } from "@/server/scheduler/jobs/files"
-import { cleanupRoomFiles, cleanupWhere } from "./cleanup"
+import { cleanupRoomFiles, cleanupWhere, sweepOrphanFiles } from "./cleanup"
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
+const ROOM = "11111111-1111-4111-8111-111111111111"
 let fake: ReturnType<typeof createFakeFileDb>
 let store: MemoryStore
 
@@ -88,6 +90,15 @@ describe("cleanupRoomFiles", () => {
     expect(await cleanupRoomFiles({ now: fake.now(), store, signal: abort.signal })).toMatchObject({ deleted: 0, more: true })
   })
 
+  it("deletes photo copies a registration stored but never recorded (it died before saving the row)", async () => {
+    const id = "33333333-3333-4333-8333-333333333333"
+    const row = file(id, 2 * DAY, { status: "UPLOADING", storagePath: `rooms/${ROOM}/${id}/IMG_1.jpg` })
+    await store.put(derivedFilePath(row, "model"), Buffer.from("jpg"), "image/jpeg")
+    await store.put(derivedFilePath(row, "thumb"), Buffer.from("jpg"), "image/jpeg")
+    expect(await cleanupRoomFiles({ now: fake.now(), store })).toEqual({ deleted: 1, objects: 1, objectErrors: 0, more: false })
+    expect([...store.files.keys()]).toEqual([])
+  })
+
   it("counts stored copies it couldn't delete", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     file("a", 10 * DAY, { status: "FAILED" })
@@ -95,6 +106,37 @@ describe("cleanupRoomFiles", () => {
       throw new Error("storage down")
     }
     expect(await cleanupRoomFiles({ now: fake.now(), store })).toEqual({ deleted: 1, objects: 0, objectErrors: 1, more: false })
+  })
+})
+
+describe("sweepOrphanFiles", () => {
+  const KEPT = "44444444-4444-4444-8444-444444444444"
+  const GONE = "55555555-5555-4555-8555-555555555555"
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date(fake.now().getTime() - 2 * DAY))
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it("deletes stored room files whose row is gone (a day old or more), never deck files or files with a row", async () => {
+    file(KEPT, HOUR, { status: "READY", storagePath: `rooms/${ROOM}/${KEPT}/a.pdf` })
+    await store.put(`rooms/${ROOM}/${GONE}/late-upload.pdf`, Buffer.from("%PDF"), "application/pdf")
+    await store.put(`rooms/${ROOM}/${GONE}/derived/thumb.jpg`, Buffer.from("jpg"), "image/jpeg")
+    await store.put("jack/assets/shot.png", Buffer.from("png"), "image/png")
+    vi.setSystemTime(fake.now())
+    const fresh = "66666666-6666-4666-8666-666666666666"
+    await store.put(`rooms/${ROOM}/${fresh}/just-now.pdf`, Buffer.from("%PDF"), "application/pdf")
+
+    expect(await sweepOrphanFiles({ now: fake.now(), store, pageSize: 2 })).toEqual({ deleted: 2, more: false })
+    expect([...store.files.keys()].sort()).toEqual(["jack/assets/shot.png", `rooms/${ROOM}/${KEPT}/a.pdf`, `rooms/${ROOM}/${fresh}/just-now.pdf`])
+  })
+
+  it("stops when the run is aborted", async () => {
+    await store.put(`rooms/${ROOM}/${GONE}/late-upload.pdf`, Buffer.from("%PDF"), "application/pdf")
+    const abort = new AbortController()
+    abort.abort()
+    expect(await sweepOrphanFiles({ now: fake.now(), store, signal: abort.signal })).toEqual({ deleted: 0, more: true })
   })
 })
 
@@ -112,9 +154,12 @@ describe("the files.cleanup job", () => {
     try {
       const { setJackFileStore } = await import("@/server/jack/decks/storage")
       setJackFileStore(store)
-      expect(await job.run(ctx())).toEqual({ summary: "Nothing to clean up", counts: { files: 0, objects: 0 } })
+      expect(await job.run(ctx())).toEqual({ summary: "Nothing to clean up", counts: { files: 0, objects: 0, leftovers: 0 } })
       file("a", 10 * DAY, { status: "FAILED" })
-      expect(await job.run(ctx())).toEqual({ summary: "Deleted 1 unsent file (1 stored copy)", counts: { files: 1, objects: 1 } })
+      expect(await job.run(ctx())).toEqual({ summary: "Deleted 1 unsent file (1 stored copy)", counts: { files: 1, objects: 1, leftovers: 0 } })
+      await store.put(`rooms/${ROOM}/77777777-7777-4777-8777-777777777777/late.pdf`, Buffer.from("%PDF"), "application/pdf")
+      vi.setSystemTime(fake.now().getTime() + 2 * DAY)
+      expect(await job.run(ctx())).toEqual({ summary: "Removed 1 leftover stored file", counts: { files: 0, objects: 0, leftovers: 1 } })
       file("b", 10 * DAY, { status: "FAILED" })
       vi.spyOn(console, "error").mockImplementation(() => {})
       store.delete = async () => {
