@@ -58,8 +58,8 @@ export const prospectUpsertSchema = z.object({
         if (row.prospectId) {
           if (seen.has(row.prospectId)) ctx.addIssue({ code: "custom", path: [i, "prospectId"], message: "the same prospect is in two rows; put its changes in one" })
           seen.add(row.prospectId)
-          const { prospectId: _id, ...fields } = row
-          if (Object.values(fields).every((value) => value === undefined)) ctx.addIssue({ code: "custom", path: [i], message: "nothing to change" })
+          const fields = Object.entries(row).filter(([key]) => key !== "prospectId")
+          if (fields.every(([, value]) => value === undefined)) ctx.addIssue({ code: "custom", path: [i], message: "nothing to change" })
         }
       })
     }),

@@ -8,7 +8,6 @@ import {
   type ActivityInput,
   type ProspectChanges,
   type ProspectFieldKey,
-  type ProspectFields,
 } from "@/schemas/sponsor-prospect.schema"
 import { createAuditLog } from "@/server/audit/log"
 import { prisma } from "@/server/db"

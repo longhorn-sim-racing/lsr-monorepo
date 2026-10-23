@@ -20,14 +20,32 @@ export type MeetingListRow = {
   openItems: number
 }
 
-export type MeetingFilter = { kind?: string; from?: Date; to?: Date; ids?: string[] }
+export type MeetingFilter = {
+  kind?: string
+  from?: Date
+  to?: Date
+  /** Words that must each be in the title, agenda or summary (any case) */
+  query?: string
+}
 
-export async function listMeetings(filter: MeetingFilter = {}, take = 500): Promise<MeetingListRow[]> {
-  const where: Prisma.MeetingWhereInput = {
+/** The words of a search, lowercase */
+export function searchWords(query: string | undefined): string[] {
+  return (query ?? "").toLowerCase().split(/\s+/).filter(Boolean).slice(0, 10)
+}
+
+export function meetingWhere(filter: MeetingFilter): Prisma.MeetingWhereInput {
+  const words = searchWords(filter.query)
+  const contains = (word: string) => ({ contains: word, mode: "insensitive" as const })
+  return {
     ...(filter.kind ? { kind: filter.kind } : {}),
     ...(filter.from || filter.to ? { heldAt: { ...(filter.from ? { gte: filter.from } : {}), ...(filter.to ? { lte: filter.to } : {}) } } : {}),
-    ...(filter.ids ? { id: { in: filter.ids } } : {}),
+    ...(words.length ? { AND: words.map((w) => ({ OR: [{ title: contains(w) }, { agendaMd: contains(w) }, { summaryMd: contains(w) }] })) } : {}),
   }
+}
+
+/** Meetings, newest first, with their counts */
+export async function listMeetings(filter: MeetingFilter = {}, take = 500): Promise<MeetingListRow[]> {
+  const where = meetingWhere(filter)
   const rows = await prisma.meeting.findMany({
     where,
     orderBy: { heldAt: "desc" },

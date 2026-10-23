@@ -19,7 +19,8 @@ describe("the Overview card registry", () => {
     vi.doMock("./sources-a", () => ({ CARDS: [fakeCard("site-traffic", 20)] }))
     vi.doMock("./automation", () => ({ CARDS: [fakeCard("needs-attention", 0)] }))
     const { OVERVIEW_CARDS } = await import("./index")
-    expect(OVERVIEW_CARDS.map((c) => c.id)).toEqual(["needs-attention", "site-traffic"])
+    // Only the mocked ones: the tracks' real cards sit among them
+    expect(OVERVIEW_CARDS.map((c) => c.id).filter((id) => ["needs-attention", "site-traffic"].includes(id))).toEqual(["needs-attention", "site-traffic"])
   })
 
   it("throws at load when two tracks register the same id", async () => {

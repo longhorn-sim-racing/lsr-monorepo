@@ -4,7 +4,7 @@ import { knowledgeEntryPath } from "@/lib/jack/knowledge"
 import type { JackToolDisplay } from "@/lib/jack/parts"
 import { ACTION_ITEM_STATUS_LABEL, ACTION_ITEMS_PAGE, centralDay, daysOverdue, formatMeetingTime, MEETING_TYPES, meetingAgendaPath, meetingPath, meetingTypeLabel, type ActionItemStatus, weekdayDate as ctDay } from "@/lib/meetings"
 import { prisma } from "@/server/db"
-import { getMeetingDetail, listActionItems, listDecisions, listMeetings, type ActionItemRow } from "@/server/queries/meetings"
+import { getMeetingDetail, listActionItems, listDecisions, listMeetings, searchWords, type ActionItemRow } from "@/server/queries/meetings"
 import { cleanHandle } from "@/server/services/officers"
 import { forModelWithLists, plural, tableDisplay } from "./display"
 import { centralDateInput, centralRange } from "./time"
@@ -33,7 +33,7 @@ const input = z.object({
 
 type Input = z.infer<typeof input>
 
-const words = (query: string | undefined) => (query ?? "").toLowerCase().split(/\s+/).filter(Boolean)
+const words = searchWords
 const insensitive = (word: string) => ({ contains: word, mode: "insensitive" as const })
 
 function clip(text: string, max: number) {
@@ -98,14 +98,7 @@ async function oneMeeting(meetingId: string, now: Date) {
 }
 
 async function meetings({ query, type, limit }: Input, range: { start?: Date; end?: Date }) {
-  const terms = words(query)
-  const where: Prisma.MeetingWhereInput = {
-    ...(type ? { kind: type } : {}),
-    ...(range.start ? { heldAt: { gte: range.start, lte: range.end } } : {}),
-    ...(terms.length ? { AND: terms.map((w) => ({ OR: [{ title: insensitive(w) }, { agendaMd: insensitive(w) }, { summaryMd: insensitive(w) }] })) } : {}),
-  }
-  const ids = terms.length || type || range.start ? (await prisma.meeting.findMany({ where, select: { id: true }, take: 500 })).map((m) => m.id) : undefined
-  const rows = await listMeetings(ids ? { ids } : {}, 500)
+  const rows = await listMeetings({ kind: type, from: range.start, to: range.end, query }, 500)
   const listed = rows.slice(0, limit)
   const items = listed.map((m) => ({ id: m.id, title: m.title, type: m.kind, when: formatMeetingTime(m.heldAt), agenda: m.hasAgenda, summary: m.hasSummary, decisions: m.decisions, actionItems: m.actionItems, openActionItems: m.openItems, link: meetingPath(m.id) }))
   const displays: JackToolDisplay[] = [
