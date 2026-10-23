@@ -398,8 +398,14 @@ async function produce(
     system: buildSystemPrompt(persona),
     tools: deps.tools,
     history,
-    // Tools run as the officer whose message started this reply: the newest one it answers
-    ctx: { roomId, messageId: reply.id, actor: { userId: latest.authorUserId, displayName: latest.author?.displayName ?? FORMER_OFFICER } },
+    // Tools run as the officer whose message started this reply: the newest one it answers. A reply
+    // that also answers a continue note isn't only an officer's, so it can't save knowledge
+    ctx: {
+      roomId,
+      messageId: reply.id,
+      actor: { userId: latest.authorUserId, displayName: latest.author?.displayName ?? FORMER_OFFICER },
+      reply: { fromOfficer: waiting.every((m) => m.kind === "user"), knowledgeChanges: 0 },
+    },
     onText: (text) => stream.write(text),
     onReset: (text) => stream.reset(text),
     onPart: (part, all) => {

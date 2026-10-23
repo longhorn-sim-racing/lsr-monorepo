@@ -1,6 +1,7 @@
 import { z } from "zod"
 import type { JackToolDisplay } from "@/lib/jack/parts"
 import { prisma } from "@/server/db"
+import { departmentName } from "@/schemas/officer-profile.schema"
 import { listSeasonEntrants } from "@/server/services/league-entry.service"
 import { forModelWithLists, plural, tableDisplay, type ModelList } from "./display"
 import { activityByMember } from "./member-activity"
@@ -64,7 +65,7 @@ const input = z.object({
     .enum(["none", "officers", "members"])
     .default("none")
     .describe(
-      "officers: every officer and admin with their title, roles, email and EID. members: every member (or those who joined between joinedFrom and joinedTo) with email, EID, join date, roles, events registered for, check-ins, races driven, this LSC season's entry status, and money paid",
+      "officers: every officer and admin with their title, department, board seat, what they work on, major, grad year, roles, email and EID. members: every member (or those who joined between joinedFrom and joinedTo) with email, EID, join date, roles, events registered for, check-ins, races driven, this LSC season's entry status, and money paid",
     ),
   joinedFrom: centralDateInput.optional().describe("With roster members: only people whose account was made on or after this Central date"),
   joinedTo: centralDateInput.optional().describe("With roster members: only people whose account was made on or before this Central date"),
@@ -73,7 +74,7 @@ const input = z.object({
 export const clubMembersTool: JackTool<z.infer<typeof input>> = {
   name: "club_members",
   description:
-    "Club membership: accounts by status, signups over time (by week or month, Central time), counts by role (officer, admin, lsc_driver, collegiate_driver) and by membership tier (General, LSR Member, Alumni, Partner), active dues entitlements, and the newest members. roster lists people: 'officers' gives every officer and admin with title, email and EID ('who are the officers'); 'members' gives every member (optionally only those who joined in a date range) with email, EID, join date, roles, events registered for, check-ins, races driven, LSC entry status for the open season, and dollars paid ('everyone's emails', 'people who joined in August and came back', a full member breakdown). Officers may see emails and EIDs.",
+    "Club membership: accounts by status, signups over time (by week or month, Central time), counts by role (officer, admin, lsc_driver, collegiate_driver) and by membership tier (General, LSR Member, Alumni, Partner), active dues entitlements, and the newest members. roster lists people: 'officers' gives every officer and admin with title, department, board seat, what they work on, major, grad year, email and EID ('who are the officers', 'who works on sponsors'); 'members' gives every member (optionally only those who joined in a date range) with email, EID, join date, roles, events registered for, check-ins, races driven, LSC entry status for the open season, and dollars paid ('everyone's emails', 'people who joined in August and came back', a full member breakdown). Officers may see emails and EIDs.",
   input,
   async run({ groupBy, from, to, newest, roster, joinedFrom, joinedTo }) {
     const now = new Date()
@@ -199,15 +200,44 @@ async function buildRoster(
     const officers = await prisma.user.findMany({
       where: { status: { not: "deleted" }, roles: { some: { role: { key: { in: ["officer", "admin"] } } } } },
       orderBy: { displayName: "asc" },
-      select: { displayName: true, officerTitle: true, email: true, eid: true, roles: { select: { role: { select: { key: true } } } } },
+      select: {
+        displayName: true,
+        handle: true,
+        officerTitle: true,
+        department: true,
+        isBoard: true,
+        workingOn: true,
+        major: true,
+        gradYear: true,
+        email: true,
+        eid: true,
+        roles: { select: { role: { select: { key: true } } } },
+      },
     })
-    const rows = officers.map((u) => ({ name: u.displayName, title: u.officerTitle, roles: u.roles.map((r) => r.role.key), email: u.email, eid: u.eid }))
+    const rows = officers.map((u) => ({
+      name: u.displayName,
+      handle: u.handle,
+      title: u.officerTitle,
+      department: departmentName(u.department),
+      board: u.isBoard || null,
+      workingOn: u.workingOn,
+      major: u.major,
+      gradYear: u.gradYear,
+      roles: u.roles.map((r) => r.role.key),
+      email: u.email,
+      eid: u.eid,
+    }))
     return {
-      rows,
-      note: `Everyone with the officer or admin role (both open the admin console). title is the board title shown on the site. ${SUMMARIZE}`,
+      // The model's copy leaves out empty fields, like the member roster
+      rows: rows.map(compactRow),
+      note:
+        `Everyone with the officer or admin role (both open the admin console). title is the board title shown on the site; department is their team (as on the About page) and board: true means they hold a board seat; ` +
+        `workingOn is what they say they work on, in their own words, and major and gradYear are from their profile. A field that's left out is empty. ${SUMMARIZE}`,
       display: tableDisplay(rows, [
         { header: "Officer", value: (r) => r.name },
         { header: "Title", value: (r) => r.title },
+        { header: "Department", value: (r) => (r.board ? `${r.department ?? "No department"} · board` : r.department) },
+        { header: "Works on", value: (r) => r.workingOn },
         { header: "Roles", value: (r) => r.roles.join(", ") },
         { header: "Email", value: (r) => r.email },
       ], `${plural(rows.length, "officer")} and admins`),

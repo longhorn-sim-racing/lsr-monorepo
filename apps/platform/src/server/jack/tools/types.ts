@@ -1,5 +1,5 @@
 import type { z } from "zod"
-import type { JackToolDisplay } from "@/lib/jack/parts"
+import type { JackToolDisplay, JackToolPart } from "@/lib/jack/parts"
 
 /**
  * What a reply is for (design §7.2): an officer's message in a room, or a scheduled run (recurring
@@ -17,9 +17,34 @@ export type JackToolContext = {
   actor: { userId: string | null; displayName: string }
   /** The reply this call is part of (deck changes record it). Absent outside a room reply, e.g. scripts */
   messageId?: string
+  /**
+   * The reply this call is part of, shared by every call in it (the reply loop makes one per reply).
+   * Absent in scripts, which then can't save knowledge
+   */
+  reply?: JackReplyState
   /** Set by the model loop; absent outside it (scripts). Tools that must not act in scheduled runs check it */
   requestType?: JackRequestType
   signal?: AbortSignal
+}
+
+/**
+ * What a reply answers, and what its tools have done so far. One object per reply: every tool call in
+ * it gets the same one, so a tool can count across calls (parallel calls included, since a count is
+ * taken before the first await)
+ */
+export type JackReplyState = {
+  /**
+   * Every message the reply answers is one an officer typed: not a continue note (and later not a
+   * recurring question or the digest). Knowledge saves need it (design §9)
+   */
+  fromOfficer: boolean
+  /** Knowledge changes made in this reply so far (the knowledge tool allows 3) */
+  knowledgeChanges: number
+  /**
+   * The reply's tool calls so far, as the model loop holds them (it sets this). The copy saved on the
+   * reply is written in the background and can lag behind, e.g. a call made alongside this one
+   */
+  toolParts?: () => readonly JackToolPart[]
 }
 
 /** An image a tool shows the model (base64), after a line of text that says what it is */

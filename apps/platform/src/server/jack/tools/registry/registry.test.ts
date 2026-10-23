@@ -13,15 +13,17 @@ const fakeTool = (name: string): AnyJackTool => ({
   run: async () => ({ forModel: "{}", label: "Ran it" }),
 })
 
-afterEach(() => {
-  vi.doUnmock("./groundwork")
-  vi.doUnmock("./memory")
-  vi.doUnmock("./sponsors-meetings")
+afterEach(async () => {
+  const { SLOT_TRACKS } = await import("@/lib/slots")
+  for (const track of SLOT_TRACKS) vi.doUnmock(`./${track}`)
   vi.resetModules()
 })
 
 describe("the tool slots", () => {
   it("send the tracks' tools after the core tools, in track order", async () => {
+    // Every slot empty but the two below, so the tracks' real tools don't change what's checked
+    const { SLOT_TRACKS } = await import("@/lib/slots")
+    for (const track of SLOT_TRACKS) vi.doMock(`./${track}`, () => ({ TOOLS: [] }))
     vi.doMock("./sponsors-meetings", () => ({ TOOLS: [fakeTool("draft_text")] }))
     vi.doMock("./groundwork", () => ({ TOOLS: [fakeTool("room_files")] }))
     const { CORE_JACK_TOOLS, JACK_TOOLS, findJackTool } = await import("../index")

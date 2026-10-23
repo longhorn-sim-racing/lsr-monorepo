@@ -454,16 +454,27 @@ const MessageRow = memo(function MessageRow({ message, anchored = false, message
   // The message the room was opened at: highlighted, and able to take focus
   const highlight = anchored ? "-mx-2 rounded-md bg-admin-selected px-2 py-1.5 outline-none ring-1 ring-primary/40" : undefined
   const tabIndex = anchored ? -1 : undefined
-  if (message.author.kind === "system")
+  if (message.author.kind === "system") {
+    // A note's first line is its summary; anything after it (a knowledge entry's saved text) shows under it as is
+    const [lead, ...rest] = message.content.split("\n")
+    const detail = rest.join("\n").trim()
     return (
-      <li data-message-id={message.id} tabIndex={tabIndex} className={cn("flex items-center gap-2.5 text-xs text-admin-subtle", highlight)}>
-        <span aria-hidden className="h-px flex-1 bg-admin-row" />
-        <span>
-          <NoteText text={message.content} /> · {timeOfDay.format(new Date(message.createdAt))}
-        </span>
-        <span aria-hidden className="h-px flex-1 bg-admin-row" />
+      <li data-message-id={message.id} tabIndex={tabIndex} className={cn("flex flex-col gap-1.5", highlight)}>
+        <div className="flex items-center gap-2.5 text-xs text-admin-subtle">
+          <span aria-hidden className="h-px flex-1 bg-admin-row" />
+          <span>
+            <NoteText text={lead} /> · {timeOfDay.format(new Date(message.createdAt))}
+          </span>
+          <span aria-hidden className="h-px flex-1 bg-admin-row" />
+        </div>
+        {detail ? (
+          <p className="mx-auto max-h-80 w-full max-w-3xl overflow-y-auto whitespace-pre-wrap break-words rounded-md border bg-admin-surface px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+            {detail}
+          </p>
+        ) : null}
       </li>
     )
+  }
   const isModel = message.author.kind === "assistant"
   const name = message.author.kind === "assistant" ? JACK_PERSONA_NAME[message.author.persona] : message.author.displayName
   const attachments = renderAttachments ? renderAttachments(message) : message.files?.length ? <FilesView files={message.files} /> : null

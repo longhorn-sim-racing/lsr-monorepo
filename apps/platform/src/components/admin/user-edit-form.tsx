@@ -23,6 +23,7 @@ import {
 import { updateUser, type UpdateUserPayload } from "@/server/actions/users"
 import { unexpectedError } from "@/lib/action-result"
 import { ROLE_LABEL, type RoleCode } from "@/lib/roles"
+import { DEPARTMENTS, WORKING_ON_MAX } from "@/schemas/officer-profile.schema"
 
 type FullUser = User & {
   officerTitle: string | null
@@ -67,6 +68,9 @@ export function UserEditForm({
   const [twitch, setTwitch] = useState(userSocials.twitch || "")
   const [youtube, setYoutube] = useState(userSocials.youtube || "")
   const [officerTitle, setOfficerTitle] = useState(user.officerTitle || "")
+  const [department, setDepartment] = useState(user.department ?? "")
+  const [isBoard, setIsBoard] = useState(user.isBoard)
+  const [workingOn, setWorkingOn] = useState(user.workingOn ?? "")
   const [selectedRoleKeys, setSelectedRoleKeys] = useState<string[]>(user.roles.map((r) => r.role.key))
 
   const activeMembership = user.memberships.find((m) => !m.validTo || new Date(m.validTo) > new Date())
@@ -77,6 +81,8 @@ export function UserEditForm({
 
   const targetIsStaff = user.roles.some((r) => STAFF_ROLES.includes(r.role.key))
   const locked = targetIsStaff && !viewerIsAdmin
+  /** Officers and admins (as ticked now) have an officer profile */
+  const isStaff = selectedRoleKeys.some((key) => STAFF_ROLES.includes(key))
 
   const handleRoleToggle = (roleKey: string) => {
     setSelectedRoleKeys((prev) => (prev.includes(roleKey) ? prev.filter((k) => k !== roleKey) : [...prev, roleKey]))
@@ -100,6 +106,9 @@ export function UserEditForm({
       major: major || null,
       socials: Object.keys(socials).length > 0 ? socials : null,
       officerTitle,
+      department: department || null,
+      isBoard,
+      workingOn: workingOn.trim() || null,
       roleKeys: selectedRoleKeys,
       activeMembershipTierKey: selectedTierKey === "GENERAL" ? null : selectedTierKey,
       activeMembershipValidTo: validToDate ? new Date(validToDate) : null,
@@ -214,6 +223,41 @@ export function UserEditForm({
               <Input id="officerTitle" placeholder="e.g. President, Treasurer" value={officerTitle} onChange={(e) => setOfficerTitle(e.target.value)} className="sm:max-w-sm" />
             </Field>
           </FormSection>
+
+          {(isStaff || department || isBoard || workingOn) && (
+            <>
+              <Divider />
+              <FormSection
+                title="Officer profile"
+                description="Jack matches how he explains things to it; the facts he gives don't change. Officers can set it on their own profile too."
+              >
+                <FieldGrid>
+                  <Field label="Department" htmlFor="department">
+                    <Select id="department" value={department} onChange={(e) => setDepartment(e.target.value)}>
+                      <option value="">None</option>
+                      {DEPARTMENTS.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <div className="flex items-end pb-1.5">
+                    <CheckboxField id="isBoard" label="Holds a board seat" checked={isBoard} onChange={(e) => setIsBoard(e.target.checked)} />
+                  </div>
+                </FieldGrid>
+                <Field label="What I work on" htmlFor="workingOn" hint={`${workingOn.trim().length} of ${WORKING_ON_MAX} characters, in their own words.`}>
+                  <Input
+                    id="workingOn"
+                    placeholder="e.g. Race control and the sim servers"
+                    maxLength={WORKING_ON_MAX}
+                    value={workingOn}
+                    onChange={(e) => setWorkingOn(e.target.value)}
+                  />
+                </Field>
+              </FormSection>
+            </>
+          )}
 
           <Divider />
 

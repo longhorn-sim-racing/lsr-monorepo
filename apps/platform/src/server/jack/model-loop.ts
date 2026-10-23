@@ -181,6 +181,8 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
 
   let text = ""
   const parts: JackToolPart[] = []
+  // Tools read the reply's calls from here (knowledge provenance): the copy saved on the reply lags behind
+  if (ctx.reply) ctx.reply.toolParts = () => parts
   let partChain: Promise<void> = Promise.resolve()
   // Web searches and fetches in this reply, in the order they started, and the pages its text cites
   const webCalls = new Map<string, WebCall>()
