@@ -161,7 +161,8 @@ describe("the knowledge source", () => {
     ])
     const [found] = await knowledgeSource.search({ query: "tiers", limit: 5, includeJackReplies: false })
     expect(sqlText()).toContain(`k."archivedAt" IS NULL`)
-    expect(found).toMatchObject({ type: "knowledge", url: "/admin/knowledge?entry=k1", meta: { notReviewed: true, tags: "sponsors", from: "GM 2 room", ageDays: 0 } })
+    // Linked to the entry's own page (the Knowledge list has no ?entry=)
+    expect(found).toMatchObject({ type: "knowledge", url: "/admin/knowledge/k1", meta: { notReviewed: true, tags: "sponsors", from: "GM 2 room", ageDays: 0 } })
   })
 
   it("reads an entry with its current version id, for updates", async () => {
@@ -181,7 +182,10 @@ describe("the knowledge source", () => {
       versions: [{ id: "v3" }],
     })
     const result = await knowledgeSource.readers[0].read("k1", {})
-    expect(result).toMatchObject({ ok: true, doc: { text: "# Tiers\nGold, Silver", meta: { versionId: "v3", owner: "Gray (@gray)" } } })
+    expect(result).toMatchObject({ ok: true, doc: { url: "/admin/knowledge/k1", text: "# Tiers\nGold, Silver", meta: { versionId: "v3", owner: "Gray (@gray)" } } })
+    // The newest version the way the knowledge service picks it (time, then id), so an update based on it isn't refused
+    const query = db.knowledgeEntry.findUnique.mock.calls[0][0] as { select: { versions: unknown } }
+    expect(query.select.versions).toEqual({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1, select: { id: true } })
     db.knowledgeEntry.findUnique.mockResolvedValue(null)
     expect(await knowledgeSource.readers[0].read("gone", {})).toEqual({ ok: false, error: expect.stringContaining("No knowledge entry gone") })
   })

@@ -91,8 +91,10 @@ vi.mock("@/server/jack/decks/assets", async (original) => ({
     assets: [{ url: "https://res.cloudinary.com/demo/image/upload/c_limit,w_2000,h_2000,q_auto:good/gallery/cota/1", about: "Members at COTA; album \"COTA trip\"", width: 2400, height: 1600, group: "gallery", album: "COTA trip" }],
     albums: [{ title: "COTA trip", slug: "cota-trip", photos: 12, date: "2026-09-20" }],
   })),
+  roomPhotoAssets: vi.fn(async () => []),
 }))
 
+import { roomPhotoAssets } from "@/server/jack/decks/assets"
 import { ensureRender } from "@/server/jack/decks/renders"
 import { deckArrangeTool, deckAssetsTool, deckCreateTool, deckEditTool, deckGuideTool, deckRenderTool, deckRestoreTool, deckViewTool, deckWriteTool } from "./decks"
 
@@ -250,7 +252,7 @@ describe("deck_render", () => {
     const { id } = await newDeck([slide("A"), slide("B TOO-TALL")])
     const out = await deckRenderTool.run({ deck: id }, ctx)
     expect(out.images?.map((i) => i.caption)).toEqual(["Slide 1:", "Slide 2:"])
-    expect(Buffer.from(out.images![1].data, "base64").toString()).toBe(`img:${slide("B TOO-TALL")}`)
+    expect(Buffer.from((out.images![1] as { data: string }).data, "base64").toString()).toBe(`img:${slide("B TOO-TALL")}`)
     expect(out.forModel).toContain("- Slide 1: no layout problems found.\n- Slide 2: The content is 81px taller")
     expect(out.label).toBe("Looked at all 2 slides of “GM 2”")
   })
@@ -284,5 +286,22 @@ describe("deck_guide and deck_assets", () => {
     expect(out.forModel).toContain("/images/lsr-hero.webp | 3840×2160 landscape | The club's orange Mercedes GT3")
     expect(out.forModel).toContain("gallery/cota/1 | 2400×1600 landscape | Members at COTA")
     expect(out.forModel).toContain("Gallery albums: COTA trip (12 photos, 2026-09-20).")
+    expect(out.forModel).not.toContain("posted in this room")
+  })
+
+  it("lists the photos officers posted in this room first, with their room URLs", async () => {
+    const url = "https://jack.assets/room/11111111-2222-4333-8444-555555555555"
+    vi.mocked(roomPhotoAssets).mockResolvedValueOnce([{ url, about: '"pit-crew.jpg", posted in this room by Gray', width: 1600, height: 1200, group: "room" }])
+    const out = await deckAssetsTool.run({ query: "COTA" }, ctx)
+    expect(roomPhotoAssets).toHaveBeenCalledWith("room-1")
+    expect(out.forModel).toMatch(new RegExp(`^Photos officers posted in this room \\(they load only in this room's decks\\):\\n${url} \\| 1600×1200 landscape \\| "pit-crew.jpg", posted in this room by Gray`))
+  })
+})
+
+describe("room photos on slides", () => {
+  it("renders and checks a deck's slides with its room, so its room photos load", async () => {
+    const { id } = await newDeck([slide("A")])
+    await deckRenderTool.run({ deck: id }, ctx)
+    expect(vi.mocked(ensureRender).mock.calls.every(([source]) => (source as { roomId?: string }).roomId === "room-1")).toBe(true)
   })
 })

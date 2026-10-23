@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { cleanCss, cleanSlideHtml, RENDER_VERSION, renderKey, slideDocument } from "./document"
+import { cleanCss, cleanSlideHtml, RENDER_VERSION, renderKey, roomAssetUrl, slideDocument, usesRoomAssets } from "./document"
 
 describe("cleanSlideHtml", () => {
   it("drops scripts, meta refreshes, base URLs, stylesheets, frames and plugins", () => {
@@ -58,5 +58,15 @@ describe("renderKey", () => {
   it("is a short hex name", () => {
     expect(renderKey(base)).toMatch(/^[0-9a-f]{40}$/)
     expect(RENDER_VERSION).toBeGreaterThan(0)
+  })
+
+  it("depends on the deck's room only for slides with room photos, so another room's deck never reuses one", () => {
+    expect(renderKey({ ...base, roomId: "room-1" })).toBe(renderKey(base))
+    const photo = { ...base, html: `<section><img src="${roomAssetUrl("11111111-2222-4333-8444-555555555555")}"></section>` }
+    expect(renderKey({ ...photo, roomId: "room-1" })).not.toBe(renderKey({ ...photo, roomId: "room-2" }))
+    expect(renderKey({ ...photo, roomId: "room-1" })).toBe(renderKey({ ...photo, roomId: "room-1" }))
+    const background = { ...base, css: `.hero { background: url(https://jack.assets/room/x) }` }
+    expect(usesRoomAssets(background)).toBe(true)
+    expect(renderKey({ ...background, roomId: "room-1" })).not.toBe(renderKey(background))
   })
 })

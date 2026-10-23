@@ -1,5 +1,9 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { cleanUpEvalRooms, describeCleanup, EVAL_ROOM_PREFIX, evalRoomId, isEvalRoomId, knowledgePlan, leftoverEvalRooms, LEGACY_EVAL_ROOM_ID, orphanedEvalRooms, runRooms, runTag } from "./cleanup";
+import { fileStore } from "../../src/server/jack/decks/storage";
+import { cleanUpEvalRooms, describeCleanup, EVAL_ROOM_PREFIX, evalRoomId, fileStoreCleanup, isEvalRoomId, knowledgePlan, leftoverEvalRooms, LEGACY_EVAL_ROOM_ID, orphanedEvalRooms, runRooms, runTag } from "./cleanup";
 import type { EvalContext } from "./shared";
 
 const ROOM = "jack-eval-mh2k1-jack-propose-email-lsc-ab12";
@@ -69,12 +73,12 @@ describe("cleanUpEvalRooms", () => {
         { id: "d2", status: "SENT" },
       ],
       instagramPublish: [{ id: "i1", status: "queued" }],
-      jackFile: [{ id: "f1", storagePath: `rooms/${ROOM}/f1/a.png`, modelCopyPath: `rooms/${ROOM}/f1/model.jpg`, thumbPath: null, anthropicFileId: "file_1" }],
+      jackFile: [{ id: "f1", roomId: ROOM, storagePath: `rooms/${ROOM}/f1/a.png`, modelCopyPath: `rooms/${ROOM}/f1/derived/model.jpg`, thumbPath: null, anthropicFileId: "file_1" }],
       recurringQuestion: [{ scheduledJobId: "job-1" }],
       meeting: [{ id: "m1" }],
     });
-    const deleteObject = vi.fn(async () => {});
-    const report = await cleanUpEvalRooms(prisma, [ROOM, ROOM], { deleteObject });
+    const deleteObjects = vi.fn(async () => {});
+    const report = await cleanUpEvalRooms(prisma, [ROOM, ROOM], { deleteObjects });
 
     // Proposals' Discord posts that never went out are deleted; one that was sent is left for a person to check
     expect(db.discordPost.findMany).toHaveBeenCalledWith({ where: { proposalId: { in: ["p1", "p2"] } }, select: { id: true, status: true } });
@@ -85,9 +89,9 @@ describe("cleanUpEvalRooms", () => {
     expect(db.event.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["draft-1"] }, status: "DRAFT" } });
     expect(db.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { OR: [{ metadata: { path: ["roomId"], equals: ROOM } }] } }));
     expect(db.auditLog.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["a1", "a2"] } } });
-    // Stored objects go through the store; a Claude file with no way to delete it is listed
-    expect(deleteObject.mock.calls).toEqual([[`rooms/${ROOM}/f1/a.png`], [`rooms/${ROOM}/f1/model.jpg`]]);
-    expect(report.left).toContain("Claude file file_1");
+    // Stored objects go through the store in one call, the photo copies too (recorded or not); a Claude file with no way to delete it is listed
+    expect(deleteObjects.mock.calls).toEqual([[[`rooms/${ROOM}/f1/a.png`, `rooms/${ROOM}/f1/derived/model.jpg`, `rooms/${ROOM}/f1/derived/thumb.jpg`]]]);
+    expect(report.left).toEqual(["Discord post d2 from an eval proposal is SENT: check Discord", "Claude file file_1"]);
     expect(db.scheduledJob.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["job-1"] } } });
     expect(db.meetingDecision.deleteMany).toHaveBeenCalledWith({ where: { meetingId: { in: ["m1"] } } });
     expect(db.actionItem.deleteMany).toHaveBeenCalledWith({ where: { OR: [{ roomId: { in: [ROOM] } }, { meetingId: { in: ["m1"] } }] } });
@@ -101,10 +105,48 @@ describe("cleanUpEvalRooms", () => {
     expect(report).toMatchObject({ rooms: 1, proposals: 2, discordPosts: 1, instagramPublishes: 1, events: 1, files: 1, storageObjects: 2, recurringQuestions: 1, auditEntries: 2, errors: [] });
   });
 
-  it("lists stored objects it can't delete when the file store has no delete", async () => {
-    const { prisma } = fakeDb({ jackFile: [{ id: "f1", storagePath: "rooms/r/f1/a.pdf", modelCopyPath: null, thumbPath: null, anthropicFileId: null }] });
+  it("lists the stored objects it recorded when it has no way to delete them, or the store fails", async () => {
+    const file = { id: "f1", roomId: "r", storagePath: "rooms/r/f1/a.pdf", modelCopyPath: null, thumbPath: null, anthropicFileId: null };
+    expect((await cleanUpEvalRooms(fakeDb({ jackFile: [file] }).prisma, [ROOM])).left).toEqual(["1 stored file object(s) (no way to delete them): rooms/r/f1/a.pdf"]);
+
+    const failing = vi.fn(async () => {
+      throw new Error("Supabase Storage couldn't delete files: status 500");
+    });
+    const report = await cleanUpEvalRooms(fakeDb({ jackFile: [file] }).prisma, [ROOM], { deleteObjects: failing });
+    expect(report).toMatchObject({ files: 1, storageObjects: 0, left: ["1 stored file object(s) (Supabase Storage couldn't delete files: status 500): rooms/r/f1/a.pdf"], errors: [] });
+  });
+
+  it("deletes room files' objects through a real file store (what the eval passes), copies included", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jack-eval-cleanup-"));
+    try {
+      const store = fileStore(root);
+      const file = { id: "f1", roomId: ROOM, storagePath: `rooms/${ROOM}/f1/a.png`, modelCopyPath: null, thumbPath: null, anthropicFileId: null };
+      // The original and a photo copy registration stored but never recorded; another room's file stays
+      for (const path of [file.storagePath, `rooms/${ROOM}/f1/derived/model.jpg`, "rooms/other/f2/b.png"]) await store.put(path, Buffer.from("x"), "image/png");
+      const report = await cleanUpEvalRooms(fakeDb({ jackFile: [file] }).prisma, [ROOM], fileStoreCleanup(store));
+      expect(report).toMatchObject({ files: 1, storageObjects: 1, left: [], errors: [] });
+      expect((await store.list("rooms/")).items.map((i) => i.pathname)).toEqual(["rooms/other/f2/b.png"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("deletes every audit entry about knowledge the eval created, not only the ones naming its room", async () => {
+    const during = at("2026-10-23T02:01:00Z");
+    const { prisma, db } = fakeDb({
+      jackRoom: [{ createdAt: at("2026-10-23T02:00:00Z") }],
+      auditLog: [{ id: "a1", actionType: "CREATE", entityType: "KNOWLEDGE_ENTRY", entityId: "new" }],
+      knowledgeEntryVersion: [{ entryId: "new" }],
+      knowledgeEntry: [{ id: "new", createdAt: during, archivedAt: null, provenance: null, versions: [{ id: "v1", roomId: ROOM, title: "T", body: "B", tags: [], createdAt: during }] }],
+    });
+    db.auditLog.deleteMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 1 });
     const report = await cleanUpEvalRooms(prisma, [ROOM]);
-    expect(report.left).toEqual(["1 stored file object(s) (this file store can't delete): rooms/r/f1/a.pdf"]);
+    // An officer's review of it during the run names no room; it goes too, then the room's own entries
+    expect(db.auditLog.deleteMany.mock.calls).toEqual([
+      [{ where: { entityType: "KNOWLEDGE_ENTRY", entityId: { in: ["new"] }, id: { notIn: ["a1"] } } }],
+      [{ where: { id: { in: ["a1"] } } }],
+    ]);
+    expect(report).toMatchObject({ knowledgeDeleted: 1, auditEntries: 2, errors: [] });
   });
 
   it("keeps going when a step fails, and reports it", async () => {

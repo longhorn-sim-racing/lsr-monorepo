@@ -7,14 +7,15 @@ import { relative, when } from "./format"
 
 /**
  * Whether the scheduler is alive: the last tick from pg_cron, pg_cron's own view of its tick job, and how
- * the site answered pg_net lately. On the Scheduled jobs page, and ready for the Connections page's
- * scheduler slot (render <SchedulerHeartbeat jobsLink />, which loads its own data).
+ * the site answered pg_net lately. On the Scheduled jobs page, and on the Connections page's scheduler
+ * slot (<SchedulerHeartbeat jobsLink />, which loads its own data and adds the jobs line).
  */
 export function SchedulerHeartbeatPanel({
   health,
   enabledJobs,
   now,
   jobsLink = false,
+  jobs,
   className,
 }: {
   health: SchedulerHealth
@@ -22,6 +23,8 @@ export function SchedulerHeartbeatPanel({
   now: Date
   /** Adds a link to the Scheduled jobs page, for other pages */
   jobsLink?: boolean
+  /** Adds a Jobs line (how many are on, and how many of those failed their last run), for pages without the Jobs page's stats */
+  jobs?: { failing: number }
   className?: string
 }) {
   const badge: { tone: Tone; label: string } =
@@ -48,6 +51,19 @@ export function SchedulerHeartbeatPanel({
       value: health.lastDispatchAt ? relative(health.lastDispatchAt, now) : <span className="text-admin-subtle">Never (the site is only called when a job is due)</span>,
     },
   ]
+  if (jobs) {
+    items.push({
+      label: "Jobs",
+      value:
+        enabledJobs === 0 ? (
+          <span className="text-admin-subtle">None switched on (every job ships off)</span>
+        ) : (
+          <span>
+            {enabledJobs} on{jobs.failing > 0 && <ToneText tone="danger">, {jobs.failing} failing</ToneText>}
+          </span>
+        ),
+    })
+  }
   if (health.cron) items.push({ label: "pg_cron", value: <CronLine cron={health.cron} /> })
   // pg_net keeps no request URLs, so this is every pg_net call; the tick is its only caller here
   if (health.delivery) items.push({ label: "pg_net calls (6 h)", value: <DeliveryLine delivery={health.delivery} now={now} /> })
@@ -127,9 +143,11 @@ function DeliveryLine({ delivery, now }: { delivery: NonNullable<SchedulerHealth
   )
 }
 
-/** The panel with its own data, for pages that don't load the scheduler's health themselves (Connections) */
+/** The panel with its own data and a jobs line, for pages that don't load the scheduler's health themselves (Connections) */
 export async function SchedulerHeartbeat({ jobsLink = false, className }: { jobsLink?: boolean; className?: string } = {}) {
   const now = new Date()
-  const [health, enabledJobs] = await Promise.all([getSchedulerHealth(now), prisma.scheduledJob.count({ where: { enabled: true } })])
-  return <SchedulerHeartbeatPanel health={health} enabledJobs={enabledJobs} now={now} jobsLink={jobsLink} className={className} />
+  const [health, enabled] = await Promise.all([getSchedulerHealth(now), prisma.scheduledJob.findMany({ where: { enabled: true }, select: { lastStatus: true } })])
+  // Failing as the Jobs page counts it: switched on, and its last run failed
+  const failing = enabled.filter((job) => job.lastStatus === "error").length
+  return <SchedulerHeartbeatPanel health={health} enabledJobs={enabled.length} now={now} jobsLink={jobsLink} jobs={{ failing }} className={className} />
 }

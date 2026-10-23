@@ -1,10 +1,12 @@
 import { prisma } from "@/server/db"
-import { cloudinaryCloudName } from "./document"
+import { FORMER_OFFICER } from "@/server/jack/messages"
+import { cloudinaryCloudName, roomAssetUrl } from "./document"
 
 /**
  * The images Jack may put on slides (#177): the site's own photos and logos (relative paths, served
- * by the public site), and the club's gallery photos on Cloudinary. Only these load in the renderer,
- * besides QR codes; the design guide says never to invent a URL.
+ * by the public site), the club's gallery photos on Cloudinary, and photos officers posted in the
+ * deck's room (G6). Only these load in the renderer, besides QR codes; the design guide says never to
+ * invent a URL.
  */
 
 export type DeckAsset = {
@@ -14,7 +16,27 @@ export type DeckAsset = {
   about: string
   width: number
   height: number
-  group: "photo" | "livery" | "logo" | "sponsor" | "partner" | "gallery"
+  group: "photo" | "livery" | "logo" | "sponsor" | "partner" | "gallery" | "room"
+}
+
+/**
+ * Photos officers posted in this room, newest first (design §5: officers' photos in decks). A slide
+ * shows one by its room URL (https://jack.assets/room/<fileId>), which only a deck made in this room loads
+ */
+export async function roomPhotoAssets(roomId: string, limit = 30): Promise<DeckAsset[]> {
+  const photos = await prisma.jackFile.findMany({
+    where: { roomId, kind: "IMAGE", status: "READY", messageId: { not: null } },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: { id: true, filename: true, width: true, height: true, message: { select: { author: { select: { displayName: true } } } } },
+  })
+  return photos.map((photo) => ({
+    url: roomAssetUrl(photo.id),
+    about: `${JSON.stringify(photo.filename)}, posted in this room by ${photo.message?.author?.displayName ?? FORMER_OFFICER}`,
+    width: photo.width ?? 0,
+    height: photo.height ?? 0,
+    group: "room" as const,
+  }))
 }
 
 const site = (path: string, width: number, height: number, group: DeckAsset["group"], about: string): DeckAsset => ({ url: path, width, height, group, about })

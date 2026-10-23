@@ -6,17 +6,20 @@
  * that was killed is cleaned up by the next one.
  *
  * What the eval's replies write, and how it's found again:
- * - by room: JackProposal, JackFile, RecurringQuestion (and its ScheduledJob), Meeting, ActionItem,
- *   JackDeck, JackUsage, and KnowledgeEntryVersion.roomId (Jack's knowledge saves record the room);
+ * - by room: JackProposal, JackFile (and its stored objects), RecurringQuestion (and its ScheduledJob),
+ *   Meeting, ActionItem, JackDeck, JackUsage, and KnowledgeEntryVersion.roomId (Jack's knowledge saves
+ *   record the room);
  * - through a room's proposals: DiscordPost and InstagramPublish rows (`proposalId`);
  * - through audit entries naming the room (`metadata.roomId`): events draft_event created, and
- *   knowledge entries archived.
+ *   knowledge entries saved, updated or archived. A knowledge entry the eval created goes with every
+ *   audit entry about it, whatever room (if any) that names.
  * A track whose tool writes anything else must make it findable one of these ways.
  *
  * Knowledge versions, action items and audit entries keep a plain room id (no foreign key), so a write
  * that lands after its room was cleaned up is found by that id instead (orphanedEvalRooms).
  */
 import { EVAL_ROOM_PREFIX } from "../../src/server/jack/eval-support";
+import { filePaths, storedPaths } from "../../src/server/jack/files/paths";
 import type { EvalContext } from "./shared";
 
 type Db = EvalContext["prisma"];
@@ -61,11 +64,19 @@ export type CleanupReport = {
 };
 
 export type CleanupOptions = {
-  /** Deletes one stored object (a room file's original, model copy or thumbnail). Without it they're listed in `left` */
-  deleteObject?: (path: string) => Promise<void>;
+  /**
+   * Deletes stored objects (room files' originals, model copies and thumbnails), as the file store's
+   * delete does: paths that aren't there are fine. Without it they're listed in `left`
+   */
+  deleteObjects?: (paths: string[]) => Promise<void>;
   /** Deletes a Claude Files API file. Without it they're listed in `left` */
   deleteClaudeFile?: (id: string) => Promise<void>;
 };
+
+/** Cleanup that deletes stored objects through a file store: the eval passes the app's (jackFileStore()) */
+export function fileStoreCleanup(store: { delete(paths: string[]): Promise<void> }): CleanupOptions {
+  return { deleteObjects: (paths) => store.delete(paths) };
+}
 
 const emptyReport = (): CleanupReport => ({
   rooms: 0,
@@ -243,7 +254,13 @@ export async function cleanUpEvalRooms(prisma: Db, roomIds: string[], options: C
     });
     const plan = knowledgePlan(entries, ids, since);
     report.left.push(...plan.left);
-    if (plan.remove.length) report.knowledgeDeleted = (await prisma.knowledgeEntry.deleteMany({ where: { id: { in: plan.remove } } })).count;
+    if (plan.remove.length) {
+      // Versions go with them (cascade). Their audit entries too: the ones naming these rooms are deleted
+      // below with the rest; any other (an officer reviewing one during the run) is about an entry that's gone
+      report.knowledgeDeleted = (await prisma.knowledgeEntry.deleteMany({ where: { id: { in: plan.remove } } })).count;
+      const others = await prisma.auditLog.deleteMany({ where: { entityType: "KNOWLEDGE_ENTRY", entityId: { in: plan.remove }, id: { notIn: audits.map((a) => a.id) } } });
+      report.auditEntries += others.count;
+    }
     for (const entry of plan.restore) {
       if (entry.content || entry.unarchive) await prisma.knowledgeEntry.update({ where: { id: entry.id }, data: { ...entry.content, ...(entry.unarchive ? { archivedAt: null } : {}) } });
       if (entry.dropVersions.length) await prisma.knowledgeEntryVersion.deleteMany({ where: { id: { in: entry.dropVersions } } });
@@ -255,17 +272,20 @@ export async function cleanUpEvalRooms(prisma: Db, roomIds: string[], options: C
   await step("files", async () => {
     const files = await prisma.jackFile.findMany({
       where: { roomId: { in: ids } },
-      select: { id: true, storagePath: true, modelCopyPath: true, thumbPath: true, anthropicFileId: true },
+      select: { id: true, roomId: true, storagePath: true, modelCopyPath: true, thumbPath: true, anthropicFileId: true },
     });
     report.files = files.length;
-    const paths = files.flatMap((f) => [f.storagePath, f.modelCopyPath, f.thumbPath].filter((p): p is string => Boolean(p)));
-    if (paths.length && !options.deleteObject) report.left.push(`${paths.length} stored file object(s) (this file store can't delete): ${paths.slice(0, 3).join(", ")}${paths.length > 3 ? ", ..." : ""}`);
-    for (const path of options.deleteObject ? paths : []) {
+    const recorded = files.flatMap(storedPaths);
+    const some = (paths: string[]) => `${paths.slice(0, 3).join(", ")}${paths.length > 3 ? ", ..." : ""}`;
+    if (recorded.length && !options.deleteObjects) report.left.push(`${recorded.length} stored file object(s) (no way to delete them): ${some(recorded)}`);
+    // Photo copies too, recorded or not, as the file cleanup job does: registration stores them before it records them
+    const paths = [...new Set(files.flatMap((f) => [...storedPaths(f), ...filePaths(f)]))];
+    if (options.deleteObjects && paths.length) {
       try {
-        await options.deleteObject!(path);
-        report.storageObjects++;
+        await options.deleteObjects(paths);
+        report.storageObjects = recorded.length;
       } catch (error) {
-        report.left.push(`stored object ${path}: ${error instanceof Error ? error.message : String(error)}`);
+        report.left.push(`${recorded.length} stored file object(s) (${error instanceof Error ? error.message : String(error)}): ${some(recorded)}`);
       }
     }
     for (const id of files.flatMap((f) => (f.anthropicFileId ? [f.anthropicFileId] : []))) {
@@ -303,7 +323,7 @@ export async function cleanUpEvalRooms(prisma: Db, roomIds: string[], options: C
     report.usageRows = (await prisma.jackUsage.deleteMany({ where: { roomId: { in: ids } } })).count;
   });
   await step("audit entries", async () => {
-    if (audits.length) report.auditEntries = (await prisma.auditLog.deleteMany({ where: { id: { in: audits.map((a) => a.id) } } })).count;
+    if (audits.length) report.auditEntries += (await prisma.auditLog.deleteMany({ where: { id: { in: audits.map((a) => a.id) } } })).count;
   });
   // Last: messages, proposals, files, recurring questions and feedback go with their room
   await step("rooms", async () => {

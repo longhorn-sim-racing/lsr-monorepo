@@ -1,4 +1,5 @@
 import type { DiffHunkLine } from "./line-diff"
+import type { JackProposalPreview } from "./markdown-preview"
 import type { JackProposalLink, JackProposalResult, JackProposalState, JackProposalStatusKey } from "./types"
 
 /**
@@ -45,6 +46,8 @@ export type JackProposalDetail = {
   links: JackProposalLink[]
   /** The rows to pick from, when it has any: exactly the ones Apply checks picks against */
   rows: JackProposalRow[] | null
+  /** A rendered preview of the Markdown it publishes (a news post), or null */
+  preview: JackProposalPreview | null
   permission: "officer" | "admin"
   /** Applying it can't be taken back: the card asks first */
   destructive: boolean
@@ -76,7 +79,7 @@ export function isProposalStatus(value: unknown): value is JackProposalStatusKey
 /** Where officers see every proposal */
 export const PROPOSALS_PAGE = "/admin/jack/proposals"
 
-/** A room, scrolled to one of its messages (the anchor works once rooms support `?m=`) */
+/** A room opened at one of its messages (the room page reads `?m=`, as search results use it); the Proposals page links each proposal's reply this way */
 export function roomMessageUrl(roomId: string, messageId: string | null): string {
   return messageId ? `/admin/jack/${roomId}?m=${encodeURIComponent(messageId)}` : `/admin/jack/${roomId}`
 }
