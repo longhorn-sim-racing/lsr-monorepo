@@ -5,7 +5,7 @@ const db = vi.hoisted(() => ({ prisma: { discordPost: null as unknown as FakePos
 vi.mock("@/server/db", () => db)
 
 import { mountFakes, type MountedFakes } from "@/server/connectors/fakes/testing"
-import { DiscordApiError, discordClient } from "@/server/connectors/discord/client"
+import { DiscordApiError, DiscordRateLimitError, discordClient } from "@/server/connectors/discord/client"
 import { FAKE_CHANNELS, FAKE_DISCORD } from "@/server/connectors/discord/fake/data"
 import { discordFake } from "@/server/connectors/discord/fake/handlers"
 import { DiscordRateLimiter } from "@/server/connectors/discord/rate-limit"
@@ -164,6 +164,38 @@ describe("sending", () => {
     const errors = [notFound, unread, refused, unreadable].map((outcome) => (outcome.status === "FAILED" ? outcome.error : null))
     expect(errors.map(isUnconfirmedFailure)).toEqual([true, true, false, false])
     expect(table.rows.map((row) => isUnconfirmedFailure(row.error))).toEqual([true, true, false, false])
+  })
+
+  it("checks the channel, never re-queues or plainly fails, when a refusal or rate limit follows a try that got no answer", async () => {
+    const { fakes, writer } = setup()
+    /** The first try gets no answer (after posting it, when `posts`), the next an answer that alone would mean nothing was posted */
+    const flaky = (then: Error, posts = false) => {
+      let tries = 0
+      return {
+        ...writer,
+        async createMessage(...args: Parameters<typeof writer.createMessage>): ReturnType<typeof writer.createMessage> {
+          if (tries++ > 0) throw then
+          if (posts) await writer.createMessage(...args)
+          throw new TypeError("fetch failed")
+        },
+      }
+    }
+    const missingPermissions = new DiscordApiError(403, 50013, "POST /channels/:id/messages", "Missing Permissions")
+    const rateLimited = new DiscordRateLimitError("POST /channels/:id/messages", 30_000)
+
+    const refused = await deliverClaimed(await claimed("Dropped, then refused"), flaky(missingPermissions), { pause: noPause })
+    const limited = await deliverClaimed(await claimed("Dropped, then rate-limited"), flaky(rateLimited), { pause: noPause })
+    const landed = await deliverClaimed(await claimed("Posted, dropped, then rate-limited"), flaky(rateLimited, true), { pause: noPause })
+
+    for (const outcome of [refused, limited]) expect(outcome).toMatchObject({ status: "FAILED", error: expect.stringMatching(/fetch failed.*isn't in the channel/) })
+    expect([refused, limited].map((outcome) => outcome.status === "FAILED" && isUnconfirmedFailure(outcome.error))).toEqual([true, true])
+    expect(landed.status).toBe("SENT")
+    expect(table.rows.map((row) => [row.status, isUnconfirmedFailure(row.error)])).toEqual([
+      ["FAILED", true],
+      ["FAILED", true],
+      ["SENT", false],
+    ])
+    expect(await botMessages(fakes, "Posted, dropped, then rate-limited")).toHaveLength(1)
   })
 
   it("puts a post back for the next run when Discord rate-limits past what the client waits (it wasn't taken)", async () => {
