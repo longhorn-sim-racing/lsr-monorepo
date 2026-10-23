@@ -83,7 +83,7 @@ What to know when posting about one:
 ## Instagram insights
 
 - **Connector** `instagram-insights` (switched off until an admin turns it on). It uses the token the feed sync already keeps in SystemSetting `instagram` (Admin → Instagram); no env vars. That token needs **`instagram_business_manage_insights`** as well as `instagram_business_basic`, so it has to be generated again with both and pasted (setup below). It stays read-only. The feed sync keeps refreshing it weekly; nothing here writes it.
-- **The Graph client** (`instagram/graph.ts`) is built per token, pinned to v26.0, with the base URL from `serviceBaseUrl("instagram", INSTAGRAM_GRAPH_URL || graph.instagram.com)`. GETs send the token as `access_token` (as the feed sync does), POSTs as a Bearer header with a JSON body (as the publishing guide does). Errors carry Meta's code and subcode and our path, never the URL or the token: 190 = token dead, 10/200–299 = permission missing, 4/17/80002 = throttled, 100 = bad metric (100/33 = the object doesn't exist).
+- **The Graph client** (`instagram/graph.ts`) is built per token, pinned to v26.0, with the base URL from `serviceBaseUrl("instagram", localOverride("INSTAGRAM_GRAPH_URL", graph.instagram.com))` (the override is for a local stand-in: plain http on this machine only, ignored on Vercel production). GETs send the token as `access_token` (as the feed sync does), POSTs as a Bearer header with a JSON body (as the publishing guide does). Errors carry Meta's code and subcode and our path, never the URL or the token: 190 = token dead, 10/200–299 = permission missing, 4/17/80002 = throttled, 100 = bad metric (100/33 = the object doesn't exist).
 - **Jobs** (off until turned on):
 
 | Kind | Schedule (Central) | What it does |

@@ -1,9 +1,10 @@
-import { serviceBaseUrl } from "@/server/connectors/base-url"
+import { localOverride, serviceBaseUrl } from "@/server/connectors/base-url"
 
 // Instagram API with Instagram Login: read the club's own posts with a long-lived token.
 // https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login
-// INSTAGRAM_GRAPH_URL (or JACK_FAKES=instagram, the shared fake) points it at a stand-in server for local testing.
-const graphUrl = () => serviceBaseUrl("instagram", process.env.INSTAGRAM_GRAPH_URL || "https://graph.instagram.com").replace(/\/+$/, "")
+// INSTAGRAM_GRAPH_URL (or JACK_FAKES=instagram, the shared fake) points it at a stand-in server for local testing:
+// http on this machine only, and ignored on Vercel production (the publishing token's renewal comes through here too).
+const graphUrl = () => serviceBaseUrl("instagram", localOverride("INSTAGRAM_GRAPH_URL", "https://graph.instagram.com")).replace(/\/+$/, "")
 
 export { INSTAGRAM_URL as INSTAGRAM_PROFILE_URL } from "@/lib/socials"
 

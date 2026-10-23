@@ -3,8 +3,8 @@ import { matches } from "@/server/connectors/sources-b-test-db"
 
 /**
  * TESTS ONLY: InstagramPublish in memory, answering the Prisma calls the publish flow makes (claims,
- * conditional updates, the proposal's unique row, the deck page's lock and repeat check in a
- * transaction), plus the few rows it reads around it (the proposal's and the deck's room, the outcome
+ * conditional updates, the proposal's unique row, the site-wide lock the cap and the deck page's repeat
+ * check run under, in a transaction), plus the few rows it reads around it (the proposal's and the deck's room, the outcome
  * notes), so the tests check what ends up stored.
  */
 
@@ -68,20 +68,34 @@ export function fakePublishDb(now: () => Date = () => new Date()) {
 
   const proposals = new Map<string, { roomId: string }>()
   const decks = new Map<string, { roomId: string | null; title: string }>()
-  /** The advisory lock keys taken (the deck page's repeat check) */
+  /** The advisory lock keys taken (every new row is made under one) */
   const locks: string[] = []
+  /** Locks held by open transactions, each released when its transaction ends */
+  const held = new Map<string, Promise<void>>()
   const db = {
     instagramPublish,
     notes,
     proposals,
     decks,
     locks,
+    /** A transaction whose $executeRaw takes an advisory lock like pg_advisory_xact_lock: a second taker waits until the holder's transaction ends */
     async $transaction<T>(work: (tx: unknown) => Promise<T>): Promise<T> {
-      return work(db)
-    },
-    async $executeRaw(_sql: TemplateStringsArray, ...values: unknown[]) {
-      locks.push(String(values[0]))
-      return 1
+      const releases: (() => void)[] = []
+      const tx = {
+        ...db,
+        async $executeRaw(_sql: TemplateStringsArray, ...values: unknown[]) {
+          const key = String(values[0])
+          locks.push(key)
+          while (held.has(key)) await held.get(key)
+          held.set(key, new Promise<void>((resolve) => releases.push(() => (held.delete(key), resolve()))))
+          return 1
+        },
+      }
+      try {
+        return await work(tx)
+      } finally {
+        for (const release of releases) release()
+      }
     },
     jackProposal: { findUnique: async ({ where }: { where: { id: string } }) => proposals.get(where.id) ?? null },
     jackDeck: { findUnique: async ({ where }: { where: { id: string } }) => decks.get(where.id) ?? null },

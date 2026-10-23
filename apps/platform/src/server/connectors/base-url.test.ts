@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { DEFAULT_FAKES_URL, fakesEnabledFor, fakesOrigin, serviceBaseUrl, serviceFetch } from "./base-url"
+import { DEFAULT_FAKES_URL, fakesEnabledFor, fakesOrigin, localOverride, serviceBaseUrl, serviceFetch } from "./base-url"
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -36,6 +36,34 @@ describe("fakesOrigin", () => {
   })
 })
 
+describe("localOverride", () => {
+  const REAL = "https://graph.instagram.com"
+
+  it("is the real URL when the override isn't set, and the override (path kept) on this machine", () => {
+    expect(localOverride("INSTAGRAM_GRAPH_URL", REAL, {})).toBe(REAL)
+    expect(localOverride("INSTAGRAM_GRAPH_URL", REAL, { INSTAGRAM_GRAPH_URL: "  " })).toBe(REAL)
+    expect(localOverride("INSTAGRAM_GRAPH_URL", REAL, { INSTAGRAM_GRAPH_URL: " http://127.0.0.1:4555/instagram/ " })).toBe("http://127.0.0.1:4555/instagram/")
+    expect(localOverride("INSTAGRAM_GRAPH_URL", REAL, { INSTAGRAM_GRAPH_URL: "http://localhost:4555" })).toBe("http://localhost:4555")
+    expect(localOverride("INSTAGRAM_GRAPH_URL", REAL, { INSTAGRAM_GRAPH_URL: "http://[::1]:4555", VERCEL_ENV: "preview" })).toBe("http://[::1]:4555")
+  })
+
+  it("is ignored on Vercel production, whatever it says, so a leftover value never gets the tokens", () => {
+    for (const value of ["http://127.0.0.1:4555", "https://graph.example.com", "http://10.0.0.5", "not a url"]) {
+      expect(localOverride("INSTAGRAM_GRAPH_URL", REAL, { INSTAGRAM_GRAPH_URL: value, VERCEL_ENV: "production" })).toBe(REAL)
+    }
+  })
+
+  it("refuses anything but plain http on this machine elsewhere, like JACK_FAKES_URL, since the client sends its token there", () => {
+    expect(() => localOverride("INSTAGRAM_GRAPH_URL", REAL, { INSTAGRAM_GRAPH_URL: "https://graph.example.com" })).toThrow("INSTAGRAM_GRAPH_URL must be http:// on this machine (127.0.0.1, localhost or [::1])")
+    expect(() => localOverride("INSTAGRAM_GRAPH_URL", REAL, { INSTAGRAM_GRAPH_URL: "https://127.0.0.1:4555" })).toThrow(/must be http:\/\//)
+    expect(() => localOverride("INSTAGRAM_GRAPH_URL", REAL, { INSTAGRAM_GRAPH_URL: "http://graph.instagram.com.example.net" })).toThrow(/this machine/)
+    expect(() => localOverride("INSTAGRAM_GRAPH_URL", REAL, { INSTAGRAM_GRAPH_URL: "http://127.0.0.1@evil.example" })).toThrow(/this machine/)
+    expect(() => localOverride("INSTAGRAM_GRAPH_URL", REAL, { INSTAGRAM_GRAPH_URL: "http://10.0.0.5:4555", VERCEL_ENV: "preview" })).toThrow(/this machine/)
+    expect(() => localOverride("INSTAGRAM_GRAPH_URL", REAL, { INSTAGRAM_GRAPH_URL: "127.0.0.1:4555/x" })).toThrow(/this machine|isn't a URL/)
+    expect(() => localOverride("INSTAGRAM_GRAPH_URL", REAL, { INSTAGRAM_GRAPH_URL: "not a url" })).toThrow("INSTAGRAM_GRAPH_URL isn't a URL")
+  })
+})
+
 describe("serviceBaseUrl", () => {
   it("returns the real URL when fakes are off", () => {
     expect(serviceBaseUrl("discord", "https://discord.com/api/v10", {})).toBe("https://discord.com/api/v10")
@@ -54,9 +82,9 @@ describe("serviceBaseUrl", () => {
   })
 
   it("lets JACK_FAKES win over a client's own override", () => {
-    const override = "http://127.0.0.1:4555"
-    expect(serviceBaseUrl("instagram", override, {})).toBe(override)
-    expect(serviceBaseUrl("instagram", override, { JACK_FAKES: "all" })).toBe("http://127.0.0.1:3999/instagram")
+    const env = { INSTAGRAM_GRAPH_URL: "http://127.0.0.1:4555" }
+    expect(serviceBaseUrl("instagram", localOverride("INSTAGRAM_GRAPH_URL", "https://graph.instagram.com", env), env)).toBe("http://127.0.0.1:4555")
+    expect(serviceBaseUrl("instagram", localOverride("INSTAGRAM_GRAPH_URL", "https://graph.instagram.com", env), { ...env, JACK_FAKES: "all" })).toBe("http://127.0.0.1:3999/instagram")
   })
 
   it("stays real in production, and fails loudly on a fakes URL off this machine", () => {

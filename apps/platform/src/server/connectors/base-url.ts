@@ -9,7 +9,8 @@ import type { ConnectorEnv } from "./types"
  *   JACK_FAKES=discord,twitch   only these
  *   JACK_FAKES_URL=…            the fakes server, http://127.0.0.1:3999 by default (loopback only)
  *
- * Fakes are never used on Vercel production, whatever the env says.
+ * Fakes are never used on Vercel production, whatever the env says, and neither is a client's own
+ * stand-in override (localOverride).
  */
 
 /** Where `pnpm jack:fakes` listens unless JACK_FAKES_URL says otherwise */
@@ -30,29 +31,46 @@ export function fakesEnabledFor(service: string, env: ConnectorEnv = process.env
   return names.includes("all") || names.includes(service)
 }
 
+/** `raw` as a URL, refused unless it's plain http on this machine (127.0.0.1, localhost or [::1]) */
+function loopbackUrl(name: string, raw: string, example: string): URL {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error(`${name} isn't a URL: use one like ${example}`)
+  }
+  if (url.protocol !== "http:" || !LOOPBACK_HOSTS.has(url.hostname)) {
+    throw new Error(`${name} must be http:// on this machine (127.0.0.1, localhost or [::1]), like ${example}`)
+  }
+  return url
+}
+
 /**
  * The fakes server's origin, from JACK_FAKES_URL. It must be plain http on a loopback address: in fake
  * mode a client still sends whatever key is in env, so it may only ever go to this machine.
  */
 export function fakesOrigin(env: ConnectorEnv = process.env): string {
-  const raw = env.JACK_FAKES_URL?.trim() || DEFAULT_FAKES_URL
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    throw new Error(`JACK_FAKES_URL isn't a URL: use one like ${DEFAULT_FAKES_URL}`)
-  }
-  if (url.protocol !== "http:" || !LOOPBACK_HOSTS.has(url.hostname)) {
-    throw new Error(`JACK_FAKES_URL must be http:// on this machine (127.0.0.1, localhost or [::1]), like ${DEFAULT_FAKES_URL}`)
-  }
-  return url.origin
+  return loopbackUrl("JACK_FAKES_URL", env.JACK_FAKES_URL?.trim() || DEFAULT_FAKES_URL, DEFAULT_FAKES_URL).origin
+}
+
+/**
+ * A client's own stand-in override (the env var `name`, e.g. INSTAGRAM_GRAPH_URL), under JACK_FAKES_URL's
+ * rules, since the client sends its real token there: ignored on Vercel production, and only plain http
+ * on this machine (anything else throws). `realUrl` when it's unset. A path in it is kept.
+ */
+export function localOverride(name: string, realUrl: string, env: ConnectorEnv = process.env): string {
+  const raw = env[name]?.trim()
+  if (!raw || env.VERCEL_ENV === "production") return realUrl
+  loopbackUrl(name, raw, "http://127.0.0.1:4555")
+  return raw
 }
 
 /**
  * The base URL a service's client uses: `realUrl`, or the same path on the fakes server when JACK_FAKES
  * lists the service. "https://discord.com/api/v10" becomes "http://127.0.0.1:3999/discord/api/v10", so a
- * fake's routes use the real API's paths. A client with its own override env var passes it as `realUrl`
- * (`process.env.INSTAGRAM_GRAPH_URL || "https://graph.instagram.com"`); JACK_FAKES still wins.
+ * fake's routes use the real API's paths. A client with its own override env var passes it through
+ * localOverride() as `realUrl` (`localOverride("INSTAGRAM_GRAPH_URL", "https://graph.instagram.com")`);
+ * JACK_FAKES still wins.
  */
 export function serviceBaseUrl(service: string, realUrl: string, env: ConnectorEnv = process.env): string {
   checkServiceId(service)

@@ -3,7 +3,7 @@ import { deckPageUrl, MAX_DECK_SLIDES } from "@/lib/jack/decks"
 import type { MdPreviewBlock, MdPreviewInline } from "@/lib/jack/markdown-preview"
 import { instagramPublishConnector } from "@/server/connectors/instagram/publish-connector"
 import { getDeck } from "@/server/jack/decks/service"
-import { captionCounts, captionProblem } from "@/server/jack/publish/caption"
+import { captionCounts, captionProblem, hiddenTextProblem } from "@/server/jack/publish/caption"
 import { CAROUSEL_MAX, CAROUSEL_MIN, fitNote, MEDIA_TYPE, PUBLISH_HISTORY, publishTargetId, TYPE_LABEL, type PublishType } from "@/lib/jack/publish"
 import { describePublish, publishDeps, PublishRefused, SHAPE, startInstagramPublish } from "@/server/jack/publish/instagram"
 import { pickSlides, slidesById, slidesLabel, slideThumbUrl } from "@/server/jack/publish/slides"
@@ -13,8 +13,10 @@ import type { ProposalKind, ProposalLink } from "../types"
 /**
  * instagram.publish (design §4.3, §12.6): a deck version's slides posted to the club's Instagram as a
  * post (one slide), a carousel (2 to 20) or a story (one slide, no caption), with a caption and,
- * if an officer asks, Instagram's "made with AI" label. The card shows the slides and the caption;
- * applying asks first (it's public, and can't be taken back from here). The slides are pinned by id at
+ * if an officer asks, Instagram's "made with AI" label. The card shows the slides, the caption and a
+ * post's alt text (public too: screen readers read it, and Instagram's web page carries it), and neither
+ * may hold characters that don't show (tag characters can spell hidden text); applying asks
+ * first (it's public, and can't be taken back from here). The slides are pinned by id at
  * the version proposed, so what goes out is what the card showed. Applying needs Instagram publishing
  * switched on (System → Connections); the post goes through `startInstagramPublish`, whose
  * InstagramPublish row (one per proposal) makes sure it never goes out twice.
@@ -50,6 +52,8 @@ function typeProblem(p: InstagramPublishPayload, count: number): string | null {
   if (p.type === "carousel" && (count < CAROUSEL_MIN || count > CAROUSEL_MAX)) return `A carousel takes ${CAROUSEL_MIN} to ${CAROUSEL_MAX} slides; this picks ${count}.`
   if (p.type === "story" && p.caption) return "Stories don't take a caption on Instagram. Leave caption out (put the words on the slide), or post it to the feed."
   if (p.type !== "post" && p.altText) return "altText is for single-image posts only."
+  // The card shows every character that goes out, so none may be invisible (the caption's check is captionProblem)
+  if (p.altText) return hiddenTextProblem("The alt text", p.altText)
   return null
 }
 
@@ -57,7 +61,7 @@ export const instagramPublishKind: ProposalKind<InstagramPublishPayload> = {
   kind: "instagram.publish",
   tool: "propose_deck_publish",
   description:
-    "instagram.publish: post a deck's slides on the club's Instagram: one slide as a post, 2-20 as a carousel, or one as a story (no caption). Use the deck id and slide numbers from deck_view, and a caption the officer gave or approved; check the slides with deck_render first. The card shows the slides and caption, and an officer confirms before it goes out (it's public). aiLabel only when an officer asks.",
+    "instagram.publish: post a deck's slides on the club's Instagram: one slide as a post, 2-20 as a carousel, or one as a story (no caption). Use the deck id and slide numbers from deck_view, and a caption the officer gave or approved; check the slides with deck_render first. The card shows the slides, caption and alt text, and an officer confirms before it goes out (it's public). aiLabel only when an officer asks.",
   schema: instagramPublishSchema,
   targetType: "INSTAGRAM_PUBLISH",
   permission: "officer",
@@ -79,6 +83,7 @@ export const instagramPublishKind: ProposalKind<InstagramPublishPayload> = {
       const { characters, hashtags, tags } = captionCounts(p.caption)
       sentences.push(`Caption: ${characters.toLocaleString("en-US")} characters, ${hashtags} hashtag${hashtags === 1 ? "" : "s"}${tags.length ? `, tagging ${tags.map((t) => `@${t}`).join(", ")}` : ""}.`)
     } else if (type !== "story") sentences.push("No caption.")
+    if (type === "post" && !p.altText) sentences.push("No alt text.")
     sentences.push(p.aiLabel ? "It's marked on Instagram as made with AI." : "It isn't marked as made with AI.")
 
     // Whether it can go out now: switched on, and the day's quota (read live, never stored)
@@ -100,7 +105,8 @@ export const instagramPublishKind: ProposalKind<InstagramPublishPayload> = {
       view: {
         title: publishTitle(type, deck.title, slidesLabel(slides)),
         summary: sentences.join(" "),
-        diff: [],
+        // Every character that goes out is on the card (none invisible): the alt text is public with the post, so it's shown whole
+        diff: p.altText ? [{ field: "altText", label: "Alt text (public on Instagram)", before: null, after: p.altText, format: "text" }] : [],
         images: slides.map((slide) => ({ url: slideThumbUrl(deck, slide.id), alt: `Slide ${slide.n} of “${deck.title}”`, label: `Slide ${slide.n}` })),
         ...(p.caption ? { preview: { label: "Caption", blocks: captionPreview(p.caption) } } : {}),
         links,

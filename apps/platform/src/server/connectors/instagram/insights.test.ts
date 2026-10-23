@@ -35,6 +35,22 @@ describe("the Graph client", () => {
     expect(seen[0]).toMatch(/^http:\/\/127\.0\.0\.1:4555\/v26\.0\/me\?/)
   })
 
+  it("never sends a token (the publishing one included) to an INSTAGRAM_GRAPH_URL off this machine, and ignores it on Vercel production", async () => {
+    const seen: string[] = []
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      seen.push(`${init?.method ?? "GET"} ${input}`)
+      return Response.json({ id: "1" })
+    })
+    expect(() => instagramGraph("t", { INSTAGRAM_GRAPH_URL: "https://graph.example.com" })).toThrow(/INSTAGRAM_GRAPH_URL must be http:\/\/ on this machine/)
+    expect(() => instagramGraph("t", { INSTAGRAM_GRAPH_URL: "http://stand-in.example.com:4555", VERCEL_ENV: "preview" })).toThrow(/this machine/)
+    expect(seen).toEqual([])
+
+    const prod = { INSTAGRAM_GRAPH_URL: "https://graph.example.com", VERCEL_ENV: "production" }
+    await instagramGraph("t", prod).get("/me")
+    await instagramGraph("t", prod).post("/me/media", { caption: "x" })
+    expect(seen.map((call) => call.split("?")[0])).toEqual(["GET https://graph.instagram.com/v26.0/me", "POST https://graph.instagram.com/v26.0/me/media"])
+  })
+
   it("names Meta's code and subcode on an error, never the token or the query", async () => {
     const fakes = mountFakes([instagramFake])
     await fakeState(fakes, { passwordChanged: true })

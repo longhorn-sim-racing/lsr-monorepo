@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { mountFakes } from "@/server/connectors/fakes/testing"
 import { INSTAGRAM_FAKE, instagramFake } from "@/server/connectors/instagram/fake/handlers"
-import { getProfile, getRecentMedia, InstagramApiError } from "./instagram"
+import { getProfile, getRecentMedia, InstagramApiError, refreshToken } from "./instagram"
 
 // The feed sync's client against the shared Instagram fake (Jack 2.0 T5), and its base URL
 afterEach(() => {
@@ -30,6 +30,22 @@ describe("the feed sync's Instagram client", () => {
     vi.stubEnv("INSTAGRAM_GRAPH_URL", "")
     await getProfile("t")
     expect(seen.map((url) => url.split("?")[0])).toEqual(["http://127.0.0.1:4555/instagram/me", "https://graph.instagram.com/me"])
+  })
+
+  it("holds INSTAGRAM_GRAPH_URL to this machine and ignores it on Vercel production (the publishing token's renewal goes through here)", async () => {
+    const seen: string[] = []
+    vi.stubGlobal("fetch", async (input: URL) => {
+      seen.push(input.toString())
+      return Response.json({ access_token: "fresh", expires_in: 5_184_000 })
+    })
+    vi.stubEnv("JACK_FAKES", "")
+    vi.stubEnv("INSTAGRAM_GRAPH_URL", "https://graph.example.com")
+    await expect(refreshToken("publish-token")).rejects.toThrow(/INSTAGRAM_GRAPH_URL must be http:\/\/ on this machine/)
+    expect(seen).toEqual([])
+
+    vi.stubEnv("VERCEL_ENV", "production")
+    await refreshToken("publish-token")
+    expect(seen.map((url) => url.split("?")[0])).toEqual(["https://graph.instagram.com/refresh_access_token"])
   })
 
   it("says the token expired on Meta's code 190", async () => {

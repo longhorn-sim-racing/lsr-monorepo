@@ -60,6 +60,13 @@ describe("Publish to Instagram on the deck page", () => {
     expect(flow.startInstagramPublish).not.toHaveBeenCalled()
   })
 
+  it("refuses a caption (it may start from Jack's draft) or alt text with characters that don't show", async () => {
+    const post = { deckId: DECK_ID, version: 3, slideIds: ["slideaaa"], type: "post" as const }
+    expect(await publishDeckToInstagram({ ...post, caption: "GM 2 recap!\u{e006a}\u{e006f}" })).toMatchObject({ ok: false, error: expect.stringMatching(/^The caption has 2 characters that don't show on screen \(U\+E006A, U\+E006F\)/) })
+    expect(await publishDeckToInstagram({ ...post, caption: "GM 2!", altText: "The podium​" })).toMatchObject({ ok: false, error: expect.stringMatching(/^The alt text has a character that doesn't show on screen \(U\+200B\)/) })
+    expect(flow.startInstagramPublish).not.toHaveBeenCalled()
+  })
+
   it("sends a story without its caption, and says nothing was posted when a limit stops it", async () => {
     flow.startInstagramPublish.mockRejectedValue(new PublishRefused("Instagram's limit of 50 API posts a day is used up (50 in the last 24 hours). Try again tomorrow."))
     expect(await publishDeckToInstagram({ deckId: DECK_ID, version: 3, slideIds: ["slideaaa"], type: "story", caption: "dropped", altText: "dropped" })).toEqual({ ok: false, error: "Instagram's limit of 50 API posts a day is used up (50 in the last 24 hours). Try again tomorrow. Nothing was posted." })

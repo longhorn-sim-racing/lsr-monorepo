@@ -1,4 +1,4 @@
-import { serviceBaseUrl } from "../base-url"
+import { localOverride, serviceBaseUrl } from "../base-url"
 import type { ConnectorEnv } from "../types"
 
 /**
@@ -6,7 +6,8 @@ import type { ConnectorEnv } from "../types"
  * Each connector builds its own on top: insights (`insights.ts`, the existing read token in SystemSetting
  * "instagram") now, publishing (`instagram-publish`, its own token in SystemSetting "instagram_publish")
  * later, so the read token can never publish. The base URL comes from serviceBaseUrl("instagram", …),
- * so JACK_FAKES (or INSTAGRAM_GRAPH_URL, as for the feed sync) points it at the fake.
+ * so JACK_FAKES (or INSTAGRAM_GRAPH_URL, as for the feed sync: http on this machine only, ignored on
+ * Vercel production, since both tokens go wherever it points) points it at the fake.
  *
  * GETs send the token as `access_token` (as the feed sync does); POSTs send it as a Bearer header with a
  * JSON body (as the publishing guide does). Errors never carry the URL or the token: Meta's error code,
@@ -56,7 +57,7 @@ type Params = Record<string, string | number | undefined>
 type GraphErrorBody = { error?: { message?: string; code?: number; error_subcode?: number } }
 
 export function instagramGraph(token: string, env: ConnectorEnv = process.env) {
-  const base = serviceBaseUrl("instagram", env.INSTAGRAM_GRAPH_URL || INSTAGRAM_GRAPH_URL, env).replace(/\/+$/, "")
+  const base = serviceBaseUrl("instagram", localOverride("INSTAGRAM_GRAPH_URL", INSTAGRAM_GRAPH_URL, env), env).replace(/\/+$/, "")
 
   /** `path` is the API path alone ("/me"); the query (with the token) never reaches an error */
   async function send<T>(path: string, query: URLSearchParams | null, init: RequestInit, signal?: AbortSignal): Promise<T> {

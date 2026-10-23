@@ -30,22 +30,33 @@ const deck: DeckView = {
 const slideItem = (n: number): GalleryItem => ({ rowId: `slide:s${n}`, kind: "slide", deck, slide: { ...deck.content.slides[n - 1], n }, alt: `GM 2 recap, slide ${n}` })
 const photoItem: GalleryItem = { rowId: "file:f1", kind: "file", fileId: "f1", roomId: "room-1", alt: "podium" }
 
-let deps: GalleryDeps & { uploads: { publicId: string; format?: string }[] }
+let deps: GalleryDeps & { uploads: { publicId: string; format?: string }[]; removed: string[] }
 let images: { id: string; publicId: string; albumId: string; order: number; alt: string }[]
+/** Public ids Cloudinary already has (an upload of one answers `existing`) */
+let onCloudinary: Set<string>
 
 beforeEach(async () => {
   vi.clearAllMocks()
   images = []
+  onCloudinary = new Set()
   const png = await sharp({ create: { width: 1080, height: 1350, channels: 3, background: "#222" } }).png().toBuffer()
   const jpeg = await sharp({ create: { width: 800, height: 600, channels: 3, background: "#555" } }).jpeg().toBuffer()
   const uploads: { publicId: string; format?: string }[] = []
+  const removed: string[] = []
   deps = {
     uploads,
+    removed,
     slidePng: async () => png,
     readStored: async (path) => (path === "rooms/room-1/f1/derived/model.jpg" ? jpeg : null),
     upload: async (body, publicId) => {
       uploads.push({ publicId, format: (await sharp(body).metadata()).format })
-      return { publicId, width: 1080, height: 1350 }
+      const existing = onCloudinary.has(publicId)
+      onCloudinary.add(publicId)
+      return { publicId, width: 1080, height: 1350, existing }
+    },
+    remove: async (publicId) => {
+      removed.push(publicId)
+      return onCloudinary.delete(publicId)
     },
   }
   db.$transaction.mockImplementation(async (work: (tx: typeof db) => unknown) => work(db))
@@ -110,5 +121,52 @@ describe("addToGallery", () => {
     db.galleryAlbum.findUnique.mockResolvedValue(null)
     await expect(addToGallery({ target: { albumId: "album-1" }, items: [slideItem(1)], actorUserId: "u2", auditMetadata: {} }, deps)).rejects.toThrow(GalleryAlbumGone)
     expect(deps.uploads).toEqual([])
+  })
+})
+
+describe("addToGallery when it fails partway", () => {
+  const add = (items: GalleryItem[]) => addToGallery({ target: { newAlbum: { title: "GM 2 graphics", date: null } }, items, actorUserId: "u2", auditMetadata: {} }, deps)
+
+  it("takes the copies it made off Cloudinary when the rows can't be written (a new album's slug taken at the same moment)", async () => {
+    // The photo was on Cloudinary before (an earlier add that failed): it isn't this call's to delete
+    onCloudinary.add("gallery/jack/file-f1")
+    const taken = Object.assign(new Error("Unique constraint failed on the fields: (`slug`)"), { code: "P2002" })
+    db.$transaction.mockRejectedValue(taken)
+    await expect(add([slideItem(1), slideItem(2), photoItem])).rejects.toBe(taken)
+    expect(deps.removed.sort()).toEqual([galleryPublicId(slideItem(1)), galleryPublicId(slideItem(2))].sort())
+    expect([...onCloudinary]).toEqual(["gallery/jack/file-f1"])
+    expect(images).toEqual([])
+    expect(audit.createAuditLog).not.toHaveBeenCalled()
+  })
+
+  it("waits for the other uploads when one fails, then takes those copies off too, and writes nothing", async () => {
+    const upload = deps.upload
+    deps.upload = async (body, publicId) => {
+      if (publicId === galleryPublicId(slideItem(2))) throw new Error("Cloudinary didn't take the image (500)")
+      // The others finish after the failure
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      return upload(body, publicId)
+    }
+    await expect(add([slideItem(1), slideItem(2), photoItem])).rejects.toThrow("Cloudinary didn't take the image (500)")
+    expect(db.$transaction).not.toHaveBeenCalled()
+    expect(deps.removed.sort()).toEqual([galleryPublicId(slideItem(1)), "gallery/jack/file-f1"].sort())
+    expect(onCloudinary.size).toBe(0)
+  })
+
+  it("leaves a copy a gallery row uses by now (another officer added the same image meanwhile), and every copy when it can't check", async () => {
+    db.$transaction.mockRejectedValue(new Error("Foreign key constraint violated: GalleryImage_albumId_fkey"))
+    // inGallery's read finds nothing; by the cleanup's, another officer's row has the slide
+    db.galleryImage.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ publicId: galleryPublicId(slideItem(1)) }])
+    await expect(add([slideItem(1), photoItem])).rejects.toThrow(/Foreign key/)
+    expect(deps.removed).toEqual(["gallery/jack/file-f1"])
+
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {})
+    deps.removed.length = 0
+    onCloudinary.clear()
+    db.galleryImage.findMany.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error("Can't reach database server"))
+    await expect(add([slideItem(1), photoItem])).rejects.toThrow(/Foreign key/)
+    expect(deps.removed).toEqual([])
+    expect(quiet).toHaveBeenCalledWith(expect.stringMatching(/couldn't check its 2 copies on Cloudinary, so they stay/), expect.any(Error))
+    quiet.mockRestore()
   })
 })

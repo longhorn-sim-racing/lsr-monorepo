@@ -18,7 +18,7 @@ import { INSTAGRAM_FAKE, instagramFake } from "@/server/connectors/instagram/fak
 import { instagramGraph } from "@/server/connectors/instagram/graph"
 import { instagramPublisher } from "@/server/connectors/instagram/publish"
 import type { DeckView } from "@/server/jack/decks/service"
-import { claimPublish, describePublish, finishInstagramPublishes, LEASE_MS, PUBLISH_CUTOFF_MS, PublishRefused, PublishRepeat, readContainers, SETTLE_MS, startInstagramPublish, type PublishDeps, type StartPublish } from "./instagram"
+import { claimPublish, describePublish, finishInstagramPublishes, LEASE_MS, NEW_ROW_LOCK, PUBLISH_CUTOFF_MS, PublishRefused, PublishRepeat, readContainers, SETTLE_MS, startInstagramPublish, type PublishDeps, type StartPublish } from "./instagram"
 import { fakePublishDb, type FakePublishDb } from "./test-db"
 
 // Before any real clock this runs on, so the fake's own timestamps (real time) always come after it
@@ -122,6 +122,14 @@ describe("startInstagramPublish", () => {
     expect(audit.createAuditLog).toHaveBeenCalledTimes(1)
     expect(audit.createAuditLog.mock.calls[0][0]).toMatchObject({ actorUserId: "u2", actionType: "CREATE", entityType: "INSTAGRAM_PUBLISH", entityId: row.id, metadata: { via: "jack", proposalId: "prop-1", publishId: row.id } })
     expect(audit.createAuditLog.mock.calls[0][0].summary).toBe("Posted “GM 2 recap” as a post on Instagram.")
+    // The record keeps everything that went out in public, the alt text with the caption
+    expect(audit.createAuditLog.mock.calls[0][0].after).toMatchObject({ caption: "GM 2 recap! #longhornsimracing", altText: "The GM 2 podium", aiGenerated: true })
+  })
+
+  it("records no alt text for a carousel or a story, which don't send one", async () => {
+    await startInstagramPublish(input({ type: "story", altText: "ignored" }), deps())
+    expect((await instagramState()).containers[0].altText).toBeNull()
+    expect(audit.createAuditLog.mock.calls[0][0].after).toMatchObject({ mediaType: "STORIES", altText: null })
   })
 
   it("posts a carousel: an item per slide in order, then the carousel with the caption and the AI label", async () => {
@@ -155,7 +163,26 @@ describe("startInstagramPublish", () => {
     for (let i = 0; i < 10; i++) await store.instagramPublish.create({ data: { status: i % 2 ? "published" : "containers" } })
     await store.instagramPublish.create({ data: { status: "failed" } })
     await expect(startInstagramPublish(input(), deps())).rejects.toThrow(/already sent 10 posts to Instagram in the last 24 hours/)
+    expect(store.instagramPublish.rows.size).toBe(11)
     expect(audit.createAuditLog).not.toHaveBeenCalled()
+  })
+
+  it("counts the day's cap with the new row under one site-wide lock, so approvals at once can't both take the last post", async () => {
+    // 9 of the day's 10 used; three approvals land at once (two proposals and a deck page press, different decks)
+    for (let i = 0; i < 9; i++) await store.instagramPublish.create({ data: { status: "published" } })
+    const other = { ...deck, id: "22222222-2222-4222-8222-222222222222" }
+    const outcomes = await Promise.allSettled([
+      startInstagramPublish(input({ proposalId: "prop-a" }), deps()),
+      startInstagramPublish(input({ proposalId: "prop-b", deck: other }), deps()),
+      startInstagramPublish(input({ deck: other, type: "story", refuseRepeat: true }), deps()),
+    ])
+    expect(outcomes.filter((o) => o.status === "fulfilled")).toHaveLength(1)
+    const refused = outcomes.flatMap((o) => (o.status === "rejected" ? [o.reason] : []))
+    expect(refused).toHaveLength(2)
+    for (const reason of refused) expect(reason).toEqual(new PublishRefused("The site has already sent 10 posts to Instagram in the last 24 hours, the most it sends in a day. Try again tomorrow, or post from the Instagram app."))
+    expect([...store.instagramPublish.rows.values()].filter((r) => r.status !== "failed")).toHaveLength(10)
+    expect(store.locks).toEqual([NEW_ROW_LOCK, NEW_ROW_LOCK, NEW_ROW_LOCK])
+    expect((await instagramState()).posts).toHaveLength(1)
   })
 
   it("fails without posting when Instagram can't use an image, and says which slide", async () => {
@@ -301,12 +328,12 @@ describe("startInstagramPublish", () => {
 })
 
 describe("startInstagramPublish from the deck page (refuseRepeat)", () => {
-  it("refuses the same pick while it's on its way or after it went out in the last day, under a lock on the deck, and makes nothing", async () => {
+  it("refuses the same pick while it's on its way or after it went out in the last day, under the site-wide lock, and makes nothing", async () => {
     await knob({ processingReads: 50 })
     const pick = input({ type: "carousel", slides: slides.slice(0, 2), proposalId: undefined, refuseRepeat: true })
     const first = await startInstagramPublish(pick, deps(), { waitMs: 3_000 })
     expect(first.state).toBe("waiting")
-    expect(store.locks).toEqual([`instagram-publish:${deck.id}`])
+    expect(store.locks).toEqual([NEW_ROW_LOCK])
 
     const containersBefore = (await instagramState()).containers.length
     const repeat = startInstagramPublish(pick, deps(), { waitMs: 3_000 })

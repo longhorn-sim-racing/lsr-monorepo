@@ -1,3 +1,4 @@
+import { INVISIBLE } from "./invisible"
 import type { JackFileItem, JackFileKindKey } from "./parts"
 
 /**
@@ -105,12 +106,6 @@ export function fileExtension(name: string): string {
 export function baseContentType(type: string | null | undefined): string {
   return (type ?? "").split(";")[0].trim().toLowerCase()
 }
-
-/*
- * Characters that change how a name reads without being visible: C0/C1 controls, DEL, and the
- * bidirectional overrides that make "photo‮gpj.exe" show as "photoexe.jpg"
- */
-const INVISIBLE = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿]/g
 
 /** The name officers see: no folders, no invisible characters, at most 200 characters (the extension kept) */
 export function cleanDisplayName(name: string): string {

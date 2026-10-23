@@ -11,7 +11,7 @@ import { instagramPublishConnector } from "@/server/connectors/instagram/publish
 import { prisma } from "@/server/db"
 import { broadcastRoomEvent } from "@/server/jack/broadcast"
 import { jackMessageInclude, toMessageView } from "@/server/jack/messages"
-import { captionProblem } from "@/server/jack/publish/caption"
+import { captionProblem, hiddenTextProblem } from "@/server/jack/publish/caption"
 import { addToGallery, describeGalleryAdd, GalleryAlbumGone } from "@/server/jack/publish/gallery"
 import { describePublish, publishDeps, PublishRefused, PublishRepeat, startInstagramPublish } from "@/server/jack/publish/instagram"
 import { slidesById } from "@/server/jack/publish/slides"
@@ -78,7 +78,9 @@ export async function publishDeckToInstagram(
   if (p.type !== "carousel" && count !== 1) return { ok: false, error: `A ${p.type} is one slide; ${pickedText}.` }
   if (p.type === "carousel" && (count < CAROUSEL_MIN || count > CAROUSEL_MAX)) return { ok: false, error: `A carousel takes ${CAROUSEL_MIN} to ${CAROUSEL_MAX} slides; ${pickedText}.` }
   const caption = p.type === "story" ? "" : p.caption
-  const problem = caption ? captionProblem(caption) : null
+  // The caption may start from Jack's draft, so its characters are checked here too (none may be invisible)
+  const altText = p.type === "post" ? p.altText || undefined : undefined
+  const problem = (caption ? captionProblem(caption) : null) ?? (altText ? hiddenTextProblem("The alt text", altText) : null)
   if (problem) return { ok: false, error: problem }
 
   const picked = await slidesById(p.deckId, p.version, p.slideIds)
@@ -93,7 +95,7 @@ export async function publishDeckToInstagram(
         slides: picked.slides,
         type: p.type,
         caption,
-        altText: p.type === "post" ? p.altText || undefined : undefined,
+        altText,
         aiGenerated: p.aiLabel,
         createdById: officer.id,
         approvedById: officer.id,

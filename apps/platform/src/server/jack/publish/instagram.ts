@@ -184,12 +184,20 @@ async function findRepeat(db: Prisma.TransactionClient, input: StartPublish, now
   return rows.find((row) => row.slideIds.length === slideIds.length && row.slideIds.every((id, i) => id === slideIds[i])) ?? null
 }
 
-/** The new row; for the deck page's press, under a lock on the deck so two presses at once take turns, and refused when it's a repeat */
+/** The advisory lock every new row is made under (`pg_advisory_xact_lock(hashtext(…))`), site-wide */
+export const NEW_ROW_LOCK = "instagram-publish"
+
+/**
+ * The new row, under one site-wide lock so approvals at once take turns: the day's cap is counted there,
+ * after every row made before it was committed, so two approvals can't both take the last post of the
+ * day; and the deck page's press is refused when it's a repeat
+ */
 async function createRow(data: Prisma.InstagramPublishUncheckedCreateInput, input: StartPublish, now: Date): Promise<InstagramPublish> {
-  if (!input.refuseRepeat) return prisma.instagramPublish.create({ data })
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`instagram-publish:${input.deck.id}`}))`
-    const repeat = await findRepeat(tx, input, now)
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${NEW_ROW_LOCK}))`
+    const today = await tx.instagramPublish.count({ where: { createdAt: { gt: new Date(now.getTime() - DAY) }, status: { not: "failed" } } })
+    if (today >= CLUB_DAILY_POSTS) throw new PublishRefused(`The site has already sent ${plural(today, "post")} to Instagram in the last 24 hours, the most it sends in a day. Try again tomorrow, or post from the Instagram app.`)
+    const repeat = input.refuseRepeat ? await findRepeat(tx, input, now) : null
     if (repeat) {
       const status = PUBLISH_STATUS[repeat.status as PublishStatus]?.label ?? repeat.status
       throw new PublishRepeat(`${input.slides.length === 1 ? "This slide" : "These slides"} already went to Instagram as ${TYPE_LABEL[repeat.mediaType as PublishMediaType] ?? "a post"} at ${centralTime(repeat.createdAt)} (${status}). See Content → Instagram.`, repeat.id)
@@ -199,10 +207,10 @@ async function createRow(data: Prisma.InstagramPublishUncheckedCreateInput, inpu
 }
 
 /**
- * Posts an approved selection of slides: the site's cap and Instagram's quota first (nothing is made
- * when either is used up), then the row, the images, the containers, and a wait for Instagram, ending
- * published or waiting (the job finishes it). A failure marks the row failed and throws. Writes one audit
- * entry once there's a row.
+ * Posts an approved selection of slides: Instagram's quota and the site's cap first (nothing is made
+ * when either is used up; the cap is counted with the new row, under its lock), then the row, the
+ * images, the containers, and a wait for Instagram, ending published or waiting (the job finishes it). A
+ * failure marks the row failed and throws. Writes one audit entry once there's a row.
  */
 export async function startInstagramPublish(input: StartPublish, deps: PublishDeps, { waitMs = APPLY_WAIT_MS, signal }: { waitMs?: number; signal?: AbortSignal } = {}): Promise<PublishOutcome> {
   if (input.proposalId) {
@@ -211,8 +219,7 @@ export async function startInstagramPublish(input: StartPublish, deps: PublishDe
   }
 
   const now = deps.now()
-  const today = await prisma.instagramPublish.count({ where: { createdAt: { gt: new Date(now.getTime() - DAY) }, status: { not: "failed" } } })
-  if (today >= CLUB_DAILY_POSTS) throw new PublishRefused(`The site has already sent ${plural(today, "post")} to Instagram in the last 24 hours, the most it sends in a day. Try again tomorrow, or post from the Instagram app.`)
+  // Read before the lock: it's a call to Instagram, and the lock is never held across one
   const quota = await deps.client.quota(signal)
   if (quota.used >= quota.total) throw new PublishRefused(`Instagram's limit of ${quota.total} API posts a day is used up (${quota.used} in the last 24 hours). Try again tomorrow.`)
 
@@ -527,7 +534,8 @@ async function auditPublish(id: string, input: StartPublish) {
     entityType: "INSTAGRAM_PUBLISH",
     entityId: row.id,
     summary: describePublish(row, input.deck.title),
-    after: { deckId: row.deckId, version: row.version, slideIds: row.slideIds, mediaType: row.mediaType, caption: row.caption, aiGenerated: readContainers(row.containerIds).aiGenerated, status: row.status, igMediaId: row.igMediaId, permalink: row.permalink, error: row.error },
+    // Everything that went out in public: a single image's alt text too (the row has no column for it)
+    after: { deckId: row.deckId, version: row.version, slideIds: row.slideIds, mediaType: row.mediaType, caption: row.caption, altText: row.mediaType === "IMAGE" ? (input.altText ?? null) : null, aiGenerated: readContainers(row.containerIds).aiGenerated, status: row.status, igMediaId: row.igMediaId, permalink: row.permalink, error: row.error },
     metadata: { ...input.auditMetadata, publishId: row.id },
   })
 }
