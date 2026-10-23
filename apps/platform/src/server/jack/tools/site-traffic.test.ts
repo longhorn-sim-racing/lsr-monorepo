@@ -59,7 +59,7 @@ describe("site_traffic", () => {
   it("says it isn't connected when there are no snapshots and no connection", async () => {
     mocks.read.trafficCoverage.mockResolvedValue(null)
     mocks.status.mockResolvedValue({ state: "not_configured", lastSyncAt: null, missingEnv: ["VERCEL_ANALYTICS_TOKEN"], missingSettings: [] })
-    expect((await run()).forModel).toMatch(/Site traffic is not set up yet/)
+    expect((await run()).forModel).toMatch(/Site traffic is not set up \(missing: VERCEL_ANALYTICS_TOKEN\); it never synced/)
   })
 })
 

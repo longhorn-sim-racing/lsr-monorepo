@@ -82,7 +82,7 @@ describe("stripe_overview", () => {
     mocks.prisma.stripeBalanceDaily.findFirst.mockResolvedValue(null)
     mocks.prisma.stripePayout.findFirst.mockResolvedValue(null)
     const result = await run()
-    expect(result.forModel).toMatch(/switched off on System → Connections; never synced\. There's no Stripe data to read/)
+    expect(result.forModel).toMatch(/switched off on System → Connections; it never synced\. There's no Stripe data to read/)
     expect(mocks.stripeSnapshot).not.toHaveBeenCalled()
   })
 
@@ -90,7 +90,7 @@ describe("stripe_overview", () => {
     mocks.status.mockResolvedValue(status("off"))
     mocks.prisma.stripeBalanceDaily.findFirst.mockResolvedValue({ date: new Date() })
     const data = JSON.parse((await run()).forModel)
-    expect(data.connection).toMatch(/Stripe is switched off .* last synced/)
+    expect(data.connection).toMatch(/Stripe is switched off .*; what's stored was last synced/)
     expect(data.balance).toBeTruthy()
   })
 

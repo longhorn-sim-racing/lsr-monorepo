@@ -18,8 +18,8 @@ export async function sourceConnection(connector: AnyConnector, label: string): 
   const synced = status.lastSyncAt ? `last synced ${ct(new Date(status.lastSyncAt))}` : "never synced"
   if (status.state === "connected") return { connected: true, note: status.lastSyncAt ? `${label}: connected, ${synced}.` : `${label}: connected, waiting for its first sync.` }
   if (status.state === "error") return { connected: true, note: `${label}: its last sync failed (System → Connections has why); ${synced}.` }
-  const why = status.state === "off" ? "switched off on System → Connections" : `not set up yet (missing: ${[...status.missingEnv, ...status.missingSettings].join(", ")})`
-  return { connected: false, note: `${label} is ${why}; ${synced}.` }
+  const why = status.state === "off" ? "switched off on System → Connections" : `not set up (missing: ${[...status.missingEnv, ...status.missingSettings].join(", ")})`
+  return { connected: false, note: `${label} is ${why}; ${status.lastSyncAt ? `what's stored was ${synced}` : "it never synced"}.` }
 }
 
 /** The answer when a source isn't connected and nothing was ever synced */

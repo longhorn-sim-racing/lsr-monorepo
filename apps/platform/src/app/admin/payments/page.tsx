@@ -36,7 +36,10 @@ export default async function AdminPaymentsPage({ searchParams }: { searchParams
 
   const data = await getAdminPayments(filters)
   // Open disputes on this page's payments, from the Stripe sync (empty until it runs)
-  const disputes = await openDisputesFor(data.payments.map((p) => p.providerRef)).catch(() => new Map())
+  const disputes = await openDisputesFor(data.payments.map((p) => p.providerRef)).catch((error: unknown) => {
+    console.error("[payments] Couldn't read Stripe disputes:", error)
+    return new Map()
+  })
 
   return (
     <>

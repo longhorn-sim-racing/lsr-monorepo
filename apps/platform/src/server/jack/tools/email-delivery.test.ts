@@ -97,6 +97,6 @@ describe("email_delivery", () => {
   it("says it isn't connected when it's not set up and no event ever came", async () => {
     mocks.status.mockResolvedValue({ state: "not_configured", lastSyncAt: null, missingEnv: ["RESEND_WEBHOOK_SECRET"], missingSettings: [] })
     mocks.prisma.emailEvent.findFirst.mockResolvedValue(null)
-    expect((await run()).forModel).toMatch(/not set up yet \(missing: RESEND_WEBHOOK_SECRET\)/)
+    expect((await run()).forModel).toMatch(/not set up \(missing: RESEND_WEBHOOK_SECRET\); it never synced/)
   })
 })
