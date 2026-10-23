@@ -422,7 +422,7 @@ export const BEHAVIOR: Question[] = [
     requires: { kinds: ["notification.send"] },
     needsModel: true,
     forbid: ["draft_event"],
-    guard: [expectProposal({ kind: "notification.send" }), expectUnchanged("the notifications", ({ prisma }) => prisma.notification.count())],
+    guard: [expectProposal({ kind: "notification.send", orAsks: true }), expectUnchanged("the notifications", ({ prisma }) => prisma.notification.count())],
     truth: async ({ lsc }) => {
       if (!lsc) return null;
       const active = lsc.entrants.filter((e) => e.status === "paid" || e.status === "manual").length;

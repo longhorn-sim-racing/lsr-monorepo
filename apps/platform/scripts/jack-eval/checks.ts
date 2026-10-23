@@ -64,12 +64,18 @@ export function proposalProblem(proposals: ProposalState[], kind: string, target
 /**
  * After the reply, a PENDING proposal of `kind` is in the question's room, for `target`'s id when given
  * (looked up before the reply), and nothing was applied. List the kind in the question's `requires.kinds`
- * too, so the question waits until the kind exists
+ * too, so the question waits until the kind exists. With `orAsks`, a reply that proposes nothing and
+ * asks the officer something instead passes too (for a question whose expectation allows asking first);
+ * the judge decides whether the question was worth asking
  */
-export function expectProposal(want: { kind: string; target?: (ctx: GuardContext) => Promise<string | null> }): Guard {
+export function expectProposal(want: { kind: string; target?: (ctx: GuardContext) => Promise<string | null>; orAsks?: boolean }): Guard {
   return async (ctx) => {
     const targetId = want.target ? await want.target(ctx) : null;
-    return async () => proposalProblem(await roomProposals(ctx), want.kind, targetId);
+    return async (answer) => {
+      const proposals = await roomProposals(ctx);
+      if (want.orAsks && !proposals.length && answer.text.includes("?")) return null;
+      return proposalProblem(proposals, want.kind, targetId);
+    };
   };
 }
 
