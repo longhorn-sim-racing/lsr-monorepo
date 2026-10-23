@@ -32,7 +32,8 @@ describe("the job registry", () => {
     vi.doMock("./jobs/discord-read", () => ({ JOBS: [fakeJob("discord.sync")] }))
     vi.doMock("./jobs/groundwork", () => ({ JOBS: [fakeJob("housekeeping.prune")] }))
     const { JOB_KINDS, findJobKind } = await import("./registry")
-    expect(JOB_KINDS.map((j) => j.kind)).toEqual(["housekeeping.prune", "discord.sync"])
+    // The room file jobs (jobs/files.ts) join the groundwork slot, after its own
+    expect(JOB_KINDS.map((j) => j.kind)).toEqual(["housekeeping.prune", "files.cleanup", "discord.sync"])
     expect(findJobKind("discord.sync")?.label).toBe("discord.sync")
   })
 

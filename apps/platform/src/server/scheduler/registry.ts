@@ -6,6 +6,7 @@ import { JOBS as decksRoomsJobs } from "./jobs/decks-rooms"
 import { JOBS as discordPostJobs } from "./jobs/discord-post"
 import { JOBS as discordReadJobs } from "./jobs/discord-read"
 import { JOBS as documentsJobs } from "./jobs/documents"
+import { JOBS as filesJobs } from "./jobs/files"
 import { JOBS as groundworkJobs } from "./jobs/groundwork"
 import { JOBS as memoryJobs } from "./jobs/memory"
 import { JOBS as sourcesAJobs } from "./jobs/sources-a"
@@ -19,7 +20,7 @@ import type { JobKind } from "./types"
  */
 
 const JOB_SLOTS = {
-  groundwork: groundworkJobs,
+  groundwork: [...groundworkJobs, ...filesJobs],
   "club-data": clubDataJobs,
   memory: memoryJobs,
   changes: changesJobs,
