@@ -80,17 +80,30 @@ function fromFileStatus(text: string | null, status: TextStatus): DocumentTextSt
   return status === "ok" ? "ok" : "truncated"
 }
 
+/** Postgres text can't hold NUL characters (pdf.js and the XML readers can give them), so they go, as in G5's register */
+function withoutNul(result: DocumentText): DocumentText {
+  if (result.text === null || !result.text.includes("\u0000")) return result
+  const text = result.text.replace(/\u0000/g, "")
+  return text.trim() ? { text, textStatus: result.textStatus } : { text: null, textStatus: "none" }
+}
+
 /**
  * A downloaded or exported file's text. Binary files are checked first (magic bytes, and for Office files
  * the ZIP: no macros, no zip bombs, the layout every reader agrees on), so a renamed or damaged file is
- * "error" and never reaches a parser.
+ * "error" and never reaches a parser. Never throws: whatever goes wrong is this file's "error", so one
+ * file can't stop a sync.
  */
 export async function documentText(reader: DocumentReader, body: Buffer, limits: ExtractLimits = EXTRACT_LIMITS): Promise<DocumentText> {
-  if (reader.kind === "PRESENTATION") return presentationText(body, limits)
-  const check = checkContent(reader.contentType, body)
-  if (!check.ok) return { text: null, textStatus: "error" }
-  const { text, textStatus } = await extractText(reader.kind, body, limits)
-  return { text, textStatus: fromFileStatus(text, textStatus) }
+  try {
+    if (reader.kind === "PRESENTATION") return withoutNul(await presentationText(body, limits))
+    const check = checkContent(reader.contentType, body)
+    if (!check.ok) return { text: null, textStatus: "error" }
+    const { text, textStatus } = await extractText(reader.kind, body, limits)
+    return withoutNul({ text, textStatus: fromFileStatus(text, textStatus) })
+  } catch (error) {
+    console.warn("[documents] Couldn't read a document:", error instanceof Error ? error.message : error)
+    return { text: null, textStatus: "error" }
+  }
 }
 
 const SLIDE = /^ppt\/slides\/slide(\d+)\.xml$/
@@ -139,14 +152,20 @@ export async function presentationText(body: Buffer, limits: ExtractLimits = EXT
   }
 }
 
+/**
+ * A tag or a run of text. Linear on any input: the name is taken whole (the lookahead stops it giving
+ * characters back) and a tag never runs past the next "<", so a part full of unclosed tags can't stall the sync
+ */
+const XML_TOKEN = /<(\/?)([\w.:-]+)(?![\w.:-])[^<>]*?(\/?)>|([^<]+)/g
+
 /** The text runs (a:t) of a slide, one line per paragraph (a:p); line breaks (a:br) and tabs kept */
 export function slideXmlText(xml: string): string {
   const lines: string[] = []
   let line = ""
   let inText = false
-  for (const [, closing, tag, selfClosing, text] of xml.matchAll(/<(\/?)([\w.:-]+)[^>]*?(\/?)>|([^<]+)/g)) {
+  for (const [, closing, tag, selfClosing, text] of xml.matchAll(XML_TOKEN)) {
     if (text !== undefined) {
-      if (inText) line += text
+      if (inText) line += text.replace(/\u0000/g, "")
       continue
     }
     if (tag === "a:t") inText = !closing && !selfClosing

@@ -28,6 +28,19 @@ describe("teamsText", () => {
   it("caps a very long message", () => {
     expect(teamsText(`<p>${"word ".repeat(10_000)}</p>`).length).toBeLessThanOrEqual(20_000)
   })
+
+  it("drops NUL characters, which Postgres can't store", () => {
+    expect(teamsText("<p>Budget\u0000 2026</p>")).toBe("Budget 2026")
+    expect(teamsText("Plain\u0000 text", "text")).toBe("Plain text")
+  })
+
+  it("reads unclosed tags in linear time", () => {
+    const started = Date.now()
+    teamsText("<a ".repeat(100_000))
+    teamsText(`<${"a".repeat(300_000)}`)
+    // Quadratic matching took seconds on inputs this size
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
 })
 
 describe("toTeamsMessage", () => {

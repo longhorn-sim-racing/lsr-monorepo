@@ -1,9 +1,15 @@
 import { strToU8, zipSync } from "fflate"
-import { describe, expect, it } from "vitest"
-import { EXTRACT_LIMITS } from "@/server/jack/files/extract"
+import { describe, expect, it, vi } from "vitest"
+import { EXTRACT_LIMITS, extractText } from "@/server/jack/files/extract"
 import { fakeDocx, fakePdf, fakePptx } from "../google-drive/fake/fixtures"
 import { readCapped } from "./bytes"
 import { cleanDocumentName, documentReader, documentText, folderPath, presentationText, slideXmlText } from "./text"
+
+// The real extractors, with a way to hand back what a reader would give
+vi.mock("@/server/jack/files/extract", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/jack/files/extract")>()
+  return { ...actual, extractText: vi.fn(actual.extractText) }
+})
 
 const buffer = (bytes: Uint8Array | string) => Buffer.from(typeof bytes === "string" ? strToU8(bytes) : bytes)
 
@@ -52,6 +58,23 @@ describe("documentText", () => {
     expect(await documentText({ kind: "TEXT", contentType: "text/plain" }, buffer("   \n"))).toEqual({ text: null, textStatus: "none" })
   })
 
+  it("drops NUL characters, which Postgres can't store (the readers pass them through)", async () => {
+    const deck = documentReader("budget.pptx", "")!
+    expect(await documentText(deck, buffer(fakePptx([{ lines: ["Budget\u0000 2026"] }])))).toEqual({ text: "--- Slide 1 ---\nBudget 2026", textStatus: "ok" })
+    // Nothing left but the NULs: no text
+    expect(await documentText(deck, buffer(fakePptx([{ lines: ["\u0000\u0000"] }])))).toEqual({ text: null, textStatus: "none" })
+    // pdf.js gives NULs for some fonts
+    vi.mocked(extractText).mockResolvedValueOnce({ text: "Budget\u0000 2026", textStatus: "ok" })
+    expect(await documentText(documentReader("budget.pdf", "")!, buffer(await fakePdf(["Budget 2026"])))).toEqual({ text: "Budget 2026", textStatus: "ok" })
+  })
+
+  it("never throws: a reader that does makes the file \"error\"", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.mocked(extractText).mockRejectedValueOnce(new Error("reader crashed"))
+    expect(await documentText(documentReader("contract.pdf", "")!, buffer(await fakePdf(["x"])))).toEqual({ text: null, textStatus: "error" })
+    warn.mockRestore()
+  })
+
   it("keeps the start of a long text and says it was cut", async () => {
     const result = await documentText({ kind: "TEXT", contentType: "text/plain" }, buffer("line\n".repeat(500)), { ...EXTRACT_LIMITS, maxChars: 100 })
     expect(result.textStatus).toBe("truncated")
@@ -88,6 +111,15 @@ describe("slideXmlText", () => {
   it("joins a paragraph's runs, keeps breaks and decodes entities", () => {
     const xml = `<p:sld><a:p><a:r><a:t>Gold </a:t></a:r><a:r><a:t>tier</a:t></a:r></a:p><a:p><a:r><a:t>A&amp;B</a:t></a:r><a:br/><a:r><a:t>&#x2014;next</a:t></a:r></a:p></p:sld>`
     expect(slideXmlText(xml)).toBe("Gold tier\nA&B\n—next")
+  })
+
+  it("reads a part full of unclosed tags in linear time", () => {
+    const started = Date.now()
+    expect(slideXmlText(`<a:t>${"<a ".repeat(100_000)}`)).toHaveLength(199_999)
+    slideXmlText(`<${"a".repeat(300_000)}`)
+    slideXmlText(`<a${" ".repeat(300_000)}`)
+    // Quadratic matching took seconds on inputs this size (and hours on a 16 MB slide)
+    expect(Date.now() - started).toBeLessThan(1_000)
   })
 })
 

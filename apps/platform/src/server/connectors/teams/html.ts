@@ -37,7 +37,8 @@ export function teamsText(content: string | null | undefined, contentType: strin
     if (link) link.text += text
     else out += text
   }
-  for (const [whole, closing, rawTag, text] of content.matchAll(/<(\/?)([a-zA-Z][\w:-]*)[^>]*>|([^<]+)|</g)) {
+  // Linear on any input: the tag name is taken whole and a tag never runs past the next "<"
+  for (const [whole, closing, rawTag, text] of content.matchAll(/<(\/?)([a-zA-Z][\w:-]*)(?![\w:-])[^<>]*>|([^<]+)|</g)) {
     if (text !== undefined) {
       push(decodeEntities(text).replace(/\s+/g, " "))
       continue
@@ -80,6 +81,8 @@ export function teamsText(content: string | null | undefined, contentType: strin
   )
 }
 
-function capped(text: string): string {
+/** At most TEAMS_TEXT_MAX_CHARS, and no NUL characters (Postgres text can't hold them) */
+function capped(raw: string): string {
+  const text = raw.replace(/\u0000/g, "")
   return text.length > TEAMS_TEXT_MAX_CHARS ? `${text.slice(0, TEAMS_TEXT_MAX_CHARS - 1)}…` : text
 }
