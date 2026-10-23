@@ -14,7 +14,7 @@ import type { DeckView } from "@/server/jack/decks/service"
 import { jackMessageInclude, toMessageView } from "@/server/jack/messages"
 import { mapLimit, plural } from "@/server/jack/proposals/changes/shared"
 import { instagramJpeg } from "./images"
-import { slideSource, type PickedSlide } from "./slides"
+import { slideImage, type PickedSlide } from "./slides"
 
 /**
  * Posting a deck's slides to Instagram (#188, design §12.6; research/instagram.md §3d to §3g), after an
@@ -185,7 +185,7 @@ export async function startInstagramPublish(input: StartPublish, deps: PublishDe
     // The images, a few at a time, each on Cloudinary under the row's id
     const shape = SHAPE[input.type]
     const urls = await mapLimit(input.slides, 3, async (slide, i) => {
-      const jpeg = await instagramJpeg(await deps.slidePng(slideSource(input.deck, slide)), shape)
+      const jpeg = await instagramJpeg(await slideImage(deps, input.deck, slide), shape)
       return (await deps.upload(jpeg.body, `jack/instagram/${rowId}/${i + 1}`, signal)).secureUrl
     })
     row = await prisma.instagramPublish.update({ where: { id: rowId }, data: { imageUrls: urls } })

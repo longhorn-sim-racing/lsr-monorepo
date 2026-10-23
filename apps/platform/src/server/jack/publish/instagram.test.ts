@@ -165,6 +165,16 @@ describe("startInstagramPublish", () => {
     expect(audit.createAuditLog.mock.calls[0][0].summary).toMatch(/^Couldn't post/)
   })
 
+  it("says which slide couldn't be made into an image (a function without Chromium, a slide never rendered)", async () => {
+    const noChromium = deps({ slidePng: () => Promise.reject(new Error("Could not find Chromium")) })
+    await expect(startInstagramPublish(input({ type: "carousel", slides: slides.slice(1) }), noChromium)).rejects.toThrow(
+      "slide 2 couldn't be turned into an image (Could not find Chromium). Open the deck page so its slides render, then try again.",
+    )
+    const [row] = store.instagramPublish.rows.values()
+    expect(row.error).toMatch(/^Nothing was posted: slide 2 couldn't be turned into an image/)
+    expect((await instagramState()).containers).toHaveLength(0)
+  })
+
   it("fails before any container when Cloudinary won't take the images", async () => {
     await fetch(`${fakes.origin}/cloudinary/_fake/state`, { method: "POST", body: JSON.stringify({ fail: 1 }) })
     await expect(startInstagramPublish(input(), deps())).rejects.toThrow(/Cloudinary didn't take the image \(500/)

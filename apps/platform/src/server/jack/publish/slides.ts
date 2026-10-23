@@ -1,4 +1,5 @@
 import { slideImageUrl, type JackSlideData } from "@/lib/jack/decks"
+import { redactSecrets } from "@/lib/redact"
 import type { SlideSource } from "@/server/jack/decks/document"
 import { getDeck, slideRange, type DeckView } from "@/server/jack/decks/service"
 
@@ -39,6 +40,21 @@ export async function slidesById(deckId: string, version: number, ids: string[])
 /** How a slide renders (renders.ts names and caches renders by this) */
 export function slideSource(deck: DeckView, slide: Pick<JackSlideData, "html">): SlideSource {
   return { size: deck.size, css: deck.content.css, html: slide.html, roomId: deck.roomId }
+}
+
+/**
+ * A slide's full-size render, through `slidePng` (renders.ts getRenderFile: from the store, rendered on
+ * a miss). The deck page and Jack's own checks render every slide, so it's usually stored; only the room
+ * page's function has Chromium on Vercel (#215), so a slide never rendered can't be made from the deck
+ * page, and the officer is told how to fix that
+ */
+export async function slideImage(deps: { slidePng(source: SlideSource): Promise<Buffer> }, deck: DeckView, slide: PickedSlide): Promise<Buffer> {
+  try {
+    return await deps.slidePng(slideSource(deck, slide))
+  } catch (error) {
+    const reason = redactSecrets(error instanceof Error ? error.message : String(error)).slice(0, 200)
+    throw new Error(`slide ${slide.n} couldn't be turned into an image (${reason}). Open the deck page so its slides render, then try again.`)
+  }
 }
 
 /** The officer-only thumbnail of a slide at the deck's version, for cards and the history */

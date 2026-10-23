@@ -8,7 +8,7 @@ import type { DeckView } from "@/server/jack/decks/service"
 import { jackFileStore } from "@/server/jack/decks/storage"
 import { mapLimit, plural, revalidate } from "@/server/jack/proposals/changes/shared"
 import { nextGalleryOrder, uniqueAlbumSlug } from "@/server/services/gallery.service"
-import { slideSource, type PickedSlide } from "./slides"
+import { slideImage, slideSource, type PickedSlide } from "./slides"
 
 /**
  * Adding deck slides and room photos to the public gallery (#188, design §4.3 gallery.add): a
@@ -90,7 +90,7 @@ export async function addToGallery(
   const missing: string[] = []
   const uploaded = (
     await mapLimit(todo, 3, async (item) => {
-      const bytes = item.kind === "slide" ? await sharp(await deps.slidePng(slideSource(item.deck, item.slide))).jpeg({ quality: 88, mozjpeg: true }).toBuffer() : await roomPhoto(item.fileId, item.roomId, deps)
+      const bytes = item.kind === "slide" ? await sharp(await slideImage(deps, item.deck, item.slide)).jpeg({ quality: 88, mozjpeg: true }).toBuffer() : await roomPhoto(item.fileId, item.roomId, deps)
       if (!bytes) {
         missing.push(item.rowId)
         return null
