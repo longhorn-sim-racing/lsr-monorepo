@@ -1,6 +1,6 @@
 import { fromZonedTime } from "date-fns-tz"
 import { chicagoDay, DEFAULT_TIMEZONE } from "@/lib/dates"
-import { DISCORD_ERROR, DiscordApiError, type DiscordClient } from "./client"
+import { DISCORD_ERROR, DiscordApiError, DiscordRateLimitError, type DiscordClient } from "./client"
 import { authorHash, keepMessage, messageRow, type MessageRow } from "./metadata"
 import { compareSnowflakes, snowflakeAt, snowflakeTime } from "./snowflake"
 import type { ChannelInput, DiscordStore, MemberInput, StoredChannel, StoredMessage } from "./store"
@@ -53,6 +53,11 @@ function stopping(ctx: SyncContext): boolean {
 /** A 401 stops the whole run (the token is bad); anything else is that channel's problem */
 function fatal(error: unknown): boolean {
   return error instanceof DiscordApiError && error.status === 401
+}
+
+/** The run was stopped (its deadline) or Discord asked us to wait longer than the client waits: not a fault, the next run resumes from the saved cursor */
+function interrupted(error: unknown, ctx: SyncContext): boolean {
+  return Boolean(ctx.signal?.aborted) || error instanceof DiscordRateLimitError
 }
 
 const byId = (a: { id: string }, b: { id: string }) => compareSnowflakes(a.id, b.id)
@@ -153,7 +158,7 @@ export async function syncMessages(ctx: SyncContext, options: { backfillDays?: n
       if (!result.done) unfinished++
     } catch (error) {
       if (fatal(error)) throw error
-      if (ctx.signal?.aborted) {
+      if (interrupted(error, ctx)) {
         unfinished++
         continue
       }
@@ -258,7 +263,7 @@ export async function rescan(ctx: SyncContext): Promise<RescanResult> {
       }
     } catch (error) {
       if (fatal(error)) throw error
-      if (!ctx.signal?.aborted) problems.push({ channel: `#${parent.name}`, error: error instanceof Error ? error.message : String(error) })
+      if (!interrupted(error, ctx)) problems.push({ channel: `#${parent.name}`, error: error instanceof Error ? error.message : String(error) })
     }
   }
   if (archived.length) {
@@ -298,7 +303,7 @@ export async function rescan(ctx: SyncContext): Promise<RescanResult> {
       if (!result.done) unfinished++
     } catch (error) {
       if (fatal(error)) throw error
-      if (ctx.signal?.aborted) {
+      if (interrupted(error, ctx)) {
         unfinished++
         continue
       }
@@ -326,7 +331,7 @@ async function refreshOpenPolls(ctx: SyncContext, before: Date, channels: Stored
     } catch (error) {
       if (fatal(error)) throw error
       if (error instanceof DiscordApiError && error.status === 404 && error.code === DISCORD_ERROR.unknownMessage) await ctx.store.markDeleted([id], clock(ctx))
-      else if (ctx.signal?.aborted) break
+      else if (interrupted(error, ctx)) break
     }
   }
   return refreshed
@@ -336,7 +341,7 @@ export type MemberSyncResult = { members: number; joined: number; left: number; 
 
 export class DiscordMembersIntentError extends Error {
   constructor() {
-    super("Discord refused the member list (403 Missing Access): switch on the Server Members intent (Developer Portal → Bot → Privileged Gateway Intents)")
+    super("Discord refused the member list (403 Missing Access): switch on the Server Members intent (Developer Portal → Bot → Privileged Gateway Intents), and check the bot is still in the server")
     this.name = "DiscordMembersIntentError"
   }
 }
@@ -359,6 +364,8 @@ export async function syncMembers(ctx: SyncContext): Promise<MemberSyncResult> {
       page = await ctx.client.members({ after, limit: MEMBER_PAGE }, ctx.signal)
     } catch (error) {
       if (error instanceof DiscordApiError && error.status === 403) throw new DiscordMembersIntentError()
+      // An incomplete list marks nobody as left; the next run reads it all again
+      if (interrupted(error, ctx)) break
       throw error
     }
     for (const member of page) {

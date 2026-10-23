@@ -141,6 +141,16 @@ describe("syncMessages", () => {
     expect([...memory.messages.values()].some((r) => r.channelId === FAKE_CHANNELS.general)).toBe(true)
   })
 
+  it("leaves a channel for the next run, not as a failure, when Discord rate limits it for longer than the client waits", async () => {
+    const { fakes, memory, ctx } = setup({ synced: [FAKE_CHANNELS.general, FAKE_CHANNELS.lscChat] })
+    await refreshChannels(ctx)
+    await hook(fakes, "POST", "rate-limit", { times: 1, retryAfter: 64, path: FAKE_CHANNELS.general })
+    const result = await syncMessages(ctx)
+    expect(result).toMatchObject({ unfinished: 1, problems: [] })
+    expect([...memory.messages.values()].some((m) => m.channelId === FAKE_CHANNELS.lscChat)).toBe(true)
+    expect(memory.channels.get(FAKE_CHANNELS.general)?.lastMessageId).toBeNull()
+  })
+
   it("stops on a rejected token", async () => {
     const { ctx } = setup({ synced: [FAKE_CHANNELS.general], token: "wrong" })
     await expect(syncMessages(ctx)).rejects.toMatchObject({ status: 401 })
