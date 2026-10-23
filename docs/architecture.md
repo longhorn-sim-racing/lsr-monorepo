@@ -110,6 +110,7 @@ Prisma Client (src/server/db.ts)     ← Database access
 - `notification.service.ts` -- Notification scheduling and dispatch
 - `payment.service.ts` -- Stripe payment processing (see [payments.md](./payments.md))
 - `league-entry.service.ts` -- Lone Star Cup entries
+- `event.service.ts`, `results.service.ts`, `news.service.ts` -- Event updates, the results pipeline (upload, parse, bind, ingest) and news posts, shared by the admin actions and Jack's proposals. They take plain input and an actor (`actor.ts`), return result objects, and list the pages they touched in `revalidate` instead of refreshing them (`revalidatePath` needs a request); callers pass that to `revalidatePaths()`
 
 **Actions** -- Next.js Server Actions for mutations. Most are colocated with their route as `src/app/**/actions.ts` (e.g. `src/app/admin/events/actions.ts`); a few shared ones live in `src/server/actions/`. Each action checks auth with a guard, does the work (through a service or repo, or Prisma directly), writes an audit log for admin changes (`audit/log.ts`), and calls `revalidatePath`.
 

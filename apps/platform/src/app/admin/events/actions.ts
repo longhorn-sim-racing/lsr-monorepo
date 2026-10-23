@@ -1,6 +1,6 @@
 "use server"
 
-import { EventStatus, Prisma, RegistrationStatus } from "@prisma/client";
+import { EventStatus, RegistrationStatus } from "@prisma/client";
 import { fromZonedTime } from "date-fns-tz";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -10,14 +10,15 @@ import { requireOfficer } from "@/server/auth/guards";
 import {
   revalidateEventList,
   revalidateEventDetail,
+  revalidatePaths,
   revalidateSeriesPages,
 } from "@/server/cache/revalidate-public";
 import {
   adminOverrideRegistration,
   adminRemoveRegistration,
-  reconcileEventWaitlist,
 } from "@/server/services/registration.service";
-import { updateAttendanceConfig, checkInUser, removeCheckIn } from "@/server/services/attendance.service";
+import { checkInUser, removeCheckIn } from "@/server/services/attendance.service";
+import * as events from "@/server/services/event.service";
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
 import { parseEventForm, parseRegistrationConfigForm } from "@/schemas/event.schema";
 import type { ActionResult } from "@/lib/action-result";
@@ -35,12 +36,6 @@ function publication(formData: FormData, timezone: string): { status: EventStatu
   }
   return null;
 }
-
-function slugTaken(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
-}
-
-const SLUG_TAKEN = "Another event already uses that URL slug. Pick a different one.";
 
 export async function createEvent(formData: FormData): Promise<ActionResult> {
   const user = await requireOfficer();
@@ -64,7 +59,7 @@ export async function createEvent(formData: FormData): Promise<ActionResult> {
       },
     });
   } catch (error) {
-    if (slugTaken(error)) return { ok: false, error: SLUG_TAKEN };
+    if (events.isSlugTaken(error)) return { ok: false, error: events.SLUG_TAKEN };
     throw error;
   }
 
@@ -88,54 +83,14 @@ export async function createEvent(formData: FormData): Promise<ActionResult> {
 export async function updateEventStatus(eventId: string, status: EventStatus, publishedAt?: Date) {
   const user = await requireOfficer();
 
-  const data: { status: EventStatus; publishedAt?: Date } = {
-    status,
-    publishedAt,
-  };
+  const result = await events.updateEventStatus({ eventId, status, publishedAt }, { userId: user.id });
 
-  const updated = await prisma.event.update({
-    where: { id: eventId },
-    data,
-    select: { slug: true },
-  });
-
-  await createAuditLog({
-    actorUserId: user.id,
-    actionType: "UPDATE",
-    entityType: "EVENT",
-    entityId: eventId,
-    summary: `Updated event status to ${status}`,
-    after: data,
-  });
-
-  revalidatePath("/admin/events");
-  revalidateEventList();
-  revalidateEventDetail(updated.slug);
+  revalidatePaths(result.revalidate);
   redirect("/admin/events");
-}
-
-/**
- * Capacity raised (or made unlimited) or the fee removed: spots may have opened for
- * people on the waitlist, so the caller should reconcile.
- */
-function waitlistNeedsRefill(
-  before: { registrationMax: number | null; registrationFeeCents: number | null } | null,
-  registrationMax: number | null,
-  registrationFeeCents: number | null
-) {
-  if (!before) return false;
-  const capacityRaised =
-    before.registrationMax != null && (registrationMax === null || registrationMax > before.registrationMax);
-  const madeFree = (before.registrationFeeCents ?? 0) > 0 && registrationFeeCents === null;
-  return capacityRaised || madeFree;
 }
 
 export async function updateEvent(id: string, formData: FormData): Promise<ActionResult> {
   const user = await requireOfficer();
-  const before = await prisma.event.findUnique({
-    where: { id },
-    select: { registrationMax: true, registrationFeeCents: true },
-  });
 
   const parsed = parseEventForm(formData);
   if (!parsed.ok) return parsed;
@@ -144,43 +99,10 @@ export async function updateEvent(id: string, formData: FormData): Promise<Actio
   const publish = publication(formData, fields.timezone);
   if (publish && "error" in publish) return { ok: false, error: publish.error };
 
-  const eventUpdateData: Prisma.EventUpdateInput = {
-    ...fields,
-    // Turning check-in on from the event form means people have to check in
-    ...(fields.attendanceEnabled ? { attendanceReportingMode: "CHECKIN_REQUIRED" as const } : {}),
-    // A draft keeps its publish date, as before
-    ...(publish ? { status: publish.status, ...(publish.status === "DRAFT" ? {} : { publishedAt: publish.publishedAt }) } : {}),
-  };
+  const result = await events.updateEventDetails({ eventId: id, details: fields, publish }, { userId: user.id });
+  if (!result.ok) return result;
 
-  let updated;
-  try {
-    updated = await prisma.event.update({
-      where: { id },
-      data: eventUpdateData,
-      select: { slug: true, seriesId: true },
-    });
-  } catch (error) {
-    if (slugTaken(error)) return { ok: false, error: SLUG_TAKEN };
-    throw error;
-  }
-
-  if (waitlistNeedsRefill(before, fields.registrationMax, fields.registrationFeeCents)) {
-    await reconcileEventWaitlist(id);
-  }
-
-  await createAuditLog({
-    actorUserId: user.id,
-    actionType: "UPDATE",
-    entityType: "EVENT",
-    entityId: id,
-    summary: `Updated event details for ${fields.title}`,
-    after: eventUpdateData,
-  });
-
-  revalidatePath("/admin/events");
-  revalidateEventList();
-  revalidateEventDetail(updated.slug);
-  if (updated.seriesId) revalidateSeriesPages();
+  revalidatePaths(result.revalidate);
   redirect("/admin/events");
 }
 
@@ -209,45 +131,15 @@ export async function deleteEvent(eventId: string) {
 export async function updateEventRegistrationConfig(eventId: string, formData: FormData): Promise<ActionResult> {
   const user = await requireOfficer();
 
-  const event = await prisma.event.findUnique({
-    where: { id: eventId },
-    select: { timezone: true, registrationMax: true, waitlistAutoPromote: true, registrationFeeCents: true },
-  });
+  const event = await prisma.event.findUnique({ where: { id: eventId }, select: { timezone: true } });
   const timezone = event?.timezone || DEFAULT_TIMEZONE;
 
   const parsed = parseRegistrationConfigForm(formData, timezone);
   if (!parsed.ok) return parsed;
-  const configData = parsed.data;
-  const { waitlistAutoPromote, registrationFeeCents } = configData;
 
-  const updated = await prisma.event.update({
-    where: { id: eventId },
-    data: configData,
-    select: { slug: true },
-  });
+  const result = await events.updateEventRegistration({ eventId, settings: parsed.data }, { userId: user.id });
 
-  const autoPromoteSwitchedOn = event != null && !event.waitlistAutoPromote && waitlistAutoPromote;
-  const promotedUserIds =
-    autoPromoteSwitchedOn || waitlistNeedsRefill(event, configData.registrationMax, registrationFeeCents)
-      ? await reconcileEventWaitlist(eventId)
-      : [];
-
-  await createAuditLog({
-    actorUserId: user.id,
-    actionType: "UPDATE",
-    entityType: "EVENT",
-    entityId: eventId,
-    summary: `Updated registration configuration for event ${eventId}`,
-    metadata: {
-      updateType: "registration_config",
-      promotedUserIds,
-    },
-    after: configData,
-  });
-
-  revalidatePath(`/admin/events/${eventId}/manage`);
-  revalidateEventList();
-  revalidateEventDetail(updated.slug);
+  revalidatePaths(result.revalidate);
   return { ok: true };
 }
 
@@ -311,17 +203,17 @@ export async function updateEventAttendanceConfig(eventId: string, formData: For
   const opensAtRaw = formData.get("attendanceOpensAt") as string;
   const closesAtRaw = formData.get("attendanceClosesAt") as string;
 
-  await updateAttendanceConfig(
-    eventId,
+  const result = await events.updateEventAttendance(
     {
+      eventId,
       attendanceEnabled: enabled,
       attendanceOpensAt: opensAtRaw ? fromZonedTime(opensAtRaw, timezone) : null,
       attendanceClosesAt: closesAtRaw ? fromZonedTime(closesAtRaw, timezone) : null,
     },
-    user.id
+    { userId: user.id }
   );
 
-  revalidatePath(`/admin/events/${eventId}/manage`);
+  revalidatePaths(result.revalidate);
 }
 
 export async function manualCheckIn(eventId: string, userId: string) {

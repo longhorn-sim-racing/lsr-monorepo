@@ -243,6 +243,7 @@ export async function getEventAttendanceState(eventId: string) {
 /**
  * Updates attendance configuration for an event.
  * Enforces side-effects like setting reporting mode when enabled.
+ * `extraMetadata` is added to the audit entry's metadata (Jack's proposal ids; see services/actor.ts).
  */
 export async function updateAttendanceConfig(
     eventId: string,
@@ -251,7 +252,8 @@ export async function updateAttendanceConfig(
         attendanceOpensAt: Date | null;
         attendanceClosesAt: Date | null;
     },
-    actorUserId: string
+    actorUserId: string,
+    extraMetadata?: Record<string, unknown>
 ) {
     return await prisma.$transaction(async (tx) => {
         const event = await tx.event.findUnique({ where: { id: eventId } });
@@ -283,7 +285,7 @@ export async function updateAttendanceConfig(
             entityType: "EVENT",
             entityId: eventId,
             summary: `Updated attendance config for event ${eventId}`,
-            metadata: { ...config, reportingMode },
+            metadata: { ...extraMetadata, ...config, reportingMode },
             before: {
                 enabled: event.attendanceEnabled,
                 opens: event.attendanceOpensAt,
