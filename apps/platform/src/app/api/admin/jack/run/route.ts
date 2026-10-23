@@ -15,7 +15,7 @@ import { acceptHandoff, parseHandoffRequest, runHandoff } from "@/server/schedul
  */
 
 export const dynamic = "force-dynamic"
-export const maxDuration = 300
+// Runs up to the project's default time limit, 300 s (FUNCTION_MAX_MS in the dispatcher); no route sets maxDuration
 
 const MAX_BODY_CHARS = 4_096
 

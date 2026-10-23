@@ -12,8 +12,6 @@ import type { FileProblem } from "@/server/jack/files/service"
  */
 
 export const dynamic = "force-dynamic"
-// Reading a long PDF or a big spreadsheet takes a while; text extraction stops itself at 25 s
-export const maxDuration = 60
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const STATUS: Record<FileProblem, number> = { bad_request: 422, not_found: 404, forbidden: 403, unavailable: 503 }

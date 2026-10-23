@@ -15,8 +15,6 @@ import { jackFileStore } from "@/server/jack/decks/storage"
  */
 
 export const dynamic = "force-dynamic"
-// A cold start launches Chromium before the first render
-export const maxDuration = 60
 
 const KINDS: JackRenderKind[] = ["thumb", "view", "png"]
 const SLIDE_ID = /^[A-Za-z0-9_-]{4,32}$/

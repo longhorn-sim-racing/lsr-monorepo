@@ -3,7 +3,6 @@ import { revalidatePath } from "next/cache";
 import { syncInstagram } from "@/server/services/instagram.service";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
 
 /**
  * Copies new Instagram posts and renews the access token when it's due.

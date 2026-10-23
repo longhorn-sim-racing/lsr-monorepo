@@ -125,6 +125,7 @@ describe("POST /api/cron/tick", () => {
 
   it("only takes POST (a redirect turning pg_net's POST into a GET gets a 405 from Next)", () => {
     expect(Object.keys(route)).not.toContain("GET")
-    expect(route.maxDuration).toBe(300)
+    // It runs on the project's default time limit (300 s, FUNCTION_MAX_MS) like every route
+    expect(Object.keys(route)).not.toContain("maxDuration")
   })
 })

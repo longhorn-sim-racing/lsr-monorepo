@@ -3,7 +3,6 @@ import { isAuthorizedCronRequest } from "@/lib/recruiting/cron-auth";
 import { sweepAndNotify } from "@/server/services/recruiting-email.service";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
 
 /**
  * The recruiting deadline job: after a round closes, submits every complete draft for its applicant

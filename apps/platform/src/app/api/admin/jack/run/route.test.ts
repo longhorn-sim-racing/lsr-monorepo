@@ -79,8 +79,8 @@ describe("POST /api/admin/jack/run", () => {
     expect(after.tasks).toHaveLength(0)
   })
 
-  it("is a 300-second function with no GET", () => {
-    expect(route.maxDuration).toBe(300)
+  it("has no GET, and runs on the project's default time limit (no maxDuration of its own)", () => {
     expect(Object.keys(route)).not.toContain("GET")
+    expect(Object.keys(route)).not.toContain("maxDuration")
   })
 })
