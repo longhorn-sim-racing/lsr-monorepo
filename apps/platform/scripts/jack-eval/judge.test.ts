@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { requestTools } from "../../src/server/jack/model-loop";
 import type { AnyJackTool } from "../../src/server/jack/tools/types";
-import { judgeAnswer, judgePair, judgeSystem, judgeTools, pairPrompt, requestJudgeTools, toolInstructions, type PairGrade } from "./judge";
+import { judgeAnswer, judgePair, judgeSystem, judgeTools, judgeTraces, pairPrompt, requestJudgeTools, toolInstructions, type PairGrade, type ToolTrace } from "./judge";
+import type { ToolPart } from "./shared";
 
 const tools = judgeTools(
   [
@@ -132,5 +133,29 @@ describe("judgeAnswer", () => {
     const sent = create.mock.calls[0][0].system as { text: string; cache_control?: unknown }[];
     expect(sent[0].text).toBe(system);
     expect(sent[1]).toMatchObject({ text: "<assistant_instructions>\nthe prompt\n</assistant_instructions>", cache_control: { type: "ephemeral" } });
+  });
+});
+
+describe("judgeTraces", () => {
+  const part = (fields: Partial<ToolPart> & Pick<ToolPart, "id" | "name">): ToolPart => ({ label: fields.name, status: "done", at: 0, input: null, displays: [], ...fields });
+
+  it("shows the web searches and fetches with their pages, among Jack's own tools in the room's order, each with its own time", () => {
+    const seen: ToolTrace[] = [{ name: "club_members", input: { q: "Sam" }, result: "1 member" }];
+    const parts = [
+      part({ id: "s1", name: "web_search", input: { query: "acc latest version" }, ms: 900, displays: [{ kind: "web_sources", queries: ["acc latest version"], sources: [{ title: "ACC v1.10.4", url: "https://www.assettocorsa.net/forum/x", host: "assettocorsa.net" }] }] }),
+      part({ id: "t1", name: "club_members", ms: 40 }),
+      part({ id: "f1", name: "web_fetch", input: { url: "https://traxion.gg/acc" }, status: "error", error: "Couldn't open traxion.gg: the page couldn't be reached", ms: 300 }),
+    ];
+
+    expect(judgeTraces(seen, parts)).toEqual([
+      { name: "web_search", input: { query: "acc latest version" }, result: JSON.stringify([{ queries: ["acc latest version"], pages: [{ title: "ACC v1.10.4", url: "https://www.assettocorsa.net/forum/x" }] }]), ms: 900 },
+      { name: "club_members", input: { q: "Sam" }, result: "1 member", ms: 40 },
+      { name: "web_fetch", input: { url: "https://traxion.gg/acc" }, result: "[]", error: "Couldn't open traxion.gg: the page couldn't be reached", ms: 300 },
+    ]);
+  });
+
+  it("keeps calls the parts don't show, after the rest", () => {
+    const seen: ToolTrace[] = [{ name: "run_sql", input: {}, result: "a" }, { name: "run_sql", input: {}, result: "b" }];
+    expect(judgeTraces(seen, [part({ id: "t1", name: "run_sql", ms: 5 })]).map((t) => [t.result, t.ms])).toEqual([["a", 5], ["b", undefined]]);
   });
 });

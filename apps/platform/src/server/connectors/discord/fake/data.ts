@@ -1,5 +1,6 @@
 import { DISCORD_EPOCH_MS } from "../snowflake"
 import { CHANNEL_TYPE, type DiscordChannel, type DiscordMember, type DiscordMessage, type DiscordPoll, type DiscordUser } from "../types"
+import type { DiscordPermissionOverwrite, DiscordRole } from "../write"
 
 /**
  * The Discord fake's made-up server (research §7): a few channels (text, announcement, a forum with
@@ -26,8 +27,37 @@ export const FAKE_DISCORD = {
   guildId: fixed("2023-08-20T18:00:00Z", 1),
   guildName: "Longhorn Sim Racing (fake)",
   botUserId: fixed("2023-08-01T12:00:00Z", 2),
-  roles: { member: fixed("2023-08-20T18:00:00Z", 10), lscDriver: fixed("2023-08-20T18:00:00Z", 11), officer: fixed("2023-08-20T18:00:00Z", 12) },
+  roles: {
+    member: fixed("2023-08-20T18:00:00Z", 10),
+    lscDriver: fixed("2023-08-20T18:00:00Z", 11),
+    officer: fixed("2023-08-20T18:00:00Z", 12),
+    /** The bot's own (managed) role, just above the roles it syncs (discord-post) */
+    bot: fixed("2023-08-20T18:00:00Z", 13),
+    /** A plain role above the bot's: role sync can't hand it out */
+    alumni: fixed("2023-08-20T18:00:00Z", 14),
+    admin: fixed("2023-08-20T18:00:00Z", 15),
+  },
 } as const
+
+/** The permissions the bot is installed with (research §2): View Channels, Send Messages, Embed Links, Read Message History, Manage Roles, Create Events, Send Polls */
+export const FAKE_BOT_PERMISSIONS = "580542407986176"
+
+/** The fake server's roles, lowest first: @everyone, Member, LSC Driver (pingable), the bot's, Alumni, Officer (moderation) and Admin */
+export function fakeRoles(): DiscordRole[] {
+  const r = FAKE_DISCORD.roles
+  const bits = (...n: number[]) => String(n.reduce((sum, b) => sum | (BigInt(1) << BigInt(b)), BigInt(0)))
+  return [
+    // View Channels, Send Messages, Add Reactions, Read Message History
+    { id: FAKE_DISCORD.guildId, name: "@everyone", position: 0, permissions: bits(10, 11, 6, 16), managed: false, mentionable: false },
+    { id: r.member, name: "Member", position: 1, permissions: "0", managed: false, mentionable: false },
+    { id: r.lscDriver, name: "LSC Driver", position: 2, permissions: "0", managed: false, mentionable: true },
+    { id: r.bot, name: "LSR Bot", position: 3, permissions: FAKE_BOT_PERMISSIONS, managed: true, mentionable: false },
+    { id: r.alumni, name: "Alumni", position: 4, permissions: "0", managed: false, mentionable: false },
+    // Kick Members, Manage Messages, Timeout Members
+    { id: r.officer, name: "Officer", position: 5, permissions: bits(1, 13, 40), managed: false, mentionable: true },
+    { id: r.admin, name: "Admin", position: 6, permissions: bits(3), managed: false, mentionable: false },
+  ]
+}
 
 /** The fake's channels by name */
 export const FAKE_CHANNELS = {
@@ -103,14 +133,16 @@ function random(seed: number) {
 export type FakeServer = {
   guild: { id: string; name: string }
   bot: DiscordUser
-  /** Every channel, including the hidden one; threads too */
-  channels: (DiscordChannel & { hidden?: boolean })[]
+  /** Every channel, including the hidden one; threads too. Overwrites as Get Guild Channels returns them (discord-post: role sync's safety check) */
+  channels: (DiscordChannel & { hidden?: boolean; permission_overwrites?: DiscordPermissionOverwrite[] })[]
   /** Per channel, oldest first */
   messages: Map<string, DiscordMessage[]>
   /** In user id order */
   members: DiscordMember[]
   /** Who links their account through the fake OAuth page unless a test picks someone else */
   oauthUserId: string
+  /** Lowest first (discord-post: role sync and pings) */
+  roles: DiscordRole[]
 }
 
 const DAY = 86_400_000
@@ -134,7 +166,7 @@ export function buildFakeServer(now = Date.now()): FakeServer {
       joined_at: joined.toISOString().replace("Z", "+00:00"),
     })
   }
-  members.push({ user: bot, nick: null, roles: [], joined_at: new Date(Date.parse("2023-08-21T00:00:00Z")).toISOString().replace("Z", "+00:00") })
+  members.push({ user: bot, nick: null, roles: [FAKE_DISCORD.roles.bot], joined_at: new Date(Date.parse("2023-08-21T00:00:00Z")).toISOString().replace("Z", "+00:00") })
   members.sort((a, b) => (BigInt(a.user.id) < BigInt(b.user.id) ? -1 : 1))
   const humans = members.filter((m) => !m.user.bot).map((m) => m.user)
   // About two thirds post; officers post the announcements
@@ -147,7 +179,18 @@ export function buildFakeServer(now = Date.now()): FakeServer {
     { id: FAKE_CHANNELS.clubCategory, type: CHANNEL_TYPE.category, name: "Club", position: 0 },
     { id: FAKE_CHANNELS.racingCategory, type: CHANNEL_TYPE.category, name: "Racing", position: 1 },
     { id: FAKE_CHANNELS.general, type: CHANNEL_TYPE.text, name: "general", parent_id: FAKE_CHANNELS.clubCategory, position: 0 },
-    { id: FAKE_CHANNELS.announcements, type: CHANNEL_TYPE.announcement, name: "announcements", parent_id: FAKE_CHANNELS.clubCategory, position: 1 },
+    {
+      id: FAKE_CHANNELS.announcements,
+      type: CHANNEL_TYPE.announcement,
+      name: "announcements",
+      parent_id: FAKE_CHANNELS.clubCategory,
+      position: 1,
+      // Only officers post here: @everyone denied Send Messages, Officer allowed it (no moderation bits)
+      permission_overwrites: [
+        { id: FAKE_DISCORD.guildId, type: 0, allow: "0", deny: String(BigInt(1) << BigInt(11)) },
+        { id: FAKE_DISCORD.roles.officer, type: 0, allow: String(BigInt(1) << BigInt(11)), deny: "0" },
+      ],
+    },
     { id: FAKE_CHANNELS.voiceLounge, type: CHANNEL_TYPE.voice, name: "Lounge", parent_id: FAKE_CHANNELS.clubCategory, position: 2 },
     { id: FAKE_CHANNELS.lscChat, type: CHANNEL_TYPE.text, name: "lsc-chat", parent_id: FAKE_CHANNELS.racingCategory, position: 0 },
     { id: FAKE_CHANNELS.setups, type: CHANNEL_TYPE.forum, name: "setups", parent_id: FAKE_CHANNELS.racingCategory, position: 1 },
@@ -216,5 +259,5 @@ export function buildFakeServer(now = Date.now()): FakeServer {
   add(FAKE_CHANNELS.officers, now - 1 * DAY, officers[0], "Officer-only planning notes")
 
   for (const list of messages.values()) list.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1))
-  return { guild: { id: FAKE_DISCORD.guildId, name: FAKE_DISCORD.guildName }, bot, channels, messages, members, oauthUserId: humans[3].id }
+  return { guild: { id: FAKE_DISCORD.guildId, name: FAKE_DISCORD.guildName }, bot, channels, messages, members, oauthUserId: humans[3].id, roles: fakeRoles() }
 }

@@ -63,25 +63,27 @@ const ITEM_GONE = { ok: false, reason: "not_found", error: "That action item doe
 const OWNER = { ok: false, reason: "owner", error: "An action item's owner has to be an officer." } as const
 
 /** Meeting columns a meeting change can touch (type is Meeting.kind) */
-const MEETING_COLUMN: Record<keyof MeetingChanges | "transcriptFileId", keyof Meeting> = {
+const MEETING_COLUMN: Record<keyof MeetingChanges | "transcriptFileId" | "transcriptDocumentId", keyof Meeting> = {
   title: "title",
   type: "kind",
   heldAt: "heldAt",
   agendaMd: "agendaMd",
   summaryMd: "summaryMd",
   transcriptFileId: "transcriptFileId",
+  transcriptDocumentId: "transcriptDocumentId",
 }
 
 /* Meetings */
 
-export type MeetingLinks = { transcriptFileId?: string | null; roomId?: string | null }
+/** Where a meeting came from: its transcript (a room file, or a synced Drive or SharePoint document) and the room it was recorded in */
+export type MeetingLinks = { transcriptFileId?: string | null; transcriptDocumentId?: string | null; roomId?: string | null }
 
 export async function createMeetingTx(tx: Db, input: unknown, actor: ServiceActor, links: MeetingLinks = {}): Promise<MeetingWriteResult> {
   const parsed = meetingFieldsSchema.safeParse(input)
   if (!parsed.success) return { ok: false, reason: "invalid", error: parsed.error.issues[0]?.message ?? "Check the meeting." }
   const { type, ...fields } = parsed.data
   const meeting = await tx.meeting.create({
-    data: { ...fields, kind: type, transcriptFileId: links.transcriptFileId ?? null, roomId: links.roomId ?? null, createdById: actor.userId },
+    data: { ...fields, kind: type, transcriptFileId: links.transcriptFileId ?? null, transcriptDocumentId: links.transcriptDocumentId ?? null, roomId: links.roomId ?? null, createdById: actor.userId },
   })
   await createAuditLog(
     {
@@ -90,7 +92,15 @@ export async function createMeetingTx(tx: Db, input: unknown, actor: ServiceActo
       entityType: "MEETING",
       entityId: meeting.id,
       summary: `Recorded meeting: ${meeting.title}`,
-      after: { title: meeting.title, kind: meeting.kind, heldAt: meeting.heldAt.toISOString(), agenda: Boolean(meeting.agendaMd), summary: Boolean(meeting.summaryMd), transcriptFileId: meeting.transcriptFileId },
+      after: {
+        title: meeting.title,
+        kind: meeting.kind,
+        heldAt: meeting.heldAt.toISOString(),
+        agenda: Boolean(meeting.agendaMd),
+        summary: Boolean(meeting.summaryMd),
+        transcriptFileId: meeting.transcriptFileId,
+        transcriptDocumentId: meeting.transcriptDocumentId,
+      },
       metadata: withActorMetadata(actor),
     },
     tx,
@@ -129,19 +139,23 @@ export async function meetingTextKeysTx(tx: Db, meetingId: string): Promise<{ de
 }
 
 /**
- * Changes a meeting: only the fields given (and the transcript file, when given). With `expected`
- * (column values as they were read, by change key), it refuses if any moved on
+ * Changes a meeting: only the fields given (and the transcript, a room file or a synced document, when
+ * given). With `expected` (column values as they were read, by change key), it refuses if any moved on
  */
 export async function updateMeetingTx(
   tx: Db,
   id: string,
   input: unknown,
   actor: ServiceActor,
-  options: { transcriptFileId?: string | null; expected?: Partial<Record<keyof typeof MEETING_COLUMN, string | null>> } = {},
+  options: { transcriptFileId?: string | null; transcriptDocumentId?: string | null; expected?: Partial<Record<keyof typeof MEETING_COLUMN, string | null>> } = {},
 ): Promise<MeetingWriteResult> {
   const parsed = meetingChangesSchema.safeParse(input)
   if (!parsed.success) return { ok: false, reason: "invalid", error: parsed.error.issues[0]?.message ?? "Check the meeting." }
-  const changes: MeetingChanges & { transcriptFileId?: string | null } = { ...parsed.data, ...(options.transcriptFileId !== undefined ? { transcriptFileId: options.transcriptFileId } : {}) }
+  const changes: MeetingChanges & { transcriptFileId?: string | null; transcriptDocumentId?: string | null } = {
+    ...parsed.data,
+    ...(options.transcriptFileId !== undefined ? { transcriptFileId: options.transcriptFileId } : {}),
+    ...(options.transcriptDocumentId !== undefined ? { transcriptDocumentId: options.transcriptDocumentId } : {}),
+  }
 
   await tx.$queryRaw`SELECT id FROM "Meeting" WHERE id = ${id} FOR UPDATE`
   const current = await tx.meeting.findUnique({ where: { id } })

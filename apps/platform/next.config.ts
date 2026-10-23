@@ -9,8 +9,9 @@ const nextConfig: NextConfig = {
   // Jack renders slides in headless Chromium (src/server/jack/decks/renderer.ts). The Chromium build
   // finds its binary next to its own files, so neither package can be bundled, and the binary has to
   // be traced into the functions that render: the room page (Jack's reply loop runs there, in the
-  // actions it posts to), the deck image and export routes, render-check, and the hand-off route that
-  // runs scheduled Jack replies. pnpm links the package from node_modules/.pnpm and the code runs
+  // actions it posts to, and proposals applied there), the deck page (Publish to Instagram and Add to
+  // gallery render slides a deck hasn't rendered yet), the deck image and export routes, render-check,
+  // and the hand-off route that runs scheduled Jack replies. pnpm links the package from node_modules/.pnpm and the code runs
   // from there, so the binary is included at that real path as well as through the link.
   // pdfjs-dist (text from PDFs Jack reads) loads its worker file from next to its own build at runtime;
   // bundled, it can't find it ("Setting up fake worker failed"), so it stays a plain Node package too.
@@ -25,6 +26,7 @@ const nextConfig: NextConfig = {
   // Keys match the route path anywhere in it ("/app/admin/jack/[roomId]"), so brackets are escaped.
   outputFileTracingIncludes: {
     "/admin/jack/\\[roomId\\]": CHROMIUM_BINARY,
+    "/admin/jack/decks/\\[deckId\\]": CHROMIUM_BINARY,
     "/api/admin/jack/decks/**": CHROMIUM_BINARY,
     "/api/admin/jack/render-check": CHROMIUM_BINARY,
     "/api/admin/jack/run": [...CHROMIUM_BINARY, ...PDF_WORKER],

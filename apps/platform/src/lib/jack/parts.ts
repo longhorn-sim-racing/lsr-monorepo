@@ -102,7 +102,7 @@ export type JackFileItem = {
 
 export type JackFilesDisplay = { kind: "files"; files: JackFileItem[] }
 
-/** What a web search looked for and the pages the answer cites (G8 builds these from the citations) */
+/** What a web search looked for and the pages the answer cites or links to (G8; web-tools.ts) */
 export type JackWebSourcesDisplay = {
   kind: "web_sources"
   queries: string[]

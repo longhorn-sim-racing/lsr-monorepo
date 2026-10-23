@@ -15,6 +15,7 @@ const store = vi.hoisted(() => ({
   proposals: new Map<string, Record<string, unknown>>(),
   messages: [] as Record<string, unknown>[],
   rooms: new Set<string>(),
+  archived: new Set<string>(),
   roles: new Map<string, string[]>(),
   users: new Map<string, string>(),
   files: new Map<string, { sha256: string | null; status: string }>(),
@@ -44,6 +45,8 @@ function matches(row: Row, where: Where = {}): boolean {
     if (key === "AND") return (condition as Where[]).every((w) => matches(row, w))
     if (key === "OR") return (condition as Where[]).some((w) => matches(row, w))
     if (key === "NOT") return !matches(row, condition as Where)
+    // A filter on the proposal's room (`room: { archivedAt: null }`), as Postgres would join it
+    if (key === "room") return matches({ archivedAt: store.archived.has(row.roomId as string) ? new Date(0) : null }, condition as Where)
     return matchValue(row[key], condition)
   })
 }
@@ -96,7 +99,8 @@ Object.assign(db, {
   },
   jackRoom: {
     async findUnique({ where }: { where: { id: string } }) {
-      return store.rooms.has(where.id) ? { id: where.id } : null
+      await yieldNow()
+      return store.rooms.has(where.id) ? { id: where.id, archivedAt: store.archived.has(where.id) ? new Date(0) : null } : null
     },
   },
   jackMessage: {
@@ -324,6 +328,7 @@ beforeEach(() => {
   store.rooms.clear()
   store.rooms.add(ROOM)
   store.rooms.add("room-2")
+  store.archived.clear()
   store.roles.clear()
   store.roles.set(gray.id, ["officer"])
   store.roles.set(dylan.id, ["officer"])
@@ -591,6 +596,52 @@ describe("applyProposal", () => {
     expect(await applyProposal(broken.proposalId, gray, {}, deps)).toEqual({ ok: false, error: "Only admins can apply this kind of change." })
   })
 
+  it("refuses in an archived room, changing nothing, and applies once the room is unarchived", async () => {
+    const { proposal } = await propose()
+    store.archived.add(ROOM)
+    expect(await applyProposal(proposal.proposalId, gray, {}, deps)).toEqual({
+      ok: false,
+      error: "This room is archived. Unarchive it to apply or discard.",
+      proposal: expect.objectContaining({ id: proposal.proposalId, status: "PENDING" }),
+    })
+    expect(row(proposal.proposalId)).toMatchObject({ status: "PENDING", claimedAt: null, decidedById: null })
+    expect(applied).toHaveLength(0)
+    expect(notes()).toEqual([])
+    expect(events).toEqual([])
+    expect(audit.createAuditLog).not.toHaveBeenCalled()
+
+    store.archived.delete(ROOM)
+    expect(await applyProposal(proposal.proposalId, gray, {}, deps)).toMatchObject({ ok: true, proposal: { status: "APPLIED" } })
+  })
+
+  it("loses to an archive that lands between its check and its claim (the claim requires the room unarchived)", async () => {
+    const { proposal } = await propose()
+    const rooms = db.jackRoom as { findUnique: (args: { where: { id: string } }) => Promise<unknown> }
+    const read = rooms.findUnique
+    vi.spyOn(rooms, "findUnique").mockImplementationOnce(async (args) => {
+      const room = await read(args)
+      store.archived.add(ROOM)
+      return room
+    })
+    expect(await applyProposal(proposal.proposalId, gray, {}, deps)).toMatchObject({ ok: false, error: "This room is archived. Unarchive it to apply or discard.", proposal: { status: "PENDING" } })
+    expect(row(proposal.proposalId)).toMatchObject({ status: "PENDING", claimedAt: null })
+    expect(applied).toHaveLength(0)
+  })
+
+  it("leaves an expired proposal in an archived room alone (no late note there), and says why it's decided when it already is", async () => {
+    const old = await propose()
+    const done = await propose("test.change", { thingId: "t2", value: "new" })
+    await applyProposal(done.proposal.proposalId, gray, {}, deps)
+    const notesBefore = notes().length
+    store.archived.add(ROOM)
+    store.clock += PROPOSAL_TTL_MS
+
+    expect(await applyProposal(old.proposal.proposalId, gray, {}, deps)).toMatchObject({ ok: false, error: "This room is archived. Unarchive it to apply or discard.", proposal: { status: "STALE" } })
+    expect(row(old.proposal.proposalId).status).toBe("PENDING")
+    expect(await applyProposal(done.proposal.proposalId, gray, {}, deps)).toMatchObject({ ok: false, error: "It was already applied." })
+    expect(notes()).toHaveLength(notesBefore)
+  })
+
   it("goes stale when the file it was built from changed", async () => {
     store.files.set("f1", { sha256: "sha-1", status: "READY" })
     const kept = await propose("test.file", { fileId: "f1" })
@@ -614,6 +665,29 @@ describe("discardProposal", () => {
     expect(audit.createAuditLog).toHaveBeenCalledWith(expect.objectContaining({ actorUserId: dylan.id, actionType: "DISCARD", entityType: "JACK_PROPOSAL", summary: "Discarded Jack's proposal: Change t1" }))
     expect(await discardProposal(proposal.proposalId, gray, deps)).toMatchObject({ ok: false, error: "It was already discarded." })
     expect(notes()).toHaveLength(1)
+  })
+
+  it("refuses in an archived room, even when the archive lands between its check and its write", async () => {
+    const { proposal } = await propose()
+    store.archived.add(ROOM)
+    expect(await discardProposal(proposal.proposalId, dylan, deps)).toMatchObject({ ok: false, error: "This room is archived. Unarchive it to apply or discard.", proposal: { status: "PENDING" } })
+    expect(row(proposal.proposalId)).toMatchObject({ status: "PENDING", decidedById: null })
+    expect(notes()).toEqual([])
+    expect(audit.createAuditLog).not.toHaveBeenCalled()
+
+    store.archived.delete(ROOM)
+    const rooms = db.jackRoom as { findUnique: (args: { where: { id: string } }) => Promise<unknown> }
+    const read = rooms.findUnique
+    vi.spyOn(rooms, "findUnique").mockImplementationOnce(async (args) => {
+      const room = await read(args)
+      store.archived.add(ROOM)
+      return room
+    })
+    expect(await discardProposal(proposal.proposalId, dylan, deps)).toMatchObject({ ok: false, error: "This room is archived. Unarchive it to apply or discard." })
+    expect(row(proposal.proposalId).status).toBe("PENDING")
+
+    store.archived.delete(ROOM)
+    expect(await discardProposal(proposal.proposalId, dylan, deps)).toMatchObject({ ok: true, proposal: { status: "DISCARDED" } })
   })
 })
 

@@ -11,6 +11,7 @@ import { useJackUploads } from "@/components/jack/use-jack-uploads"
 import { unexpectedError, type ActionResult } from "@/lib/action-result"
 import type { JackFeedbackRating, JackFeedbackSummary } from "@/lib/jack/feedback"
 import { mentionPlaceholder, type JackAnswerMode } from "@/lib/jack/mentions"
+import { PROPOSAL_ROOM_ARCHIVED } from "@/lib/jack/proposals"
 import { outsideGap, type SnapshotGap } from "@/lib/jack/room-gap"
 import type { RoomSnapshotData } from "@/lib/jack/room-state"
 import type { JackSpend } from "@/lib/jack/spend"
@@ -35,8 +36,8 @@ type JackRoomClientProps = {
 /** An archived room starts no runs; its page doesn't ask (the room offers no "continue" there either) */
 const archivedResume = async (): Promise<ActionResult> => ({ ok: false, error: "This room is archived." })
 
-/** An archived room is read-only, so its proposal cards say so instead of applying or discarding (applyProposal itself doesn't check yet: G4) */
-const archivedProposalAction = async (): Promise<string | null> => "This room is archived. Unarchive it to apply or discard."
+/** An archived room is read-only, so its proposal cards say so instead of applying or discarding (the server refuses too) */
+const archivedProposalAction = async (): Promise<string | null> => PROPOSAL_ROOM_ARCHIVED
 
 /** Two sets of ratings say the same thing, so a snapshot doesn't redraw every rating for nothing */
 const sameFeedback = (a: Record<string, JackFeedbackSummary>, b: Record<string, JackFeedbackSummary>) => JSON.stringify(a) === JSON.stringify(b)
