@@ -71,7 +71,7 @@ describe("proposing a new one", () => {
     expect(prepared.view.title).toBe("Set up the recurring question “Weekly signups”")
     // Sonnet's typical run: 4.35 Mondays a month at about $0.12
     expect(prepared.view.summary).toBe(
-      "Asks it in “Signups room” (Mondays at 9:00 AM CT), answered by Jack as Gray with no web search. About $0.52 a month (4 runs at about $0.12, a typical run), counted toward automations' $10 a month. It starts off: turn it on on Jack → Recurring questions.",
+      "Asks it in “Signups room” (Mondays at 9:00 AM CT), answered by Jack as Gray with no web search. About $0.54 a month (4 runs at about $0.12, a typical run), counted toward automations' $10 a month. It starts off: turn it on on Jack → Recurring questions.",
     )
     expect(prepared.view.diff.map((row) => [row.label, row.after])).toEqual([
       ["Title", "Weekly signups"],
@@ -80,7 +80,7 @@ describe("proposing a new one", () => {
       ["When", "Mondays at 9:00 AM CT"],
       ["Answered by", "Jack"],
       ["On", "Off"],
-      ["Estimated cost", "$0.52 a month"],
+      ["Estimated cost", "$0.54 a month"],
     ])
     expect(db.jackRoom.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "room-here" } }))
   })

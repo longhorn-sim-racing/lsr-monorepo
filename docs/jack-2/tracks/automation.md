@@ -39,7 +39,7 @@ A question Jack is asked on a schedule in a room, answered as the officer who se
 - **Jack or Stand only.** The reply to its note is written by the question's persona, whatever the room is set to, so a room switched to Lift doesn't make its automations Lift (`scheduledPersona`).
 - **Off by default.** The page's form has "Turn it on now" (off unless ticked); the proposal has `on` (off unless the officer asked to start it).
 - **Who it runs as:** `createdById`. From the page, whoever set it up; from a proposal, the officer it was proposed for (or whoever applied it, if that officer isn't one any more). Turning on a question whose owner isn't an officer any more makes the officer who turns it on its owner (the page says so before and after).
-- **Estimated monthly cost:** about how many runs a month (a year's runs over twelve) times one run's cost: the question's own last answers when it has some, else recent answers to any recurring question by the same persona (3 or more in 60 days), else a typical run's tokens at the model's prices (about $0.12 for Jack, under a cent for Stand). Labelled an estimate on the card and the page.
+- **Estimated monthly cost:** about how many runs a month (a year's runs over twelve) times one run's cost: the question's own last answers when it has some, else recent answers to any recurring question by the same persona (3 or more in 60 days), else a typical run's tokens at the model's prices (about $0.12 for Jack, under a cent for Stand; the cached prompt was about 34,000 tokens on 10/23). Labelled an estimate on the card and the page.
 
 ### Each run (`recurring/run.ts`, handed off to `/api/admin/jack/run`, budget 285 s)
 

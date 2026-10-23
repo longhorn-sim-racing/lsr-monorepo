@@ -13,10 +13,11 @@ import { JACK_MODELS } from "@/server/jack/models"
  */
 
 /**
- * A typical scheduled answer: the cached prompt written once (daily runs come long after the cache's five
- * minutes), read back on a few tool rounds, and a short answer with some thinking
+ * A typical scheduled answer: the cached prompt (system prompt and always-loaded tools, about 34,000 tokens
+ * when measured on 10/23) written once, since runs come long after the cache's five minutes, read back on
+ * two tool rounds, and a short answer with some thinking
  */
-export const TYPICAL_RUN_TOKENS: TokenUsage = { inputTokens: 3_000, cacheWriteTokens: 30_000, cacheReadTokens: 90_000, outputTokens: 2_000 }
+export const TYPICAL_RUN_TOKENS: TokenUsage = { inputTokens: 3_000, cacheWriteTokens: 34_000, cacheReadTokens: 68_000, outputTokens: 2_000 }
 
 /** Answers averaged for a question's own estimate */
 const OWN_SAMPLES = 5
