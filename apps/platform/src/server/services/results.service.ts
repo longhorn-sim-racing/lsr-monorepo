@@ -7,7 +7,8 @@
 //   lists the paths it touched in `revalidate`; the caller passes them to revalidatePaths()
 //   (src/server/cache/revalidate-public.ts), so the admin page and a proposal refresh the same pages.
 // - parseUpload({ write: false }) and previewResultFile() write nothing, so a proposal can show what a
-//   file holds (and which drivers aren't linked to members) before an officer applies it.
+//   file holds (and which drivers aren't linked to members) before an officer applies it. They refuse a
+//   file they can't read instead of throwing.
 // - scripts/check-results-service.ts replays real uploads through parse, bind and ingest and diffs the
 //   race rows against the ones already in the database; run it after changing anything here.
 
@@ -132,6 +133,19 @@ export function parseResultFile(rawJson: unknown): ParsedResultFile {
   return { ok: true, report, status: anomalies.length > 0 ? "FAILED" : "PARSED" }
 }
 
+/**
+ * parseResultFile for the read-only paths, which may see a file nobody has checked yet: one it can't read
+ * (a Result entry that's null) is refused instead of throwing. The writing parse still throws on it, as
+ * the admin page always has.
+ */
+function parseResultFileSafely(rawJson: unknown): ParsedResultFile {
+  try {
+    return parseResultFile(rawJson)
+  } catch {
+    return { ok: false, error: NOT_A_RESULTS_FILE }
+  }
+}
+
 /** The drivers not linked to a member (no DriverIdentity, or one without a user): their points won't count in standings */
 async function unmatchedDrivers(drivers: ResultFileDriver[]): Promise<ResultFileDriver[]> {
   if (drivers.length === 0) return []
@@ -147,9 +161,9 @@ export type ResultFilePreview =
   | { ok: true; report: ResultFileReport; status: "PARSED" | "FAILED"; unmatchedDrivers: ResultFileDriver[] }
   | { ok: false; error: string }
 
-/** A file that isn't uploaded yet (a room file Jack proposes to import): what parsing would find. Only reads. */
+/** A file that isn't uploaded yet (a room file Jack proposes to import): what parsing would find. Only reads, and never throws on a bad file. */
 export async function previewResultFile(rawJson: unknown): Promise<ResultFilePreview> {
-  const parsed = parseResultFile(rawJson)
+  const parsed = parseResultFileSafely(rawJson)
   if (!parsed.ok) return parsed
   return { ...parsed, unmatchedDrivers: await unmatchedDrivers(parsed.report.drivers) }
 }
@@ -175,7 +189,8 @@ export type ParseUploadResult =
 /**
  * Parses an upload: its drivers, counts and anomalies. The same checks run either way (a missing upload,
  * one already ingested, a file that isn't a results file), so `write: false` says exactly what
- * `write: true` would do without doing it.
+ * `write: true` would do without doing it. The one difference: a file it can't read at all (a null
+ * Result entry) is refused by `write: false` and throws with `write: true`, as the admin page always has.
  *
  * `write: true` is the admin page's Parse step: it records each driver's GUID and name (DriverIdentity),
  * saves the ParseReport and sets the status (FAILED with the anomalies, or PARSED). A file that isn't a
@@ -194,7 +209,7 @@ export async function parseUpload(uploadId: string, options: ParseUploadOptions)
     return { ok: false, error: ALREADY_INGESTED }
   }
 
-  const parsed = parseResultFile(upload.rawJson)
+  const parsed = options.write ? parseResultFile(upload.rawJson) : parseResultFileSafely(upload.rawJson)
   if (!parsed.ok) {
     if (options.write) {
       await prisma.rawResultUpload.update({

@@ -242,6 +242,18 @@ describe("parseUpload", () => {
     expect(db.driverIdentity.upsert).not.toHaveBeenCalled()
   })
 
+  it("a file it can't read (a null Result entry) is refused without writing, and still throws when writing", async () => {
+    db.rawResultUpload.findUnique.mockResolvedValue(upload({ rawJson: { Result: [null], Laps: [] } }))
+
+    expect(await parseUpload("up1", { write: false })).toEqual({ ok: false, error: "This file isn't a results file: it has no session data." })
+
+    // The writing parse is unchanged: it throws before writing anything, as the admin page always has
+    await expect(parseUpload("up1", { write: true, actor: officer })).rejects.toThrow(TypeError)
+    expect(db.rawResultUpload.update).not.toHaveBeenCalled()
+    expect(db.driverIdentity.upsert).not.toHaveBeenCalled()
+    expect(audit.createAuditLog).not.toHaveBeenCalled()
+  })
+
   it.each([{ write: false } as const, { write: true, actor: officer } as const])("refuses an ingested upload (write: $write)", async (options) => {
     db.rawResultUpload.findUnique.mockResolvedValue(upload({ status: "INGESTED" }))
     expect(await parseUpload("up1", options)).toEqual({ ok: false, error: ALREADY_INGESTED })
@@ -270,6 +282,14 @@ describe("previewResultFile", () => {
 
   it("skips the lookup when there are no drivers", async () => {
     expect(await previewResultFile({ Result: [], Laps: [] })).toMatchObject({ ok: true, status: "PARSED", unmatchedDrivers: [] })
+    expect(db.driverIdentity.findMany).not.toHaveBeenCalled()
+  })
+
+  it("refuses a file it can't read instead of throwing", async () => {
+    const error = { ok: false, error: "This file isn't a results file: it has no session data." }
+    expect(await previewResultFile({ Result: [null], Laps: [] })).toEqual(error)
+    expect(await previewResultFile({ Result: [{ DriverGuid: "gA", DriverName: "Ana", CarModel: "x" }, undefined], Laps: [] })).toEqual(error)
+    expect(await previewResultFile(null)).toEqual(error)
     expect(db.driverIdentity.findMany).not.toHaveBeenCalled()
   })
 })
