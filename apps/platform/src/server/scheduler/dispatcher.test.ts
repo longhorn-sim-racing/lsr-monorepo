@@ -13,7 +13,7 @@ vi.mock("@/server/db", () => ({
 }))
 vi.mock("./registry", () => ({ findJobKind: (kind: string) => kinds.get(kind) }))
 
-import { acceptHandoff, dispatchDueJobs, parseHandoffRequest, runHandoff, CLAIM_WINDOW_MS, LOCK_MS, ORPHANED_RUN_ERROR } from "./dispatcher"
+import { acceptHandoff, dispatchDueJobs, parseHandoffRequest, runHandoff, runOneJob, CLAIM_WINDOW_MS, LOCK_MS, ORPHANED_RUN_ERROR } from "./dispatcher"
 
 const SECRET = "s".repeat(64)
 const START = Date.parse("2026-10-22T18:00:30Z")
@@ -266,6 +266,31 @@ describe("dispatchDueJobs", () => {
     await vi.advanceTimersByTimeAsync(1_000)
     await dispatching
     expect(store.runs[0]).toMatchObject({ status: "ok", summary: "Stopped early: 40 of 90 done" })
+  })
+})
+
+describe("runOneJob (pnpm jack:tick --job)", () => {
+  it("runs one job now, even switched off and not due, hand-off jobs in place, and records the run", async () => {
+    const run = vi.fn<JobKind["run"]>(ok("Pruned"))
+    kind("long", run, { handoff: true })
+    const job = store.addJob({ kind: "long", enabled: false, schedule: "0 6 * * *", nextRunAt: new Date(START + 86_400_000) })
+
+    const result = await runOneJob("long", { clock: () => START })
+
+    expect(result).toEqual({ ok: true, status: "ok", runId: store.runs[0].id })
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(store.runs[0]).toMatchObject({ status: "ok", summary: "Pruned" })
+    expect(job).toMatchObject({ enabled: false, lockedUntil: null, lastStatus: "ok" })
+  })
+
+  it("won't run a job another claim holds, a key that doesn't exist, or a kind it doesn't know", async () => {
+    kind("k", ok())
+    store.addJob({ kind: "k", lockedUntil: new Date(START + 60_000) })
+    store.addJob({ kind: "gone" })
+    expect(await runOneJob("k", { clock: () => START })).toEqual({ ok: false, error: "Another run holds it right now" })
+    expect(await runOneJob("nope", { clock: () => START })).toMatchObject({ ok: false, error: expect.stringContaining('"nope"') })
+    expect(await runOneJob("gone", { clock: () => START })).toMatchObject({ ok: false, error: expect.stringContaining('"gone"') })
+    expect(store.runs).toHaveLength(0)
   })
 })
 

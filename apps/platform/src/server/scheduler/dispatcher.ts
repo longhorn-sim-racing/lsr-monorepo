@@ -117,9 +117,10 @@ function errorText(error: unknown): string {
 /**
  * Claims a due job for one run: a conditional update that only one caller can win. Sets its next run
  * (from now) and its lock, marks runs a dead function left "running" as failed, and opens the run row.
- * Null when another tick got it first, or it stopped being due.
+ * Null when another tick got it first, or it stopped being due. `force` claims it due or not and on or
+ * off (still never while another claim holds it).
  */
-export async function claimJob(job: Pick<ScheduledJob, "id" | "schedule">, nowMs: number): Promise<(Claim & { scheduleError?: string }) | null> {
+export async function claimJob(job: Pick<ScheduledJob, "id" | "schedule">, nowMs: number, { force = false }: { force?: boolean } = {}): Promise<(Claim & { scheduleError?: string }) | null> {
   const at = new Date(nowMs)
   let nextRunAt: Date
   let scheduleError: string | undefined
@@ -130,7 +131,8 @@ export async function claimJob(job: Pick<ScheduledJob, "id" | "schedule">, nowMs
     nextRunAt = new Date(nowMs + BAD_SCHEDULE_RETRY_MS)
   }
   const lockedUntil = new Date(nowMs + LOCK_MS)
-  const { count } = await prisma.scheduledJob.updateMany({ where: { id: job.id, ...dueWhere(at) }, data: { lockedUntil, nextRunAt } })
+  const where: Prisma.ScheduledJobWhereInput = force ? { id: job.id, OR: [{ lockedUntil: null }, { lockedUntil: { lt: at } }] } : { id: job.id, ...dueWhere(at) }
+  const { count } = await prisma.scheduledJob.updateMany({ where, data: { lockedUntil, nextRunAt } })
   if (count === 0) return null
   // The lock had run out, so a run still marked running lost its function
   await prisma.scheduledJobRun.updateMany({ where: { jobId: job.id, status: RUN_RUNNING }, data: { status: "error", error: ORPHANED_RUN_ERROR, finishedAt: at } })
@@ -296,6 +298,24 @@ export async function dispatchDueJobs(options: DispatchOptions = {}): Promise<Di
   }
   await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_JOBS, queue.length) }, worker))
   return result
+}
+
+/**
+ * Runs one job now in this process, due or not and on or off, hand-off jobs included (pnpm jack:tick --job,
+ * so a job can be tried without switching it on in a database other worktrees share). Claimed like any
+ * other run, so never while another claim holds it.
+ */
+export async function runOneJob(key: string, { clock = Date.now }: { clock?: () => number } = {}): Promise<{ ok: true; status: RunStatus; runId: string } | { ok: false; error: string }> {
+  const job = await prisma.scheduledJob.findUnique({ where: { key }, select: DUE_SELECT })
+  if (!job) return { ok: false, error: `There's no job with the key "${key}"` }
+  const kind = findJobKind(job.kind)
+  if (!kind) return { ok: false, error: `This code doesn't know the job kind "${job.kind}"` }
+  const startedAt = clock()
+  const claim = await claimJob(job, startedAt, { force: true })
+  if (!claim) return { ok: false, error: "Another run holds it right now" }
+  const outcome: Outcome = claim.scheduleError ? { status: "error", error: claim.scheduleError } : await runJob(job, kind, { startedAt, clock })
+  await finishRun(job.id, claim, outcome, clock)
+  return { ok: true, status: outcome.status, runId: claim.runId }
 }
 
 /** A hand-off this route took over: the job is locked to it and its run row is open */

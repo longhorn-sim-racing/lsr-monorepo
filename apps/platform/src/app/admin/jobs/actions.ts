@@ -1,6 +1,6 @@
 "use server"
 
-import { formatDistance } from "date-fns"
+import { formatDistanceStrict } from "date-fns"
 import { revalidatePath } from "next/cache"
 import type { ActionResult } from "@/lib/action-result"
 import { createAuditLog } from "@/server/audit/log"
@@ -55,7 +55,7 @@ export async function setScheduledJobEnabled(jobId: string, enabled: boolean): P
       return { ok: false, error: `Its schedule "${job.schedule}" can't be read. Change the schedule first.` }
     }
   }
-  const nextRun = formatDistance(nextRunAt, now, { addSuffix: true })
+  const nextRun = formatDistanceStrict(nextRunAt, now, { addSuffix: true })
   if (job.enabled === enabled) return { ok: true, data: { enabled, nextRun } }
 
   await prisma.scheduledJob.update({ where: { id: job.id }, data: { enabled, nextRunAt, updatedById: actorId } })

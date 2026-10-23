@@ -1,10 +1,10 @@
-import { formatDistance } from "date-fns"
+import { formatDistanceStrict } from "date-fns"
 import { formatInTimeZone } from "date-fns-tz"
 import { DEFAULT_TIMEZONE } from "@/lib/dates"
 
-/** "2 minutes ago", "in 5 hours" */
+/** "2 minutes ago", "in 5 hours" (rounded, without "about", to stay short in tables) */
 export function relative(date: Date | null | undefined, now: Date): string | null {
-  return date ? formatDistance(date, now, { addSuffix: true }) : null
+  return date ? formatDistanceStrict(date, now, { addSuffix: true }) : null
 }
 
 /** "Oct 22, 4:10 PM CT" */

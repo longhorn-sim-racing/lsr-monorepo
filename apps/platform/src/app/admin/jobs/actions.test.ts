@@ -56,7 +56,7 @@ describe("scheduled job actions", () => {
   describe("setScheduledJobEnabled", () => {
     it("turns a job on with its next run from now (not the stale one), and audits it", async () => {
       const result = await setScheduledJobEnabled("job-1", true)
-      expect(result).toEqual({ ok: true, data: { enabled: true, nextRun: "in about 18 hours" } })
+      expect(result).toEqual({ ok: true, data: { enabled: true, nextRun: "in 18 hours" } })
       expect(db.scheduledJob.update).toHaveBeenCalledWith({ where: { id: "job-1" }, data: { enabled: true, nextRunAt: new Date("2026-10-23T09:10:00Z"), updatedById: "admin-1" } })
       expect(audit.createAuditLog).toHaveBeenCalledWith(
         expect.objectContaining({ actorUserId: "admin-1", actionType: "SCHEDULED_JOB_ENABLED", entityType: "SCHEDULED_JOB", entityId: "job-1", summary: "Turned on the scheduled job Prune job history" })

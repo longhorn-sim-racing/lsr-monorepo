@@ -73,9 +73,9 @@ export default async function ScheduledJobsPage({ searchParams }: { searchParams
       defaultScheduleText: kind ? describeSchedule(kind.defaultSchedule) : null,
       enabled: job.enabled,
       running: !!job.lockedUntil && job.lockedUntil > now,
+      due: job.nextRunAt <= now,
       nextRun: relative(job.nextRunAt, now)!,
       nextRunAt: when(job.nextRunAt)!,
-      nextRunSort: job.nextRunAt.getTime(),
       lastRun: relative(job.lastRunAt, now),
       lastRunAt: when(job.lastRunAt),
       lastRunSort: job.lastRunAt?.getTime() ?? null,
@@ -108,7 +108,7 @@ export default async function ScheduledJobsPage({ searchParams }: { searchParams
         <Stat label="Jobs on" value={`${enabled.length} of ${jobs.length}`} hint={enabled.length === 0 ? "None runs until it's switched on" : undefined} />
         <Stat label="Failing" value={failing} hint={failing ? "Last run failed" : "Every job on is fine"} />
         <Stat label="Runs in 24 h" value={runsToday} hint={failedToday ? `${failedToday} failed` : undefined} />
-        <Stat label="Next run" value={next ? relative(next.nextRunAt, now) : "—"} hint={next ? (findJobKind(next.kind)?.label ?? next.key) : undefined} />
+        <Stat label="Next run" value={next ? (next.nextRunAt > now ? relative(next.nextRunAt, now) : "Due now") : "—"} hint={next ? (findJobKind(next.kind)?.label ?? next.key) : undefined} />
       </StatRow>
       <JobsClient jobs={rows} runs={runRows} selectedId={selected?.id ?? null} isAdmin={isAdmin} ticking={health.state === "ok"} />
     </>

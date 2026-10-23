@@ -3,16 +3,17 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState, useTransition } from "react"
+import { X } from "lucide-react"
 import { toast } from "sonner"
 import {
   Badge,
   Button,
-  CellStack,
   DataTable,
   DetailList,
   Dialog,
   EmptyState,
   Field,
+  IconButton,
   Input,
   Panel,
   PanelBody,
@@ -50,9 +51,10 @@ export type JobRow = {
   enabled: boolean
   /** A claim holds it right now */
   running: boolean
+  /** Its next run has come: it runs on the next tick */
+  due: boolean
   nextRun: string
   nextRunAt: string
-  nextRunSort: number
   lastRun: string | null
   lastRunAt: string | null
   lastRunSort: number | null
@@ -127,44 +129,39 @@ export function JobsClient({ jobs, runs, selectedId, isAdmin, ticking }: { jobs:
       header: "Job",
       sortValue: (job) => job.label,
       cell: (job) => (
-        <div className="flex min-w-0 items-center gap-2">
-          <CellStack
-            primary={
-              <Link href={jobHref(job.id)} scroll={false} className="hover:underline">
-                {job.label}
-              </Link>
-            }
-            secondary={<span className="font-mono">{job.key}</span>}
-          />
-          {!job.known && <Badge tone="warning">Unknown</Badge>}
-          {job.running && <Badge tone="info">Running</Badge>}
+        <div className="flex min-w-0 flex-col">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <Link href={jobHref(job.id)} scroll={false} className="font-semibold hover:underline">
+              {job.label}
+            </Link>
+            {!job.known && <Badge tone="warning">Unknown</Badge>}
+            {job.running && <Badge tone="info">Running</Badge>}
+          </span>
+          <span className="text-xs text-admin-subtle" title={job.schedule}>
+            {job.scheduleText ?? <span className="font-mono">{job.schedule}</span>}
+          </span>
         </div>
       ),
     },
     {
-      id: "schedule",
-      header: "Schedule",
-      cell: (job) => <CellStack primary={<span className="font-normal">{job.scheduleText ?? job.schedule}</span>} secondary={job.scheduleText ? <span className="font-mono">{job.schedule}</span> : undefined} />,
-      hideBelow: "sm",
-    },
-    {
-      id: "next",
-      header: "Next run",
-      sortValue: (job) => (job.enabled ? job.nextRunSort : null),
-      cell: (job) => (job.enabled ? <span title={job.nextRunAt}>{job.nextRun}</span> : <span className="text-admin-subtle">Off</span>),
-      hideBelow: "md",
-    },
-    {
-      id: "last",
-      header: "Last run",
+      id: "runs",
+      header: "Runs",
+      // By last run; jobs that never ran sort last either way
       sortValue: (job) => job.lastRunSort,
       cell: (job) => {
         const last = status(job.lastStatus)
-        if (!job.lastRun || !last) return <span className="text-admin-subtle">Never</span>
         return (
-          <span className="flex flex-col" title={job.lastError ?? job.lastRunAt ?? undefined}>
-            <ToneText tone={last.tone}>{last.label}</ToneText>
-            <span className="text-xs text-admin-subtle">{job.lastRun}</span>
+          <span className="flex flex-col whitespace-nowrap">
+            {job.lastRun && last ? (
+              <span title={job.lastError ?? job.lastRunAt ?? undefined}>
+                <ToneText tone={last.tone}>{last.label}</ToneText> <span className="text-xs text-admin-subtle">{job.lastRun}</span>
+              </span>
+            ) : (
+              <span className="text-xs text-admin-subtle">Never run</span>
+            )}
+            <span className="text-xs text-admin-subtle" title={job.enabled ? job.nextRunAt : undefined}>
+              {!job.enabled ? "Off" : job.due ? "Due now" : `Next ${job.nextRun}`}
+            </span>
           </span>
         )
       },
@@ -210,7 +207,7 @@ export function JobsClient({ jobs, runs, selectedId, isAdmin, ticking }: { jobs:
             onRowClick={(job) => router.replace(jobHref(job.id), { scroll: false })}
             selectedId={selectedId ?? undefined}
             noun={{ one: "job", many: "jobs" }}
-            minWidth={560}
+            minWidth={340}
             empty={<EmptyState title="No jobs yet" description="Jobs appear here once a part of the site registers one." />}
             rowActions={(job) => (
               <RowActions>
@@ -231,7 +228,7 @@ function RunsPanel({ job, runs, isAdmin, onRunNow, onEdit, busy }: { job: JobRow
     <Panel>
       <PanelHeader
         title={job ? job.label : "Recent runs"}
-        description={job ? (job.description ?? "This version of the site doesn't know this job, so it's skipped.") : "Every job's latest runs. Pick a job to see its own."}
+        description={job ? undefined : "Every job's latest runs. Pick a job to see its own."}
         actions={
           job ? (
             <>
@@ -240,17 +237,18 @@ function RunsPanel({ job, runs, isAdmin, onRunNow, onEdit, busy }: { job: JobRow
                   Run now
                 </Button>
               )}
-              <Button size="sm" variant="ghost" asChild>
+              <IconButton label="Back to every job's runs" asChild>
                 <Link href="/admin/jobs" scroll={false}>
-                  All runs
+                  <X />
                 </Link>
-              </Button>
+              </IconButton>
             </>
           ) : undefined
         }
       />
       {job && (
-        <PanelBody className="border-b border-admin-row">
+        <PanelBody className="flex flex-col gap-3 border-b border-admin-row">
+          <p className="text-[13px] text-muted-foreground">{job.description ?? "This version of the site doesn't know this job, so the scheduler skips it. It may come from a newer or an older deploy."}</p>
           <DetailList
             items={[
               {
@@ -273,9 +271,9 @@ function RunsPanel({ job, runs, isAdmin, onRunNow, onEdit, busy }: { job: JobRow
                   </span>
                 ),
               },
-              { label: "Status", value: job.enabled ? `On · next run ${job.nextRun}` : "Off" },
+              { label: "Status", value: !job.enabled ? "Off" : job.due ? "On · due now, it runs on the next tick" : `On · next run ${job.nextRun}` },
               ...(job.budget ? [{ label: "Time budget", value: `${job.budget}${job.handoff ? ", in its own function" : ""}` }] : []),
-              { label: "Kind", value: <span className="font-mono text-xs">{job.kind}</span> },
+              { label: "Key", value: <span className="font-mono text-xs">{job.key === job.kind ? job.key : `${job.key} (${job.kind})`}</span> },
               ...(job.lastError ? [{ label: "Last error", value: <span className="whitespace-pre-wrap text-tone-danger-foreground">{job.lastError}</span> }] : []),
             ]}
           />

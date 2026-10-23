@@ -69,9 +69,9 @@ export function createFakeDb() {
         if (orderBy?.nextRunAt) found = [...found].sort((a, b) => a.nextRunAt.getTime() - b.nextRunAt.getTime())
         return found.slice(0, take ?? found.length).map((job) => pick(job, select))
       },
-      findUnique: async ({ where, select }: { where: { id: string }; select?: Record<string, boolean> }) => {
+      findUnique: async ({ where, select }: { where: { id: string } | { key: string }; select?: Record<string, boolean> }) => {
         await tick()
-        const job = jobs.find((row) => row.id === where.id)
+        const job = jobs.find((row) => matches(row, where))
         return job ? pick(job, select) : null
       },
       count: async ({ where }: { where?: Row } = {}) => {
