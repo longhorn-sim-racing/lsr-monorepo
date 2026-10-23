@@ -19,6 +19,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:reset": "prisma migrate reset --force",
     "set-role": "tsx scripts/set-role.ts",
+    "jack:tick": "tsx scripts/jack-tick.ts",
+    "jack:scheduler-setup": "tsx scripts/jack-scheduler-setup.ts",
     "sponsor-packet": "tsx scripts/sponsor-packet.ts"
   },
   "prisma": {
