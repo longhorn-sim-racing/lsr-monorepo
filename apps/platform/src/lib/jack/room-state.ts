@@ -227,6 +227,7 @@ function sameFinal(a: JackMessageView, b: JackMessageView): boolean {
     a.streamSeq === b.streamSeq &&
     a.answered === b.answered &&
     a.continues === b.continues &&
+    a.scheduled === b.scheduled &&
     a.expectsAnswer === b.expectsAnswer &&
     a.createdAt === b.createdAt &&
     JSON.stringify(a.author) === JSON.stringify(b.author) &&
@@ -351,14 +352,15 @@ export const STUCK_QUIET_MS = ROOM_LOCK_STALE_MS + 15_000
 
 /**
  * What the room may be stuck on, before counting how long it's been quiet: "unanswered" when an
- * officer message hasn't been picked up by a reply (`answered`, not the order: one posted while a reply
- * was being set up sorts above it) and nothing is streaming; "stuck" when a reply is still streaming.
+ * officer message (or a continue or scheduled note) hasn't been picked up by a reply (`answered`, not the
+ * order: one posted while a reply was being set up sorts above it) and nothing is streaming; "stuck"
+ * when a reply is still streaming.
  * An officer message that expects no answer (a mention-mode room, no mention) never counts. Null when
  * nothing is waiting
  */
 export function stallCandidate(messages: JackMessageView[]): "unanswered" | "stuck" | null {
   if (messages.some((m) => m.status === "streaming")) return "stuck"
-  return messages.some((m) => (m.author.kind === "user" || m.continues) && !m.answered && m.expectsAnswer !== false) ? "unanswered" : null
+  return messages.some((m) => (m.author.kind === "user" || m.continues || m.scheduled) && !m.answered && m.expectsAnswer !== false) ? "unanswered" : null
 }
 
 /** How long a stall candidate has to stay quiet before the room offers to ask Jack to continue */
