@@ -43,6 +43,8 @@ describe("overdue action items", () => {
         { title: "No owner: 1 overdue", href: "/admin/action-items?owner=none&status=overdue", detail: "Oldest due 2026-10-19 (3 days ago)" },
         { title: "Alex: 1 overdue", href: "/admin/action-items?owner=alex&status=overdue", detail: "Oldest due 2026-10-21 (1 day ago)" },
       ],
+      // Items are owners, all listed: "and N more" counts owners, not the 4 items
+      moreItems: 0,
     })
   })
 
@@ -50,7 +52,7 @@ describe("overdue action items", () => {
     db.actionItem.findMany.mockResolvedValue([{ status: "open", dueAt: due("2026-10-19"), owner: DYLAN }])
     expect((await overdueActionItems.run({ now: NOW })).severity).toBe("info")
     db.actionItem.findMany.mockResolvedValue([])
-    expect(await overdueActionItems.run({ now: NOW })).toEqual({ count: 0, severity: "info", items: [] })
+    expect(await overdueActionItems.run({ now: NOW })).toEqual({ count: 0, severity: "info", items: [], moreItems: 0 })
   })
 })
 

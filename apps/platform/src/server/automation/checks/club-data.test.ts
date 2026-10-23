@@ -50,6 +50,7 @@ describe("the unreviewed applications check", () => {
       count: 2,
       severity: "warning",
       items: [{ title: "Media: 2 applications with no review", href: "/admin/recruiting?cycle=fall-2026&team=media", detail: "Oldest waiting 9 days" }],
+      moreItems: 0,
     })
     expect(JSON.stringify(result)).not.toMatch(/Private Name/)
   })
@@ -58,6 +59,6 @@ describe("the unreviewed applications check", () => {
     db.applicationTrack.findMany.mockResolvedValue([track("1", "media", "SUBMITTED", 2)])
     expect(await unreviewedApplications.run({ now })).toMatchObject({ count: 1, severity: "info" })
     db.applicationTrack.findMany.mockResolvedValue([track("4", "technology", "ACCEPTED", 12)])
-    expect(await unreviewedApplications.run({ now })).toEqual({ count: 0, severity: "info", items: [] })
+    expect(await unreviewedApplications.run({ now })).toEqual({ count: 0, severity: "info", items: [], moreItems: 0 })
   })
 })

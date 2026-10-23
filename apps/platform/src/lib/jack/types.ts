@@ -60,10 +60,10 @@ export type JackMessageView = {
   /** The last streamed delta included in `content` */
   streamSeq: number
   /**
-   * Officer messages and continue notes: whether a reply has picked it up (JackMessage.answeredById is
-   * set). Always true for other messages, which nobody answers. A message waiting for an answer can sort above the reply
-   * that's streaming (it was posted while the reply was being set up), so this, not the order, says
-   * what's still waiting
+   * Officer messages, continue notes and scheduled notes: whether a reply has picked it up
+   * (JackMessage.answeredById is set). Always true for other messages, which nobody answers. A message
+   * waiting for an answer can sort above the reply that's streaming (it was posted while the reply was
+   * being set up), so this, not the order, says what's still waiting
    */
   answered: boolean
   /**
@@ -71,6 +71,12 @@ export type JackMessageView = {
    * room starts a run for it as soon as it sees one waiting
    */
   continues?: true
+  /**
+   * A room note a scheduled job posted for Jack to answer (a recurring question, the weekly digest's
+   * summary, design §11). Its own job runs the room for it (and tries again when the room is busy); one
+   * left waiting makes the room offer to continue, like an officer message
+   */
+  scheduled?: true
   /** Files an officer attached, in order (G5) */
   files?: JackMessageFile[]
   /**

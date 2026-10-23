@@ -15,6 +15,7 @@ import { JACK_MODELS } from "./models"
 import { buildSystemPrompt } from "./prompt"
 import { releaseRoomLock, renewRoomLock, tryAcquireRoomLock } from "./room-lock"
 import { REPLY_TRIGGERS } from "./reply-triggers"
+import { scheduledHistoryRows, scheduledPersona } from "./scheduled-replies"
 import { getMonthSpend } from "./spend"
 import { nameRoom, STAND_TIMEOUT_MS } from "./stand"
 import { JACK_TOOLS } from "./tools"
@@ -256,10 +257,12 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   // A reply to officers also takes what they said among themselves meanwhile (mention mode) as its turn's context
   const asides = requestType === "room" && waiting.some((m) => m.kind === "user") ? await waitingAsides(roomId, waiting[waiting.length - 1]) : []
   const taken = [...waiting.map((m) => m.id), ...asides]
+  // A scheduled note is answered by its recurring question's persona (Jack or Stand), not the room's
+  const scheduledAs = requestType === "scheduled" ? await scheduledPersona(waiting[0]) : null
   const reply = await prisma.$transaction(async (tx) => {
     const room = await tx.jackRoom.findUnique({ where: { id: roomId }, select: { persona: true } })
     const created = await tx.jackMessage.create({
-      data: { roomId, kind: "assistant", persona: room?.persona ?? "jack", status: "streaming" },
+      data: { roomId, kind: "assistant", persona: scheduledAs ?? room?.persona ?? "jack", status: "streaming" },
       include: jackMessageInclude,
     })
     await tx.jackMessage.updateMany({
@@ -407,13 +410,19 @@ async function produce(
     )
   }
 
-  const rows = await prisma.jackMessage.findMany({
-    where: { roomId },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: HISTORY_ROWS,
-    include: jackMessageInclude,
-  })
-  const conversation = buildConversation(rows.reverse(), reply.id)
+  // A scheduled note (a recurring question) is answered from a short history: it and its job's last answer
+  const rows =
+    run.requestType === "scheduled"
+      ? await scheduledHistoryRows(roomId, waiting[0], reply)
+      : (
+          await prisma.jackMessage.findMany({
+            where: { roomId },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            take: HISTORY_ROWS,
+            include: jackMessageInclude,
+          })
+        ).reverse()
+  const conversation = buildConversation(rows, reply.id)
   // The files posted in this turn go with it: photos and PDFs as images and documents, others summarized
   const history = await attachTurnFiles(conversation.history, conversation.attached, { signal: run.signal })
   const latest = waiting[waiting.length - 1]

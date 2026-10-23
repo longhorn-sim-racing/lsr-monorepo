@@ -33,7 +33,7 @@ describe("the email bounce check", () => {
   it("counts addresses from the last week, grouped by email, with no address in the items", async () => {
     const result = await emailBounces.run({ now })
     expect(delivery.bouncedRecipients).toHaveBeenCalledWith(new Date(now.getTime() - BOUNCE_WINDOW_DAYS * 86_400_000), 500, { hideOfficerApplicants: true })
-    expect(result).toMatchObject({ count: 3, severity: "warning" })
+    expect(result).toMatchObject({ count: 3, severity: "warning", moreItems: 0 })
     expect(result.items.map((i) => i.title)).toEqual(["GM 2 is tonight: 2 addresses didn't get it", "An email sent outside the site: 1 address didn't get it"])
     expect(result.items[0].detail).toBe("Last Oct 21")
     expect(JSON.stringify(result)).not.toContain("@example.com")
@@ -43,6 +43,6 @@ describe("the email bounce check", () => {
     delivery.bouncedRecipients.mockResolvedValueOnce({ total: 1, rows: [row("a@example.com", "complained", "News", 1)] })
     expect((await emailBounces.run({ now })).severity).toBe("danger")
     delivery.bouncedRecipients.mockResolvedValueOnce({ total: 0, rows: [] })
-    expect(await emailBounces.run({ now })).toEqual({ count: 0, severity: "info", items: [] })
+    expect(await emailBounces.run({ now })).toEqual({ count: 0, severity: "info", items: [], moreItems: 0 })
   })
 })

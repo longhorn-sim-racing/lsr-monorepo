@@ -1,12 +1,15 @@
 import { Prisma } from "@prisma/client"
 import { fromZonedTime } from "date-fns-tz"
 import { isFeedbackRating, type JackFeedbackRating } from "@/lib/jack/feedback"
+import { DIGEST_JOB_KEY } from "@/lib/jack/recurring"
 import type { JackPersonaKey } from "@/lib/jack/types"
+import { automationBudgetUsd } from "@/server/automation/cap"
 import { prisma } from "@/server/db"
 import { roundUsd } from "./cost"
 import { EVAL_ROOM_PREFIX } from "./eval-support"
 import { REPLY_TRIGGERS } from "./reply-triggers"
 import { jackMonthlyBudgetUsd } from "./spend"
+import { NAME_ROOM_JOB } from "./stand"
 
 /**
  * The Usage page (Jack → Usage, design §10 and §13): what Jack cost by month, by persona, and by officer
@@ -114,8 +117,6 @@ export async function monthlyCosts(months: UsageMonth[]): Promise<MonthCost[]> {
 // by officer and automation
 // ---------------------------------------------------------------------------
 
-/** The JackUsage job Stand's room naming saves (stand.ts) */
-const NAME_ROOM_JOB = "name_room"
 
 export type SpenderKind = "officer" | "automation" | "side_job" | "unlinked"
 
@@ -124,14 +125,15 @@ export type Spender = { key: string; label: string; kind: SpenderKind; calls: nu
 export type ReplyCostRow = {
   costUsd: Prisma.Decimal | number | null
   /** The message that started the reply: the newest one it answers, a scheduled note first */
-  answers: { authorUserId: string | null; scheduled: boolean; author: { displayName: string } | null }[]
+  answers: { authorUserId: string | null; scheduled: boolean; jobKey?: string | null; author: { displayName: string } | null }[]
 }
 
 export type SideJobRow = { job: string; persona: string; calls: number; costUsd: number }
 
 /**
  * Who each reply's cost goes to: the officer whose message started it (the reply ran as them), or
- * automation when it answered a scheduled note (a recurring question: no officer asked). Side jobs from
+ * automation when it answered a scheduled note (a recurring question, or the weekly digest's summary: no
+ * officer asked). Side jobs from
  * JackUsage go by job: Stand naming rooms, and anything else (later automations, such as digest summaries)
  * as automation. Highest cost first.
  */
@@ -147,6 +149,7 @@ export function attributeSpend(replies: ReplyCostRow[], sideJobs: SideJobRow[]):
     const cost = Number(reply.costUsd ?? 0)
     const start = reply.answers[0]
     if (!start) add("unlinked", "Replies to no message (older or deleted)", "unlinked", 1, cost)
+    else if (start.scheduled && start.jobKey === DIGEST_JOB_KEY) add("automation:digest", "Weekly digest summaries", "automation", 1, cost)
     else if (start.scheduled) add("automation:recurring", "Recurring questions", "automation", 1, cost)
     else if (start.authorUserId) add(`officer:${start.authorUserId}`, start.author?.displayName ?? "Former officer", "officer", 1, cost)
     else add("officer:former", "Former officers", "officer", 1, cost)
@@ -170,7 +173,7 @@ export async function spendBySource(month: UsageMonth): Promise<Spender[]> {
           where: { OR: REPLY_TRIGGERS },
           orderBy: [{ scheduled: "desc" }, { createdAt: "desc" }, { id: "desc" }],
           take: 1,
-          select: { authorUserId: true, scheduled: true, author: { select: { displayName: true } } },
+          select: { authorUserId: true, scheduled: true, jobKey: true, author: { select: { displayName: true } } },
         },
       },
     }),
@@ -332,6 +335,8 @@ export type UsageOverview = {
   months: MonthCost[]
   selected: MonthCost
   spenders: Spender[]
+  /** The month's automations (recurring questions, digest summaries) against their own cap inside the budget */
+  automation: { spentUsd: number; capUsd: number }
   feedback: { counts: FeedbackCounts; down: ThumbsDown[] }
   rooms: number
   words: CommonWord[]
@@ -357,6 +362,8 @@ export async function getUsageOverview(raw: string | string[] | undefined, now =
     months: costs,
     selected: selected ?? costs.find((c) => c.month.key === month.key)!,
     spenders,
+    // Automations are exactly the spenders counted as automation (the cap's own sum, automation/cap.ts)
+    automation: { spentUsd: roundUsd(spenders.filter((s) => s.kind === "automation").reduce((sum, s) => sum + s.costUsd, 0)), capUsd: automationBudgetUsd() },
     feedback,
     rooms: questions.length,
     words: commonWords(questions),

@@ -130,6 +130,21 @@ describe("by officer and automation", () => {
     ])
   })
 
+  it("tells the weekly digest's summaries apart from recurring questions by the note's job", () => {
+    const spenders = attributeSpend(
+      [
+        reply(0.12, { authorUserId: "gray", scheduled: true, jobKey: "recurring:q-1", author: { displayName: "Gray" } }),
+        reply(0.08, { authorUserId: "gray", scheduled: true, jobKey: "digest.weekly", author: { displayName: "Gray" } }),
+        reply(0.05, { authorUserId: "gray", scheduled: true, jobKey: null, author: { displayName: "Gray" } }),
+      ],
+      []
+    )
+    expect(spenders.map((s) => [s.label, s.kind, s.calls, s.costUsd])).toEqual([
+      ["Recurring questions", "automation", 2, 0.17],
+      ["Weekly digest summaries", "automation", 1, 0.08],
+    ])
+  })
+
   it("asks for the message that started each reply (from the list the reply loop answers): a scheduled note first, else the newest it answered", async () => {
     db.jackUsage.groupBy.mockResolvedValue([{ job: "name_room", persona: "stand", _sum: { costUsd: 0.002 }, _count: { _all: 2 } }])
     const month = monthFromKey("2026-10")!
@@ -222,6 +237,17 @@ describe("getUsageOverview", () => {
     expect(usage.months.map((m) => m.month.key)).toHaveLength(12)
     expect(usage.months[0].month.key).toBe("2026-10")
     expect(db.$queryRaw).toHaveBeenCalledTimes(2)
+  })
+
+  it("shows the month's automations against their own cap", async () => {
+    vi.stubEnv("JACK_AUTOMATION_BUDGET_USD", "8")
+    db.$queryRaw.mockResolvedValue([])
+    db.jackMessage.findMany.mockResolvedValue([{ costUsd: 0.5, answers: [{ authorUserId: "gray", scheduled: true, jobKey: "recurring:q-1", author: { displayName: "Gray" } }] }])
+    db.jackUsage.groupBy.mockResolvedValue([
+      { job: "name_room", persona: "stand", _sum: { costUsd: 0.01 }, _count: { _all: 1 } },
+      { job: "some automation", persona: "stand", _sum: { costUsd: 0.25 }, _count: { _all: 1 } },
+    ])
+    expect((await getUsageOverview(undefined, NOW)).automation).toEqual({ spentUsd: 0.75, capUsd: 8 })
   })
 
   it("adds up a month older than the table's twelve on its own", async () => {

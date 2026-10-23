@@ -477,7 +477,13 @@ const MessageRow = memo(function MessageRow({ message, anchored = false, message
         </div>
         {detail ? (
           <p className="mx-auto max-h-80 w-full max-w-3xl overflow-y-auto whitespace-pre-wrap break-words rounded-md border bg-admin-surface px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-            {detail}
+            {/* Each line may end with a site path to open, as the lead can (the weekly digest's items do) */}
+            {detail.split("\n").map((line, i) => (
+              <Fragment key={i}>
+                {i ? "\n" : null}
+                <NoteText text={line} />
+              </Fragment>
+            ))}
           </p>
         ) : null}
       </li>

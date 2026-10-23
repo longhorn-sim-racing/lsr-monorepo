@@ -1,10 +1,10 @@
 import type { Prisma } from "@prisma/client"
+import { missingResultsWhere as missingResultsFor, RESULTS_LOOKBACK_DAYS } from "@/lib/events"
 import { prisma } from "@/server/db"
 
 const DAY = 24 * 60 * 60 * 1000
 
-/** How far back the "results missing" list looks, so old seasons don't sit there forever */
-export const RESULTS_LOOKBACK_DAYS = 90
+export { RESULTS_LOOKBACK_DAYS }
 
 /**
  * Everything the admin Overview shows, in one round of cheap queries (counts and small `take`s).
@@ -13,16 +13,11 @@ export const RESULTS_LOOKBACK_DAYS = 90
 export async function getOverview(now = new Date()) {
   const weekAgo = new Date(now.getTime() - 7 * DAY)
   const weekAhead = new Date(now.getTime() + 7 * DAY)
-  const lookback = new Date(now.getTime() - RESULTS_LOOKBACK_DAYS * DAY)
 
   // Ended events in a series that has a season (a racing series), with no ingested upload. "Ended" matches
   // getEffectiveEventStatus: published (or auto-published) and past its end time, or a legacy COMPLETED.
-  const missingResultsWhere: Prisma.EventWhereInput = {
-    endsAtUtc: { lt: now, gte: lookback },
-    OR: [{ status: { in: ["PUBLISHED", "COMPLETED"] } }, { status: "SCHEDULED", publishedAt: { lte: now } }],
-    series: { seasons: { some: {} } },
-    rawResultUploads: { none: { status: "INGESTED" } },
-  }
+  // The digest's results check uses the same rule
+  const missingResultsWhere: Prisma.EventWhereInput = missingResultsFor(now)
 
   // Events running now or starting in the next 7 days. Drafts have their own list; cancelled ones don't need anything.
   const upcomingWhere: Prisma.EventWhereInput = {
