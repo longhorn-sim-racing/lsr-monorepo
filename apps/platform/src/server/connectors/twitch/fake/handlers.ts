@@ -11,8 +11,9 @@ import { EVENTSUB_HEADERS, eventSubSignature } from "../eventsub"
  * - Helix checks Bearer + Client-Id, knows app from user tokens (EventSub refuses user tokens), sends
  *   Ratelimit-* headers, and can fail with a 429 or a 503;
  * - a channel that goes live and offline (a new stream id each time, viewers that wander, an optional
- *   lag where Get Streams stays empty after going live, and flapping), archive VODs with paging, and the
- *   follower total (the list only for the club's user token);
+ *   lag where Get Streams stays empty after going live, and flapping), archive VODs with paging (a live
+ *   broadcast's archive is listed while it's live, as on Twitch), and the follower total (the list only
+ *   for the club's user token);
  * - EventSub subscriptions: create (202, then a signed challenge to the callback; enabled only when the
  *   callback echoes it), 409 for a duplicate, list with one filter, delete; and notifications or
  *   revocations sent signed to the callbacks, with knobs for a resend, a stale timestamp and a bad signature.
@@ -271,10 +272,13 @@ export const twitchFake: FakeService = {
     const json = async (request: Request) => ((await request.json().catch(() => ({}))) ?? {}) as Record<string, unknown>
     const form = async (request: Request) => new URLSearchParams(await request.text())
 
+    /** A broadcast's archive VOD: Twitch lists it from go-live on, its duration growing, and keeps it after (same id) */
+    const archiveOf = (stream: FakeStream, views: number): FakeVideo => ({ id: `9${stream.id}`, streamId: stream.id, title: stream.title, createdAt: stream.startedAt, seconds: Math.max(60, Math.round((Date.now() - stream.startedAt) / 1000)), views })
+
     function goOffline(): FakeStream | null {
       const ended = live
       if (!ended) return null
-      videos.unshift({ id: String(335922000 + next++), streamId: ended.id, title: ended.title, createdAt: ended.startedAt, seconds: Math.max(60, Math.round((Date.now() - ended.startedAt) / 1000)), views: Math.max(1, Math.round(ended.viewers * 1.7)) })
+      videos.unshift(archiveOf(ended, Math.max(1, Math.round(ended.viewers * 1.7))))
       live = null
       return ended
     }
@@ -404,7 +408,8 @@ export const twitchFake: FakeService = {
           const found = videos.filter((video) => ids.includes(video.id))
           return found.length ? ok({ data: found.map(videoJson), pagination: {} }) : error(404, "Videos not found", rateHeaders())
         }
-        const matching = userId === TWITCH_FAKE.broadcasterId && (type === "all" || type === "archive") ? [...videos].sort((a, b) => b.createdAt - a.createdAt) : []
+        const archives = live?.type === "live" ? [archiveOf(live, 0), ...videos] : videos
+        const matching = userId === TWITCH_FAKE.broadcasterId && (type === "all" || type === "archive") ? [...archives].sort((a, b) => b.createdAt - a.createdAt) : []
         if (url.searchParams.get("sort") === "views") matching.sort((a, b) => b.views - a.views)
         const first = Math.min(100, Math.max(1, Number(url.searchParams.get("first") ?? 20) || 20))
         const offset = Number(Buffer.from(url.searchParams.get("after") ?? "", "base64url").toString() || 0) || 0

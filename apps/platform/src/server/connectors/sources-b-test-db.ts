@@ -1,7 +1,8 @@
 /**
  * TESTS ONLY: the Twitch and Instagram insights tables in memory, answering the Prisma calls the
- * sources-b code makes (the stream lifecycle, the jobs, the webhook), so their tests check what ends up
- * stored rather than which calls were made. Only the where-clause shapes that code uses are understood.
+ * sources-b code makes (the stream lifecycle, the jobs, the webhook, the Twitch setting's row lock, the
+ * live check's cursor), so their tests check what ends up stored rather than which calls were made.
+ * Only the where-clause shapes and raw SQL that code uses are understood.
  */
 
 type Row = Record<string, unknown>
@@ -125,14 +126,35 @@ function table(keyOf: (row: Row) => string, defaults: Row = {}) {
 }
 
 export function fakeSourcesBDb() {
-  return {
+  const systemSetting = table((r) => String(r.key))
+  const sql = (strings: TemplateStringsArray) => strings.join("?")
+  let queue: Promise<unknown> = Promise.resolve()
+  const db = {
     twitchStream: table((r) => String(r.id), { endedAt: null, gameName: null, peakViewers: 0, avgViewers: null, vodId: null, vodViews: null, vodViewsAt: null }),
     twitchViewerSample: table((r) => `${r.streamId}@${(r.at as Date).toISOString()}`),
     twitchChannelDaily: table((r) => (r.date as Date).toISOString()),
     twitchEventSubMessage: table((r) => String(r.id), { receivedAt: new Date() }),
     instagramAccountDaily: table((r) => (r.date as Date).toISOString(), { reach: null, views: null, accountsEngaged: null, totalInteractions: null, follows: null, unfollows: null }),
     instagramPost: table((r) => String(r.id), { reach: null, likes: null, comments: null, saved: null, shares: null, views: null, insightsAt: null, hidden: false }),
+    connectorState: table((r) => String(r.id), { enabled: false, lastSyncAt: null, lastError: null, lastErrorAt: null, cursor: null }),
+    systemSetting,
+    // withTwitchSettings' row lock: the insert-if-missing, the SELECT … FOR UPDATE, and transactions one at a time
+    async $executeRaw(strings: TemplateStringsArray, ...values: unknown[]) {
+      if (!sql(strings).includes(`INSERT INTO "SystemSetting"`)) throw new Error(`fake db: unsupported $executeRaw: ${sql(strings)}`)
+      return (await systemSetting.createMany({ data: [{ key: values[0], value: "{}" }], skipDuplicates: true })).count
+    },
+    async $queryRaw(strings: TemplateStringsArray, ...values: unknown[]) {
+      if (!sql(strings).includes(`FROM "SystemSetting"`)) throw new Error(`fake db: unsupported $queryRaw: ${sql(strings)}`)
+      const row = systemSetting.rows.get(String(values[0]))
+      return row ? [{ value: row.value }] : []
+    },
+    async $transaction<R>(run: (tx: unknown) => Promise<R>): Promise<R> {
+      const result = queue.then(() => run(db))
+      queue = result.catch(() => undefined)
+      return result
+    },
   }
+  return db
 }
 
 export type FakeSourcesBDb = ReturnType<typeof fakeSourcesBDb>
