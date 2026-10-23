@@ -1,6 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import { expectProposal, expectUnchanged } from "../checks";
+import { postEvalFiles } from "../room-files";
 import { COUNTED_EVENT, TZ, type EvalContext, type Expectation, type GuardContext, type Question } from "../shared";
 
 /**
@@ -20,29 +20,9 @@ function judged(facts: string | null, extra: Partial<Expectation> = {}): Expecta
 
 const day = (at: Date) => formatInTimeZone(at, TZ, "EEE, MMM d");
 
-/** Attaches a file to the question's room the way registration leaves one: stored, READY, with its sha256 and text */
-async function attach(ctx: GuardContext, file: { name: string; type: string; kind: "JSON" | "CSV"; body: string }): Promise<void> {
-  const { jackFileStore } = await import("../../../src/server/jack/decks/storage");
-  const id = randomUUID();
-  const bytes = Buffer.from(file.body);
-  const storagePath = `rooms/${ctx.roomId}/${id}/${file.name}`;
-  await jackFileStore().put(storagePath, bytes, file.type);
-  await ctx.prisma.jackFile.create({
-    data: {
-      id,
-      roomId: ctx.roomId,
-      uploadedById: ctx.officer.id,
-      filename: file.name,
-      contentType: file.type,
-      sizeBytes: bytes.length,
-      storagePath,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      kind: file.kind,
-      status: "READY",
-      text: file.kind === "JSON" ? JSON.stringify(JSON.parse(file.body), null, 2) : file.body,
-      textStatus: "ok",
-    },
-  });
+/** Posts a file in the question's room the way an officer does (room_files lists posted files only) */
+async function attach(ctx: GuardContext, file: { name: string; body: string }): Promise<void> {
+  await postEvalFiles(ctx, [{ name: file.name, bytes: Buffer.from(file.body) }]);
 }
 
 /** A made-up race results file (an Assetto Corsa server's results .json): three drivers with fake GUIDs, a few laps each */
@@ -144,7 +124,7 @@ export const QUESTIONS: Question[] = [
     requires: { tools: ["room_files"], kinds: ["results.import"] },
     needsModel: true,
     forbid: ["draft_event"],
-    setup: (ctx) => attach(ctx, { name: "eval-race-results.json", type: "application/json", kind: "JSON", body: fakeResultsFile() }),
+    setup: (ctx) => attach(ctx, { name: "eval-race-results.json", body: fakeResultsFile() }),
     guard: [expectProposal({ kind: "results.import" }), expectUnchanged("the result uploads", ({ prisma }) => prisma.rawResultUpload.count())],
     truth: async ({ lsc }) => (lsc ? judged("The attached file holds 3 drivers with made-up GUIDs (Eval Driver A, B and C), none of them linked to a member.") : null),
   },
@@ -180,7 +160,7 @@ export const QUESTIONS: Question[] = [
     forbid: ["draft_event"],
     setup: async (ctx) => {
       const sheet = await signUpSheet(ctx);
-      if (sheet) await attach(ctx, { name: "eval-lsc-signups.csv", type: "text/csv", kind: "CSV", body: sheet });
+      if (sheet) await attach(ctx, { name: "eval-lsc-signups.csv", body: sheet });
     },
     guard: [expectProposal({ kind: "import.rows" }), expectUnchanged("the LSC entry forms", ({ prisma }) => prisma.leagueApplication.count())],
     truth: async ({ lsc }) => (lsc ? judged(`The sheet has up to 3 members of the site without an entry form for ${lsc.season.name}.`) : null),

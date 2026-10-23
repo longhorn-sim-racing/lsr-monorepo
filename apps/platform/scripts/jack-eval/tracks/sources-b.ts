@@ -1,4 +1,4 @@
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { mentionsNumber } from "../../../src/server/jack/eval-support";
 import { injectionCase } from "../checks";
 import { number, TZ, type EvalContext, type Expectation, type Question } from "../shared";
@@ -71,17 +71,29 @@ export const QUESTIONS: Question[] = [
     ask: "How many times did we stream on Twitch in the last 30 days, and which stream had the highest peak?",
     requires: TWITCH,
     truth: async (ctx) => {
-      const recent = await streams(ctx, new Date(ctx.now.getTime() - 30 * DAY));
-      if (!recent.length) return null;
-      const best = recent.filter((s) => s.counted).sort((a, b) => b.peakViewers - a.peakViewers)[0];
-      const words = best ? titleWords(best.title) : [];
+      // "The last 30 days" as 720 hours back, or as whole Central days from midnight 30 days ago: either reading is right
+      const back = new Date(ctx.now.getTime() - 30 * DAY);
+      const readings = [
+        { window: "the last 720 hours", list: await streams(ctx, back) },
+        { window: `whole Central days since ${formatInTimeZone(back, TZ, "MMM d")}`, list: await streams(ctx, fromZonedTime(`${formatInTimeZone(back, TZ, "yyyy-MM-dd")}T00:00:00`, TZ)) },
+      ]
+        .map((r) => ({ ...r, best: r.list.filter((s) => s.counted).sort((a, b) => b.peakViewers - a.peakViewers)[0] }))
+        .filter((r, i, all) => i === 0 || r.list.length !== all[0].list.length);
+      const [recent, best] = [readings[0].list, readings[0].best];
+      if (!recent.length && readings.length === 1) return null;
+      const said = (r: (typeof readings)[number]) =>
+        `${r.list.length} streams started in ${r.window}.${r.best ? ` Highest peak: "${r.best.title}" on ${dayTime(r.best.startedAt)} with ${r.best.peakViewers} viewers.` : " None had viewers counted."}`;
       return {
-        expected: `${recent.length} streams${best ? `; the highest peak was "${best.title}" (${best.peakViewers})` : ""}`,
-        facts: `${recent.length} streams started in the last 30 days.${best ? ` Highest peak: "${best.title}" on ${dayTime(best.startedAt)} with ${best.peakViewers} viewers.` : " None had viewers counted."}`,
+        expected: `${recent.length} streams${best ? `; the highest peak was "${best.title}" (${best.peakViewers})` : ""}${readings.length > 1 ? ` (or ${readings[1].list.length} counting whole days)` : ""}`,
+        facts: readings.map(said).join(" Either window is a fair reading of 'the last 30 days' if the answer says which it used. "),
         check: ({ text }) => {
-          if (!mentionsNumber(text, recent.length, ["stream", "time", "broadcast"])) return `doesn't say ${recent.length} streams`;
-          if (best && !mentionsNumber(text, best.peakViewers) && !words.some((w) => text.toLowerCase().includes(w.toLowerCase()))) return `doesn't name the highest-peak stream ("${best.title}")`;
-          return null;
+          const problems = readings.map((r) => {
+            if (!mentionsNumber(text, r.list.length, ["stream", "time", "broadcast"])) return `doesn't say ${r.list.length} streams`;
+            const words = r.best ? titleWords(r.best.title) : [];
+            if (r.best && !mentionsNumber(text, r.best.peakViewers) && !words.some((w) => text.toLowerCase().includes(w.toLowerCase()))) return `doesn't name the highest-peak stream ("${r.best.title}")`;
+            return null;
+          });
+          return problems.includes(null) ? null : problems[0];
         },
         fakeAnswer: `${recent.length} streams. The highest peak was ${best ? `"${best.title}" with ${best.peakViewers} viewers` : "unknown"}.`,
         fakeCalls: [{ name: "twitch_stats", input: { view: "streams" } }],
