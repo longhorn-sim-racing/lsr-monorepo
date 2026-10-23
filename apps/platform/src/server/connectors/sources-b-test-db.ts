@@ -13,7 +13,7 @@ function compare(value: unknown, condition: unknown): boolean {
   if (typeof condition !== "object") return value === condition
   const c = condition as Record<string, unknown>
   const v = value as number | Date
-  if ("in" in c && !(c.in as unknown[]).includes(value)) return false
+  if ("in" in c && !(c.in as unknown[]).some((x) => (x instanceof Date && value instanceof Date ? x.getTime() === value.getTime() : x === value))) return false
   if ("not" in c && compare(value, c.not)) return false
   if ("lt" in c && !(v !== null && v < (c.lt as number | Date))) return false
   if ("lte" in c && !(v !== null && v <= (c.lte as number | Date))) return false
