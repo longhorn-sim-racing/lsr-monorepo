@@ -63,7 +63,7 @@ import { cleanUpEvalRooms, describeCleanup, evalRoomId, fileStoreCleanup, leftov
 import { decksIn, DESIGN } from "./jack-eval/design";
 import { APP_DIR } from "./jack-eval/env";
 import { EVERYDAY } from "./jack-eval/everyday";
-import { JudgeDeclined, judgeAnswer, judgeCostUsd, judgePair, judgeSystem, requestJudgeTools, toolInstructions, type JudgeGrade, type PairGrade, type ToolTrace } from "./jack-eval/judge";
+import { JudgeDeclined, judgeAnswer, judgeCostUsd, judgeTraces, judgePair, judgeSystem, requestJudgeTools, toolInstructions, type JudgeGrade, type PairGrade, type ToolTrace } from "./jack-eval/judge";
 import { loadLsc, type Answer, type EvalContext, type Exchange, type Group, type GuardCheck, type GuardContext, type Question } from "./jack-eval/shared";
 import { questionSet } from "./jack-eval/tracks";
 
@@ -418,7 +418,7 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
     // The judge, blind to the model
     const expect = question.expect ?? GROUP_EXPECT[question.group ?? "everyday"];
     const facts = truth.facts ?? (truth.judgeOnly ? undefined : `The right answer: ${truth.expected}.`);
-    const traces: ToolTrace[] = seen.map((s, i) => ({ ...s, ms: out.parts[i]?.ms }));
+    const traces = judgeTraces(seen, out.parts);
     let judged: Awaited<ReturnType<typeof judgeAnswer>> | null = null;
     let judgeProblem: string | null = null;
     const images = c.judge && question.group === "design" ? await slideImages(answer) : undefined;

@@ -4,7 +4,6 @@ import { prisma } from "@/server/db"
 import type { ClaudeFilesClient } from "@/server/connectors/anthropic/files"
 import { errorText } from "@/server/connectors/state"
 import { jackFileStore, type JackFileStore } from "@/server/jack/decks/storage"
-import { webToolsOn } from "@/server/jack/web-tools"
 import { claudeCandidateSelect, claudeFilesForUploads, claudeIdsReachModel, ensureClaudeIds, MAX_DOCUMENT_PAGES, pdfFitsAsDocument } from "./claude"
 import { FILE_KIND_LABEL, fileSummary, shownName, sizeLabel, SUMMARY_CHARS, type HistoryFile } from "./describe"
 
@@ -12,9 +11,9 @@ import { FILE_KIND_LABEL, fileSummary, shownName, sizeLabel, SUMMARY_CHARS, type
  * What Jack sees of the files posted in the turn he's answering (design §5). The history names every
  * file under its message (history.ts); this adds the files themselves after the turn's text:
  * - photos as images and PDFs as documents, by Claude Files id when Claude Files is on (a photo without
- *   one goes as its model copy, inline), within this turn's limits;
- * - past the limits, or a PDF Claude can't take, its text instead; and every PDF while the reply has
- *   web fetch (see turnFileBlocks);
+ *   one goes as its model copy, inline), within this turn's limits. PDFs go as documents with web fetch on
+ *   too: links in a document aren't user input for web_fetch (scripts/check-jack-web-fetch-documents.ts);
+ * - past the limits, or a PDF Claude can't take, its text instead, links neutralized;
  * - text-like files (CSV, spreadsheets, JSON, text, transcripts, Word) as a short summary.
  * Earlier turns' files aren't sent again; room_files reads any of them.
  */
@@ -55,8 +54,6 @@ export type TurnFileOptions = {
   claude?: ClaudeFilesClient | null
   /** Whether Files API ids may go to the model (claudeIdsReachModel) */
   sendIds?: boolean
-  /** Whether the reply has web search and fetch (webToolsOn, the default): PDFs then go as their text */
-  webTools?: boolean
   signal?: AbortSignal
   limits?: Partial<TurnFileLimits>
 }
@@ -109,7 +106,6 @@ type Plan = { file: TurnFile; as: "image" | "document" | "text" | "summary" | "n
 async function turnFileBlocks(attached: HistoryFile[], options: TurnFileOptions): Promise<BetaContentBlockParam[]> {
   const limits = { ...TURN_FILE_LIMITS, ...options.limits }
   const store = options.store ?? jackFileStore()
-  const webTools = options.webTools ?? webToolsOn()
   const rows: TurnFile[] = await prisma.jackFile.findMany({ where: { id: { in: attached.map((file) => file.id) } }, select: turnFileSelect })
   const byId = new Map(rows.map((row) => [row.id, row]))
 
@@ -133,13 +129,6 @@ async function turnFileBlocks(attached: HistoryFile[], options: TurnFileOptions)
       const pages = file.pageCount ?? 0
       if (!pdfFitsAsDocument(file)) {
         plans.push({ file, as: "text", why: file.pageCount && file.pageCount > MAX_DOCUMENT_PAGES ? `it's over ${MAX_DOCUMENT_PAGES} pages, so here's the start of its text` : "here's what could be read of it" })
-      } else if (webTools) {
-        // Not as a document while the reply has web_fetch: its url_sources take every URL in a user turn,
-        // and a document's text may count, so a link planted in an outside PDF (a sponsor packet, a
-        // forwarded form) could be fetched. Its text goes with links neutralized, and room_files read
-        // shows the pages (a tool result, which url_sources excludes). Lift this only after the probe in
-        // docs/jack-2/tracks/files.md shows a document's URLs aren't user input
-        plans.push({ file, as: "text", why: "here's the start of its text. To see its pages, use room_files read with this id" })
       } else if (pdfPages + pages > limits.maxPdfPages || pdfBytes + file.sizeBytes > limits.maxPdfBytes) {
         plans.push({ file, as: "text", why: `this turn's PDFs are over ${limits.maxPdfPages} pages or ${sizeLabel(limits.maxPdfBytes)}, so here's the start of its text` })
       } else {

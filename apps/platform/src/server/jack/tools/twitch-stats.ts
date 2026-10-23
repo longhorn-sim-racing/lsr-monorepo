@@ -4,7 +4,7 @@ import type { JackToolDisplay } from "@/lib/jack/parts"
 import { twitchConnector } from "@/server/connectors/twitch/connector"
 import { findStream, followerSeries, listStreams, streamViewers, twitchOverview, type StreamSummary } from "@/server/queries/twitch"
 import { forModelWithLists, plural, tableDisplay } from "./display"
-import { sourceStatus } from "./source-status"
+import { sourceConnection } from "./source-connection"
 import { centralDateInput, centralRange, CLUB_TZ, ct, ctShort } from "./time"
 import type { JackTool, JackToolResult } from "./types"
 
@@ -72,7 +72,7 @@ const streamsTable = (streams: StreamSummary[], caption?: string) =>
   )
 
 async function overview(now: Date): Promise<JackToolResult> {
-  const [data, connection] = await Promise.all([twitchOverview(now), sourceStatus(twitchConnector)])
+  const [data, connection] = await Promise.all([twitchOverview(now), sourceConnection(twitchConnector, "Twitch")])
   const { live, lastStream, last30, followers } = data
   const displays: JackToolDisplay[] = [
     {
@@ -89,7 +89,7 @@ async function overview(now: Date): Promise<JackToolResult> {
   return {
     forModel: forModelWithLists(
       {
-        connection,
+        connection: connection.note,
         live: live ? { ...streamForModel(live), viewersNow: live.viewersNow, lastCounted: live.lastSampleAt ? ct(live.lastSampleAt) : null } : null,
         lastStream: lastStream ? streamForModel(lastStream) : null,
         last30Days: last30,
@@ -112,12 +112,12 @@ export const twitchStatsTool: JackTool<Input> = {
   async run(args) {
     const now = new Date()
     if (args.view === "overview") return overview(now)
-    const connection = await sourceStatus(twitchConnector)
+    const connection = await sourceConnection(twitchConnector, "Twitch")
 
     if (args.view === "stream") {
       const stream = await findStream(args.streamId, now)
       if (!stream) {
-        return { isError: !!args.streamId, forModel: args.streamId ? `No stream with id ${args.streamId}. Use view streams to find one.` : JSON.stringify({ connection, note: "No streams are stored yet." }), label: "Looked at a Twitch stream (none found)", displays: [] }
+        return { isError: !!args.streamId, forModel: args.streamId ? `No stream with id ${args.streamId}. Use view streams to find one.` : JSON.stringify({ connection: connection.note, note: "No streams are stored yet." }), label: "Looked at a Twitch stream (none found)", displays: [] }
       }
       const viewers = stream.sampled ? await streamViewers(stream.id) : []
       // Counted, but no samples left: they were pruned after 180 days (the peak and average stay)
@@ -132,7 +132,7 @@ export const twitchStatsTool: JackTool<Input> = {
         ? [{ kind: "note", text: note }]
         : [{ kind: "chart", chart: { type: "line", title: `Viewers: ${stream.title || "stream"} (${ctShort(stream.startedAt)})`, xKey: "time", series: [{ key: "viewers", label: "Viewers" }], rows: viewers.map((v) => ({ time: formatInTimeZone(v.at, CLUB_TZ, "h:mm a"), viewers: v.viewers })), yLabel: "Viewers" } }]
       return {
-        forModel: forModelWithLists({ connection, stream: streamForModel(stream), ...(note ? { note } : {}), dataNotes: DATA_NOTES }, [{ key: "viewersByMinute", items: viewers.map((v) => ({ at: ct(v.at), viewers: v.viewers })), keep: "first" }]),
+        forModel: forModelWithLists({ connection: connection.note, stream: streamForModel(stream), ...(note ? { note } : {}), dataNotes: DATA_NOTES }, [{ key: "viewersByMinute", items: viewers.map((v) => ({ at: ct(v.at), viewers: v.viewers })), keep: "first" }]),
         label: `Looked at a Twitch stream (${ctShort(stream.startedAt)})`,
         displays,
       }
@@ -145,7 +145,7 @@ export const twitchStatsTool: JackTool<Input> = {
       const series = await followerSeries({ from: new Date(`${range.from}T00:00:00Z`), to: new Date(`${range.to}T00:00:00Z`) })
       const rows = series.map((p) => ({ date: p.date.toISOString().slice(0, 10), followers: p.followers }))
       return {
-        forModel: forModelWithLists({ connection, from: range.from, to: range.to, note: rows.length ? "One snapshot a day (Central dates); days without one are missing." : "No follower snapshots in this range." }, [{ key: "followersByDay", items: rows, keep: "last", whenTrimmed: "Ask for a shorter range." }]),
+        forModel: forModelWithLists({ connection: connection.note, from: range.from, to: range.to, note: rows.length ? "One snapshot a day (Central dates); days without one are missing." : "No follower snapshots in this range." }, [{ key: "followersByDay", items: rows, keep: "last", whenTrimmed: "Ask for a shorter range." }]),
         label: `Looked at Twitch followers (${rows.length ? `${rows[rows.length - 1].followers} now` : "none stored"})`,
         displays: rows.length > 1 ? [{ kind: "chart", chart: { type: "line", title: "Twitch followers", xKey: "date", series: [{ key: "followers", label: "Followers" }], rows } }] : [],
       }
@@ -153,9 +153,9 @@ export const twitchStatsTool: JackTool<Input> = {
 
     const streams = await listStreams({ from: range.start, to: new Date(range.end.getTime() + 1), limit: args.limit, now })
     return {
-      forModel: forModelWithLists({ connection, from: range.from, to: range.to, count: streams.length, dataNotes: DATA_NOTES }, [{ key: "streams", items: streams.map(streamForModel) }]),
+      forModel: forModelWithLists({ connection: connection.note, from: range.from, to: range.to, count: streams.length, dataNotes: DATA_NOTES }, [{ key: "streams", items: streams.map(streamForModel) }]),
       label: `Looked at Twitch streams (${plural(streams.length, "stream")})`,
-      displays: streams.length ? [streamsTable(streams, `${range.from} to ${range.to}`)] : [{ kind: "note", text: connection.note ?? "No streams in this range." }],
+      displays: streams.length ? [streamsTable(streams, `${range.from} to ${range.to}`)] : [{ kind: "note", text: connection.connected && !connection.failing ? "No streams in this range." : (connection.note ?? "No streams in this range.") }],
     }
   },
 }

@@ -149,17 +149,12 @@ async function main() {
     const rows = await prisma.jackMessage.findMany({ where: { roomId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], include: jackMessageInclude })
     const conversation = buildConversation(rows, reply!.id)
     check("the conversation hands over the turn's files", conversation.attached.map((f) => f.id).join() === [photo.id, pdf.id, csv.id].join(), conversation.attached.map((f) => f.filename).join())
-    const withIds = await attachTurnFiles(conversation.history, conversation.attached, { store, claude, sendIds: true, webTools: false })
+    const withIds = await attachTurnFiles(conversation.history, conversation.attached, { store, claude, sendIds: true })
     const idBlocks = withIds.at(-1)!.content as { type: string; text?: string; source?: { type: string; file_id?: string } }[]
     check("with ids: the photo goes as an image by id", idBlocks.some((b) => b.type === "image" && b.source?.file_id === photo.anthropicFileId))
     check("with ids: the PDF goes as a document by id", idBlocks.some((b) => b.type === "document" && b.source?.file_id === pdf.anthropicFileId))
-    const withWeb = (await attachTurnFiles(conversation.history, conversation.attached, { store, claude, sendIds: true, webTools: true })).at(-1)!.content as typeof idBlocks
-    check(
-      "with web fetch on: the PDF goes as its text, never as a document",
-      !withWeb.some((b) => b.type === "document") && withWeb.some((b) => b.type === "text" && (b.text ?? "").includes(`<attached_file id="${pdf.id}"`) && (b.text ?? "").includes("room_files read"))
-    )
     await claude.remove(photo.anthropicFileId!)
-    await attachTurnFiles(conversation.history, conversation.attached, { store, claude, sendIds: true, webTools: false })
+    await attachTurnFiles(conversation.history, conversation.attached, { store, claude, sendIds: true })
     const healed = await prisma.jackFile.findUniqueOrThrow({ where: { id: photo.id } })
     check("a copy that's gone is uploaded again and recorded", Boolean(healed.anthropicFileId) && healed.anthropicFileId !== photo.anthropicFileId, String(healed.anthropicFileId))
 

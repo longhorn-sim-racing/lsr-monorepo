@@ -1,7 +1,7 @@
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
-import { expectNoProposal, expectProposal, expectUnchanged } from "../checks";
+import { expectNoProposal, expectProposal, expectUnchanged, roomProposals } from "../checks";
 import { SM_FACTS, SM_SEED, seedOwner } from "../seed/sponsors-meetings";
-import { TZ, type Answer, type Expectation, type EvalContext, type PlantContext, type Question } from "../shared";
+import { TZ, type Answer, type Expectation, type EvalContext, type Guard, type PlantContext, type Question } from "../shared";
 
 /**
  * Eval questions from the sponsors-meetings track (design §16). The registry (./index.ts) tags each with
@@ -48,6 +48,28 @@ function lastTuesday(now: Date): Date {
 }
 
 const TUESDAY_MEETING = "evalplant-sm-activity-tuesday";
+
+/** The fake Drive folder's general meeting transcript (the documents track's seeder syncs it), while Google Drive is on in the eval copy */
+const DRIVE_TRANSCRIPT = "Fixture GM transcript.vtt";
+
+async function driveTranscript({ prisma }: Pick<EvalContext, "prisma">): Promise<{ id: string } | null> {
+  const [state, doc] = await Promise.all([
+    prisma.connectorState.findUnique({ where: { id: "google-drive" }, select: { enabled: true } }),
+    prisma.externalDocument.findFirst({ where: { source: "drive", name: DRIVE_TRANSCRIPT, deletedAt: null, text: { not: null } }, select: { id: true } }),
+  ]);
+  return state?.enabled && doc ? doc : null;
+}
+
+/** After the reply, the pending meeting.record names the synced transcript as its documentId (not a room file, not nothing) */
+function namesDriveTranscript(): Guard {
+  return async (ctx) => {
+    const doc = await driveTranscript(ctx);
+    return async () => {
+      const pending = (await roomProposals(ctx)).filter((p) => p.kind === "meeting.record" && p.status === "PENDING");
+      return pending.some((p) => doc && (p.payload as { documentId?: unknown } | null)?.documentId === doc.id) ? null : "the meeting.record proposal doesn't name the Drive transcript as its documentId";
+    };
+  };
+}
 
 export const QUESTIONS: Question[] = [
   {
@@ -204,6 +226,34 @@ export const QUESTIONS: Question[] = [
         ],
         fakeAnswer: "The card records the meeting with the decision and your action item; an officer applies it.",
       }),
+  },
+  {
+    id: "sm-propose-meeting-from-drive-transcript",
+    group: "propose",
+    ask: ({ now }) => `Record the general meeting we held ${formatInTimeZone(now, TZ, "EEEE, MMMM d")} from the GM transcript in our Drive's Transcripts folder, with the showcase budget as a decision.`,
+    expect:
+      "Finds the transcript in the club's Drive with search, reads it, and proposes recording a general meeting from it (the synced document as its transcript) with the showcase budget of 400 dollars as a decision; says an officer applies it and doesn't claim it's recorded.",
+    requires: { tools: ["search", "read"], kinds: ["meeting.record"] },
+    guard: [
+      expectProposal({ kind: "meeting.record" }),
+      namesDriveTranscript(),
+      expectUnchanged("the meetings and decisions", async ({ prisma }) => [await prisma.meeting.count(), await prisma.meetingDecision.count()]),
+    ],
+    truth: async (ctx) => {
+      const doc = await driveTranscript(ctx);
+      if (!doc) return null;
+      return judged(`The Drive document "${DRIVE_TRANSCRIPT}" (in Transcripts) is a general meeting's transcript: Hall B is booked for the fall showcase, and the showcase budget is 400 dollars.`, {
+        fakeCalls: [
+          { name: "search", input: { query: "GM transcript", sources: ["documents"] } },
+          { name: "read", input: { type: "document", id: doc.id } },
+          {
+            name: "propose_meeting",
+            input: { proposal: { kind: "meeting.record", title: "General meeting", type: "general", date: formatInTimeZone(ctx.now, TZ, "yyyy-MM-dd"), documentId: doc.id, decisions: [{ text: "The fall showcase budget is 400 dollars." }] } },
+          },
+        ],
+        fakeAnswer: "The card records the general meeting from the Drive transcript, with the budget as a decision; an officer applies it.",
+      });
+    },
   },
   {
     id: "sm-propose-item-done",

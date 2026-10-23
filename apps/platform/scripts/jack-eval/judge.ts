@@ -4,6 +4,7 @@
  * parseable. Lift is Opus too, so the criteria are concrete checks rather than taste.
  */
 import Anthropic from "@anthropic-ai/sdk";
+import type { ToolPart } from "./shared";
 
 export const JUDGE_MODEL = "claude-opus-5-5";
 /** When Opus declines to grade (its safety checks can trip on a question about secrets), Fable grades instead; it isn't a model under test */
@@ -24,6 +25,25 @@ export function judgeCostUsd(model: string, usage: Anthropic.Usage): number {
 }
 
 export type ToolTrace = { name: string; input: unknown; result: string; error?: string; ms?: number };
+
+/**
+ * What the judge sees of the reply's tools, in the order the room shows them: Jack's own tools with what
+ * they returned (each timed by its part), and the web searches and fetches, which are server tools with no
+ * `run` to wrap, as the queries and pages the room shows
+ */
+export function judgeTraces(seen: ToolTrace[], parts: ToolPart[]): ToolTrace[] {
+  const traces: ToolTrace[] = [];
+  let next = 0;
+  for (const part of parts) {
+    if (part.name === "web_search" || part.name === "web_fetch") {
+      const shown = part.displays.flatMap((d) => (d.kind === "web_sources" ? [{ queries: d.queries, pages: d.sources.map((s) => ({ title: s.title, url: s.url })) }] : []));
+      traces.push({ name: part.name, input: part.input, result: JSON.stringify(shown), ...(part.error ? { error: part.error } : {}), ms: part.ms });
+    } else if (next < seen.length) {
+      traces.push({ ...seen[next++], ms: part.ms });
+    }
+  }
+  return [...traces, ...seen.slice(next)];
+}
 
 export type JudgeInput = {
   question: string;

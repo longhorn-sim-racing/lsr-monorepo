@@ -3,7 +3,7 @@ import type { JackToolDisplay } from "@/lib/jack/parts"
 import { instagramInsightsConnector } from "@/server/connectors/instagram/connector"
 import { instagramAccountDays, instagramInsightsOverview, listPostInsights, POST_SORTS, type PostWithInsights, type WeekTotals } from "@/server/queries/instagram-insights"
 import { forModelWithLists, plural, tableDisplay } from "./display"
-import { sourceStatus } from "./source-status"
+import { sourceConnection } from "./source-connection"
 import { centralDateInput, centralRange, ct, ctShort } from "./time"
 
 import type { JackTool, JackToolResult } from "./types"
@@ -79,7 +79,7 @@ const change = (now: number | null, before: number | null) => (now !== null && b
 const weekForModel = (w: WeekTotals) => ({ daysWithNumbers: w.days, reach: w.reach, views: w.views, accountsEngaged: w.accountsEngaged, interactions: w.totalInteractions, follows: w.follows, unfollows: w.unfollows })
 
 async function overview(now: Date): Promise<JackToolResult> {
-  const [data, connection] = await Promise.all([instagramInsightsOverview(now), sourceStatus(instagramInsightsConnector)])
+  const [data, connection] = await Promise.all([instagramInsightsOverview(now), sourceConnection(instagramInsightsConnector, "Instagram insights")])
   const { followers, week, previousWeek } = data
   const displays: JackToolDisplay[] = [
     {
@@ -97,7 +97,7 @@ async function overview(now: Date): Promise<JackToolResult> {
   return {
     forModel: forModelWithLists(
       {
-        connection,
+        connection: connection.note,
         followers: { latest: followers.latest?.followers ?? null, asOf: followers.latest ? day(followers.latest.date) : null, changeLast7Days: followers.change7, changeLast30Days: followers.change30 },
         last7Days: weekForModel(week),
         previous7Days: weekForModel(previousWeek),
@@ -121,7 +121,7 @@ export const instagramInsightsTool: JackTool<Input> = {
   async run(args) {
     const now = new Date()
     if (args.view === "overview") return overview(now)
-    const connection = await sourceStatus(instagramInsightsConnector)
+    const connection = await sourceConnection(instagramInsightsConnector, "Instagram insights")
     const range = centralRange(args, { fromDaysAgo: 30, toDaysAhead: 0 }, now)
     if (!range.ok) return { isError: true, forModel: range.error, label: "Instagram lookup failed", displays: [] }
 
@@ -130,7 +130,7 @@ export const instagramInsightsTool: JackTool<Input> = {
       const rows = days.map((d) => ({ date: day(d.date), followers: d.followers, reach: d.reach, views: d.views, accountsEngaged: d.accountsEngaged, interactions: d.totalInteractions, follows: d.follows, unfollows: d.unfollows }))
       const charted = rows.filter((r) => r.reach !== null)
       return {
-        forModel: forModelWithLists({ connection, from: range.from, to: range.to, note: rows.length ? "Days without a row weren't snapshotted; null means Instagram had no number yet." : "No account snapshots in this range.", dataNotes: DATA_NOTES }, [{ key: "days", items: rows, keep: "last", whenTrimmed: "Ask for a shorter range." }]),
+        forModel: forModelWithLists({ connection: connection.note, from: range.from, to: range.to, note: rows.length ? "Days without a row weren't snapshotted; null means Instagram had no number yet." : "No account snapshots in this range.", dataNotes: DATA_NOTES }, [{ key: "days", items: rows, keep: "last", whenTrimmed: "Ask for a shorter range." }]),
         label: `Looked at Instagram's daily numbers (${plural(rows.length, "day")})`,
         displays: charted.length > 1 ? [{ kind: "chart", chart: { type: "line", title: "Instagram reach and views per day", xKey: "date", series: [{ key: "reach", label: "Reach" }, { key: "views", label: "Views" }], rows: charted.map((r) => ({ date: r.date, reach: r.reach, views: r.views })) } }] : [],
       }
@@ -141,7 +141,7 @@ export const instagramInsightsTool: JackTool<Input> = {
       const posts = await listPostInsights({ id: args.postId, match: args.match, limit: 5 })
       if (!posts.length) return { isError: true, forModel: args.postId ? `No post with id ${args.postId}.` : `No post's caption contains "${args.match}". Try view posts.`, label: "Looked at an Instagram post (none found)", displays: [] }
       return {
-        forModel: forModelWithLists({ connection, ...(posts.length > 1 ? { note: `${posts.length} posts match; each is listed.` } : {}), dataNotes: DATA_NOTES }, [{ key: "posts", items: posts.map(postForModel) }]),
+        forModel: forModelWithLists({ connection: connection.note, ...(posts.length > 1 ? { note: `${posts.length} posts match; each is listed.` } : {}), dataNotes: DATA_NOTES }, [{ key: "posts", items: posts.map(postForModel) }]),
         label: `Looked at an Instagram post (${ctShort(posts[0].postedAt)})`,
         displays: [postsTable(posts)],
       }
@@ -149,9 +149,9 @@ export const instagramInsightsTool: JackTool<Input> = {
 
     const posts = await listPostInsights({ from: range.start, to: new Date(range.end.getTime() + 1), sort: args.sort, match: args.match, limit: args.limit })
     return {
-      forModel: forModelWithLists({ connection, from: range.from, to: range.to, sort: args.sort, dataNotes: DATA_NOTES }, [{ key: "posts", items: posts.map(postForModel) }]),
+      forModel: forModelWithLists({ connection: connection.note, from: range.from, to: range.to, sort: args.sort, dataNotes: DATA_NOTES }, [{ key: "posts", items: posts.map(postForModel) }]),
       label: `Looked at Instagram posts (${plural(posts.length, "post")})`,
-      displays: posts.length ? [postsTable(posts, `Posted ${range.from} to ${range.to}`)] : [{ kind: "note", text: connection.note ?? "No posts in this range." }],
+      displays: posts.length ? [postsTable(posts, `Posted ${range.from} to ${range.to}`)] : [{ kind: "note", text: connection.connected && !connection.failing ? "No posts in this range." : (connection.note ?? "No posts in this range.") }],
     }
   },
 }
