@@ -1761,6 +1761,18 @@ model TwitchChannelDaily {
   followers Int?
 }
 
+/// EventSub deliveries already handled (design §12.2): Twitch resends a message with the same id, and
+/// the webhook processes each id once. Pruned after 2 days by the Twitch token check
+model TwitchEventSubMessage {
+  /// Twitch-Eventsub-Message-Id
+  id         String   @id
+  /// notification | revocation
+  type       String
+  receivedAt DateTime @default(now())
+
+  @@index([receivedAt])
+}
+
 /// The Stripe balance once a day (design §12.3)
 model StripeBalanceDaily {
   date           DateTime @id @db.Date

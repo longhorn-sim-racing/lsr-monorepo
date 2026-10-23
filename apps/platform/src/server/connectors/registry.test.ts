@@ -43,6 +43,7 @@ describe("the connector registry", () => {
   it("joins the tracks' connectors in track order and finds them by id", async () => {
     vi.doMock("./slots/discord-read", () => ({ CONNECTORS: [fakeConnector("discord")] }))
     vi.doMock("./slots/groundwork", () => ({ CONNECTORS: [fakeConnector("storage")] }))
+    vi.doMock("./slots/sources-b", () => ({ CONNECTORS: [] }))
     const { CONNECTORS, findConnector } = await import("./registry")
     // Only the mocked ones: the other tracks' real connectors sit among them
     expect(CONNECTORS.map((c) => c.id).filter((id) => ["storage", "discord"].includes(id))).toEqual(["storage", "discord"])
