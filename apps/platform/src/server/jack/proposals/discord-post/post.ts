@@ -8,7 +8,7 @@ import { messageProblems, type DiscordMessageBody } from "@/server/connectors/di
 import { channelList, findPostingChannel, postingChannelIds, postingChannels } from "@/server/discord-post/channels"
 import { officerAskedPing, pollInput, postBody, resolvePing, sendTime, type PollInput } from "@/server/discord-post/compose"
 import { discordPosting, discordPostingForPage, NOT_CONNECTED } from "@/server/discord-post/connection"
-import { postUrl, queueDiscordPost, readBody, sendPostNow } from "@/server/discord-post/outbox"
+import { postUrl, queueDiscordPost, readBody, sendOutcomeAudit, sendPostNow, type SendOutcome } from "@/server/discord-post/outbox"
 import { readRoles } from "@/server/discord-post/role-sync"
 import { pingLabel, type PingTarget } from "@/server/discord-post/templates"
 import { LOCAL_TIME, when } from "@/server/discord-post/time"
@@ -92,10 +92,14 @@ function removedSentence(removed: { mentions: string[]; links: string[] }): stri
   return parts.length ? `Taken out because no officer's message in this room has them: ${listed(parts)}.` : null
 }
 
-/** Cleans a poll's words like the text (a poll can't ping, but its words still shouldn't carry outside links) */
+/** Cleans a poll's words like the text (a poll can't ping, but its words still shouldn't carry outside links). A question or answer left empty is refused, never posted as it was */
 function cleanPoll(poll: PollInput | undefined, clean: (text: string) => string): PollInput | undefined {
   if (!poll) return undefined
-  return { ...poll, question: clean(poll.question) || poll.question, answers: poll.answers.map((a) => clean(a) || a) }
+  const question = clean(poll.question)
+  if (!question) throw new ProposalInputError("The poll's question was only a link or mention no officer gave. Write the question in words.")
+  const answers = poll.answers.map((a) => clean(a))
+  if (answers.some((a) => !a)) throw new ProposalInputError("A poll answer was only a link or mention no officer gave. Write each answer in words.")
+  return { ...poll, question, answers }
 }
 
 export const discordPostKind: ProposalKind<DiscordPostProposal> = {
@@ -208,17 +212,17 @@ export const discordPostKind: ProposalKind<DiscordPostProposal> = {
       createdById: ctx.auditMetadata.proposedFor,
       approvedById: ctx.officer.userId,
     })
-    if (created) {
-      await createAuditLog({
+    /** The audit entry, once it's known what happened: scheduled, or how the send ended */
+    const audit = (start: string, extra: { status: string; error?: string | null }) =>
+      createAuditLog({
         actorUserId: ctx.officer.userId,
         actionType: sendAt ? "SCHEDULE" : "CREATE",
         entityType: "DISCORD_POST",
         entityId: post.id,
-        summary: `${sendAt ? `Scheduled a Discord post for ${when(sendAt)}` : "Posted"} in #${channelName}${saved.data.ping ? `, pinging ${saved.data.ping}` : ""}, proposed by Jack`,
-        after: { channelId, content: (body.content ?? "").slice(0, 500), poll: body.poll?.question.text ?? null, scheduledFor: post.scheduledFor.toISOString() },
+        summary: `${start}${saved.data.ping ? `, pinging ${saved.data.ping}` : ""}, proposed by Jack`,
+        after: { channelId, content: (body.content ?? "").slice(0, 500), poll: body.poll?.question.text ?? null, scheduledFor: post.scheduledFor.toISOString(), status: extra.status, ...(extra.error ? { error: extra.error } : {}) },
         metadata: { ...ctx.auditMetadata, channelId, postId: post.id },
       })
-    }
     refreshAnnouncements()
     const announcements = { title: "Announcements", url: ANNOUNCEMENTS_PAGE }
 
@@ -226,9 +230,21 @@ export const discordPostKind: ProposalKind<DiscordPostProposal> = {
       const url = postUrl(post)
       return { summary: `Already posted in #${channelName}; nothing was posted again.`, links: [announcements, ...(url ? [{ title: "The post in Discord", url }] : [])], created: [{ type: "DISCORD_POST", id: post.id }] }
     }
-    if (sendAt && post.status === "SCHEDULED") return { summary: `Scheduled for ${when(sendAt)} in #${channelName}.`, links: [announcements], created: [{ type: "DISCORD_POST", id: post.id }] }
+    if (sendAt && post.status === "SCHEDULED") {
+      if (created) await audit(`Scheduled a Discord post for ${when(sendAt)} in #${channelName}`, { status: "SCHEDULED" })
+      return { summary: `Scheduled for ${when(sendAt)} in #${channelName}.`, links: [announcements], created: [{ type: "DISCORD_POST", id: post.id }] }
+    }
 
-    const outcome = await sendPostNow(post.id, posting.writer)
+    let outcome: SendOutcome | undefined
+    try {
+      outcome = await sendPostNow(post.id, posting.writer)
+    } finally {
+      // Written after the send, so the log says what really happened
+      if (created || (outcome && outcome.status !== "SKIPPED")) {
+        const words = sendOutcomeAudit(outcome, channelName)
+        await audit(words.summary, words)
+      }
+    }
     refreshAnnouncements()
     if (outcome.status === "SENT") {
       const url = postUrl({ channelId, discordMessageId: outcome.messageId })

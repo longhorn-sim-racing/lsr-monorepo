@@ -5,7 +5,7 @@ const db = vi.hoisted(() => ({ prisma: { discordPost: null as unknown as FakePos
 vi.mock("@/server/db", () => db)
 
 import { mountFakes, type MountedFakes } from "@/server/connectors/fakes/testing"
-import { discordClient } from "@/server/connectors/discord/client"
+import { DiscordApiError, discordClient } from "@/server/connectors/discord/client"
 import { FAKE_CHANNELS, FAKE_DISCORD } from "@/server/connectors/discord/fake/data"
 import { discordFake } from "@/server/connectors/discord/fake/handlers"
 import { DiscordRateLimiter } from "@/server/connectors/discord/rate-limit"
@@ -115,6 +115,23 @@ describe("sending", () => {
     expect(outcome).toMatchObject({ status: "FAILED", error: expect.stringMatching(/isn't in the channel/) })
     expect(posts(fakes)).toHaveLength(3)
     expect(table.rows[0].status).toBe("FAILED")
+  })
+
+  it("treats a 2xx whose answer couldn't be read as unconfirmed, not refused: it's found in the channel and marked sent", async () => {
+    const { fakes, writer } = setup()
+    // Discord posted it but the answer wasn't JSON (the REST client throws DiscordApiError with the 2xx status)
+    const garbled = {
+      ...writer,
+      async createMessage(...args: Parameters<typeof writer.createMessage>): ReturnType<typeof writer.createMessage> {
+        await writer.createMessage(...args)
+        throw new DiscordApiError(200, null, "POST /channels/:id/messages", "the answer wasn't JSON")
+      },
+    }
+    const post = await claimed("Posted, answer garbled")
+    const outcome = await deliverClaimed(post, garbled, { pause: noPause })
+    expect(outcome.status).toBe("SENT")
+    expect(table.rows[0].status).toBe("SENT")
+    expect(await botMessages(fakes, "Posted, answer garbled")).toHaveLength(1)
   })
 
   it("fails at once, without retrying, when Discord refuses it", async () => {

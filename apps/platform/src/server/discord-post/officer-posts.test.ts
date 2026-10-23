@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fakePostTable, postRow, type FakePostTable } from "./fake-posts"
 
-const state = vi.hoisted(() => ({ audits: [] as Record<string, unknown>[], posting: [] as string[] }))
+const state = vi.hoisted(() => ({ audits: [] as Record<string, unknown>[], posting: [] as string[], rule: null as Record<string, unknown> | null }))
 const db = vi.hoisted(() => ({ prisma: {} as Record<string, unknown> }))
 vi.mock("@/server/db", () => db)
 vi.mock("@/server/audit/log", () => ({ createAuditLog: async (entry: Record<string, unknown>) => void state.audits.push(entry) }))
@@ -25,11 +25,15 @@ beforeEach(() => {
   const client = discordClient({ token: FAKE_DISCORD.botToken, guildId: FAKE_DISCORD.guildId, limiter: new DiscordRateLimiter() })
   posting = { client, writer: discordWriter(client.rest, client.guildId) }
   posts = fakePostTable()
-  Object.assign(state, { audits: [], posting: [CHANNEL] })
+  Object.assign(state, { audits: [], posting: [CHANNEL], rule: null })
   db.prisma = {
     discordPost: posts,
     systemSetting: { findUnique: async () => ({ value: JSON.stringify({ channels: state.posting }) }) },
-    discordChannel: { findMany: async ({ where }: { where: { id: { in: string[] } } }) => [{ id: CHANNEL, name: "announcements", type: 5 }].filter((c) => where.id.in.includes(c.id)) },
+    discordChannel: {
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) => [{ id: CHANNEL, name: "announcements", type: 5 }].filter((c) => where.id.in.includes(c.id)),
+      findUnique: async ({ where }: { where: { id: string } }) => (where.id === CHANNEL ? { name: "announcements" } : null),
+    },
+    discordRule: { findUnique: async () => state.rule },
   }
 })
 afterEach(() => {
@@ -44,7 +48,13 @@ describe("an officer's own post", () => {
     expect(result).toMatchObject({ ok: true, status: "SENT", summary: "Posted in #announcements." })
     expect(sent()[0]).toMatchObject({ content: "Hey @everyone, GM at 6 https://forms.example/x", allowed_mentions: { parse: [] } })
     expect(posts.rows[0]).toMatchObject({ source: "admin", createdById: "u1", approvedById: "u1", status: "SENT" })
-    expect(state.audits[0]).toMatchObject({ actorUserId: "u1", actionType: "CREATE", entityType: "DISCORD_POST" })
+    expect(state.audits[0]).toMatchObject({ actorUserId: "u1", actionType: "CREATE", entityType: "DISCORD_POST", summary: "Posted in #announcements", after: expect.objectContaining({ status: "SENT" }) })
+  })
+
+  it("is audited after the send, so a refused one never reads as posted", async () => {
+    await fetch(`${fakes.origin}/discord/_fake/fail`, { method: "POST", body: JSON.stringify({ path: "/messages", method: "POST", status: 403, code: 50013, message: "Missing Permissions" }) })
+    expect(await createOfficerPost({ channelId: CHANNEL, text: "GM at 6" }, actor, posting)).toMatchObject({ ok: false, error: expect.stringMatching(/isn't allowed to post/) })
+    expect(state.audits).toEqual([expect.objectContaining({ actionType: "CREATE", summary: expect.stringMatching(/^Couldn't post in #announcements/), after: expect.objectContaining({ status: "FAILED", error: expect.stringMatching(/Missing Permissions/) }) })])
   })
 
   it("pings a role the bot may ping", async () => {
@@ -77,6 +87,21 @@ describe("what any officer can do to a post", () => {
     const result = await retryFailedPost("p2", actor, posting)
     expect(result).toMatchObject({ ok: true, status: "SENT" })
     expect(posts.rows[0]).toMatchObject({ status: "SENT", discordMessageId: first.id })
-    expect(state.audits.at(-1)).toMatchObject({ actionType: "RETRY" })
+    expect(state.audits.at(-1)).toMatchObject({ actionType: "RETRY", summary: "Sent a failed Discord post again: posted in #announcements" })
+  })
+
+  it("get the posts job's last check before a send again: cancelled instead when the channel or the rule says no", async () => {
+    posts.rows.push(postRow({ id: "p3", channelId: CHANNEL, status: "FAILED", source: "admin" }))
+    state.posting = []
+    expect(await retryFailedPost("p3", actor, posting)).toMatchObject({ ok: false, error: expect.stringMatching(/cancelled now: Its channel isn't a posting channel anymore/) })
+    expect(posts.rows[0]).toMatchObject({ status: "CANCELLED" })
+    expect(state.audits.at(-1)).toMatchObject({ actionType: "CANCEL" })
+
+    state.posting = [CHANNEL]
+    state.rule = { id: "r1", kind: "new_event", enabled: false, channelId: CHANNEL, config: {} }
+    posts.rows.push(postRow({ id: "p4", channelId: CHANNEL, status: "FAILED", ruleId: "r1", dedupeKey: "new_event:r1:e1" }))
+    expect(await retryFailedPost("p4", actor, posting)).toMatchObject({ ok: false, error: expect.stringMatching(/Its rule is switched off/) })
+    expect(posts.rows[1]).toMatchObject({ status: "CANCELLED", dedupeKey: null })
+    expect(sent()).toHaveLength(0)
   })
 })

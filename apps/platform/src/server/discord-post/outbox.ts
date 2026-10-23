@@ -128,6 +128,26 @@ export type SendOutcome =
   /** It wasn't ours to send (another run claimed it, or it isn't due or scheduled) */
   | { status: "SKIPPED"; reason: string }
 
+/**
+ * How a send that was tried ended, for its audit entry (written after the send, so the log never says a
+ * post went out when it didn't): the summary's start ("Posted in #announcements"), and the status and
+ * error to keep. With no outcome, the send stopped with an error
+ */
+export function sendOutcomeAudit(outcome: SendOutcome | undefined, channel: string): { summary: string; status: string; error: string | null } {
+  switch (outcome?.status) {
+    case "SENT":
+      return { summary: `Posted in #${channel}`, status: "SENT", error: null }
+    case "FAILED":
+      return { summary: `Couldn't post in #${channel} (Discord refused it or didn't confirm it)`, status: "FAILED", error: outcome.error }
+    case "SCHEDULED":
+      return { summary: `Queued a Discord post for #${channel} (rate-limited; it goes out on a later run)`, status: "SCHEDULED", error: outcome.error }
+    case "SKIPPED":
+      return { summary: `Queued a Discord post for #${channel} (not confirmed sent yet)`, status: "WAITING", error: outcome.reason }
+    default:
+      return { summary: `Queued a Discord post for #${channel} (the send stopped with an error)`, status: "UNKNOWN", error: null }
+  }
+}
+
 /** Why Discord refused a send, in words officers can act on */
 export function describeSendError(error: unknown, channel = "the channel"): string {
   if (error instanceof DiscordApiError) {
@@ -206,8 +226,8 @@ export async function deliverClaimed(post: DiscordPost, writer: DiscordWriter, d
         await prisma.discordPost.updateMany({ where: { id: post.id, status: "SENDING" }, data: { status: "SCHEDULED", claimedAt: null, error: text } })
         return { status: "SCHEDULED", error: text }
       }
-      // Discord answered and refused it: nothing was posted
-      if (error instanceof DiscordApiError && error.status < 500) {
+      // Discord answered and refused it: nothing was posted. A 2xx whose answer couldn't be read may have posted it, so that one is checked like a send with no answer
+      if (error instanceof DiscordApiError && error.status >= 400 && error.status < 500) {
         const failed = await markFailed(post.id, describeSendError(error))
         return error.status === 401 ? { ...failed, stop: true } : failed
       }

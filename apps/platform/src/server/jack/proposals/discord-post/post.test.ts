@@ -168,4 +168,25 @@ describe("discord.post", () => {
     state.officerTexts = ["post something"]
     await expect(discordPostKind.prepare(proposal({ text: "https://claim.example/x" }), ctx)).rejects.toBeInstanceOf(ProposalInputError)
   })
+
+  it("refuses a poll whose question or an answer is only a link or mention no officer gave, never posting it as it was", async () => {
+    state.officerTexts = ["Run a poll on the next track"]
+    const poll = (question: string, answers: string[]) => proposal({ text: undefined, poll: { question, answers } })
+    await expect(discordPostKind.prepare(poll("Next track?", ["Monza", "https://evil.example/a"]), ctx)).rejects.toThrow(/A poll answer was only a link or mention no officer gave/)
+    await expect(discordPostKind.prepare(poll("<@&123456789012345678>", ["Monza", "Spa"]), ctx)).rejects.toThrow(/The poll's question was only a link or mention/)
+    const prepared = await discordPostKind.prepare(poll("Next track? https://evil.example/q", ["Monza", "Spa https://evil.example/s"]), ctx)
+    const body = (prepared.before as { body: { poll: { question: { text: string }; answers: { poll_media: { text: string } }[] } } }).body
+    expect(body.poll.question.text).toBe("Next track?")
+    expect(body.poll.answers.map((a) => a.poll_media.text)).toEqual(["Monza", "Spa"])
+  })
+
+  it("writes its audit entry after the send, with how it ended", async () => {
+    const prepared = await discordPostKind.prepare(proposal({}), ctx)
+    await fetch(`${fakes.origin}/discord/_fake/fail`, { method: "POST", body: JSON.stringify({ path: "/messages", method: "POST", status: 403, code: 50013, message: "Missing Permissions" }) })
+    await expect(discordPostKind.apply(proposal({}), applyCtx(prepared.before))).rejects.toThrow(/Couldn't post it/)
+    expect(state.audits).toEqual([expect.objectContaining({ actionType: "CREATE", summary: expect.stringMatching(/^Couldn't post in #announcements .*, proposed by Jack$/), after: expect.objectContaining({ status: "FAILED" }) })])
+    const sent = await discordPostKind.prepare(proposal({}), ctx)
+    await discordPostKind.apply(proposal({}), { ...applyCtx(sent.before), proposalId: "prop-3", idempotencyKey: "proposal:prop-3" })
+    expect(state.audits.at(-1)).toMatchObject({ summary: "Posted in #announcements, proposed by Jack", after: expect.objectContaining({ status: "SENT" }) })
+  })
 })

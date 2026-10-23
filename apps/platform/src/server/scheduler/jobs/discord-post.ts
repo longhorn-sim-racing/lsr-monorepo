@@ -1,12 +1,12 @@
-import type { DiscordPost } from "@prisma/client"
 import { recordConnectorError } from "@/server/connectors/state"
 import { DISCORD_CONNECTOR } from "@/server/connectors/discord/connector"
 import { postingChannelIds } from "@/server/discord-post/channels"
 import { discordPosting } from "@/server/discord-post/connection"
 import { runEventMirror } from "@/server/discord-post/event-mirror"
 import { sendDuePosts } from "@/server/discord-post/outbox"
+import { duePostProblem } from "@/server/discord-post/post-check"
 import { runRoleSync } from "@/server/discord-post/role-sync"
-import { rulePostProblem, runDiscordRules } from "@/server/discord-post/rule-runner"
+import { runDiscordRules } from "@/server/discord-post/rule-runner"
 import type { JobKind, JobResult } from "../types"
 
 /**
@@ -28,12 +28,6 @@ async function failed(error: unknown): Promise<never> {
   throw error
 }
 
-/** A due post's last check: its channel is still a posting channel, and a rule's post is still wanted */
-async function checkPost(post: DiscordPost, now: Date, allowed: string[]): Promise<string | null> {
-  if (!allowed.includes(post.channelId)) return "Its channel isn't a posting channel anymore."
-  return post.source === "rule" ? rulePostProblem(post, now) : null
-}
-
 export const discordPostsJob: JobKind = {
   kind: "discord.posts",
   label: "Discord posts",
@@ -45,7 +39,7 @@ export const discordPostsJob: JobKind = {
     const posting = await discordPosting()
     if (!posting) return SKIPPED
     const allowed = await postingChannelIds()
-    const run = await sendDuePosts(posting.writer, { now: new Date(), deadline: ctx.deadline, signal: ctx.signal, log: ctx.log, check: (post, now) => checkPost(post, now, allowed) }).catch(failed)
+    const run = await sendDuePosts(posting.writer, { now: new Date(), deadline: ctx.deadline, signal: ctx.signal, log: ctx.log, check: (post, now) => duePostProblem(post, now, allowed) }).catch(failed)
     const parts = [run.sent && `sent ${run.sent}`, run.failed && `${run.failed} failed`, run.cancelled && `${run.cancelled} cancelled`, run.deferred && `${run.deferred} waiting on a rate limit`, run.confirmed && `${run.confirmed} confirmed after a stopped run`].filter(Boolean)
     return { summary: parts.length ? `Posts: ${parts.join(", ")}` : "No posts due", counts: { sent: run.sent, failed: run.failed, cancelled: run.cancelled, deferred: run.deferred, confirmed: run.confirmed } }
   },
