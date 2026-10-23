@@ -7,7 +7,6 @@ import * as news from "@/server/services/news.service"
 import { ProposalInputError, StaleProposalError } from "../errors"
 import { applyTextEdits, textEditsSchema } from "../text-edits"
 import type { ProposalDiffRow, ProposalKind, ProposalLink } from "../types"
-import { markdownPreview, mdxError, parseMarkdown } from "./markdown"
 import { fromLocal, LOCAL_TIME, listed, plural, revalidate, when } from "./shared"
 
 /**
@@ -81,8 +80,15 @@ const FIELD_LABEL: Record<PostField, string> = { title: "Title", slug: "Link", e
 
 const NOW = "now"
 
+/**
+ * The Markdown parser, loaded when a news proposal needs it: everything that loads the proposal kinds
+ * (the tools, the scheduler's jobs, the room's routes) would otherwise load remark and micromark too
+ */
+const markdown = () => import("./markdown")
+
 /** The parse of a post's text, when it's plain Markdown; `was` is the text an edit starts from (./markdown.ts mdxError) */
-function checkBody(text: string, was?: string) {
+async function checkBody(text: string, was?: string) {
+  const { mdxError, parseMarkdown } = await markdown()
   const tree = parseMarkdown(text)
   const problem = mdxError(text, "The post's text", tree, was)
   if (problem) throw new ProposalInputError(problem)
@@ -182,7 +188,8 @@ export const newsCreateKind: ProposalKind<NewsCreate> = {
   permission: "officer",
 
   async prepare(p, ctx) {
-    const tree = checkBody(p.bodyMd)
+    const tree = await checkBody(p.bodyMd)
+    const { markdownPreview } = await markdown()
     const now = new Date()
     const writer = await findAuthor(p.author, ctx.officer.userId)
     let slugValue = p.slug
@@ -300,7 +307,7 @@ async function planUpdate(p: NewsUpdate, post: PostState & { id: string }, now: 
     ;(current as Record<string, unknown>)[field] = post[field]
   }
   if (!Object.keys(next).length) throw new ProposalInputError(`Nothing would change: the post “${post.title}” already reads that way.`)
-  if (next.bodyMd !== undefined) checkBody(next.bodyMd, post.bodyMd)
+  if (next.bodyMd !== undefined) await checkBody(next.bodyMd, post.bodyMd)
   if (next.slug !== undefined) {
     const owner = await slugOwner(next.slug, post.id)
     if (owner) throw new ProposalInputError(`/news/${next.slug} is taken by “${owner.title}”. Pick another slug.`)
@@ -351,6 +358,7 @@ export const newsUpdateKind: ProposalKind<NewsUpdate> = {
       !after.authorId ? "Its author's account is gone, so the officer who applies it becomes its author." : null,
     ].filter(Boolean)
     const showPreview = next.bodyMd !== undefined || next.title !== undefined || next.excerpt !== undefined
+    const { markdownPreview } = await markdown()
     return {
       before: { current, next } satisfies UpdateBefore,
       targetId: post.id,
