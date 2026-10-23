@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   },
 }
 
-const LAST_UPDATED = "October 22, 2026"
+const LAST_UPDATED = "October 23, 2026"
 const EFFECTIVE_DATE = "May 16, 2026"
 const CONTACT_EMAIL = "info@longhornsimracing.org"
 
@@ -209,7 +209,7 @@ export default function PrivacyPage() {
               <P>
                 LSR runs a bot in the club&apos;s Discord server. It records only{" "}
                 <span className="font-bold text-white">metadata</span>, and only in the channels our
-                admins choose to sync (the server&apos;s privacy note lists them):
+                admins choose to sync (the privacy note pinned in the server lists them):
               </P>
               <UL>
                 <li>
@@ -218,21 +218,27 @@ export default function PrivacyPage() {
                   answers and vote totals.
                 </li>
                 <li>
+                  For each public thread or forum post in those channels: its title, so its activity
+                  can be counted under its channel.
+                </li>
+                <li>
                   For the member list: each member&apos;s Discord user ID, username, display name, roles
                   and the date they joined, so we can count members, joins and leaves.
                 </li>
               </UL>
               <P>
-                We never store the text of messages, attachments, direct messages, or who voted in a
-                poll. Officers see this as totals only &mdash; messages per channel and day, how many
-                members were active, members over time and poll results &mdash; never as a profile or
-                ranking of any one person.
+                We never store the text of messages, attachments, direct messages, private threads, or
+                who voted in a poll. Our officers&apos; pages and Jack are set up to show this as totals
+                only &mdash; messages per channel and day, how many members were active, members over
+                time and poll results &mdash; and not as a profile or ranking of any one person.
               </P>
               <P>
                 When an officer asks Jack, our officers&apos; assistant (powered by Anthropic&apos;s
                 Claude), a question, Jack may search messages in the synced channels through
-                Discord&apos;s own search. The matching messages are sent to Anthropic to answer that
-                question and are not stored by us or used to train models.
+                Discord&apos;s own search and read the conversation around a match. Those messages are
+                sent to Anthropic to answer the question; they aren&apos;t used to train models. We
+                don&apos;t store the messages themselves, but Jack&apos;s answer, which may summarize or
+                quote them, is kept in our officers&apos; workspace.
               </P>
               <P>
                 <span className="font-bold text-white">Linking your account.</span> You can link your
@@ -242,8 +248,9 @@ export default function PrivacyPage() {
                 unlink at any time from your profile, and deleting your account removes the link.
               </P>
               <P>
-                Message records are deleted after 12 months; daily totals, which identify no one, are
-                kept. To have your Discord data deleted, email{" "}
+                Message records and thread titles are deleted after 12 months; daily totals, which
+                identify no one, are kept. Everything recorded from a channel, totals included, is
+                deleted when it stops being synced. To have your Discord data deleted, email{" "}
                 <a href={`mailto:${CONTACT_EMAIL}`} className="text-lsr-orange hover:underline font-medium">
                   {CONTACT_EMAIL}
                 </a>{" "}
@@ -351,7 +358,7 @@ export default function PrivacyPage() {
                     <tr>
                       <td className="p-4 font-bold text-white">Anthropic</td>
                       <td className="p-4">Jack, the officers&apos; AI assistant</td>
-                      <td className="p-4">Club records officers ask about, including Discord messages found by a search (see 2.4)</td>
+                      <td className="p-4">Club records officers ask about, including Discord messages Jack searches or reads (see 2.4)</td>
                     </tr>
                     <tr>
                       <td className="p-4 font-bold text-white">Printful</td>
@@ -680,8 +687,10 @@ export default function PrivacyPage() {
                   <tr>
                     <td className="p-4 font-bold text-white">Discord activity records</td>
                     <td className="p-4">
-                      12 months (message records; members who left, 12 months after leaving). Daily
-                      totals, which identify no one, are kept
+                      12 months (message records; thread titles, 12 months after the thread was last
+                      active; members who left, 12 months after leaving). Daily totals, which identify
+                      no one, are kept. A channel&apos;s records, totals included, are deleted when it
+                      stops being synced
                     </td>
                   </tr>
                   <tr>
