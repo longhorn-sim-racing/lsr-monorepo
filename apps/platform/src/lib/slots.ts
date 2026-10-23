@@ -23,15 +23,23 @@ export const SLOT_TRACKS = [
 export type SlotTrack = (typeof SLOT_TRACKS)[number]
 
 /**
- * Joins a registry's slots in SLOT_TRACKS order (tracks without a slot are skipped), and throws when
- * two entries share a key, naming both tracks. Registries call it at module load, so a clash fails
- * the build and the tests instead of one entry quietly shadowing the other.
+ * Joins a registry's slots in SLOT_TRACKS order, and throws when two entries share a key, naming both
+ * tracks. Registries call it at module load, so a clash fails the build and the tests instead of one
+ * entry quietly shadowing the other.
+ *
+ * A registry that only some tracks plug into leaves the others out of `slots`. A track that is listed
+ * but whose slot is still undefined means a slot file was read before it finished loading: an import
+ * cycle (a slot file importing its own registry). That throws too, instead of quietly dropping the
+ * track's entries.
  */
 export function joinSlots<T>(what: string, slots: Partial<Record<SlotTrack, readonly T[]>>, keyOf: (item: T) => string): T[] {
   const seen = new Map<string, SlotTrack>()
   const joined: T[] = []
   for (const track of SLOT_TRACKS) {
-    for (const item of slots[track] ?? []) {
+    if (!Object.hasOwn(slots, track)) continue
+    const slot = slots[track]
+    if (!slot) throw new Error(`The ${track} slot of the ${what} registry isn't initialized: an import cycle? (a slot file must not import its own registry)`)
+    for (const item of slot) {
       const key = keyOf(item)
       const first = seen.get(key)
       if (first) throw new Error(`Duplicate ${what} "${key}": registered by ${first === track ? `${track} twice` : `${first} and ${track}`}`)

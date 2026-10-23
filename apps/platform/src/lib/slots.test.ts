@@ -24,6 +24,16 @@ describe("joinSlots", () => {
     expect(() => joinSlots("job kind", { memory: [{ id: "a" }, { id: "a" }] }, key)).toThrow('Duplicate job kind "a": registered by memory twice')
   })
 
+  it("throws when a listed slot isn't loaded yet, the sign of an import cycle", () => {
+    const unloaded = { memory: [{ id: "a" }], changes: undefined } as unknown as Record<string, { id: string }[]>
+    expect(() => joinSlots("proposal kind", unloaded, key)).toThrow("The changes slot of the proposal kind registry isn't initialized: an import cycle?")
+  })
+
+  it("fails loudly when a slot file imports its own registry and is loaded first", async () => {
+    // slot.ts imports registry.ts, which joins slot.ts's ITEMS before slot.ts has finished loading
+    await expect(import("./__fixtures__/slot-cycle/slot")).rejects.toThrow("The groundwork slot of the fixture item registry isn't initialized: an import cycle?")
+  })
+
   it("has every track once, groundwork first", () => {
     expect(new Set(SLOT_TRACKS).size).toBe(SLOT_TRACKS.length)
     expect(SLOT_TRACKS[0]).toBe("groundwork")

@@ -15,6 +15,24 @@ import type { JackProposalLink, JackProposalResult } from "@/lib/jack/types"
 /** Who may apply a proposal of this kind, checked against the applying officer's roles (the same rule as the admin page) */
 export type ProposalPermission = "officer" | "admin"
 
+/**
+ * The propose_* tools (design §7.1). Each kind names the one tool that offers it; the tool builds its
+ * input and description from `kindsForTool()`, so a track adds a kind without editing another track's
+ * tool file
+ */
+export const PROPOSE_TOOLS = [
+  "propose_change",
+  "propose_content",
+  "propose_message",
+  "propose_import",
+  "propose_discord",
+  "propose_deck_publish",
+  "propose_meeting",
+  "propose_recurring",
+] as const
+
+export type ProposeToolName = (typeof PROPOSE_TOOLS)[number]
+
 /** One field a proposal changes, formatted on the server for the card */
 export type ProposalDiffRow = {
   /** The payload field, e.g. "startsAtUtc" */
@@ -109,6 +127,8 @@ export type ProposalPrepared = {
 
 /**
  * One kind of change (design §4.2). Registered in `proposals/kinds/<track>.ts`.
+ * - `tool` and `description` are how the model reaches it: the named propose_* tool lists every kind
+ *   that names it, in registry order.
  * - `prepare` only reads: it describes the change and snapshots `before`.
  * - `checkStale` runs right before `apply`, outside any transaction, and returns why the proposal is
  *   stale ("GM 2's start time changed since this was proposed") or null.
@@ -118,6 +138,10 @@ export type ProposalPrepared = {
 export type ProposalKind<P> = {
   /** Stable, saved on JackProposal.kind: "event.update" */
   kind: string
+  /** The propose_* tool that offers it */
+  tool: ProposeToolName
+  /** What it changes and when to use it, written for the model (the tool's description includes it) */
+  description: string
   /** Validates the payload when proposed and again at apply time */
   schema: z.ZodType<P>
   /** AuditLog entityType of what it changes, e.g. "Event" */
@@ -161,12 +185,17 @@ export type ImportRowCheck<R> =
  * becomes an unmatched row with its error as the detail), and at apply time reads the file again,
  * re-validates, keeps the rows the officer selected and hands the valid ones to `applyRows`.
  * A target only knows its own table.
+ *
+ * Kinds find targets through `proposals/import-targets` (its own registry), never through the kinds
+ * registry, which would be an import cycle.
  */
 export type ImportTarget<R> = {
   /** Stable key, the `target` in an import.rows payload, e.g. "lsc_application" */
   target: string
   /** e.g. "LSC applications" */
   label: string
+  /** Who may apply an import into it, when that's stricter than the import.rows kind's own permission (the stricter one applies) */
+  permission?: ProposalPermission
   columns: ImportColumn[]
   /** Checks one row and resolves what it refers to (a member by email, say). Reads only; runs at propose time and again at apply */
   validateRow(row: ImportCells): Promise<ImportRowCheck<R>>
