@@ -144,6 +144,19 @@ model User {
   eid        String?  @unique
   signedUpAt DateTime @default(now())
 
+  /// Officer profile (Jack 2.0, #188): the officer's team (the about page roster's TeamId:
+  /// executive, business, community, competition, media, technology), whether they hold a board seat,
+  /// and a short "what I work on". Jack tailors explanations to it; facts never change with it
+  department String?
+  isBoard    Boolean @default(false)
+  workingOn  String? @db.VarChar(160)
+
+  /// The member's linked Discord account (Jack 2.0): set through Discord OAuth from their profile.
+  /// No Discord tokens are kept
+  discordUserId   String?   @unique
+  discordUsername String?
+  discordLinkedAt DateTime?
+
   // Relations
   roles                UserRole[]
   payments             Payment[]
@@ -177,6 +190,14 @@ model User {
   jackMessages     JackMessage[]     @relation("JackMessageAuthor")
   jackDecks        JackDeck[]        @relation("JackDeckCreator")
   jackDeckVersions JackDeckVersion[] @relation("JackDeckVersionAuthor")
+
+  // Jack 2.0 (#188)
+  knowledgeOwned     KnowledgeEntry[]    @relation("KnowledgeOwner")
+  actionItemsOwned   ActionItem[]        @relation("ActionItemOwner")
+  prospectsOwned     SponsorProspect[]   @relation("SponsorProspectOwner")
+  recurringQuestions RecurringQuestion[] @relation("RecurringQuestionCreator")
+  jackFeedback       JackFeedback[]
+  discordMembers     DiscordMember[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -852,6 +873,7 @@ model Notification {
   @@index([userId, channel, dismissedAt])
   @@index([status, scheduledFor])
   @@index([type, createdAt])
+  @@index([emailMessageId])
 }
 
 model NotificationPreference {
@@ -888,6 +910,15 @@ model InstagramPost {
   hidden    Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  /// Insights (Jack 2.0): copied by the insights job, since Instagram only keeps some of them for a while
+  reach      Int?
+  likes      Int?
+  comments   Int?
+  saved      Int?
+  shares     Int?
+  views      Int?
+  insightsAt DateTime?
 
   @@index([hidden, postedAt])
 }
@@ -950,10 +981,18 @@ model JackRoom {
   runId        String?
   runStartedAt DateTime?
 
-  createdBy User?         @relation("JackRoomCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  messages  JackMessage[]
-  usage     JackUsage[]
-  decks     JackDeck[]
+  /// Jack 2.0: pinned rooms sort first; in "mention" mode Jack answers only messages that mention him
+  pinnedAt   DateTime?
+  answerMode String    @default("always")
+
+  createdBy          User?               @relation("JackRoomCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  messages           JackMessage[]
+  usage              JackUsage[]
+  decks              JackDeck[]
+  proposals          JackProposal[]
+  files              JackFile[]
+  recurringQuestions RecurringQuestion[]
+  meetings           Meeting[]
 
   @@index([archivedAt, updatedAt])
 }
@@ -986,27 +1025,35 @@ model JackUsage {
 /// One message in a room. `kind` says who it's from; a check constraint keeps `persona` set exactly
 /// on assistant messages, and `authorUserId` off them
 model JackMessage {
-  id           String            @id @default(uuid())
-  roomId       String
-  kind         JackMessageKind
+  id            String                   @id @default(uuid())
+  roomId        String
+  kind          JackMessageKind
   /// user: the officer who wrote it. system: the officer whose action it records. Null for assistant
   /// messages, and once the officer deletes their account
-  authorUserId String?
+  authorUserId  String?
   /// assistant: the model that wrote it. Null otherwise
-  persona      JackPersona?
-  content      String            @default("")
+  persona       JackPersona?
+  content       String                   @default("")
   /// Tool calls and their results (later steps)
-  toolCalls    Json?
-  status       JackMessageStatus @default(done)
+  toolCalls     Json?
+  status        JackMessageStatus        @default(done)
   /// The last streamed delta whose text is saved in `content`. Viewers who open the room
   /// mid-answer apply only the deltas after it
-  streamSeq    Int               @default(0)
+  streamSeq     Int                      @default(0)
   /// user messages: the reply that answered it. Null until Jack picks it up, so a message posted
   /// while he's answering waits for the next pass
-  answeredById String?
+  answeredById  String?
   /// A room note asking Jack to keep going (#177): a deck job that ran out of time or tool calls
   /// leaves one, and it's answered like an officer message (answeredById), as the officer it names
-  continues    Boolean           @default(false)
+  continues     Boolean                  @default(false)
+  /// Officer messages (Jack 2.0): the author's profile when they posted it, e.g. "Technology Director ·
+  /// Technology · CS". Snapshotted so history never changes when a profile does
+  authorLabel   String?
+  /// False for officer messages in a mention-mode room that don't mention Jack: context, not questions
+  expectsAnswer Boolean                  @default(true)
+  /// Full-text search (room search). Filled by a database trigger once the message is done streaming;
+  /// Prisma never reads or writes it
+  search        Unsupported("tsvector")?
 
   /// Assistant messages only (later steps)
   model           String?
@@ -1024,10 +1071,13 @@ model JackMessage {
   answers      JackMessage[]     @relation("JackAnswer")
   /// Deck changes this reply made
   deckVersions JackDeckVersion[]
+  files        JackFile[]
+  feedback     JackFeedback[]
 
   @@index([roomId, createdAt])
   @@index([roomId, kind, answeredById])
   @@index([authorUserId])
+  @@index([search], type: Gin)
 }
 
 /// A deck's canvas: 16:9 slides (1920x1080), an Instagram post (1080x1350), an Instagram story
@@ -1213,6 +1263,7 @@ model ApplicationEmail {
 
   @@index([status, createdAt])
   @@index([applicationId])
+  @@index([resendMessageId])
 }
 
 // Per-round, per-team settings (the Google Calendar booking link).
@@ -1227,4 +1278,741 @@ model RecruitingTrackConfig {
   cycle RecruitingCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
 
   @@unique([cycleId, track])
+}
+
+// ---------- Jack 2.0 (#188; design: docs/jack-2/design.md) ----------
+// Tables marked "personal data" have row level security with a read policy for jack_readonly only
+// (see the migration). Daily tables use the America/Chicago date unless noted.
+
+enum JackProposalStatus {
+  PENDING // waiting for an officer
+  APPLYING // claimed by an Apply that's running (side effects may have started)
+  APPLIED
+  DISCARDED
+  FAILED
+  STALE // what it changes has changed since, or it expired
+  SUPERSEDED // a newer proposal for the same thing replaced it
+}
+
+/// A change Jack proposed in a room, for an officer to apply or discard (design §4). Personal data:
+/// imports carry rows from spreadsheets
+model JackProposal {
+  id             String             @id @default(uuid())
+  roomId         String
+  /// The reply that proposed it
+  messageId      String?
+  /// Registry key, e.g. "event.update" (src/server/jack/proposals)
+  kind           String
+  /// Written by the kind on the server, never by the model
+  title          String
+  summary        String
+  /// Only the changes, validated by the kind's schema
+  payload        Json
+  /// What the changed fields were when it was proposed: the diff, and the staleness check
+  before         Json?
+  /// AuditLog entityType and id of what it changes
+  targetType     String?
+  targetId       String?
+  status         JackProposalStatus @default(PENDING)
+  claimedAt      DateTime?
+  /// The officer whose message led to it (plain id: audit only)
+  proposedForId  String?
+  /// Who applied or discarded it (plain id: audit only)
+  decidedById    String?
+  decidedAt      DateTime?
+  /// What applying did (created ids and links, counts, applied rows) or the error, redacted
+  result         Json?
+  /// After this, a PENDING proposal counts as STALE
+  expiresAt      DateTime
+  supersededById String?
+  /// Proposals built from a room file pin its sha256; Apply checks it
+  fileSha256     String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  room JackRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@index([kind, targetType, targetId, status])
+}
+
+enum JackFileKind {
+  IMAGE
+  PDF
+  SPREADSHEET
+  CSV
+  JSON
+  TEXT
+  DOCUMENT // .docx
+  TRANSCRIPT // .vtt
+  OTHER
+}
+
+enum JackFileStatus {
+  UPLOADING
+  READY
+  FAILED
+}
+
+/// A file an officer attached in a room (design §5). Personal data: sign-in sheets, form exports,
+/// transcripts
+model JackFile {
+  id              String         @id @default(uuid())
+  roomId          String
+  /// Set when the message that carries it is posted
+  messageId       String?
+  position        Int            @default(0)
+  uploadedById    String?
+  filename        String
+  contentType     String
+  sizeBytes       Int
+  /// Where the original is stored (server-chosen: rooms/<roomId>/<id>/<name>)
+  storagePath     String         @unique
+  sha256          String?
+  kind            JackFileKind
+  status          JackFileStatus @default(UPLOADING)
+  /// The copy Jack looks at (images: JPEG, EXIF stripped, long edge at most 2000 px)
+  modelCopyPath   String?
+  /// Claude Files API id for the model copy; server-side only, never taken from the browser
+  anthropicFileId String?
+  thumbPath       String?
+  pageCount       Int?
+  width           Int?
+  height          Int?
+  /// Extracted text (capped), for search and for Jack to read
+  text            String?
+  textStatus      String?
+  error           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  room                 JackRoom     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  message              JackMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  meetingsAsTranscript Meeting[]
+
+  @@index([roomId, createdAt])
+  @@index([messageId])
+  @@index([status, createdAt])
+}
+
+enum KnowledgeSource {
+  MANUAL // an officer wrote it on the Knowledge page
+  JACK // Jack saved it in a room ("not reviewed" until an officer reviews it)
+  SEED // loaded from the reviewed seed files
+}
+
+/// One piece of club knowledge: a decision, a how-to, a policy, who does what (design §9). Personal
+/// data: entries can name people
+model KnowledgeEntry {
+  id           String                   @id @default(uuid())
+  title        String
+  /// Markdown
+  body         String
+  tags         String[]                 @default([])
+  sourceType   KnowledgeSource          @default(MANUAL)
+  sourceUrl    String?
+  /// Where it came from, e.g. "Teams General, Dylan, 9/28"
+  sourceNote   String?
+  /// When the source said it; with reviewedAt, this dates the entry (not updatedAt)
+  sourceDate   DateTime?
+  reviewedAt   DateTime?
+  reviewedById String?
+  /// Room, message and the outside sources read in the reply that saved it (Jack saves only)
+  provenance   Json?
+  /// Who keeps it current
+  ownerId      String?
+  createdById  String?
+  updatedById  String?
+  archivedAt   DateTime?
+  /// Full-text search, filled by a database trigger; Prisma never reads or writes it
+  search       Unsupported("tsvector")?
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+
+  owner     User?                   @relation("KnowledgeOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  versions  KnowledgeEntryVersion[]
+  decisions MeetingDecision[]
+
+  @@index([archivedAt, updatedAt])
+  @@index([search], type: Gin)
+}
+
+/// Every saved state of a knowledge entry. Personal data, like the entry
+model KnowledgeEntryVersion {
+  id         String   @id @default(uuid())
+  entryId    String
+  title      String
+  body       String
+  tags       String[] @default([])
+  editedById String?
+  /// "admin" | "jack" | "seed"
+  via        String
+  roomId     String?
+  createdAt  DateTime @default(now())
+
+  entry KnowledgeEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId, createdAt])
+}
+
+/// Something that runs on a schedule (design §6). pg_cron's tick calls the site only when a row is
+/// due; the dispatcher claims rows with a conditional update on lockedUntil
+model ScheduledJob {
+  id          String    @id @default(uuid())
+  /// e.g. "discord.sync", "digest.weekly", "recurring:<id>"
+  key         String    @unique
+  /// Job registry key (src/server/scheduler)
+  kind        String
+  /// Cron expression, evaluated in America/Chicago
+  schedule    String
+  enabled     Boolean   @default(false)
+  config      Json?
+  nextRunAt   DateTime
+  lockedUntil DateTime?
+  lastRunAt   DateTime?
+  lastStatus  String?
+  /// Redacted
+  lastError   String?
+  createdById String?
+  updatedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  runs              ScheduledJobRun[]
+  recurringQuestion RecurringQuestion?
+
+  @@index([enabled, nextRunAt])
+}
+
+model ScheduledJobRun {
+  id         String    @id @default(uuid())
+  jobId      String
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  /// running | ok | error | skipped
+  status     String
+  summary    String?
+  /// Redacted
+  error      String?
+
+  job ScheduledJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, startedAt])
+  @@index([startedAt])
+}
+
+/// When the scheduler last ran, for the Connections and Scheduled jobs pages
+model SchedulerHeartbeat {
+  id             String    @id @default("tick")
+  lastTickAt     DateTime
+  lastDispatchAt DateTime?
+}
+
+/// An outside service's switch and sync status (design §12). Never holds credentials: tokens live in
+/// env or in SystemSetting, which Jack can't read
+model ConnectorState {
+  /// Connector id, e.g. "discord"
+  id          String    @id
+  /// Admins switch connectors on one at a time after their smoke test
+  enabled     Boolean   @default(false)
+  lastSyncAt  DateTime?
+  /// Redacted
+  lastError   String?
+  lastErrorAt DateTime?
+  /// Sync position (page tokens, message ids); never tokens
+  cursor      Json?
+  updatedAt   DateTime  @updatedAt
+}
+
+/// A file from the club's Google Drive folder or SharePoint site, with its text for search (design
+/// §12.7 and §12.8). Personal data: documents can hold anything. Deleted files keep the row but lose
+/// their text
+model ExternalDocument {
+  id         String                   @id @default(uuid())
+  /// "drive" | "sharepoint"
+  source     String
+  /// Drive file id, or "driveId!itemId" for SharePoint
+  externalId String
+  driveId    String?
+  name       String
+  path       String
+  mimeType   String
+  webUrl     String
+  modifiedAt DateTime
+  sizeBytes  BigInt?
+  /// Drive version or SharePoint eTag, to skip unchanged files
+  version    String?
+  text       String?
+  /// ok | too_large | unsupported | error
+  textStatus String
+  syncedAt   DateTime
+  deletedAt  DateTime?
+  search     Unsupported("tsvector")?
+
+  meetingsAsTranscript Meeting[]
+
+  @@unique([source, externalId])
+  @@index([source, modifiedAt])
+  @@index([search], type: Gin)
+}
+
+/// A Teams channel we may sync (off until UT IT approves; design §12.8)
+model TeamsChannel {
+  id           String    @id
+  teamId       String
+  name         String
+  synced       Boolean   @default(false)
+  deltaLink    String?
+  lastSyncedAt DateTime?
+}
+
+/// A synced Teams channel message. Personal data. Deleted messages lose their content
+model TeamsMessage {
+  id          String                   @id
+  channelId   String
+  replyToId   String?
+  authorAadId String?
+  authorName  String
+  /// Plain text (HTML stripped)
+  content     String
+  createdAt   DateTime
+  editedAt    DateTime?
+  deletedAt   DateTime?
+  search      Unsupported("tsvector")?
+
+  @@index([channelId, createdAt])
+  @@index([search], type: Gin)
+}
+
+/// A Microsoft Graph change-notification subscription (they expire after about 3 days and are renewed)
+model GraphSubscription {
+  id              String   @id
+  resource        String
+  expiresAt       DateTime
+  clientStateHash String
+  createdAt       DateTime @default(now())
+}
+
+/// A Discord channel in the club server. Admins choose which ones sync (design §12.1)
+model DiscordChannel {
+  id            String    @id
+  name          String
+  type          Int
+  parentName    String?
+  synced        Boolean   @default(false)
+  lastMessageId String?
+  lastSyncedAt  DateTime?
+  /// Where the trailing re-scan (edits, deletions) starts
+  rescanFrom    DateTime?
+}
+
+/// Metadata for a message in a synced Discord channel. No message content is stored: Jack searches
+/// Discord live. Personal data (who posted when)
+model DiscordMessage {
+  id            String    @id
+  channelId     String
+  authorId      String
+  /// The linked member, if any (plain id)
+  userId        String?
+  createdAt     DateTime
+  editedAt      DateTime?
+  deletedAt     DateTime?
+  contentLength Int       @default(0)
+  attachments   Int       @default(0)
+  isReply       Boolean   @default(false)
+  /// Poll question, answers, counts, expiry, finalized (no voters)
+  poll          Json?
+  lastSeenAt    DateTime
+
+  @@index([channelId, createdAt])
+  @@index([authorId, createdAt])
+}
+
+/// A member of the club Discord server (for joins, leaves and role sync). Personal data
+model DiscordMember {
+  id          String    @id
+  username    String
+  displayName String?
+  joinedAt    DateTime?
+  roles       String[]  @default([])
+  userId      String?
+  firstSeenAt DateTime
+  lastSeenAt  DateTime
+  leftAt      DateTime?
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}
+
+model DiscordDailyStat {
+  date          DateTime @db.Date
+  channelId     String
+  messages      Int
+  activeAuthors Int
+
+  @@id([date, channelId])
+}
+
+model DiscordGuildDaily {
+  date        DateTime @id @db.Date
+  memberCount Int
+  joined      Int?
+  left        Int?
+}
+
+/// A standing automation an officer set up (design §12.1): fixed templates over our own data, never
+/// model text. Only acts on items after cutoffAt
+model DiscordRule {
+  id          String   @id @default(uuid())
+  /// event_reminder | new_event | results_posted | standings_update | twitch_live | event_mirror
+  kind        String
+  channelId   String?
+  config      Json
+  enabled     Boolean  @default(false)
+  cutoffAt    DateTime
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum DiscordPostStatus {
+  SCHEDULED
+  SENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+/// A message the bot posts or posted: from a standing rule, an applied proposal, or the admin page
+model DiscordPost {
+  id               String            @id @default(uuid())
+  /// "rule" | "proposal" | "admin"
+  source           String
+  ruleId           String?
+  proposalId       String?
+  channelId        String
+  /// Exactly what is sent: { content, embeds?, poll?, allowed_mentions }
+  content          Json
+  /// One post per thing, e.g. "event_reminder:<eventId>:<startsAt>:1440" or "proposal:<id>"
+  dedupeKey        String?           @unique
+  /// Discord's nonce (enforce_nonce), so a retried send can't post twice
+  nonce            String?           @db.VarChar(25)
+  status           DiscordPostStatus @default(SCHEDULED)
+  scheduledFor     DateTime
+  claimedAt        DateTime?
+  sentAt           DateTime?
+  discordMessageId String?
+  /// Redacted
+  error            String?
+  createdById      String?
+  approvedById     String?
+  createdAt        DateTime          @default(now())
+
+  @@index([status, scheduledFor])
+}
+
+/// Our event mirrored as a Discord scheduled event
+model DiscordEventMirror {
+  eventId         String   @id
+  discordEventId  String   @unique
+  /// The start time it was mirrored with, to notice moves
+  eventStartsAt   DateTime
+  lastSyncedAt    DateTime
+  interestedCount Int?
+}
+
+/// Which Discord role linked members get, and when (e.g. "officer", "lsc_driver_current_season")
+model DiscordRoleRule {
+  id          String  @id @default(uuid())
+  roleId      String
+  condition   String
+  enabled     Boolean @default(false)
+  createdById String?
+}
+
+model TwitchStream {
+  id          String    @id
+  startedAt   DateTime
+  endedAt     DateTime?
+  title       String
+  gameName    String?
+  peakViewers Int       @default(0)
+  avgViewers  Float?
+  vodId       String?
+  vodViews    Int?
+  vodViewsAt  DateTime?
+
+  samples TwitchViewerSample[]
+}
+
+model TwitchViewerSample {
+  streamId String
+  at       DateTime
+  viewers  Int
+
+  stream TwitchStream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+
+  @@id([streamId, at])
+}
+
+model TwitchChannelDaily {
+  date      DateTime @id @db.Date
+  followers Int?
+}
+
+/// The Stripe balance once a day (design §12.3)
+model StripeBalanceDaily {
+  date           DateTime @id @db.Date
+  availableCents Int
+  pendingCents   Int
+  currency       String
+}
+
+model StripePayout {
+  id          String   @id
+  amountCents Int
+  currency    String
+  status      String
+  arrivalDate DateTime
+  createdAt   DateTime
+  method      String?
+  failureCode String?
+  syncedAt    DateTime
+}
+
+model StripeDispute {
+  id              String    @id
+  chargeId        String
+  paymentIntentId String?
+  amountCents     Int
+  status          String
+  reason          String
+  evidenceDueBy   DateTime?
+  createdAt       DateTime
+  syncedAt        DateTime
+}
+
+model StripeRefund {
+  id              String   @id
+  chargeId        String
+  paymentIntentId String?
+  amountCents     Int
+  status          String
+  createdAt       DateTime
+  syncedAt        DateTime
+}
+
+/// One Resend delivery event for one recipient (design §12.4). Personal data (addresses). Joins to
+/// Notification.emailMessageId and ApplicationEmail.resendMessageId. Pruned after 12 months
+model EmailEvent {
+  id         String   @id @default(uuid())
+  resendId   String
+  recipient  String
+  /// e.g. email.delivered, email.bounced, email.complained, email.opened, email.clicked
+  type       String
+  occurredAt DateTime
+  /// Bounce type and reason, or the clicked link; never IP or user agent
+  detail     Json?
+  /// Webhook delivery id, so retried deliveries don't count twice
+  svixId     String   @unique
+
+  @@index([resendId, occurredAt])
+  @@index([recipient, occurredAt])
+  @@index([type, occurredAt])
+}
+
+/// Site traffic from Vercel Web Analytics, snapshotted daily (Hobby keeps a month). `date` is the UTC
+/// day Vercel reports, not the Chicago date
+model SiteTrafficDaily {
+  date      DateTime @db.Date
+  /// "total" | "path" | "referrer" | "country" | "device"
+  dimension String
+  key       String
+  pageviews Int
+  visitors  Int
+
+  @@id([date, dimension, key])
+}
+
+/// The club Instagram account once a day (account metrics expire after 90 days on Instagram's side)
+model InstagramAccountDaily {
+  date              DateTime @id @db.Date
+  followers         Int
+  reach             Int?
+  views             Int?
+  accountsEngaged   Int?
+  totalInteractions Int?
+  follows           Int?
+  unfollows         Int?
+}
+
+/// A publish to Instagram that an officer approved (design §12.6)
+model InstagramPublish {
+  id           String    @id @default(uuid())
+  deckId       String?
+  version      Int?
+  slideIds     String[]  @default([])
+  /// "IMAGE" | "CAROUSEL" | "STORIES"
+  mediaType    String
+  caption      String
+  /// Public JPEG copies on Cloudinary that Instagram fetches
+  imageUrls    String[]  @default([])
+  /// Containers created so far, saved before media_publish so a retry checks them first
+  containerIds Json?
+  /// queued | containers | publishing | published | failed
+  status       String    @default("queued")
+  claimedAt    DateTime?
+  igMediaId    String?
+  permalink    String?
+  /// Redacted
+  error        String?
+  proposalId   String?   @unique
+  createdById  String?
+  approvedById String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+/// A possible sponsor (design §7). Personal data: contact details
+model SponsorProspect {
+  id            String    @id @default(uuid())
+  company       String
+  website       String?
+  contactName   String?
+  contactEmail  String?
+  contactRole   String?
+  /// idea | researching | contacted | talking | committed | declined | dormant
+  stage         String    @default("idea")
+  tierInterest  String?
+  ownerId       String?
+  lastContactAt DateTime?
+  nextStep      String?
+  nextStepDue   DateTime?
+  notes         String?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  owner      User?             @relation("SponsorProspectOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  activities SponsorActivity[]
+
+  @@index([stage, updatedAt])
+}
+
+/// Personal data, like its prospect
+model SponsorActivity {
+  id         String   @id @default(uuid())
+  prospectId String
+  /// email_sent | reply | meeting | call | note | stage_change
+  type       String
+  summary    String
+  occurredAt DateTime
+  byId       String?
+  createdAt  DateTime @default(now())
+
+  prospect SponsorProspect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([prospectId, occurredAt])
+}
+
+/// A club meeting with its agenda, summary, decisions and action items. Personal data
+model Meeting {
+  id                   String   @id @default(uuid())
+  title                String
+  /// board | tech | general | department | other
+  kind                 String
+  heldAt               DateTime
+  agendaMd             String?
+  summaryMd            String?
+  transcriptFileId     String?
+  transcriptDocumentId String?
+  roomId               String?
+  createdById          String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  transcriptFile     JackFile?         @relation(fields: [transcriptFileId], references: [id], onDelete: SetNull)
+  transcriptDocument ExternalDocument? @relation(fields: [transcriptDocumentId], references: [id], onDelete: SetNull)
+  room               JackRoom?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  decisions          MeetingDecision[]
+  actionItems        ActionItem[]
+
+  @@index([heldAt])
+}
+
+/// A decision, also kept in the knowledge base's decision log. Personal data
+model MeetingDecision {
+  id               String   @id @default(uuid())
+  meetingId        String?
+  text             String
+  decidedAt        DateTime
+  knowledgeEntryId String?
+  createdAt        DateTime @default(now())
+
+  meeting        Meeting?        @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  knowledgeEntry KnowledgeEntry? @relation(fields: [knowledgeEntryId], references: [id], onDelete: SetNull)
+}
+
+/// Something someone said they'd do. Personal data
+model ActionItem {
+  id          String    @id @default(uuid())
+  text        String
+  ownerId     String?
+  dueAt       DateTime?
+  /// open | done | dropped
+  status      String    @default("open")
+  doneAt      DateTime?
+  meetingId   String?
+  roomId      String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  owner   User?    @relation("ActionItemOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  meeting Meeting? @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+
+  @@index([status, dueAt])
+  @@index([ownerId, status])
+}
+
+/// A question Jack answers on a schedule in a room (design §11.1). The schedule lives on its
+/// ScheduledJob; runs pause when the officer who set it up is no longer an officer
+model RecurringQuestion {
+  id             String    @id @default(uuid())
+  title          String
+  prompt         String
+  roomId         String
+  /// "jack" | "stand"
+  persona        String    @default("jack")
+  scheduledJobId String    @unique
+  /// The officer it runs as
+  createdById    String?
+  pausedReason   String?
+  lastRunAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  room         JackRoom     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  scheduledJob ScheduledJob @relation(fields: [scheduledJobId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("RecurringQuestionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+}
+
+/// An officer's thumbs up or down on one of Jack's replies
+model JackFeedback {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  /// "up" | "down"
+  rating    String
+  note      String?
+  createdAt DateTime @default(now())
+
+  message JackMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
 }
