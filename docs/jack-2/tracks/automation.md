@@ -5,7 +5,7 @@ Docs and env notes for the automation track; folded into docs/jack.md at the end
 Design §11 (all), §1 principle 10 (the $10 automation cap inside the $50), §4.3 (`recurring.upsert`), §7.1 (`propose_recurring`, deferred), §13 (Jack → Recurring questions, Overview "Needs attention"). Code paths are relative to `apps/platform/`.
 
 **New env vars:** `JACK_AUTOMATION_BUDGET_USD` (optional, default 10). `TEAMS_WEBHOOK_URL` was already listed (and already masked by `redactSecrets`); this track is what reads it.
-**Migration (additive):** `20261024020000_jack2_note_job_key` adds one nullable column, `JackMessage.jobKey`, and an index (below, "Why a column").
+**Migration (additive):** `20261024020500_jack2_note_job_key` adds one nullable column, `JackMessage.jobKey`, and an index (below, "Why a column").
 **Setup steps:** only for posting the digest to Teams or Discord (below). Everything else works once the scheduler ticks.
 
 ## What's where
@@ -133,7 +133,7 @@ No fake data is seeded: the run question reads the eval copy's accounts, and the
 
 - `NODE_ENV=production pnpm exec tsx scripts/check-automation.ts` runs a recurring question through the real reply loop (a scripted fake Claude) against the local database: the note, the persona, the short history, the cost counted as automation spend, a busy room and the retry, the cap, both pauses, the delete trigger, `recurring.upsert`'s prepare and apply, every registered check against the schema, and the digest (note, summary, once a day). It deletes what it wrote.
 - **The page:** start the app, open Jack → Recurring questions, set up a question in a room and turn it on, then `pnpm --filter @lsr/platform jack:tick --job recurring:<id>` (the key is on System → Scheduled jobs). Without `ANTHROPIC_API_KEY` the reply is Jack's "isn't connected" notice, which is enough to see the flow. A run inside `jack:tick` runs in-process (no hand-off).
-- **The digest:** set it up on the page (a room, summary on), then `jack:tick --job digest.weekly`. To try Teams against the fake: `JACK_FAKES=teams-webhook` and `TEAMS_WEBHOOK_URL=https://prod-00.fake.logic.azure.com/workflows/lsr-fake/triggers/manual/paths/invoke?api-version=2016-06-01&sig=fake` in `.env.local`, `pnpm jack:fakes`, switch "Teams digest posts" on in Connections (its smoke test posts to the fake), tick "Post to Teams" as an admin, run the job, then `curl http://127.0.0.1:3999/teams-webhook/_fake/cards`. Discord's fake has no create-message route until T8 adds it, so a Discord post fails locally (the row says so); the unit tests use a test-only fake for it.
+- **The digest:** set it up on the page (a room, summary on), then `jack:tick --job digest.weekly`. To try Teams against the fake: `JACK_FAKES=teams-webhook` and `TEAMS_WEBHOOK_URL=https://prod-00.fake.logic.azure.com/workflows/lsr-fake/triggers/manual/paths/invoke?api-version=2016-06-01&sig=fake` in `.env.local`, `pnpm jack:fakes`, switch "Teams digest posts" on in Connections (its smoke test posts to the fake), tick "Post to Teams" as an admin, run the job, then `curl http://127.0.0.1:3999/teams-webhook/_fake/cards`. The Discord copy goes through Discord posting (T8's outbox: a `digest` post on Announcements, sent now with its guards); with `JACK_FAKES` covering Discord, the shared fake answers it.
 - Unit tests: `src/lib/jack/recurring.test.ts`, `src/server/automation/**/*.test.ts`, `src/server/jack/scheduled-replies.test.ts`, `src/server/jack/proposals/automation/recurring-upsert.test.ts`, `src/server/jack/proposals/checks.test.ts`, `src/server/connectors/checks.test.ts`, `src/server/connectors/teams-webhook/client.test.ts`, the page's `actions.test.ts`, the card's test, `scripts/jack-eval/tracks/automation.test.ts`, plus additions to `usage.test.ts`, `messages.test.ts`, `room-state.test.ts`.
 
 ## Setup for Gray
@@ -150,7 +150,7 @@ No fake data is seeded: the run question reads the eval copy's accounts, and the
 
 ## Release
 
-1. The migration `20261024020000_jack2_note_job_key` goes to production with the other 2.0 migrations, before the code (it's additive; old code never reads the column).
+1. The migration `20261024020500_jack2_note_job_key` goes to production with the other 2.0 migrations, before the code (it's additive; old code never reads the column).
 2. After the merge, the digest and every recurring question are off until officers turn them on; "Teams digest posts" ships off like every connector.
 3. Turn on the scheduler first (G3). A recurring question or the digest posts nothing while it isn't ticking, and the page says so.
 

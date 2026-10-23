@@ -1,5 +1,6 @@
 import { formatInTimeZone } from "date-fns-tz"
 import { DEFAULT_TIMEZONE } from "@/lib/dates"
+import type { DiscordMessageBody } from "@/server/connectors/discord/write"
 import { attentionCount, failedChecks, moreThanShown, needingAttention, type DigestReport } from "../run-checks"
 
 /**
@@ -95,8 +96,8 @@ export function discordDigestText(report: DigestReport, siteUrl: string): string
 }
 
 /** Discord's create-message body: the text, with every ping turned off */
-export function discordDigestMessage(report: DigestReport, siteUrl: string) {
-  return { content: discordDigestText(report, siteUrl), allowed_mentions: { parse: [] as string[] }, flags: 4 /* SUPPRESS_EMBEDS */ }
+export function discordDigestMessage(report: DigestReport, siteUrl: string): DiscordMessageBody {
+  return { content: discordDigestText(report, siteUrl), allowed_mentions: { parse: [] }, flags: 4 /* SUPPRESS_EMBEDS */ }
 }
 
 /**
