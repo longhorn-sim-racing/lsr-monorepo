@@ -17,6 +17,7 @@ import {
 import { replyPieces } from "@/lib/jack/reply-pieces"
 import { JACK_TITLE_MAX } from "@/schemas/jack.schema"
 import type { JackSpend } from "@/lib/jack/spend"
+import { NoteText } from "./note-text"
 import { FilesView } from "./parts/files-view"
 import { JackToolPartView } from "./parts/tool-part"
 import { PersonaAvatar } from "./persona-avatar"
@@ -411,7 +412,7 @@ const MessageRow = memo(function MessageRow({ message, messageActions, renderAtt
       <li className="flex items-center gap-2.5 text-xs text-admin-subtle">
         <span aria-hidden className="h-px flex-1 bg-admin-row" />
         <span>
-          {message.content} · {timeOfDay.format(new Date(message.createdAt))}
+          <NoteText text={message.content} /> · {timeOfDay.format(new Date(message.createdAt))}
         </span>
         <span aria-hidden className="h-px flex-1 bg-admin-row" />
       </li>

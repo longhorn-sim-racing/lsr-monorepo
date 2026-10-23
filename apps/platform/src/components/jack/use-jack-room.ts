@@ -276,7 +276,13 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
     return result
   }, [roomId, resume])
 
-  return { room: state.room, messages: state.messages, proposals: state.proposals, present, connection, stall, send, switchPersona, renameRoom, continueRoom }
+  /**
+   * Takes an event this viewer's own action produced (a proposal's new status and its room note), so the
+   * room shows it at once instead of waiting for the broadcast; the broadcast copy then changes nothing
+   */
+  const receive = useCallback((event: JackRoomEvent) => dispatch(event), [])
+
+  return { room: state.room, messages: state.messages, proposals: state.proposals, present, connection, stall, send, switchPersona, renameRoom, continueRoom, receive }
 }
 
 /** One entry per officer, however many tabs they have open. A tab from before #183 tracks no picture */

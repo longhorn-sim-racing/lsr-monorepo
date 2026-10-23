@@ -142,7 +142,7 @@ describe("sweepOrphanFiles", () => {
 
 describe("the files.cleanup job", () => {
   const job = JOBS.find((j) => j.kind === "files.cleanup")!
-  const ctx = (log = vi.fn()) => ({ signal: new AbortController().signal, deadline: Date.now() + 60_000, log, config: null, job: { id: "job-1", key: "files.cleanup" } })
+  const ctx = (log = vi.fn()) => ({ signal: new AbortController().signal, deadline: Date.now() + 60_000, startedAt: Date.now(), log, config: null, job: { id: "job-1", key: "files.cleanup" } })
 
   it("is registered daily with a budget", () => {
     expect(job).toMatchObject({ defaultSchedule: "15 4 * * *", budgetMs: 60_000 })
