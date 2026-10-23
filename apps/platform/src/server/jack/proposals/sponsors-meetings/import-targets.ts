@@ -1,5 +1,5 @@
 import { ACTION_ITEMS_PAGE, dueDateValue } from "@/lib/meetings"
-import { companyKey, parseProspectStage, parseTier, SPONSORS_PAGE } from "@/lib/sponsor-prospects"
+import { companyKey, parseProspectStage, parseTier, PROSPECT_STAGE_LABEL, SPONSORS_PAGE } from "@/lib/sponsor-prospects"
 import { actionItemFieldsSchema, type ActionItemFields } from "@/schemas/meeting.schema"
 import { prospectFieldsSchema, type ProspectFields } from "@/schemas/sponsor-prospect.schema"
 import { prisma } from "@/server/db"
@@ -124,7 +124,7 @@ export const prospectsImportTarget: ImportTarget<ProspectFields> = {
     })
     if (!parsed.success) return { ok: false, label, error: parsed.error.issues[0]?.message ?? "Check the row" }
     if ((await prospectCompanies()).has(companyKey(company))) return { ok: false, label, error: "Already a prospect (change it on its Sponsors page, or with prospect.upsert)" }
-    const detail = [parsed.data.stage, owner?.ok ? owner.officer.displayName : null, parsed.data.contactName].filter(Boolean).join(" · ")
+    const detail = [PROSPECT_STAGE_LABEL[parsed.data.stage], owner?.ok ? owner.officer.displayName : null, parsed.data.contactName].filter(Boolean).join(" · ")
     return { ok: true, value: parsed.data, label, ...(detail ? { detail } : {}) }
   },
 

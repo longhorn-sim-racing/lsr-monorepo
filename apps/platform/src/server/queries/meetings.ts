@@ -166,11 +166,12 @@ export function sortActionItems<T extends { status: string; overdue: boolean; du
   })
 }
 
-/** Counts for the Action items page's filters */
-export async function actionItemCounts(now = new Date()): Promise<{ open: number; overdue: number; done: number; dropped: number; all: number }> {
+/** Counts for the Action items page's filters: everyone's, or one owner's (null: nobody's) */
+export async function actionItemCounts(now = new Date(), ownerId?: string | null): Promise<{ open: number; overdue: number; done: number; dropped: number; all: number }> {
+  const owner = ownerId !== undefined ? { ownerId } : {}
   const [grouped, open] = await Promise.all([
-    prisma.actionItem.groupBy({ by: ["status"], _count: { _all: true } }),
-    prisma.actionItem.findMany({ where: { status: "open", dueAt: { not: null } }, select: { status: true, dueAt: true } }),
+    prisma.actionItem.groupBy({ by: ["status"], where: owner, _count: { _all: true } }),
+    prisma.actionItem.findMany({ where: { ...owner, status: "open", dueAt: { not: null } }, select: { status: true, dueAt: true } }),
   ])
   const count = (status: string) => grouped.find((g) => g.status === status)?._count._all ?? 0
   return {

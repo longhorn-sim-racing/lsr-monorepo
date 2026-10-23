@@ -49,6 +49,8 @@ describe("decisions in the decision log", () => {
     expect(title.length).toBeLessThanOrEqual(120)
     expect(title.endsWith("…")).toBe(true)
     expect(title).not.toMatch(/ …$/)
+    // Long enough for the knowledge base's title rule
+    expect(decisionTitle("No.")).toBe("Decision: No")
   })
 
   it("writes the decision with where it was made", () => {

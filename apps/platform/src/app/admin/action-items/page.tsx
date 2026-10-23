@@ -55,9 +55,11 @@ export default async function ActionItemsPage({ searchParams }: { searchParams: 
 
   const owner = ownerHandle && ownerHandle !== "none" ? await prisma.user.findUnique({ where: { handle: ownerHandle.toLowerCase() }, select: { id: true, displayName: true } }) : null
   const ownerId = ownerHandle === "none" ? null : owner ? owner.id : undefined
+  // A handle that's no one's shows nothing, rather than everyone's
+  const unknown = Boolean(ownerHandle && ownerHandle !== "none" && !owner)
   const [items, counts, owners, officers] = await Promise.all([
-    ownerHandle && ownerHandle !== "none" && !owner ? Promise.resolve([]) : listActionItems({ status, ...(ownerId !== undefined ? { ownerId } : {}) }, now),
-    actionItemCounts(now),
+    unknown ? Promise.resolve([]) : listActionItems({ status, ...(ownerId !== undefined ? { ownerId } : {}) }, now),
+    unknown ? Promise.resolve({ open: 0, overdue: 0, done: 0, dropped: 0, all: 0 }) : actionItemCounts(now, ownerId),
     actionItemOwners(),
     listOfficers(),
   ])
@@ -68,7 +70,7 @@ export default async function ActionItemsPage({ searchParams }: { searchParams: 
     <>
       <PageHeader
         title="Action items"
-        description={`What officers said they'd do: ${counts.open} open${counts.overdue ? `, ${counts.overdue} overdue` : ""}. Overdue means open and past its due date.`}
+        description={`What officers said they'd do${owner ? ` (${owner.displayName})` : ownerId === null ? " (no owner)" : ""}: ${counts.open} open${counts.overdue ? `, ${counts.overdue} overdue` : ""}. Overdue means open and past its due date.`}
       />
       <ActionItemFilters counts={{ ...counts }} owners={owners.map((o) => ({ handle: o.handle, displayName: o.displayName }))} />
       <SplitLayout

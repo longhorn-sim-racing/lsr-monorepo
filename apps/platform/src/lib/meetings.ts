@@ -113,6 +113,7 @@ export function decisionTitle(text: string, max = MEETING_LIMITS.decisionTitleMa
   const firstLine = text.trim().split(/\n/)[0]
   const sentence = firstLine.match(/^(.+?[.!?])(\s|$)/)?.[1] ?? firstLine
   const clean = sentence.replace(/[.!?]+$/, "").trim()
+  if (clean.length < 3) return `Decision: ${clean}`
   if (clean.length <= max) return clean
   const cut = clean.slice(0, max - 1)
   const space = cut.lastIndexOf(" ")

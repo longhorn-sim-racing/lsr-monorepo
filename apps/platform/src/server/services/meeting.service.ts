@@ -234,7 +234,7 @@ export async function linkDecisionsToLog(
         {
           title: title || decisionTitle(decision.text),
           body: decisionBody(decision.text, meeting),
-          tags: [DECISION_TAG, meeting.kind],
+          tags: meeting.kind === "other" ? [DECISION_TAG] : [DECISION_TAG, meeting.kind],
           sourceNote: `${meeting.title} (meeting record)`,
           sourceDate: meeting.heldAt,
           sourceUrl: meetingPath(meeting.id),
