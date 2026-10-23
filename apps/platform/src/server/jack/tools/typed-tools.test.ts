@@ -287,11 +287,21 @@ describe("audit_log filters", () => {
   it("matches action and entity case-insensitively, and 'system' as no actor", () => {
     expect(auditWhere({ ...range, action: "payment_succeeded", actor: "system" })).toEqual({
       createdAt: { gte: range.start, lte: range.end },
+      NOT: expect.anything(),
       actionType: { equals: "payment_succeeded", mode: "insensitive" },
       actorUserId: null,
     })
     const byName = auditWhere({ ...range, actor: "alex", search: "standings" })
     expect(byName).toMatchObject({ summary: { contains: "standings", mode: "insensitive" }, actor: { OR: expect.any(Array) } })
+  })
+
+  it("never shows recruiting entries about an officer's or admin's own application", () => {
+    expect(auditWhere(range).NOT).toEqual({
+      entityType: { in: ["APPLICATION", "APPLICATION_TRACK", "APPLICATION_EMAIL"] },
+      targetUser: { roles: { some: { role: { key: { in: ["officer", "admin"] } } } } },
+    })
+    // Filtering by entity doesn't lift it
+    expect(auditWhere({ ...range, entity: "APPLICATION_TRACK" }).NOT).toBeDefined()
   })
 })
 
