@@ -19,8 +19,19 @@ export type JackProposalDiffRow = {
   stats?: { added: number; removed: number }
 }
 
-/** A row of a list kind, with a checkbox on the card */
-export type JackProposalRow = { id: string; label: string; detail?: string; status?: "matched" | "ambiguous" | "unmatched" }
+/** A row of a list kind, with a checkbox on the card; `thumbUrl` a small picture of it (isCardImagePath) */
+export type JackProposalRow = { id: string; label: string; detail?: string; status?: "matched" | "ambiguous" | "unmatched"; thumbUrl?: string }
+
+/** A picture on a card: what a proposal posts or adds (a slide, a room photo), from an officer-only route of this site */
+export type JackProposalImage = { url: string; alt: string; label?: string }
+
+/**
+ * The only pictures a card loads: this site's officer-only Jack image routes (a deck slide's render, a
+ * room file's thumbnail). Nothing outside the site, so a card never fetches a link from a proposal
+ */
+export function isCardImagePath(url: string): boolean {
+  return /^\/api\/admin\/jack\/(decks\/[0-9a-f-]{36}\/slides\/[A-Za-z0-9_-]{4,32}|files\/[0-9a-f-]{36})(\?[A-Za-z0-9=&_.%-]*)?$/i.test(url)
+}
 
 export type JackProposalDetail = {
   id: string
@@ -48,6 +59,8 @@ export type JackProposalDetail = {
   rows: JackProposalRow[] | null
   /** A rendered preview of the Markdown it publishes (a news post), or null */
   preview: JackProposalPreview | null
+  /** Pictures of what it posts or adds, in order (only isCardImagePath links) */
+  images: JackProposalImage[]
   permission: "officer" | "admin"
   /** Applying it can't be taken back: the card asks first */
   destructive: boolean

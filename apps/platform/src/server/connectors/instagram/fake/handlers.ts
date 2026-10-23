@@ -1,4 +1,5 @@
 import type { FakeService } from "../../fakes/types"
+import { PUBLISH_SCOPE, publishingFake } from "./publishing"
 
 /**
  * The Instagram Graph fake (research/instagram.md §7), mounted at /instagram: what the feed sync
@@ -16,7 +17,8 @@ import type { FakeService } from "../../fakes/types"
  * - Post insights check the metric set per media type; album children have none; a deleted post (or an
  *   id that isn't a media id) gets 100/33. Media ids it doesn't know but that look real (15+ digits) are
  *   answered as photos, so the eval copy's real posts get numbers.
- * Publishing (T9b) adds its routes here.
+ * - Publishing (T9b: containers, their status, media_publish, the quota) is in ./publishing.ts, for a
+ *   token with instagram_business_content_publish (`publishToken`).
  */
 
 export const INSTAGRAM_FAKE = {
@@ -24,6 +26,8 @@ export const INSTAGRAM_FAKE = {
   token: "IGfake-read-insights-token",
   /** Today's token: basic only (no insights) */
   basicToken: "IGfake-read-basic-token",
+  /** The publishing app's token: basic and content_publish (no insights) */
+  publishToken: "IGfake-publish-token",
   /** Professional account id (user_id, "IG_ID"); /me's `id` is the app-scoped one */
   userId: "17841400000000000",
   appScopedId: "26172548090000000",
@@ -84,6 +88,7 @@ export const instagramFake: FakeService = {
     const tokens = new Map<string, FakeToken>([
       [INSTAGRAM_FAKE.token, { scopes: ["instagram_business_basic", "instagram_business_manage_insights"], issuedAt: created - 3 * DAY, expiresAt: created + 57 * DAY, dead: null }],
       [INSTAGRAM_FAKE.basicToken, { scopes: ["instagram_business_basic"], issuedAt: created - 3 * DAY, expiresAt: created + 57 * DAY, dead: null }],
+      [INSTAGRAM_FAKE.publishToken, { scopes: ["instagram_business_basic", PUBLISH_SCOPE], issuedAt: created - 3 * DAY, expiresAt: created + 57 * DAY, dead: null }],
     ])
     const media: FakeMedia[] = SEEDED_POSTS.map(([days, type, caption], i) => ({
       id: `180123456789000${String(i + 10)}`,
@@ -100,6 +105,7 @@ export const instagramFake: FakeService = {
 
     const children = new Set(media.flatMap((m) => m.children ?? []))
     const findMedia = (id: string) => media.find((m) => m.id === id)
+    const publishing = publishingFake({ userId: INSTAGRAM_FAKE.userId, username: INSTAGRAM_FAKE.username, graphError, addPost: (post) => media.push(post) })
 
     /** The request's token, or the error Graph would answer */
     function auth(request: Request, url: URL): FakeToken | Response {
@@ -197,6 +203,7 @@ export const instagramFake: FakeService = {
           return Response.json({ followers, throttleNext, media: media.length, deleted: [...deleted] })
         },
       },
+      ...publishing.routes,
       {
         method: "*",
         path: "/*",
@@ -241,6 +248,8 @@ export const instagramFake: FakeService = {
             if (target === INSTAGRAM_FAKE.userId || target === "me") return accountInsights(url)
             return mediaInsights(target, url)
           }
+          const published = publishing.handle(request, url, path, token.scopes)
+          if (published) return published
           return graphError(`Unsupported ${request.method.toLowerCase()} request. Object with ID '${path.split("/")[1] ?? ""}' does not exist, cannot be loaded due to missing permissions, or does not support this operation.`, 100, 33, "GraphMethodException")
         },
       },

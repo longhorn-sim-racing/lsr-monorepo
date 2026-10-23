@@ -4,17 +4,12 @@ import { prisma } from '@/server/db';
 import { revalidatePath } from 'next/cache';
 import { requireOfficer } from '@/server/auth/guards';
 import { createAuditLog } from '@/server/audit/log';
+import { nextGalleryOrder as nextOrder, uniqueAlbumSlug as uniqueSlug } from '@/server/services/gallery.service';
 
 function revalidateGallery() {
   revalidatePath('/admin/gallery');
   revalidatePath('/gallery');
   revalidatePath('/');
-}
-
-/** Next order value at the end of an album (or of the unsorted photos). */
-async function nextOrder(albumId: string | null) {
-  const last = await prisma.galleryImage.aggregate({ where: { albumId }, _max: { order: true } });
-  return (last._max.order ?? 0) + 1;
 }
 
 export async function createImage(
@@ -129,29 +124,6 @@ export type AlbumInput = {
   description: string | null;
   eventId: string | null;
 };
-
-function slugify(title: string) {
-  return title
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^\w\s-]/g, "")
-    .trim()
-    .replace(/[\s_-]+/g, "-")
-    .slice(0, 60)
-    .replace(/^-+|-+$/g, "") || "album";
-}
-
-// /gallery shows photos without an album under this slug
-const RESERVED_SLUGS = new Set(["unsorted"]);
-
-async function uniqueSlug(title: string, excludeId?: string) {
-  const base = slugify(title);
-  for (let n = RESERVED_SLUGS.has(base) ? 2 : 1; ; n++) {
-    const slug = n === 1 ? base : `${base}-${n}`;
-    const taken = await prisma.galleryAlbum.findFirst({ where: { slug, ...(excludeId ? { id: { not: excludeId } } : {}) } });
-    if (!taken) return slug;
-  }
-}
 
 function parseAlbumInput(input: AlbumInput) {
   const title = input.title.trim();

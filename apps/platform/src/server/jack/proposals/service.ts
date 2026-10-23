@@ -3,7 +3,7 @@ import { Prisma, type JackProposal } from "@prisma/client"
 import type { ZodError } from "zod"
 import { describeLineChanges, diffHunks, diffStats, lineDiff } from "@/lib/jack/line-diff"
 import type { JackProposalDisplay } from "@/lib/jack/parts"
-import { isNotePath, noteWithLink, PROPOSAL_ROOM_ARCHIVED, type JackProposalDetail, type JackProposalDiffRow, type JackProposalRow } from "@/lib/jack/proposals"
+import { isCardImagePath, isNotePath, noteWithLink, PROPOSAL_ROOM_ARCHIVED, type JackProposalDetail, type JackProposalDiffRow, type JackProposalImage, type JackProposalRow } from "@/lib/jack/proposals"
 import { JACK_EVENT, type JackMessageView, type JackProposalResult, type JackProposalState } from "@/lib/jack/types"
 import { redactSecrets } from "@/lib/redact"
 import { createAuditLog } from "@/server/audit/log"
@@ -363,7 +363,7 @@ export async function getProposalDetail(id: string, viewerId: string, deps: Prop
   const names = await namesOf([row.proposedForId, row.decidedById])
   const roles = kind && state.status === "PENDING" ? await rolesOf(viewerId) : []
   // The same rows Apply checks picks against, so the card only offers checkboxes Apply honours
-  const rows: JackProposalRow[] | null = kind && payload ? pickableRows(kind, row, payload) : (view.rows ?? null)
+  const rows: JackProposalRow[] | null = (kind && payload ? pickableRows(kind, row, payload) : (view.rows ?? null))?.map(cardRow) ?? null
 
   return {
     id: row.id,
@@ -386,6 +386,7 @@ export async function getProposalDetail(id: string, viewerId: string, deps: Prop
     links: view.links ?? [],
     rows,
     preview: view.preview ?? null,
+    images: cardImages(view),
     permission,
     destructive: kind?.destructive ?? false,
     canApply: Boolean(kind) && state.status === "PENDING" && mayApply(permission, roles),
@@ -596,7 +597,18 @@ function savedView(row: Pick<JackProposal, "title" | "summary" | "view">): Propo
     ...(Array.isArray(view.links) ? { links: view.links } : {}),
     ...(Array.isArray(view.rows) ? { rows: view.rows } : {}),
     ...(view.preview && typeof view.preview === "object" && Array.isArray(view.preview.blocks) ? { preview: view.preview } : {}),
+    ...(Array.isArray(view.images) ? { images: view.images } : {}),
   }
+}
+
+/** The pictures a card may load: this site's officer-only image routes only, on the images and the rows */
+function cardImages(view: ProposalView): JackProposalImage[] {
+  return (view.images ?? []).filter((image) => typeof image?.url === "string" && isCardImagePath(image.url)).map((image) => ({ url: image.url, alt: String(image.alt ?? ""), ...(image.label ? { label: String(image.label) } : {}) }))
+}
+
+function cardRow(row: ProposalRow): JackProposalRow {
+  if (row.thumbUrl === undefined || isCardImagePath(row.thumbUrl)) return row
+  return { id: row.id, label: row.label, ...(row.detail !== undefined ? { detail: row.detail } : {}), ...(row.status ? { status: row.status } : {}) }
 }
 
 /** A kind's view as plain JSON, with the title and summary kept to sizes the room and the table hold */

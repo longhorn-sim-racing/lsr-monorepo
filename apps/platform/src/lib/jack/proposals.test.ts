@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isProposalStatus, latestProposalState, noteLink, noteWithLink, roomMessageUrl } from "./proposals"
+import { isCardImagePath, isProposalStatus, latestProposalState, noteLink, noteWithLink, roomMessageUrl } from "./proposals"
 import type { JackProposalState } from "./types"
 
 describe("room notes with a link", () => {
@@ -48,5 +48,23 @@ describe("helpers", () => {
   it("links to a room's message", () => {
     expect(roomMessageUrl("r1", "m 1")).toBe("/admin/jack/r1?m=m%201")
     expect(roomMessageUrl("r1", null)).toBe("/admin/jack/r1")
+  })
+
+  it("lets a card load pictures only from this site's officer-only slide and room file routes", () => {
+    const deck = "11111111-1111-4111-8111-111111111111"
+    expect(isCardImagePath(`/api/admin/jack/decks/${deck}/slides/slide-a?v=3&kind=thumb`)).toBe(true)
+    expect(isCardImagePath(`/api/admin/jack/files/${deck}?variant=thumb`)).toBe(true)
+    for (const url of [
+      "https://evil.example/x.jpg",
+      "//evil.example/x.jpg",
+      "/\\evil.example/x.jpg",
+      `/api/admin/jack/decks/${deck}/export?format=pdf`,
+      `/api/admin/jack/files/${deck}/../../../x`,
+      `/api/admin/jack/files/${deck}?variant=thumb#"onerror`,
+      "/admin/jack",
+      "javascript:alert(1)",
+    ]) {
+      expect(isCardImagePath(url), url).toBe(false)
+    }
   })
 })

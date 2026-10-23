@@ -1,5 +1,6 @@
 import type { z } from "zod"
 import type { JackProposalPreview } from "@/lib/jack/markdown-preview"
+import type { JackProposalImage } from "@/lib/jack/proposals"
 import type { JackProposalLink, JackProposalResult } from "@/lib/jack/types"
 
 /**
@@ -61,7 +62,12 @@ export type ProposalRow = {
   detail?: string
   /** How the server matched the row to club data; the card starts unmatched and ambiguous rows unchecked */
   status?: "matched" | "ambiguous" | "unmatched"
+  /** A small picture of the row (a slide, a room photo): an officer-only image route of this site (isCardImagePath) */
+  thumbUrl?: string
 }
+
+/** A picture on the card of what a proposal posts or adds: an officer-only image route of this site (isCardImagePath); anything else isn't shown */
+export type ProposalImage = JackProposalImage
 
 /** A person the change affects (registrants, recipients, drivers), shown on the card */
 export type ProposalPerson = { name: string; detail?: string }
@@ -88,6 +94,8 @@ export type ProposalView = {
   rows?: ProposalRow[]
   /** A rendered preview of long Markdown the change publishes (a news post), drawn on the card as the site structures it */
   preview?: JackProposalPreview
+  /** Pictures of what it posts or adds (the slides of an Instagram post), drawn in order on the card */
+  images?: ProposalImage[]
 }
 
 /**

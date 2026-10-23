@@ -3,6 +3,7 @@ import { JACK_DECK_SIZES } from "@/lib/jack/decks"
 import { requireOfficerPage } from "@/server/auth/guards"
 import { prisma } from "@/server/db"
 import { getDeck, listDeckVersions } from "@/server/jack/decks/service"
+import { deckPublishOptions } from "@/server/jack/publish/deck-options"
 import { JackDeckClient } from "./deck-client"
 
 export const dynamic = "force-dynamic"
@@ -16,7 +17,7 @@ type JackDeckPageArgs = {
   searchParams: Promise<{ v?: string }>
 }
 
-/** One of Jack's decks or graphics (#177): every slide, its notes, the versions, and downloads */
+/** One of Jack's decks or graphics (#177): every slide, its notes, the versions, downloads, and Publish to Instagram and Add to gallery (#188) */
 export default async function JackDeckPage({ params, searchParams }: JackDeckPageArgs) {
   await requireOfficerPage()
   const { deckId } = await params
@@ -30,10 +31,11 @@ export default async function JackDeckPage({ params, searchParams }: JackDeckPag
   const deck = version === current.version ? current : await getDeck(deckId, version)
   if (!deck) notFound()
 
-  const [versions, room, createdBy] = await Promise.all([
+  const [versions, room, createdBy, publish] = await Promise.all([
     listDeckVersions(deckId, 100),
     current.roomId ? prisma.jackRoom.findUnique({ where: { id: current.roomId }, select: { id: true, title: true } }) : null,
     current.createdById ? prisma.user.findUnique({ where: { id: current.createdById }, select: { displayName: true } }) : null,
+    deckPublishOptions(current),
   ])
   // What Jack's replies that changed this deck cost (the whole reply, data lookups included)
   const messageIds = [...new Set(versions.flatMap((ver) => (ver.messageId ? [ver.messageId] : [])))]
@@ -56,6 +58,7 @@ export default async function JackDeckPage({ params, searchParams }: JackDeckPag
         costUsd: spent?._sum.costUsd ? Number(spent._sum.costUsd) : null,
       }}
       versions={versions.map((ver) => ({ version: ver.version, summary: ver.summary, slides: ver.slides, createdAt: ver.createdAt.toISOString(), byName: ver.byName }))}
+      publish={publish}
     />
   )
 }

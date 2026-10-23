@@ -131,11 +131,17 @@ Object.assign(db, {
 })
 
 const audit = vi.hoisted(() => ({ createAuditLog: vi.fn() }))
+// instagram.publish runs for real below; its deck comes from here, and publishing is switched off
+const decks = vi.hoisted(() => ({ getDeck: vi.fn() }))
 vi.mock("@/server/db", () => ({ prisma: db }))
 vi.mock("@/server/audit/log", () => audit)
 vi.mock("./registry", () => ({ findProposalKind: () => undefined, PROPOSAL_KINDS: [] }))
+vi.mock("@/server/jack/decks/service", async (original) => ({ ...(await original<typeof import("@/server/jack/decks/service")>()), getDeck: decks.getDeck }))
+vi.mock("@/server/jack/decks/renders", () => ({ getRenderFile: vi.fn() }))
+vi.mock("@/server/connectors/instagram/publish-connector", () => ({ instagramPublishConnector: { client: async () => null } }))
 
 import { buildHistory, type HistoryRow } from "../history"
+import { instagramPublishKind } from "./decks-rooms/instagram-publish"
 import { ProposalInputError, StaleProposalError } from "./errors"
 import { APPLYING_TIMEOUT_MS, applyProposal, createProposal, discardProposal, getProposalDetail, PROPOSAL_TTL_MS, roomProposalStates, sweepProposals, type ProposalDeps } from "./service"
 import type { AnyProposalKind, ProposalApplyContext } from "./types"
@@ -257,14 +263,39 @@ const previewKind: AnyProposalKind = {
   },
 }
 
+/* Pictures on the card (an Instagram post's slides, a gallery add's images): only this site's officer image routes load */
+const SLIDE_THUMB = "/api/admin/jack/decks/11111111-1111-4111-8111-111111111111/slides/slide-a?v=3&kind=thumb"
+const picturesKind: AnyProposalKind = {
+  ...fileKind,
+  kind: "test.pictures",
+  schema: z.object({}),
+  async prepare() {
+    return {
+      before: null,
+      view: {
+        title: "Post it",
+        summary: "Posts it.",
+        diff: [],
+        images: [{ url: SLIDE_THUMB, alt: "Slide 1", label: "Slide 1" }, { url: "https://evil.example/pixel.gif", alt: "x" }],
+        rows: [
+          { id: "a", label: "Slide 1", thumbUrl: SLIDE_THUMB },
+          { id: "b", label: "Photo", thumbUrl: "//evil.example/x.jpg" },
+        ],
+      },
+    }
+  },
+}
+
 const KINDS: Record<string, AnyProposalKind> = {
   "test.change": thingKind("test.change"),
   "test.preview": previewKind,
+  "test.pictures": picturesKind,
   "test.admin": thingKind("test.admin", { permission: "admin" }),
   "test.list": listKind,
   "test.file": fileKind,
   "test.audience": audienceKind,
   "test.gated": gatedKind,
+  "instagram.publish": instagramPublishKind as AnyProposalKind,
 }
 
 const events: { roomId: string; event: JackRoomEvent }[] = []
@@ -373,6 +404,21 @@ describe("createProposal", () => {
     for (const untouched of [otherTarget, otherRoom, otherKind]) expect(row(untouched.proposal.proposalId).status).toBe("PENDING")
     expect(notes().at(-1)).toBe("Superseded: Change t1. Jack proposed a newer version.")
     expect(proposalEvents()).toEqual([expect.objectContaining({ id: first.proposal.proposalId, status: "SUPERSEDED" })])
+  })
+
+  it("keeps separate Instagram posts of one deck pending: two stories, a carousel; only a revised caption replaces a card", async () => {
+    const DECK = "11111111-1111-4111-8111-111111111111"
+    decks.getDeck.mockResolvedValue({ id: DECK, title: "GM 2 recap", size: "post", version: 3, roomId: ROOM, createdById: null, createdAt: new Date(), updatedAt: new Date(), content: { css: "", slides: ["a", "b", "c"].map((id) => ({ id: `slide-${id}`, html: `<section>${id}</section>` })) } })
+    const story1 = await propose("instagram.publish", { deck: DECK, type: "story", slides: [1] })
+    const story2 = await propose("instagram.publish", { deck: DECK, type: "story", slides: [2] })
+    const carousel = await propose("instagram.publish", { deck: DECK, type: "carousel", caption: "GM 2 recap!" })
+    for (const made of [story2, carousel]) expect(made.superseded).toEqual([])
+    for (const made of [story1, story2, carousel]) expect(row(made.proposal.proposalId).status).toBe("PENDING")
+
+    const revised = await propose("instagram.publish", { deck: DECK, type: "carousel", caption: "GM 2 recap! Thanks for coming." })
+    expect(revised.superseded).toEqual([carousel.proposal.proposalId])
+    expect(row(carousel.proposal.proposalId).status).toBe("SUPERSEDED")
+    for (const made of [story1, story2]) expect(row(made.proposal.proposalId).status).toBe("PENDING")
   })
 
   it("never supersedes one an officer is applying", async () => {
@@ -684,6 +730,17 @@ describe("reading proposals", () => {
   it("gives the card the preview the kind built when proposing", async () => {
     const { proposal } = await propose("test.preview", { text: "Hello" })
     expect((await getProposalDetail(proposal.proposalId, gray.id, deps))?.preview).toEqual({ label: "How it reads", title: "Post", blocks: [{ t: "p", c: [{ t: "text", v: "Hello" }] }] })
+    expect((await getProposalDetail(proposal.proposalId, gray.id, deps))?.images).toEqual([])
+  })
+
+  it("gives the card pictures and row thumbnails from this site's officer image routes only", async () => {
+    const { proposal } = await propose("test.pictures", {})
+    const detail = await getProposalDetail(proposal.proposalId, gray.id, deps)
+    expect(detail?.images).toEqual([{ url: SLIDE_THUMB, alt: "Slide 1", label: "Slide 1" }])
+    expect(detail?.rows).toEqual([
+      { id: "a", label: "Slide 1", thumbUrl: SLIDE_THUMB },
+      { id: "b", label: "Photo" },
+    ])
   })
 
   it("gives the card the rows Apply honours: saved ones, list.rows() ones, or none", async () => {
