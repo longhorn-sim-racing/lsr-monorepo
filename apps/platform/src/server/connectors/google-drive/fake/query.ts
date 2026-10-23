@@ -55,7 +55,7 @@ function tokenize(q: string): Token[] {
 
 type Predicate = (file: QueryFile) => boolean
 
-const words = (text: string) => text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
+const words = (text: string): string[] => text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
 
 /** Drive's fullText: whole-token matches; a "quoted phrase" must appear as consecutive tokens */
 function fullTextMatch(file: QueryFile, query: string): boolean {
