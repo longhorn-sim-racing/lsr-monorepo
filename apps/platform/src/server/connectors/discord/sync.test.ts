@@ -227,11 +227,39 @@ describe("rescan", () => {
     expect(spa?.lastMessageId).toBeTruthy()
   })
 
-  it("saves where a pass cut short got to, and marks deletions only up to there", async () => {
-    const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.general] })
+  it("saves where a pass cut short got to, marks deletions only up to there, and carries on from there next time", async () => {
+    const { fakes, memory, ctx } = setup({ synced: [FAKE_CHANNELS.general] })
+    // More than one page of recent messages
+    for (let i = 0; i < 120; i++) await hook(fakes, "POST", "messages", { channelId: FAKE_CHANNELS.general, content: `message ${i}` })
     await syncMessages(ctx)
-    const result = await rescan({ ...ctx, deadline: Date.now() + 1_000 })
-    expect(result).toMatchObject({ unfinished: 1, deleted: 0 })
+    const window = (await ctx.store.liveMessageIds(FAKE_CHANNELS.general, new Date(Date.now() - 7 * DAY), new Date())).sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1))
+    const [early, late] = [window[0], window[window.length - 1]]
+    await hook(fakes, "DELETE", `messages/${FAKE_CHANNELS.general}/${early}`)
+    await hook(fakes, "DELETE", `messages/${FAKE_CHANNELS.general}/${late}`)
+
+    // The run's time runs out after its first page
+    let pages = 0
+    const client = { ...ctx.client, messages: async (...args: Parameters<SyncContext["client"]["messages"]>) => (pages++, ctx.client.messages(...args)) }
+    const cut = await rescan({
+      ...ctx,
+      client,
+      get deadline() {
+        return pages ? Date.now() : Date.now() + 60_000
+      },
+    } as SyncContext)
+    expect(cut).toMatchObject({ unfinished: 1, deleted: 1 })
+    expect(memory.messages.get(early)?.deletedAt).toBeInstanceOf(Date)
+    expect(memory.messages.get(late)?.deletedAt).toBeNull()
+    const resumeAt = memory.channels.get(FAKE_CHANNELS.general)?.rescanFrom
+    expect(resumeAt).toBeInstanceOf(Date)
+
+    const next = await rescan(ctx)
+    expect(next).toMatchObject({ unfinished: 0, deleted: 1 })
+    expect(memory.messages.get(late)?.deletedAt).toBeInstanceOf(Date)
+    expect(memory.channels.get(FAKE_CHANNELS.general)?.rescanFrom).toBeNull()
+    // The second pass started where the first stopped, not at the window's start
+    const asked = fakes.requests.filter((r) => r.path === `/api/v10/channels/${FAKE_CHANNELS.general}/messages`).map((r) => new URL(r.url).searchParams.get("after")!)
+    expect(asked.some((after) => snowflakeTime(after).getTime() >= resumeAt!.getTime() - 1)).toBe(true)
   })
 })
 
