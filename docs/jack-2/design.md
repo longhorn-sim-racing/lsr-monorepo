@@ -530,11 +530,11 @@ Every external link shows its host. In replies, `reply-text.tsx` also shows the 
 - **Tabs** (from the tab registry): Documents (Drive and SharePoint) and Teams messages.
 - **Age:** Jack mentions an entry's age when it's over 180 days old, counted from reviewed, source or updated date.
 - **Seed:**
-  - Drafts live in `docs/jack-2/knowledge-seed/*.md`, one entry per file with front matter: title, tags, sourceNote, sourceDate, owner.
+  - **The repo is public, so seed content is never committed.** Drafts live in a private folder outside the repo (default `~/.lsr/jack-knowledge-seed/`), one entry per `.md` file with front matter: title, tags, sourceNote, sourceDate, owner. Only the README describing the format is in the repo (`docs/jack-2/knowledge-seed/README.md`).
   - They're drafted from Teams posts, the Drive folder and repo docs.
   - A lint step rejects emails, keys and tokens.
   - Gray reviews them in one pass, recorded in `build-log.md`.
-  - `scripts/jack-knowledge-seed.ts` loads them (sourceType SEED, reviewedAt = sign-off date) only with `--approved`.
+  - `scripts/jack-knowledge-seed.ts --dir <folder>` loads them (sourceType SEED, reviewedAt = sign-off date) only with `--approved`, against the database `DATABASE_URL` points at (production loading is a release step Gray runs).
   - **Coverage checklist** (from #188): the club; who does what (with officer profiles); decision log (one entry per decision, tag `decision`); policies; brand; sponsors; events playbook; recruiting; services and who holds access (names only); calendar rhythm.
   - Gray's private notes are never used.
 
