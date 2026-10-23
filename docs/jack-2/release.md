@@ -5,22 +5,21 @@ The steps Gray follows to ship Jack 2.0 (#188): what to check before merging `ja
 - **Who runs it:** Gray, as an admin. Some steps need another account's owner; each section says who.
 - **The order matters** in sections 1 and 2. In section 3 most services stand alone (each says what it needs first), so skipping one leaves the rest working. Launch can go ahead with every connector off. [design §15]
 - **The pattern in section 3:** accounts and keys, env vars in Vercel (then redeploy), outside settings, the smoke test on System → Connections, the switch, then the jobs on System → Scheduled jobs. Off always works.
-- **Sources:** each step ends with where it came from, in brackets. `design §n` is `docs/jack-2/design.md`, `build log` is `docs/jack-2/build-log.md`, and a track name (`groundwork`, `files`, `sources-a`…) is `docs/jack-2/tracks/<track>.md`. Commands run from the repo root.
-- **The three security PRs (#222, #223, #224)** are described here as merged. #224 adds the twelfth migration (1.6). #223 changes render keys, so every deck in a room renders again once after the deploy. #222 makes the notifications cron hold scheduled announcement emails the day's email limit can't take; they show as failed on Notifications with a note to retry after the reset.
+- **Sources:** each step ends with where it came from, in brackets. `design §n` is `docs/jack-2/design.md`, `build log` is `docs/jack-2/build-log.md`, and a track name (`groundwork`, `files`, `sources-a`…) is `docs/jack-2/tracks/<track>.md`. `added here` marks a step no doc has: reasoning, or what earlier PRs showed. Commands run from the repo root.
+- **The three security PRs (#222, #223, #224)** merged into `jack-2` on 10/23. #224 adds the twelfth migration (1.6). #223 changes render keys, so every deck in a room renders again once after the deploy. #222 makes the notifications cron hold scheduled announcement emails the day's email limit can't take; they show as failed on Notifications with a note to retry after the reset.
 
 ## 1. Before merging
 
 ### 1.1 Land what's still open
-1. Merge the open PRs into `jack-2`: the security fixes #222, #223 and #224, and the Phase F PRs (docs, this runbook, and the fixes from the wave 2b security pass). [build log: Status]
-2. Merge the four fixes waiting on `main`, then merge `main` into `jack-2` so the release carries them. [build log: Log, 10/22 and 10/23]
-   - #190: every cron route refuses all requests when `CRON_SECRET` is unset.
-   - #191: Sonnet 5.5 cache reads priced at $0.10 per million tokens.
-   - #195: `run_sql` refuses `ts_rewrite`. **This one conflicts** in `src/server/jack/tools/run-sql.ts` and `run-sql.test.ts`: keep `jack-2`'s side, which already refuses `ts_rewrite` (and more).
-   - #216: the Stripe webhook no longer logs the request body on a bad signature.
-   - #190, #191 and #216 merge into `jack-2` without conflicts (checked with `git merge-tree` on 10/23).
+1. Merge the open PRs into `jack-2`: the Phase F PRs (F-docs #226, this runbook #225, and the fixes from the wave 2b security pass). The security fixes #222, #223 and #224 are already in. [build log: Status]
+2. Merge the four fixes waiting on `main`, then merge `main` into `jack-2` so the release carries them. Checked with `git merge-tree` on 10/23 against `jack-2` with #222–#224 and F-docs in; if step 1 brings in anything else that touches these files, run `git merge-tree --write-tree --name-only origin/jack-2 origin/main` (after fetching) for the current list. [build log: Log, 10/22 and 10/23; merge check: added here]
+   - #190: every cron route refuses all requests when `CRON_SECRET` is unset. **Conflicts** in `docs/deployment.md`: #222 added a sentence to the same notification-cron paragraph. Keep both sentences (#222's note on holding announcement emails past the day's limit, and #190's "Every cron route refuses all requests when `CRON_SECRET` is not set…"). The recruiting paragraph merges on its own, losing its recruiting-only `CRON_SECRET` sentence as #190 intends.
+   - #191: Sonnet 5.5 cache reads priced at $0.10 per million tokens. Merges cleanly, `docs/jack.md`'s price table included.
+   - #195: `run_sql` refuses `ts_rewrite`. **Conflicts** in `src/server/jack/tools/run-sql.ts` and `run-sql.test.ts`, and, once F-docs is in, in `docs/jack.md`'s list of off-limits names. Keep `jack-2`'s side in all three: it already refuses `ts_rewrite` (and more), and its `docs/jack.md` already lists it.
+   - #216: the Stripe webhook no longer logs the request body on a bad signature. Merges cleanly.
 
 ### 1.2 Gates from the build log
-- **Production upload path (G5): passed 10/23.** All 19 end-to-end checks on Supabase Storage, a browser upload, render-check, a deck's slides and exports. [build log: Log, 10/23; files: Release gate]
+- **Production upload path (G5): passed 10/23 on local Supabase Storage.** All 19 end-to-end checks with `JACK_FILE_STORE=supabase`, a browser upload, render-check, a deck's slides and exports. Production Storage is first used in 1.8 (the bucket) and 2.3 (render-check and the first room upload). [build log: Log, 10/23; files: Release gate]
 - **Live model checks (G8, G6): passed 10/23.** Tool search with streamed tool input, `url_sources` naming the deferred `web_links`, dynamic filtering on Sonnet and Haiku, Claude Files, and the PDF link probe. [build log: Log, 10/23]
 - **Security review of wave 2b**, and its fixes merged. Waves 1 and 2a were reviewed on 10/23 (their fixes are #222–#224). [build log: Log, 10/23]
 - **The eval**: one full run on all three models, on `lsr_eval`, with the spend recorded in the build log; the release PR's checklist also has "Eval run against Jack today". The dry run passed 108 of 110 per model on 10/23, and the two failing checks were fixed. How to run it: `tracks/eval.md`. [design §16; #189 checklist]
@@ -35,12 +34,12 @@ The steps Gray follows to ship Jack 2.0 (#188): what to check before merging `ja
 5. The preview **deployed**, not just built:
    - It didn't stop at "Deploying outputs" with "No more than 12 Serverless Functions" (Hobby's limit). #215 brought it to 7 functions; recheck it on this PR. [build log: Log, 10/23 and Wave 2a calls]
    - It isn't marked "build-rate-limit" (Hobby's build rate limit, hit on 10/23). If it is, wait and redeploy. [build log: Log, 10/23]
-6. If sign-in on the preview sends you back to the live site, check officer pages on production after the merge instead (2.3).
+6. If sign-in on the preview sends you back to the live site, check officer pages on production after the merge instead (2.3). [added here: earlier PRs' previews did this]
 
 ### 1.4 Rehearse the migrations
 - `lsr_eval` (a production copy, refreshed 10/22) was migrated to 2.0 on 10/23, before wave 2b merged. `pnpm --filter @lsr/platform jack:eval:prepare --skip-seed` applies the ones it doesn't have yet (wave 2b's and #224's) the same way, with `prisma migrate deploy`. [design §17 step 1; build log: Log, 10/23; eval: Try it locally]
-- For a full rehearsal, make a fresh copy of production the way `lsr_eval` was made and run `jack:eval:prepare --db=<lsr_eval…> --skip-seed` on it: all twelve should apply cleanly, and a second run should apply nothing.
-- Then run `pnpm --filter @lsr/platform exec tsx scripts/check-jack-sql-role.ts` locally (after `scripts/jack-local-sql-role.ts`, so the role can log in; it refuses anything but a local database): Jack's SQL role still reads only what it should. [design §3.2; script header]
+- For a full rehearsal, make a fresh copy of production the way `lsr_eval` was made and run `jack:eval:prepare --db=<lsr_eval…> --skip-seed` on it: all twelve should apply cleanly, and a second run should apply nothing. A copy skips the scheduler migration's pg_cron and pg_net step (it only runs in the database pg_cron runs in), so this doesn't rehearse that part; 1.7's checks cover it on production. [eval: Try it locally; `scripts/jack-eval/prepare.ts` header; `20261023020000_jack2_scheduler` header]
+- Then check Jack's SQL role still reads only what it should: `pnpm --filter @lsr/platform exec tsx scripts/check-jack-sql-role.ts` (after `scripts/jack-local-sql-role.ts`, so the role can log in; both refuse anything but a local database). It checks the database `DATABASE_URL` and `JACK_DATABASE_URL` name, and from `.env.local` that's the shared local dev database (migrated piecemeal), not the copy you just migrated. To check the copy, set both in the shell to the same local URLs with the copy's name as the database; the role belongs to the whole local server, so the password `jack-local-sql-role.ts` set works there too. [design §3.2; both scripts' headers]
 
 ### 1.5 Enable pg_cron and pg_net
 In the Supabase dashboard: pg_cron under Integrations → Cron, pg_net under Database → Extensions. Do this **before** the migrations. The scheduler migration then finds both and only adds its own schema and function. [design §17 step 2; `scripts/jack-scheduler-setup.ts`; groundwork: Scheduler, Setup 1]
@@ -63,7 +62,7 @@ They go to production **before** the code merges. They're additive (new tables, 
 | 11 | `20261024020500_jack2_note_job_key` | `JackMessage.jobKey` (nullable) and an index | T11 (#220) |
 | 12 | `20261024021500_jack2_discord_thread_owner` | `DiscordChannel.ownerId` (nullable); row level security and Jack's read policy on `DiscordChannel` | #224 |
 
-Several migrations check themselves and stop with an error if something is off (row level security off on a personal-data table, Jack's role able to write, read the search index or use the `cron` and `scheduler` schemas). If one fails, Prisma stops there, applies nothing after it, and records it as failed; later deploys refuse until that's resolved. Read the error, check what of it was applied, fix the cause, then `pnpm --filter @lsr/platform exec prisma migrate resolve --rolled-back <migration name>` and deploy again.
+Several migrations check themselves and stop with an error if something is off (row level security off on a personal-data table, Jack's role able to write, read the search index or use the `cron` and `scheduler` schemas). If one fails, Prisma stops there, applies nothing after it, and records it as failed; later deploys refuse until that's resolved. Read the error, check what of it was applied, fix the cause, then `pnpm --filter @lsr/platform exec prisma migrate resolve --rolled-back <migration name>` and deploy again. [the checks: the migrations themselves; what Prisma does on a failure: added here]
 
 **How.** Either way it's `prisma migrate deploy` (`pnpm --filter @lsr/platform db:deploy`) on the `jack-2` code:
 - **From Gray's machine** (the plan), on a `jack-2` checkout, with production's connection strings set in this shell only (never in a file in the repo):
@@ -74,11 +73,11 @@ Several migrations check themselves and stop with an error if something is off (
   pnpm --filter @lsr/platform db:deploy
   pnpm --filter @lsr/platform exec prisma migrate status   # "Database schema is up to date!"
   ```
-  Prisma also reads `apps/platform/.env` (the local database), but values set in the shell win; `migrate status` names the host it's on, so check that first. If the direct host doesn't answer (it's IPv6-only), use the session pooler on port 5432 for `DIRECT_URL`, as the migrate workflow does. There's no backup this way unless you take one first.
+  Prisma also reads `apps/platform/.env` (the local database), but values set in the shell win; `migrate status` names the host it's on, so check that first. If the direct host doesn't answer (it's IPv6-only), use the session pooler on port 5432 for `DIRECT_URL`, as the migrate workflow does. There's no backup this way unless you take one first. [Gray's plan for this release, and Prisma's env handling: added here; the pooler: `.github/workflows/migrate.yml` header]
 - **Or from GitHub:** Actions → Database Migrate → Run workflow, branch `jack-2`. It takes an encrypted backup of production first, then runs `db:deploy` with the `PRODUCTION_*` secrets. [`.github/workflows/migrate.yml`; design §17 step 3]
 
 ### 1.7 Checks after the migrations
-1. `prisma migrate status` against production says it's up to date.
+1. `prisma migrate status` against production says it's up to date. [as in 1.6]
 2. The live site, still on `main`'s code, works: sign in, open `/admin`, open an event, and ask Jack something in a room (Jack 1.x reads the new schema). [design §3.1; design §17]
 3. In the Supabase SQL editor:
    ```sql
@@ -115,7 +114,7 @@ After the merge, Supabase Storage is where deck renders, exports, screenshots an
 
 ### 2.2 The deployment
 - The build passed, and the deployment didn't stop at "Deploying outputs" over 12 functions. [build log: Wave 2a calls]
-- Runtime logs show no new errors in the first minutes (Vercel → the project → Logs).
+- Runtime logs show no new errors in the first minutes (Vercel → the project → Logs). [added here]
 
 ### 2.3 Check production
 Signed in as an admin:
@@ -162,7 +161,7 @@ One service at a time; check each works before the next. For each: env vars in V
 3. Smoke test (paid): in a room, "Search the web for the FIA's esports program and give me the link." Expect a "Searched the web (… cited)" part with hosts, and a function log line `[jack] Reply … N web searches, M pages opened`. Then "open the first link": expect a `web_links` call and "Read <host>". [groundwork: Model loop 2.0, Smoke test]
 4. The PDF link probe passed on 10/23, so PDFs go to Claude as documents with web fetch on. Run it again only if the web fetch tool version has changed (`web_fetch_20260209` in `src/server/jack/web-tools.ts`): `ANTHROPIC_API_KEY=… pnpm --filter @lsr/platform exec tsx scripts/check-jack-web-fetch-documents.ts` (paid, a few cents). [files: G6, Setup and release 5]
 - **Watch:** Jack → Usage. A search costs $0.01 plus 35,000 to 53,000 input tokens (dynamic filtering reads results in code execution). A reply is told to wrap up after 8 searches or 5 pages. Recurring questions and the digest never get web tools. [build log: Log, 10/23; groundwork: Model loop 2.0, Limits]
-- **Off:** remove `JACK_WEB_TOOLS` (or set it to anything but `on`) and redeploy.
+- **Off:** remove `JACK_WEB_TOOLS` (or set it to anything but `on`) and redeploy. [groundwork: Model loop 2.0, Web search and fetch]
 
 ### 3.5 Stripe (read only)
 - **Who:** Gray (existing Stripe account).
@@ -195,14 +194,14 @@ One service at a time; check each works before the next. For each: env vars in V
 2. Find the channel's numeric user id (`TWITCH_BROADCASTER_ID`). Make the EventSub secret: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. [sources-b: Setup, Twitch 2]
 3. Vercel (Production): `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET` (Sensitive), `TWITCH_BROADCASTER_ID`, `TWITCH_EVENTSUB_SECRET` (Sensitive). Redeploy. [sources-b: Setup, Twitch 3]
 4. Content → Streams → **Connect the club account** (an admin), signed in to Twitch as the club account (sign out of a personal one first; Twitch shows which account). Only the club channel's grant is kept. [sources-b: Setup, Twitch 4]
-5. Subscribe the webhooks from a machine with the same four values set in the shell (Sensitive values can't be read back from Vercel, so use your own copy): `pnpm --filter @lsr/platform exec tsx scripts/twitch-eventsub.ts` shows the plan; add `--apply` to create `stream.online` and `stream.offline`. It waits for Twitch's challenge and says when both are enabled. [sources-b: Setup, Twitch 5]
+5. Subscribe the webhooks from a machine with the same four values set in the shell (Sensitive values can't be read back from Vercel, so use your own copy): `pnpm --filter @lsr/platform exec tsx scripts/twitch-eventsub.ts` shows the plan; add `--apply` to create `stream.online` and `stream.offline`. It waits for Twitch's challenge and says when both are enabled. The script also reads `apps/platform/.env.local`, and if that still has `JACK_FAKES=twitch` (or `all`) from trying it locally, it talks to the local fake instead. So also set `JACK_FAKES=none` in the same shell (not an empty value, which PowerShell drops), and check the first line says "on the REAL Twitch" before adding `--apply`. [sources-b: Setup, Twitch 5; Try it locally; `scripts/twitch-eventsub.ts`]
 6. Connections → **Twitch** → Run smoke test ("Read @…, offline; club account @… OK, N followers"), switch on, then turn on `twitch.live` (every minute), `twitch.daily` and `twitch.token-check` (hourly). [sources-b: Setup, Twitch 6]
 - **Watch:** the first `twitch.live` runs, then a real go-live: Content → Streams shows it live within seconds, its title a few seconds later. `twitch.live` adds one run row a minute to Scheduled jobs. If Streams says Twitch revoked the webhooks, run the EventSub script with `--apply` again. [sources-b: Release steps 3; Jobs; EventSub webhook]
 - **Before ever deleting the Twitch app:** `scripts/twitch-eventsub.ts --remove --apply`. [sources-b: Setup, Twitch 7]
 
 ### 3.9 Instagram insights
 - **Who:** Gray or the Media lead (whoever holds the Meta app). No env vars: it uses the feed's token in Admin → Instagram. [sources-b: Instagram insights; design §15]
-1. In the Meta app's Instagram use case, give the token `instagram_business_basic` and `instagram_business_manage_insights` (still read only), generate it, and paste it on Content → Instagram (Replace token). The feed keeps working with it. [sources-b: Setup, Instagram insights 1]
+1. In the Meta app's Instagram use case, give the token `instagram_business_basic` and `instagram_business_manage_insights` (still read only), generate it, and paste it on Content → Instagram, in the Connection panel (**Paste a new access token**), not in Publishing. The feed keeps working with it. [sources-b: Setup, Instagram insights 1; `src/app/admin/instagram/client.tsx`]
 2. Connections → **Instagram insights** → Run smoke test ("Read @…: N followers; yesterday's reach …"; a missing permission fails with code 10), switch on, then turn on `instagram.account-daily` and `instagram.post-insights`. [sources-b: Setup, Instagram insights 2]
 - **Watch:** Content → Instagram → Insights. Days before the first snapshot stay empty. Follows and unfollows need 100+ followers (Instagram's rule). [sources-b: Instagram insights; Setup 3]
 
@@ -278,7 +277,7 @@ Run after the migrations are in production. The scripts run from a `jack-2` chec
 2. **Gray reviews the drafts** in the private seed folder (`~/.lsr/jack-knowledge-seed/`, outside the repo), including the open questions at the end of its `_index.md`. Record the sign-off date in the build log. [design §9; build log: Log, 10/22 later]
 3. **Lint and plan** (writes nothing): `DATABASE_URL='<production>' pnpm --filter @lsr/platform exec tsx scripts/jack-knowledge-seed.ts --dir ~/.lsr/jack-knowledge-seed`. The loader reads `apps/platform/.env.local` and `.env` too, but never over what's set in the shell. [knowledge-seed README: Loading]
 4. **Load:** the same command with `--approved=<sign-off date> --actor <your handle>`. Entries load as SEED, reviewed as of that date, each with a version and an audit entry. Running it again never undoes changes made on the site (they're skipped and listed; `--overwrite` replaces them). [knowledge-seed README: Loading; memory: Seed tooling]
-5. Check Content → Knowledge: the entries, their owners and tags. Ask Jack something one of them answers.
+5. Check Content → Knowledge: the entries, their owners and tags. Ask Jack something one of them answers. [added here]
 
 ## 5. Decisions for Gray before switching things on
 1. **Discord Developer Terms §12(a)** (before 3.12): written terms with the service providers that see Discord API data (Anthropic, Supabase, Vercel). Their standard terms and DPAs probably cover it; confirm it. [discord-read: Setup 4; research: discord.md §6]
@@ -305,19 +304,21 @@ Run after the migrations are in production. The scripts run from a `jack-2` chec
   - Webhooks while off: Resend's events are acknowledged and dropped; Twitch notifications are dropped; Graph notifications are acknowledged and dropped. Stripe's payout and dispute events are still stored (they're Stripe's own signed messages). [sources-a; sources-b; documents]
   - Drive, SharePoint and Teams: a connector switched off hides its documents and messages everywhere, whatever rows are stored. [documents: What it adds]
   - Discord: due posts wait; when posting resumes, any more than 6 hours late are cancelled, not sent. Instagram publishing: posts on their way wait; when it's back on, one more than 2 hours past its approval fails instead of going up late. [discord-post: Jobs; decks-rooms: How a post goes out]
-- **A job:** System → Scheduled jobs → its switch (admins).
+- **A job:** System → Scheduled jobs → its switch (admins). [groundwork: Scheduler, Choices made here]
 - **Discord posts:** any officer can pause a rule (its scheduled posts are cancelled) or cancel a scheduled post on Announcements. [discord-post: Standing rules; Announcements]
-- **Recurring questions and the digest:** Off on Jack → Recurring questions.
+- **Recurring questions and the digest:** Off on Jack → Recurring questions. [automation: Jack → Recurring questions]
 - **Web tools:** remove `JACK_WEB_TOOLS` and redeploy. [groundwork: Model loop 2.0]
 
 ### 6.2 Stop everything scheduled
 `SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'lsr-scheduler-tick'), active := false);` in the Supabase SQL editor. Nothing scheduled runs (syncs, posts, recurring questions, the digest). The GitHub Actions crons (notifications, recruiting, Instagram feed) aren't affected. [groundwork: Scheduler, When something's wrong; design §6]
 
 ### 6.3 Roll the code back
-Vercel → Deployments → the last production deployment from before the merge → Instant Rollback (or redeploy it). It's safe because the migrations are additive: `main`'s code ran on them between 1.6 and 2.1. [design §17 step 6; `docs/deployment.md`]
-- **Pause the tick first (6.2).** With old code, `/api/cron/tick` is a 404, and any job switched on stays due, so pg_cron would call it every minute.
-- Webhooks pointed at the new routes get 404s: Resend retries and may disable the endpoint; Twitch revokes subscriptions after repeated failures (run the EventSub script again after going forward); Graph subscriptions lapse within 3 days. The existing Stripe endpoint keeps working; the old code ignores payout and dispute events.
-- Jack 1.x reads deck files from Vercel Blob again. What the copy took is still in Blob (it doesn't delete), but renders, exports, screenshots and room files saved since the merge are only in Supabase.
+Vercel → Deployments → the last production deployment from before the merge. The schema is safe for it because the migrations are additive: `main`'s code ran on them between 1.6 and 2.1. [design §17 step 6; `docs/deployment.md`]
+- **Pause the tick first (6.2).** With old code, `/api/cron/tick` is a 404, and any job switched on stays due, so pg_cron would call it every minute. [groundwork: Scheduler, How it fits together; When something's wrong]
+- **Instant Rollback** only reaches it if nothing has been deployed to production since the merge: on Hobby, Vercel rolls back only to the deployment just before the current one, and every redeploy in section 3 adds one. Otherwise, **Redeploy** that deployment. A redeploy is an ordinary production deployment, so the next push to `main` puts 2.0 live again while the tick is still paused. Either way, to make the rollback last, open a revert of #189's merge on `main`, or hold merges to `main` until 2.0 goes forward again. [Vercel docs: Instant Rollback, Hobby limit; the rest added here]
+- Webhooks pointed at the new routes get 404s: Resend retries and may disable the endpoint; Twitch revokes subscriptions after repeated failures (run the EventSub script again after going forward); Graph subscriptions lapse within 3 days. The existing Stripe endpoint keeps working; the old code ignores payout and dispute events. [sources-a: Resend delivery events; Stripe; sources-b: EventSub webhook; documents: Teams]
+- Jack 1.x reads deck files from Vercel Blob again. What the copy took is still in Blob (it doesn't delete), but renders, exports, screenshots and room files saved since the merge are only in Supabase. [files: The file store; files: Setup (production) 2; `scripts/jack-storage-setup.ts`]
+- **Rooms under the old code:** Jack 1.x ignores 2.0's room settings. Mention-mode rooms answer every message again, and the first post in one gets Jack 1.x answering the side messages waiting since the last mention along with it (they're officer messages nobody has answered). Archived rooms drop out of the list and can't be opened (1.x shows only rooms that aren't archived, and has no way to unarchive); pins are ignored. Pending proposals can't be applied or discarded until 2.0 is back. [`main`'s `src/server/jack/reply-loop.ts` (`ANSWERABLE`) and `rooms.ts`; added here]
 
 ### 6.4 What the migrations leave behind
 A code rollback doesn't undo the migrations, and they don't need undoing. What stays: [design §3.1; design §17]

@@ -131,7 +131,7 @@ All four Twitch vars are already in `.env.example`. Nothing new for Instagram.
 7. Before ever deleting the Twitch app: `scripts/twitch-eventsub.ts --remove --apply` (subscriptions keep firing otherwise).
 
 **Instagram insights**
-1. In the Meta app's Instagram use case (API setup with Instagram business login), give the token both `instagram_business_basic` and `instagram_business_manage_insights` (still read-only; no publishing, comments or messages), generate it, and paste it in Admin → Instagram (Replace token). The feed keeps working with it.
+1. In the Meta app's Instagram use case (API setup with Instagram business login), give the token both `instagram_business_basic` and `instagram_business_manage_insights` (still read-only; no publishing, comments or messages), generate it, and paste it in Admin → Instagram, in the Connection panel (Paste a new access token), not in Publishing. The feed keeps working with it.
 2. System → Connections: run Instagram insights' smoke test ("Read @…: N followers; yesterday's reach …"; a missing permission fails with code 10), then switch it on. On Scheduled jobs turn on `instagram.account-daily` and `instagram.post-insights`.
 3. The account needs 100+ followers for follows and unfollows (Instagram's rule).
 
