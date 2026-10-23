@@ -1,4 +1,5 @@
 import type { DiffHunkLine } from "./line-diff"
+import type { JackProposalPreview } from "./markdown-preview"
 import type { JackProposalLink, JackProposalResult, JackProposalState, JackProposalStatusKey } from "./types"
 
 /**
@@ -45,6 +46,8 @@ export type JackProposalDetail = {
   links: JackProposalLink[]
   /** The rows to pick from, when it has any: exactly the ones Apply checks picks against */
   rows: JackProposalRow[] | null
+  /** A rendered preview of the Markdown it publishes (a news post), or null */
+  preview: JackProposalPreview | null
   permission: "officer" | "admin"
   /** Applying it can't be taken back: the card asks first */
   destructive: boolean
