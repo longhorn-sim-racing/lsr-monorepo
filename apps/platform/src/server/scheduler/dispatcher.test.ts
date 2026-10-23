@@ -69,7 +69,7 @@ describe("dispatchDueJobs", () => {
   })
 
   it("never runs a job twice when two ticks race for it: the conditional claim lets only one win", async () => {
-    const run = vi.fn(ok())
+    const run = vi.fn<JobKind["run"]>(ok())
     kind("stripe.sync", run)
     const job = store.addJob({ kind: "stripe.sync", nextRunAt: dueAt })
 
@@ -96,7 +96,7 @@ describe("dispatchDueJobs", () => {
   })
 
   it("leaves disabled, not-yet-due and locked jobs alone", async () => {
-    const run = vi.fn(ok())
+    const run = vi.fn<JobKind["run"]>(ok())
     kind("k", run)
     store.addJob({ kind: "k", key: "off", enabled: false, nextRunAt: dueAt })
     store.addJob({ kind: "k", key: "later", nextRunAt: new Date(START + 60_000) })
@@ -111,7 +111,7 @@ describe("dispatchDueJobs", () => {
   })
 
   it("stops claiming 200 s into the request, and only claims jobs whose budget fits the time left", async () => {
-    const run = vi.fn(ok())
+    const run = vi.fn<JobKind["run"]>(ok())
     kind("small", run, { budgetMs: 60_000 })
     kind("big", run, { budgetMs: 120_000 })
     kind("long", run, { budgetMs: 280_000, handoff: true })
@@ -135,7 +135,7 @@ describe("dispatchDueJobs", () => {
   })
 
   it("caps a job's deadline at the end of the function", async () => {
-    const run = vi.fn(ok())
+    const run = vi.fn<JobKind["run"]>(ok())
     kind("k", run, { budgetMs: 100_000 })
     store.addJob({ kind: "k", nextRunAt: dueAt })
     await dispatchDueJobs({ startedAt: START, clock: () => START + 150_000 })
@@ -222,7 +222,7 @@ describe("dispatchDueJobs", () => {
   })
 
   it("fails a job whose saved schedule can't be read, and tries it again an hour later", async () => {
-    const run = vi.fn(ok())
+    const run = vi.fn<JobKind["run"]>(ok())
     kind("k", run)
     const job = store.addJob({ kind: "k", schedule: "every tuesday", nextRunAt: dueAt })
     await dispatchDueJobs({ startedAt: START, clock: () => START })
@@ -273,10 +273,10 @@ describe("hand-offs", () => {
   const BASE = "https://www.example.org"
 
   it("sends a handoff job to /api/admin/jack/run, signed for that route only, and leaves it locked and running", async () => {
-    const run = vi.fn(ok())
+    const run = vi.fn<JobKind["run"]>(ok())
     kind("recurring.question", run, { handoff: true, budgetMs: 280_000, singleton: false })
     const job = store.addJob({ kind: "recurring.question", key: "recurring:q1", nextRunAt: dueAt })
-    const fetch = vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify({ ok: true }), { status: 202 }))
+    const fetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({ ok: true }), { status: 202 }))
 
     const result = await dispatchDueJobs({ startedAt: START, clock: () => START, fetch: fetch as unknown as typeof globalThis.fetch, baseUrl: `${BASE}/` })
 
@@ -314,7 +314,7 @@ describe("hand-offs", () => {
   })
 
   it("runs handoff jobs in place with handoff: 'inline' (pnpm jack:tick)", async () => {
-    const run = vi.fn(ok("Asked the question"))
+    const run = vi.fn<JobKind["run"]>(ok("Asked the question"))
     kind("long", run, { handoff: true })
     store.addJob({ kind: "long", nextRunAt: dueAt })
     const fetch = vi.fn()
@@ -324,7 +324,7 @@ describe("hand-offs", () => {
   })
 
   it("takes a hand-off over exactly once, runs it with the route's own deadline, and lets go after", async () => {
-    const run = vi.fn(ok("Answered"))
+    const run = vi.fn<JobKind["run"]>(ok("Answered"))
     kind("long", run, { handoff: true, budgetMs: 280_000 })
     const job = store.addJob({ kind: "long", nextRunAt: dueAt })
     let request: string | undefined
