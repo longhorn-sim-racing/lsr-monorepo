@@ -59,7 +59,7 @@ export default async function KnowledgeEntryPage({
             <span>{describeAge(age)}</span>
           </span>
         }
-        actions={<EntryActions id={entry.id} title={entry.title} archived={!!entry.archivedAt} canDelete={isAdmin} />}
+        actions={<EntryActions id={entry.id} title={entry.title} archived={!!entry.archivedAt} canDelete={isAdmin} baseVersionId={latestVersionId} />}
       />
 
       <SplitLayout

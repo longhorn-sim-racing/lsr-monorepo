@@ -54,7 +54,7 @@ describe("who can do what", () => {
     guards.requireOfficer.mockRejectedValue(new Error("Requires one of the following roles: admin, officer"))
     for (const result of [
       await saveKnowledgeEntry(null, form()),
-      await markKnowledgeEntryReviewed("entry-1"),
+      await markKnowledgeEntryReviewed("entry-1", "v1"),
       await setKnowledgeEntryArchived("entry-1", true),
       await restoreKnowledgeVersion("entry-1", "v1", "v2"),
     ]) {
@@ -74,7 +74,11 @@ describe("who can do what", () => {
   })
 
   it("lets any officer review, archive and unarchive", async () => {
-    expect(await markKnowledgeEntryReviewed("entry-1")).toEqual({ ok: true })
+    expect(await markKnowledgeEntryReviewed("entry-1", "v2")).toEqual({ ok: true })
+    // As of the version the page showed: a newer one is refused (the service's check)
+    expect(service.markKnowledgeReviewed).toHaveBeenCalledWith("entry-1", { userId: "officer-1", via: "admin" }, { baseVersionId: "v2" })
+    service.markKnowledgeReviewed.mockResolvedValueOnce({ ok: false, reason: "conflict", error: "“Dues policy” changed since you opened it." })
+    expect(await markKnowledgeEntryReviewed("entry-1", "v1")).toEqual({ ok: false, error: "“Dues policy” changed since you opened it." })
     expect(await setKnowledgeEntryArchived("entry-1", false)).toEqual({ ok: true })
     expect(service.setKnowledgeArchived).toHaveBeenCalledWith("entry-1", false, { userId: "officer-1", via: "admin" })
     expect(cache.revalidatePath).toHaveBeenCalledWith("/admin/knowledge/entry-1")
@@ -94,6 +98,16 @@ describe("saveKnowledgeEntry", () => {
   it("edits on the version the form was opened at", async () => {
     await saveKnowledgeEntry("entry-1", form({ sourceDate: "" }), { baseVersionId: "v1" })
     expect(service.updateKnowledgeEntry).toHaveBeenCalledWith("entry-1", expect.objectContaining({ sourceDate: null }), { userId: "officer-1", via: "admin" }, { baseVersionId: "v1", markReviewed: undefined, allowArchived: true })
+  })
+
+  it("sends only the fields an edit changed, so it can't undo another officer's owner or source", async () => {
+    await saveKnowledgeEntry("entry-1", { body: "New text." }, { baseVersionId: "v1" })
+    expect(service.updateKnowledgeEntry.mock.calls[0][1]).toEqual({ body: "New text." })
+
+    await saveKnowledgeEntry("entry-1", { ownerId: "", sourceDate: "" }, { baseVersionId: "v1" })
+    expect(service.updateKnowledgeEntry.mock.calls[1][1]).toEqual({ ownerId: null, sourceDate: null })
+    // "No owner" needs no owner check
+    expect(db.user.count).not.toHaveBeenCalled()
   })
 
   it("passes back duplicates and conflicts for the form to show", async () => {

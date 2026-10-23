@@ -25,10 +25,15 @@ import { saveKnowledgeEntry, type KnowledgeFormInput, type SaveKnowledgeResult }
 
 const MARKDOWN_HINT = "Markdown: ## Section, - bullet, 1. numbered, **bold**, [link](https://…). One topic per entry; Jack quotes it when he cites it."
 
+/** The fields an edit sends: only the ones the officer changed, so a save can't undo someone else's change to the rest */
+function changedFields(form: KnowledgeFormInput, initial: KnowledgeFormInput): Partial<KnowledgeFormInput> {
+  return Object.fromEntries(Object.entries(form).filter(([key, value]) => value !== initial[key as keyof KnowledgeFormInput]))
+}
+
 /**
  * Writes a new entry or edits one. An edit carries the version it was opened at, so saving over
- * someone else's newer change is refused instead of losing it (the page remounts this form on every
- * new version). A new entry that looks like an existing one asks first.
+ * someone else's newer text is refused instead of losing it (the page remounts this form on every new
+ * version), and sends only the fields that changed. A new entry that looks like an existing one asks first.
  */
 export function KnowledgeForm({
   id,
@@ -58,7 +63,7 @@ export function KnowledgeForm({
     setSaving(true)
     let result: SaveKnowledgeResult
     try {
-      result = await saveKnowledgeEntry(id, form, { baseVersionId, notDuplicateOf, markReviewed })
+      result = await saveKnowledgeEntry(id, id ? changedFields(form, initial) : form, { baseVersionId, notDuplicateOf, markReviewed })
     } catch (error) {
       result = { ok: false, error: unexpectedError(error, "Couldn't save the entry") }
     } finally {

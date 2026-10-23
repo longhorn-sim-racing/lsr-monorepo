@@ -32,15 +32,29 @@ function useEntryAction() {
   return { pending, run }
 }
 
-/** The entry page's header buttons: review, archive, and (admins) delete for good */
-export function EntryActions({ id, title, archived, canDelete }: { id: string; title: string; archived: boolean; canDelete: boolean }) {
+/** The entry page's header buttons: review (of the version on the page), archive, and (admins) delete for good */
+export function EntryActions({
+  id,
+  title,
+  archived,
+  canDelete,
+  baseVersionId,
+}: {
+  id: string
+  title: string
+  archived: boolean
+  canDelete: boolean
+  /** The version the page shows: reviewing is refused if a newer one came in since */
+  baseVersionId: string | null
+}) {
   const confirm = useConfirm()
   const { pending, run } = useEntryAction()
 
   async function remove() {
     const ok = await confirm({
       title: `Delete “${title}” for good?`,
-      description: "The entry and every version of it are deleted, and Jack can't find it any more. This can't be undone. To only hide it, archive it instead.",
+      description:
+        "The entry and every version of it are deleted, and Jack can't find it any more. Jack's room notes with its text are cleared, and so is its text in his tool calls. Its title stays in the audit log, and messages that quote it (an officer's own, or Jack's answer) aren't changed: its History links the rooms. This can't be undone. To only hide it, archive it instead.",
       confirmLabel: "Delete for good",
       tone: "danger",
     })
@@ -59,7 +73,7 @@ export function EntryActions({ id, title, archived, canDelete }: { id: string; t
   return (
     <>
       {!archived && (
-        <Button disabled={pending} onClick={() => run(() => markKnowledgeEntryReviewed(id), "Marked reviewed")} title="You checked it's still true; its age restarts today">
+        <Button disabled={pending} onClick={() => run(() => markKnowledgeEntryReviewed(id, baseVersionId), "Marked reviewed")} title="You checked it's still true; its age restarts today">
           <CheckCircle2 aria-hidden />
           Mark reviewed
         </Button>

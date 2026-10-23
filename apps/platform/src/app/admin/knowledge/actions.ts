@@ -12,6 +12,7 @@ import {
   markKnowledgeReviewed,
   setKnowledgeArchived,
   updateKnowledgeEntry,
+  type KnowledgeFields,
   type KnowledgeWriter,
 } from "@/server/jack/knowledge/service"
 import { isCalendarDate, startOfCentralDay } from "@/server/jack/tools/time"
@@ -22,7 +23,7 @@ import { isCalendarDate, startOfCentralDay } from "@/server/jack/tools/time"
  * service, which validates, versions and audits.
  */
 
-/** The entry form as the page sends it: text fields as typed */
+/** The entry form as the page sends it: text fields as typed (an edit sends only the ones the officer changed) */
 export type KnowledgeFormInput = {
   title: string
   body: string
@@ -70,30 +71,44 @@ async function checkOwner(ownerId: string): Promise<string | null> {
   return count ? null : "The owner has to be an officer."
 }
 
-export async function saveKnowledgeEntry(id: string | null, input: KnowledgeFormInput, options: SaveKnowledgeOptions = {}): Promise<SaveKnowledgeResult> {
+/** The form's fields as the service takes them, only the ones sent */
+function toFields(input: Partial<KnowledgeFormInput>): Partial<KnowledgeFields> {
+  const sourceDate = input.sourceDate?.trim()
+  return {
+    ...(input.title !== undefined ? { title: input.title } : {}),
+    ...(input.body !== undefined ? { body: input.body } : {}),
+    ...(input.tags !== undefined ? { tags: input.tags.split(",") } : {}),
+    ...(input.sourceNote !== undefined ? { sourceNote: input.sourceNote } : {}),
+    ...(input.sourceUrl !== undefined ? { sourceUrl: input.sourceUrl } : {}),
+    ...(sourceDate !== undefined ? { sourceDate: sourceDate ? startOfCentralDay(sourceDate) : null } : {}),
+    ...(input.ownerId !== undefined ? { ownerId: input.ownerId || null } : {}),
+  }
+}
+
+/**
+ * Creates an entry, or edits one. An edit carries only the fields the officer changed: a details change
+ * writes no version, so the base version check can't catch one, and sending every field would undo
+ * another officer's newer owner or source.
+ */
+export async function saveKnowledgeEntry(id: string | null, input: Partial<KnowledgeFormInput>, options: SaveKnowledgeOptions = {}): Promise<SaveKnowledgeResult> {
   const user = await officer()
   if (!user) return { ok: false, error: SIGNED_OUT }
 
-  const sourceDate = input.sourceDate.trim()
+  const sourceDate = input.sourceDate?.trim()
   if (sourceDate && !isCalendarDate(sourceDate)) return { ok: false, error: "The source date isn't a date on the calendar." }
-  const ownerError = await checkOwner(input.ownerId)
+  const ownerError = input.ownerId ? await checkOwner(input.ownerId) : null
   if (ownerError) return { ok: false, error: ownerError }
 
-  const fields = {
-    title: input.title,
-    body: input.body,
-    tags: input.tags.split(","),
-    sourceNote: input.sourceNote,
-    sourceUrl: input.sourceUrl,
-    sourceDate: sourceDate ? startOfCentralDay(sourceDate) : null,
-    ownerId: input.ownerId || null,
-  }
+  const fields = toFields(input)
   const writer: KnowledgeWriter = { userId: user.id, via: "admin" }
 
   try {
     const result = id
       ? await updateKnowledgeEntry(id, fields, writer, { baseVersionId: options.baseVersionId, markReviewed: options.markReviewed, allowArchived: true })
-      : await createKnowledgeEntry(fields, writer, { notDuplicateOf: options.notDuplicateOf, reviewedAt: options.markReviewed ? new Date() : null })
+      : await createKnowledgeEntry({ ...fields, title: fields.title ?? "", body: fields.body ?? "" }, writer, {
+          notDuplicateOf: options.notDuplicateOf,
+          reviewedAt: options.markReviewed ? new Date() : null,
+        })
     if (!result.ok) {
       if (result.reason === "duplicate") return { ok: false, error: result.error, duplicates: result.duplicates.map((d) => ({ id: d.id, title: d.title })) }
       if (result.reason === "conflict") {
@@ -109,10 +124,11 @@ export async function saveKnowledgeEntry(id: string | null, input: KnowledgeForm
   }
 }
 
-export async function markKnowledgeEntryReviewed(id: string): Promise<ActionResult> {
+/** Marks an entry reviewed, as of the version the officer was looking at (refused if there's a newer one) */
+export async function markKnowledgeEntryReviewed(id: string, baseVersionId: string | null): Promise<ActionResult> {
   const user = await officer()
   if (!user) return { ok: false, error: SIGNED_OUT }
-  const result = await markKnowledgeReviewed(id, { userId: user.id, via: "admin" })
+  const result = await markKnowledgeReviewed(id, { userId: user.id, via: "admin" }, { baseVersionId })
   if (!result.ok) return { ok: false, error: result.error }
   revalidate(id)
   return { ok: true }
