@@ -10,6 +10,9 @@ import { formatCents } from "@/lib/money"
 import { PAYMENT_KIND_LABELS, paymentKind, stripeDashboardUrl } from "@/lib/payments"
 import { PAYMENTS_PAGE_SIZE, type AdminPayment, type PaymentFilters } from "@/server/queries/payments"
 
+/** An open Stripe dispute on a payment, by its PaymentIntent id (from the Stripe sync) */
+type OpenDispute = { id: string; status: string; evidenceDueBy: Date | null }
+
 type PaymentsConsoleProps = {
   filters: PaymentFilters
   payments: AdminPayment[]
@@ -17,6 +20,7 @@ type PaymentsConsoleProps = {
   succeededCount: number
   succeededCents: number
   pageCount: number
+  disputes?: Record<string, OpenDispute>
 }
 
 const STATUS: Record<PaymentStatus, { label: string; tone: Tone }> = {
@@ -32,7 +36,7 @@ const DUPLICATE_REFUND_HINT = "They already had this entry or membership when th
 const DUPLICATE_NO_ENTRY_HINT =
   "This was flagged as a duplicate, but the entry it duplicated has since ended. They've paid and have no entry: re-enter them or refund."
 
-export function PaymentsConsole({ filters, payments, total, succeededCount, succeededCents, pageCount }: PaymentsConsoleProps) {
+export function PaymentsConsole({ filters, payments, total, succeededCount, succeededCents, pageCount, disputes = {} }: PaymentsConsoleProps) {
   const offset = (filters.page - 1) * PAYMENTS_PAGE_SIZE
   const firstRow = payments.length ? offset + 1 : 0
   const lastRow = offset + payments.length
@@ -80,7 +84,7 @@ export function PaymentsConsole({ filters, payments, total, succeededCount, succ
                 </td>
               </tr>
             ) : (
-              payments.map((payment) => <PaymentRow key={payment.id} payment={payment} />)
+              payments.map((payment) => <PaymentRow key={payment.id} payment={payment} dispute={payment.providerRef ? disputes[payment.providerRef] : undefined} />)
             )}
           </tbody>
         </Table>
@@ -96,7 +100,7 @@ export function PaymentsConsole({ filters, payments, total, succeededCount, succ
   )
 }
 
-function PaymentRow({ payment }: { payment: AdminPayment }) {
+function PaymentRow({ payment, dispute }: { payment: AdminPayment; dispute?: OpenDispute }) {
   const meta = (payment.metadata ?? {}) as Record<string, unknown>
   const kind = paymentKind(payment)
   const what = payment.product?.name ?? payment.eventRegistration?.event.title ?? (typeof meta.eventTitle === "string" ? meta.eventTitle : null)
@@ -139,6 +143,13 @@ function PaymentRow({ payment }: { payment: AdminPayment }) {
             <span title={DUPLICATE_NO_ENTRY_HINT}>
               <Badge tone="warning">Paid, no entry</Badge>
             </span>
+          )}
+          {dispute && (
+            <a href={`https://dashboard.stripe.com/disputes/${dispute.id}`} target="_blank" rel="noopener noreferrer" title="The cardholder disputed this charge. Respond in Stripe.">
+              <Badge tone="danger">
+                Disputed{dispute.evidenceDueBy ? `: respond by ${formatInTimeZone(dispute.evidenceDueBy, DEFAULT_TIMEZONE, "MMM d")}` : ""}
+              </Badge>
+            </a>
           )}
         </div>
       </TD>

@@ -182,6 +182,46 @@ export async function emailsTo(recipient: string, since: Date, limit = 25, optio
   return delivery.map(([resendId, d]) => ({ resendId, status: d.status, at: d.at, reason: d.reason, sentAt: d.firstAt, subject: subjects.get(resendId) ?? null }))
 }
 
+export type RecruitingDelivery = {
+  /** Sent emails of the round that didn't arrive (or are still delayed), newest first */
+  problems: {
+    id: string
+    template: string
+    subject: string
+    toEmail: string
+    createdAt: Date
+    applicationId: string
+    applicantName: string | null
+    delivery: EmailDelivery
+  }[]
+  /** The round's sent emails by what Resend reported */
+  summary: { sent: number; arrived: number; undelivered: number; delayed: number; noReport: number }
+}
+
+/** How a recruiting round's sent emails turned out (Recruiting → Emails). The console shows officers every application's mail */
+export async function recruitingDelivery(cycleId: string): Promise<RecruitingDelivery> {
+  const sent = await prisma.applicationEmail.findMany({
+    where: { status: "SENT", resendMessageId: { not: null }, application: { cycleId } },
+    orderBy: { createdAt: "desc" },
+    take: 2_000,
+    select: { id: true, template: true, subject: true, toEmail: true, createdAt: true, resendMessageId: true, application: { select: { id: true, fullName: true } } },
+  })
+  const delivery = await deliveryFor(sent.map((e) => e.resendMessageId))
+  const summary = { sent: sent.length, arrived: 0, undelivered: 0, delayed: 0, noReport: 0 }
+  const problems: RecruitingDelivery["problems"] = []
+  for (const email of sent) {
+    const d = delivery.get(email.resendMessageId!)
+    if (!d || d.status === "sent") summary.noReport += 1
+    else if (isUndelivered(d.status)) summary.undelivered += 1
+    else if (d.status === "delayed") summary.delayed += 1
+    else summary.arrived += 1
+    if (d && (isUndelivered(d.status) || d.status === "delayed")) {
+      problems.push({ id: email.id, template: email.template, subject: email.subject, toEmail: email.toEmail, createdAt: email.createdAt, applicationId: email.application.id, applicantName: email.application.fullName, delivery: d })
+    }
+  }
+  return { problems, summary }
+}
+
 /** Every event of one email, oldest first */
 export async function emailTimeline(resendId: string) {
   return prisma.emailEvent.findMany({ where: { resendId }, orderBy: { occurredAt: "asc" }, select: { type: true, occurredAt: true, detail: true, recipient: true } })
