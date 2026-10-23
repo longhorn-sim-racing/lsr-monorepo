@@ -21,6 +21,8 @@
     "jack:tick": "tsx scripts/jack-tick.ts",
     "jack:scheduler-setup": "tsx scripts/jack-scheduler-setup.ts",
     "set-role": "tsx scripts/set-role.ts",
+    "jack:eval": "tsx scripts/jack-eval.ts",
+    "jack:eval:prepare": "tsx scripts/jack-eval/prepare.ts",
     "sponsor-packet": "tsx scripts/sponsor-packet.ts",
     "jack:fakes": "tsx scripts/jack-fakes.ts"
   },

@@ -1,8 +1,15 @@
 /**
  * Pure helpers for scripts/jack-eval.ts (#161): which database the eval may run against (the local-only
- * check scripts use the same test), and how its checks read numbers out of an answer. Here rather than
- * in the scripts so they're unit-tested. No imports, no environment: the scripts pass everything in.
+ * check scripts use the same test), how its checks read numbers out of an answer, and its rooms' id
+ * prefix. Here rather than in the scripts so they're unit-tested. No imports, no environment: the
+ * scripts pass everything in.
  */
+
+/**
+ * Every eval room's id starts with this; real rooms have uuids. The eval's cleanup finds its rooms by
+ * it, and officers' room lists leave them out (their pages and actions only take uuids)
+ */
+export const EVAL_ROOM_PREFIX = "jack-eval-"
 
 // ---------------------------------------------------------------------------
 // which database
@@ -45,6 +52,31 @@ export function parseDatabaseUrl(url: string | undefined): DbTarget | null {
     projectRef: dot > 0 ? user.slice(dot + 1) : null,
     hostOverride: [...parsed.searchParams.keys()].find((key) => HOST_OVERRIDES.includes(key.toLowerCase())) ?? null,
   }
+}
+
+/**
+ * The same connection string pointed at another database on the same server: the eval's `--db` and
+ * `jack:eval:prepare` use it for the lsr_eval copy. Null when it isn't a postgres:// URL or the name
+ * isn't a plain identifier
+ */
+export function withDatabaseName(url: string | undefined, name: string): string | null {
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(name) || !parseDatabaseUrl(url)) return null
+  const parsed = new URL(url!.trim())
+  parsed.pathname = `/${name}`
+  return parsed.toString()
+}
+
+/**
+ * The eval copy's URL (`jack:eval:prepare`, and the eval's `--db`): DATABASE_URL's server, which must be
+ * this machine, with the database `name`, which must start with lsr_eval, so a slip can't migrate or
+ * seed the dev database
+ */
+export function evalCopyUrl(databaseUrl: string | undefined, name: string): { ok: true; url: string } | { ok: false; error: string } {
+  if (!/^lsr_eval\w*$/.test(name)) return { ok: false, error: `--db must name an eval copy (lsr_eval, or a name that starts with lsr_eval), not "${name}".` }
+  const problem = localDatabaseProblem("DATABASE_URL", databaseUrl)
+  if (problem) return { ok: false, error: `Refusing to run: ${problem}` }
+  const url = withDatabaseName(databaseUrl, name)
+  return url ? { ok: true, url } : { ok: false, error: "DATABASE_URL isn't a postgres:// URL." }
 }
 
 const overrideProblem = (name: string, key: string) =>

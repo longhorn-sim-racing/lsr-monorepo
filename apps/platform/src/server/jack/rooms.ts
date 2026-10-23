@@ -3,6 +3,7 @@ import { JACK_EVENT, JACK_PERSONA_NAME } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
 import { runAfterResponse } from "@/server/after-response"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
+import { EVAL_ROOM_PREFIX } from "./eval-support"
 import { linkAttachments } from "./files/attach"
 import { jackMessageInclude, jackRoomViewSelect, toMessageView, toRoomView } from "./messages"
 import { roomProposalStates } from "./proposals/service"
@@ -14,7 +15,8 @@ const SNAPSHOT_LIMIT = 500
 
 export async function listRooms(): Promise<JackRoomSummary[]> {
   const rooms = await prisma.jackRoom.findMany({
-    where: { archivedAt: null },
+    // Not the eval's rooms (scripts/jack-eval.ts): they only last a question, and their ids aren't uuids
+    where: { archivedAt: null, NOT: { id: { startsWith: EVAL_ROOM_PREFIX } } },
     orderBy: { updatedAt: "desc" },
     take: 200,
     select: {
