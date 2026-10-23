@@ -1,4 +1,5 @@
 import type { z } from "zod"
+import type { JackProposalPreview } from "@/lib/jack/markdown-preview"
 import type { JackProposalLink, JackProposalResult } from "@/lib/jack/types"
 
 /**
@@ -85,6 +86,8 @@ export type ProposalView = {
    * alone, without `list`; when it has both, these win
    */
   rows?: ProposalRow[]
+  /** A rendered preview of long Markdown the change publishes (a news post), drawn on the card as the site structures it */
+  preview?: JackProposalPreview
 }
 
 /**
@@ -209,7 +212,8 @@ export type ImportColumn = {
 
 /** What `validateRow` found: the value `applyRows` takes, or why the row can't be imported */
 export type ImportRowCheck<R> =
-  | { ok: true; value: R; label: string; detail?: string; status?: ProposalRow["status"] }
+  /** `key`: rows with the same key are the same record (one member's entry form); import.rows marks the later ones as repeats */
+  | { ok: true; value: R; label: string; detail?: string; status?: ProposalRow["status"]; key?: string }
   | { ok: false; label: string; error: string }
 
 /**
