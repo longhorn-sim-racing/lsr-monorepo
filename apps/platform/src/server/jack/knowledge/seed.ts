@@ -1,5 +1,7 @@
+import type { TeamId } from "@/app/about/roster"
 import { KNOWLEDGE_LIMITS, normalizeTags } from "@/lib/jack/knowledge"
 import { findSecret } from "@/lib/redact"
+import { DEPARTMENTS } from "@/schemas/officer-profile.schema"
 import { isCalendarDate } from "../tools/time"
 
 /**
@@ -12,10 +14,16 @@ import { isCalendarDate } from "../tools/time"
  *   tags: [lsc, fees, decision]
  *   sourceNote: Competition team post in Teams, Sep 28
  *   sourceDate: 2026-09-28
- *   owner: armando-martinez
+ *   owner: Competition
  *   ---
  *   The entry fee is $10, or $5 for returning drivers. ...
  */
+
+/**
+ * Who keeps an entry current: an officer by handle, or a department ("Media"), which the loader
+ * gives to the department's lead when exactly one officer of it holds a board seat
+ */
+export type SeedOwner = { kind: "handle"; handle: string } | { kind: "department"; id: TeamId }
 
 export type SeedEntry = {
   /** The file it came from, relative to the seed folder */
@@ -26,8 +34,24 @@ export type SeedEntry = {
   sourceNote: string
   /** YYYY-MM-DD, Central */
   sourceDate: string
-  /** The handle of the officer who keeps it current */
-  owner: string | null
+  owner: SeedOwner | null
+}
+
+/** Files the loader skips: README.md, and notes or indexes whose name starts with "_" (like _index.md) */
+export function isSeedFileName(name: string): boolean {
+  const lower = name.toLowerCase()
+  return lower.endsWith(".md") && lower !== "readme.md" && !lower.startsWith("_")
+}
+
+/** "Media", "media" → the department; "@gray-marshall" or "gray-marshall" → the handle; null when it's neither */
+export function parseSeedOwner(value: string): SeedOwner | null {
+  const clean = value.trim()
+  if (!clean.startsWith("@")) {
+    const department = DEPARTMENTS.find((d) => d.id === clean.toLowerCase() || d.name.toLowerCase() === clean.toLowerCase())
+    if (department) return { kind: "department", id: department.id }
+  }
+  const handle = clean.replace(/^@/, "").toLowerCase()
+  return HANDLE.test(handle) ? { kind: "handle", handle } : null
 }
 
 export type SeedParse = { ok: true; entry: SeedEntry } | { ok: false; file: string; errors: string[] }
@@ -101,18 +125,21 @@ export function parseSeedFile(file: string, text: string): SeedParse {
   const title = text_("title")
   const sourceNote = text_("sourceNote")
   const sourceDate = text_("sourceDate")
-  const owner = text_("owner").replace(/^@/, "").toLowerCase()
+  const ownerText = text_("owner")
+  const owner = ownerText ? parseSeedOwner(ownerText) : null
   const rawTags = fields.get("tags")
-  const tags = normalizeTags(Array.isArray(rawTags) ? rawTags : rawTags ? listOf(rawTags) : [])
+  const listed = normalizeTags(Array.isArray(rawTags) ? rawTags : rawTags ? listOf(rawTags) : [])
+  // A department that owns an entry is one of its tags too, whoever the loader gives it to
+  const tags = normalizeTags([...listed, ...(owner?.kind === "department" ? [owner.id] : [])])
 
   if (!title) errors.push("title is missing.")
   else if (title.length < 3 || title.length > KNOWLEDGE_LIMITS.titleMax) errors.push(`title has to be 3 to ${KNOWLEDGE_LIMITS.titleMax} characters.`)
-  if (!tags.length) errors.push("tags is missing: give at least one, e.g. tags: [policy].")
+  if (!listed.length) errors.push("tags is missing: give at least one, e.g. tags: [policy].")
   if (!sourceNote) errors.push("sourceNote is missing: say where it came from, e.g. \"Teams General, Dylan, Sep 28\".")
   else if (sourceNote.length > KNOWLEDGE_LIMITS.sourceNoteMax) errors.push(`sourceNote has to be ${KNOWLEDGE_LIMITS.sourceNoteMax} characters or fewer.`)
   if (!sourceDate) errors.push("sourceDate is missing: the date the source said it, YYYY-MM-DD.")
   else if (!/^\d{4}-\d{2}-\d{2}$/.test(sourceDate) || !isCalendarDate(sourceDate)) errors.push(`sourceDate "${sourceDate}" isn't a date like 2026-09-28.`)
-  if (owner && !HANDLE.test(owner)) errors.push(`owner "${owner}" isn't a handle (lowercase letters, numbers and dashes).`)
+  if (ownerText && !owner) errors.push(`owner "${ownerText}" isn't a department (${DEPARTMENTS.map((d) => d.name).join(", ")}) or an officer's handle.`)
   if (!body) errors.push("The entry has no text after the front matter.")
   else if (body.length > KNOWLEDGE_LIMITS.bodyMax) errors.push(`The text is over ${KNOWLEDGE_LIMITS.bodyMax.toLocaleString("en-US")} characters; split it into several entries.`)
 
@@ -122,7 +149,7 @@ export function parseSeedFile(file: string, text: string): SeedParse {
   if (secret) errors.push(`It seems to hold ${secret}. Seeds never hold passwords, keys or tokens; say where one is kept instead.`)
 
   if (errors.length) return { ok: false, file, errors }
-  return { ok: true, entry: { file, title, body, tags, sourceNote, sourceDate, owner: owner || null } }
+  return { ok: true, entry: { file, title, body, tags, sourceNote, sourceDate, owner } }
 }
 
 /** Two seed files with the same title would load as one entry: both are errors */

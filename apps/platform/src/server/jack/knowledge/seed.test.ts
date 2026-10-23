@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { duplicateSeedTitles, parseSeedFile, splitFrontMatter } from "./seed"
+import { duplicateSeedTitles, isSeedFileName, parseSeedFile, parseSeedOwner, splitFrontMatter } from "./seed"
 
 const file = (front: string, body = "The entry fee is $10, or $5 for returning drivers.") => `---\n${front}\n---\n\n${body}\n`
 
@@ -20,9 +20,14 @@ describe("parseSeedFile", () => {
         tags: ["lsc", "fees", "decision"],
         sourceNote: "Competition team post in Teams, Sep 28",
         sourceDate: "2026-09-28",
-        owner: "armando-martinez",
+        owner: { kind: "handle", handle: "armando-martinez" },
       },
     })
+  })
+
+  it("takes a department as the owner, and tags the entry with it", () => {
+    const parsed = parseSeedFile("fees.md", GOOD.replace('owner: "@Armando-Martinez"', 'owner: "Competition"'))
+    expect(parsed).toMatchObject({ ok: true, entry: { owner: { kind: "department", id: "competition" }, tags: ["lsc", "fees", "decision", "competition"] } })
   })
 
   it("takes tags as a list too, and no owner", () => {
@@ -41,7 +46,7 @@ describe("parseSeedFile", () => {
         "tags is missing: give at least one, e.g. tags: [policy].",
         'sourceNote is missing: say where it came from, e.g. "Teams General, Dylan, Sep 28".',
         'sourceDate "2026-02-30" isn\'t a date like 2026-09-28.',
-        'owner "not a handle" isn\'t a handle (lowercase letters, numbers and dashes).',
+        'owner "Not A Handle" isn\'t a department (Executive, Competition, Community, Media, Business, Technology) or an officer\'s handle.',
         "The entry has no text after the front matter.",
       ],
     })
@@ -60,6 +65,21 @@ describe("parseSeedFile", () => {
     expect(parseSeedFile("d.md", "Just text")).toMatchObject({ ok: false, errors: [expect.stringMatching(/start with front matter/)] })
     expect(parseSeedFile("e.md", "---\ntitle: Never ends\n")).toMatchObject({ ok: false, errors: [expect.stringMatching(/never ends/)] })
     expect(splitFrontMatter("---\ntitle: a\ntitle: b\n---\nx")).toEqual({ error: "title is in the front matter twice." })
+  })
+})
+
+describe("owners and file names", () => {
+  it("reads a department by name or id, and a handle with or without @", () => {
+    expect(parseSeedOwner("Media")).toEqual({ kind: "department", id: "media" })
+    expect(parseSeedOwner(" technology ")).toEqual({ kind: "department", id: "technology" })
+    expect(parseSeedOwner("@Gray-Marshall")).toEqual({ kind: "handle", handle: "gray-marshall" })
+    // @ makes it a handle even when it's a department's name
+    expect(parseSeedOwner("@media")).toEqual({ kind: "handle", handle: "media" })
+    expect(parseSeedOwner("Media team")).toBeNull()
+  })
+
+  it("skips the README and notes whose name starts with _", () => {
+    expect(["dues.md", "README.md", "_index.md", "notes.txt", "Brand.MD"].filter(isSeedFileName)).toEqual(["dues.md", "Brand.MD"])
   })
 })
 

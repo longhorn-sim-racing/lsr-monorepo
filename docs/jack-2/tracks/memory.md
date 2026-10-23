@@ -66,7 +66,9 @@ Columns on `User` (G1): `department` (the About page roster's team ids: executiv
 
 The format is in `docs/jack-2/knowledge-seed/README.md`. **The repo is public, so seed files are never committed**: they live in `~/.lsr/jack-knowledge-seed/` (the loader refuses a folder inside the repo, and `.gitignore` covers `jack-knowledge-seed/` anywhere and everything in `docs/jack-2/knowledge-seed/` but the README). No seed content is in this PR.
 
-`scripts/jack-knowledge-seed.ts` lints every file (`src/server/jack/knowledge/seed.ts`: required fields, dates, sizes, no emails, keys or tokens, unique titles), shows the plan when `DATABASE_URL` is set, and loads only with `--approved[=YYYY-MM-DD] --actor <you>`: `sourceType` SEED, reviewed as of the sign-off date. Reruns update changed entries (a new version for new text) and leave the rest; seed entries missing from the folder are listed, never deleted.
+`scripts/jack-knowledge-seed.ts` lints every file (`src/server/jack/knowledge/seed.ts`: required fields, dates, sizes, no emails, keys or tokens, unique titles; `README.md` and `_*.md` notes are skipped), shows the plan when `DATABASE_URL` is set, and loads only with `--approved[=YYYY-MM-DD] --actor <you>`: `sourceType` SEED, reviewed as of the sign-off date. Reruns update changed entries (a new version for new text) and leave the rest; seed entries missing from the folder are listed, never deleted.
+
+The drafted seed names departments as owners (`owner: "Media"`). The loader gives a department's entries to its one board officer (from the officer profiles, so the badge sync's backfill has to run first), or to no one when the department has none or several (Executive has two), and adds the department as a tag either way. All 99 drafted entries pass the lint as of this PR.
 
 ## Setup steps (release)
 

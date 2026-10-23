@@ -13,7 +13,9 @@
  * Without --approved nothing is written. With it, every file must pass the lint first; then new
  * entries are created and changed ones updated (each a new version), as sourceType SEED and reviewed
  * as of the approval date (--approved alone means today), credited to --actor in the audit log. An
- * entry is matched to an earlier load by its title. Seed entries that are no longer in the folder are
+ * owner that's a department goes to the department's one board officer (from the officer profiles,
+ * so run scripts/sync-officer-badges.ts first), or to no one, and the department is a tag either way.
+ * An entry is matched to an earlier load by its title. Seed entries that are no longer in the folder are
  * listed, never deleted. It loads into whatever database DATABASE_URL points at (production is a
  * release step Gray runs); it reads only apps/platform/.env.local and .env, without overriding the
  * environment.
@@ -21,7 +23,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, relative, resolve, sep } from "node:path"
-import { duplicateSeedTitles, parseSeedFile, type SeedEntry } from "../src/server/jack/knowledge/seed"
+import { duplicateSeedTitles, isSeedFileName, parseSeedFile, type SeedEntry } from "../src/server/jack/knowledge/seed"
 import { isCalendarDate, startOfCentralDay } from "../src/server/jack/tools/time"
 
 function flag(name: string): string | undefined {
@@ -53,8 +55,8 @@ function repoRoot(): string | null {
 function markdownFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name)
-    if (statSync(path).isDirectory()) return name.startsWith(".") ? [] : markdownFiles(path)
-    return name.toLowerCase().endsWith(".md") && name.toLowerCase() !== "readme.md" ? [path] : []
+    if (statSync(path).isDirectory()) return name.startsWith(".") || name.startsWith("_") ? [] : markdownFiles(path)
+    return isSeedFileName(name) ? [path] : []
   })
 }
 
@@ -140,11 +142,29 @@ async function main() {
       select: { id: true, title: true, body: true, tags: true, sourceNote: true, sourceDate: true, ownerId: true, reviewedAt: true, archivedAt: true },
     })
     const byTitle = new Map(existing.map((e) => [e.title.toLowerCase(), e]))
-    const handles = [...new Set(entries.map((e) => e.owner).filter((h): h is string => !!h))]
+    // Owners: a handle is that officer; a department goes to its lead (its one officer with a board
+    // seat, from the officer profiles), and to no one when there isn't exactly one
+    const handles = [...new Set(entries.flatMap((e) => (e.owner?.kind === "handle" ? [e.owner.handle] : [])))]
     const owners = await prisma.user.findMany({ where: { handle: { in: handles }, status: { not: "deleted" } }, select: { id: true, handle: true } })
-    const ownerId = new Map(owners.map((o) => [o.handle, o.id]))
-    const missingOwners = handles.filter((h) => !ownerId.has(h))
+    const byHandle = new Map(owners.map((o) => [o.handle, o.id]))
+    const missingOwners = handles.filter((h) => !byHandle.has(h))
     if (missingOwners.length) fail(`No account has the handle${missingOwners.length === 1 ? "" : "s"} ${missingOwners.map((h) => `@${h}`).join(", ")}. Fix the owner fields; nothing was loaded.`)
+    const leads = await prisma.user.findMany({
+      where: { isBoard: true, department: { not: null }, status: { not: "deleted" }, roles: { some: { role: { key: { in: ["officer", "admin"] } } } } },
+      select: { id: true, department: true, displayName: true },
+    })
+    const departmentOwner = new Map<string, string | null>()
+    for (const department of new Set(entries.flatMap((e) => (e.owner?.kind === "department" ? [e.owner.id] : [])))) {
+      const board = leads.filter((l) => l.department === department)
+      departmentOwner.set(department, board.length === 1 ? board[0].id : null)
+      console.log(
+        board.length === 1
+          ? `  owner    ${department} entries go to ${board[0].displayName}, its board officer`
+          : `  owner    ${department} entries get no owner (${board.length} board officers in it; the department stays as a tag)`,
+      )
+    }
+    const ownerId = (entry: SeedEntry): string | null =>
+      !entry.owner ? null : entry.owner.kind === "handle" ? byHandle.get(entry.owner.handle)! : (departmentOwner.get(entry.owner.id) ?? null)
 
     const reviewedAt = startOfCentralDay(approvedOn)
     type Plan = { entry: SeedEntry; fields: Parameters<typeof service.createKnowledgeEntry>[0]; current?: (typeof existing)[number] }
@@ -156,7 +176,7 @@ async function main() {
         tags: entry.tags,
         sourceNote: entry.sourceNote,
         sourceDate: startOfCentralDay(entry.sourceDate),
-        ownerId: entry.owner ? ownerId.get(entry.owner)! : null,
+        ownerId: ownerId(entry),
       },
       current: byTitle.get(entry.title.toLowerCase()),
     }))

@@ -6,7 +6,7 @@ The knowledge base starts with a reviewed set of entries: the club, who does wha
 
 ## The format
 
-One entry per `.md` file. Subfolders are fine (`policies/dues.md`); a file named `README.md` is skipped.
+One entry per `.md` file. Subfolders are fine (`policies/dues.md`). `README.md` and anything whose name starts with `_` (an index, notes, open questions: `_index.md`) are skipped.
 
 ```markdown
 ---
@@ -14,7 +14,7 @@ title: LSC entry fee for Season 3
 tags: [lsc, fees, decision]
 sourceNote: Competition team post in Teams General, Sep 28
 sourceDate: 2026-09-28
-owner: armando-martinez
+owner: Competition
 ---
 
 The Season 3 entry fee is $10, or $5 for drivers who raced Season 2. There are no membership dues this semester.
@@ -26,13 +26,13 @@ The Season 3 entry fee is $10, or $5 for drivers who raced Season 2. There are n
 | `tags` | yes | At least one: `[a, b]`, `a, b`, or a `- item` list. Lowercase words joined by dashes; a decision gets `decision` (one entry per decision). |
 | `sourceNote` | yes | Where it came from: "Teams General, Dylan, Sep 28", "Drive: Sponsor packet", "docs/payments.md". |
 | `sourceDate` | yes | The date the source said it, `YYYY-MM-DD` (Central). |
-| `owner` | no | The handle of the officer who keeps it current. |
+| `owner` | no | Who keeps it current: a department (`Executive`, `Business`, `Community`, `Competition`, `Media`, `Technology`), or an officer's handle (`@gray-marshall`). A department goes to its one board officer when the officer profiles name exactly one (so backfill the profiles first: `scripts/sync-officer-badges.ts --apply`), and to no one otherwise; either way the department is added as a tag. |
 
 The text after the front matter is Markdown, at most 20,000 characters. Keep each entry to one topic.
 
 ## What the lint refuses
 
-- a missing or malformed field, or an unknown one (a typo like `sourcenote`);
+- a missing or malformed field, or an unknown one (a typo like `sourcenote`), or an owner that's neither a department nor a handle;
 - an email address anywhere: name the role or the page instead ("the Business lead", "the Contact page");
 - anything that looks like a key, token or password (`sk_`, `rk_`, `whsec_`, `re_`, `Bot …`, private keys, long random strings, `password: …`). Say where a secret is kept ("in Vercel's env settings"), never the secret;
 - two files with the same title.
