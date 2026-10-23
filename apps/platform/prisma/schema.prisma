@@ -1049,8 +1049,9 @@ model JackMessage {
   /// A room note a scheduled run posted (a recurring question, design §11.1). It's answered as the officer
   /// it names, in a reply of its own (never together with officer messages) that gets no web tools
   scheduled     Boolean           @default(false)
-  /// Officer messages (Jack 2.0): the author's profile when they posted it, e.g. "Technology Director ·
-  /// Technology · CS". Snapshotted so history never changes when a profile does
+  /// Officer messages (Jack 2.0): who posted it as Jack reads it, from their profile when they posted it,
+  /// e.g. "Gray (Technology Director · Technology · CS) [@gray-marshall]". Snapshotted so history never
+  /// changes when a profile does
   authorLabel   String?
   /// False for officer messages in a mention-mode room that don't mention Jack: context, not questions
   expectsAnswer Boolean           @default(true)
@@ -1764,6 +1765,18 @@ model TwitchChannelDaily {
   followers Int?
 }
 
+/// EventSub deliveries already handled (design §12.2): Twitch resends a message with the same id, and
+/// the webhook processes each id once. Pruned after 2 days by the Twitch token check
+model TwitchEventSubMessage {
+  /// Twitch-Eventsub-Message-Id
+  id         String   @id
+  /// notification | revocation
+  type       String
+  receivedAt DateTime @default(now())
+
+  @@index([receivedAt])
+}
+
 /// The Stripe balance once a day (design §12.3)
 model StripeBalanceDaily {
   date           DateTime @id @db.Date
@@ -1804,6 +1817,30 @@ model StripeRefund {
   status          String
   createdAt       DateTime
   syncedAt        DateTime
+}
+
+/// A Stripe charge, synced daily (design §12.3). No card, billing or customer details. paymentIntentId
+/// joins Payment.providerRef; feeCents and netCents come from its balance transaction, payoutId from the
+/// automatic payout it was paid out in (set once that payout's transactions are listed)
+model StripeCharge {
+  id                  String   @id
+  paymentIntentId     String?
+  amountCents         Int
+  amountRefundedCents Int      @default(0)
+  currency            String
+  status              String
+  disputed            Boolean  @default(false)
+  /// metadata.purpose, e.g. "donation" (donations have no Payment row)
+  purpose             String?
+  feeCents            Int?
+  netCents            Int?
+  payoutId            String?
+  createdAt           DateTime
+  syncedAt            DateTime
+
+  @@index([paymentIntentId])
+  @@index([payoutId])
+  @@index([createdAt])
 }
 
 /// One Resend delivery event for one recipient (design §12.4). Personal data (addresses). Joins to

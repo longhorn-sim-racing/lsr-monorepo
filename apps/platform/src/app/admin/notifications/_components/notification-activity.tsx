@@ -22,6 +22,7 @@ import {
   useConfirm,
 } from "@/components/admin/kit"
 import { unexpectedError } from "@/lib/action-result"
+import { DELIVERY_LABEL } from "@/lib/email-delivery"
 import { cn } from "@/lib/utils"
 import { retryFailedNotification, deleteNotificationAdmin, getRecentNotifications } from "../actions"
 import { centralTime, STATUS, typeLabel, type NotificationRow } from "./format"
@@ -58,6 +59,17 @@ function Channel({ notification }: { notification: NotificationRow }) {
   )
 }
 
+/** What happened after Resend took the email, from its delivery events; a dash when there's no report (in-app, not sent, or tracking not set up) */
+function Delivery({ notification }: { notification: NotificationRow }) {
+  if (notification.channel !== "EMAIL" || !notification.delivery) return <span className="text-admin-subtle">—</span>
+  const { label, tone, hint } = DELIVERY_LABEL[notification.delivery.status]
+  return (
+    <span title={notification.delivery.reason ? `${hint}. ${notification.delivery.reason}` : hint}>
+      <Badge tone={tone}>{label}</Badge>
+    </span>
+  )
+}
+
 function Details({ notification }: { notification: NotificationRow }) {
   const items: { label: React.ReactNode; value: React.ReactNode }[] = [
     { label: "Title", value: <span className="font-medium">{notification.title}</span> },
@@ -81,6 +93,18 @@ function Details({ notification }: { notification: NotificationRow }) {
   if (notification.channel === "IN_APP") {
     items.push({ label: "Read", value: notification.readAt ? centralTime(notification.readAt, "MMM d, yyyy, h:mm a") : "Not yet" })
     items.push({ label: "Dismissed", value: notification.dismissedAt ? centralTime(notification.dismissedAt, "MMM d, yyyy, h:mm a") : "No" })
+  }
+  if (notification.delivery) {
+    const { label, hint } = DELIVERY_LABEL[notification.delivery.status]
+    items.push({
+      label: "Delivery",
+      value: (
+        <span>
+          {label} ({centralTime(notification.delivery.at, "MMM d, h:mm a")}): {hint}
+          {notification.delivery.reason && <span className="block text-admin-subtle">{notification.delivery.reason}</span>}
+        </span>
+      ),
+    })
   }
   if (notification.emailError) {
     items.push({ label: "Error", value: <span className="break-words text-tone-danger-foreground">{notification.emailError}</span> })
@@ -166,7 +190,7 @@ export function NotificationActivity({ notifications: initial, total }: { notifi
 
   return (
     <Panel className="overflow-hidden">
-      <Table minWidth={760} className="rounded-none border-0">
+      <Table minWidth={860} className="rounded-none border-0">
         <THead>
           <TH className="w-8">
             <span className="sr-only">Details</span>
@@ -175,6 +199,7 @@ export function NotificationActivity({ notifications: initial, total }: { notifi
           <TH>Notification</TH>
           <TH>Channel</TH>
           <TH>Status</TH>
+          <TH>Delivery</TH>
           <TH>Created</TH>
           <TH className="w-px">
             <span className="sr-only">Actions</span>
@@ -220,6 +245,9 @@ export function NotificationActivity({ notifications: initial, total }: { notifi
                   <TD>
                     <StatusBadge notification={notification} />
                   </TD>
+                  <TD>
+                    <Delivery notification={notification} />
+                  </TD>
                   <TD className="whitespace-nowrap text-muted-foreground">{centralTime(notification.createdAt)}</TD>
                   <TD className="px-2 py-1">
                     <RowActions>
@@ -245,7 +273,7 @@ export function NotificationActivity({ notifications: initial, total }: { notifi
                 </TR>
                 {expanded && (
                   <tr className="border-b border-admin-row bg-admin-selected last:border-b-0">
-                    <td colSpan={7} className="px-4 pb-4 pt-1">
+                    <td colSpan={8} className="px-4 pb-4 pt-1">
                       <div className="flex flex-col gap-3 rounded-md border bg-card p-3.5 sm:ml-8">
                         <Details notification={notification} />
                         <div className="flex flex-wrap gap-2">

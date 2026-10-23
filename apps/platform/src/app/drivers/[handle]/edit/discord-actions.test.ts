@@ -4,7 +4,11 @@ const guards = vi.hoisted(() => ({ requireUser: vi.fn() }));
 const service = vi.hoisted(() => ({ unlinkDiscord: vi.fn() }));
 const nav = vi.hoisted(() => ({ redirect: vi.fn() }));
 const cache = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
-const db = vi.hoisted(() => ({ user: { delete: vi.fn() } }));
+const db = vi.hoisted(() => ({
+  user: { delete: vi.fn() },
+  jackMessage: { updateMany: vi.fn() },
+  $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
+}));
 vi.mock('@/server/auth/guards', () => guards);
 vi.mock('@/server/services/discord-link.service', () => service);
 vi.mock('next/navigation', () => nav);

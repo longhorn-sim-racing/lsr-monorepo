@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client"
+import { TEAMS_CONNECTOR_ID, teamsConnector } from "@/server/connectors/teams/connector"
 import { prisma } from "@/server/db"
 import { ct } from "../../tools/time"
 import { teamsMessageHref } from "../links"
@@ -11,13 +12,12 @@ import type { SearchSource } from "../types"
  * table still holds. Deleted messages lose their content and aren't searched.
  */
 
-export const TEAMS_CONNECTOR = "teams"
+export const TEAMS_CONNECTOR = TEAMS_CONNECTOR_ID
 export const TEAMS_OFF = "Teams isn't connected, so its messages can't be searched or read."
 
-/** Whether an admin has switched the Teams connector on (ConnectorState; no row means off) */
+/** Whether an admin has switched the Teams connector on (its ConnectorState switch; no row means off) */
 export async function teamsEnabled(): Promise<boolean> {
-  const state = await prisma.connectorState.findUnique({ where: { id: TEAMS_CONNECTOR }, select: { enabled: true } })
-  return state?.enabled ?? false
+  return teamsConnector.enabled()
 }
 
 type TeamsRow = {

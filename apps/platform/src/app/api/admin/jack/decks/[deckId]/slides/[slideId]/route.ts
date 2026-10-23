@@ -45,7 +45,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ deck
 
   let file: { key: string; body: Buffer; transient: boolean }
   try {
-    file = await getRenderFile({ size: deck.size, css: deck.content.css, html: slide.html }, kind)
+    file = await getRenderFile({ size: deck.size, css: deck.content.css, html: slide.html, roomId: deck.roomId }, kind)
   } catch (error) {
     console.error(`[jack] Couldn't render slide ${slideId} of deck ${deckId}:`, error)
     return NextResponse.json({ error: "Couldn't render this slide" }, { status: 500 })

@@ -448,6 +448,44 @@ describe("answered officer messages", () => {
   })
 })
 
+describe("mention mode and room settings (design §10)", () => {
+  const aside = (id: string, createdAt: string): JackMessageView => ({ ...waitingMessage(id, createdAt), content: "Thursday works for me", expectsAnswer: false })
+
+  it("offers to continue only when a mention waits, not for the asides around it", () => {
+    const quiet = run(start([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" })]), created(aside("a1", "2026-10-12T20:00:09.000Z")))
+    expect(stallCandidate(quiet.messages)).toBeNull()
+    const mentioned = run(quiet, created(waitingMessage("m2", "2026-10-12T20:00:10.000Z")))
+    expect(stallCandidate(mentioned.messages)).toBe("unanswered")
+  })
+
+  it("marks the asides a mention's reply took as answered, with the mention", () => {
+    const later = reply({ id: "reply-2", createdAt: "2026-10-12T20:00:11.000Z" })
+    const state = run(
+      start(),
+      created(aside("a1", "2026-10-12T20:00:09.000Z")),
+      created(waitingMessage("m2", "2026-10-12T20:00:10.000Z")),
+      created(aside("a2", "2026-10-12T20:00:12.000Z")),
+      { type: "message.created", message: later, answers: ["a1", "m2"] }
+    )
+    expect(state.messages.filter((m) => m.answered).map((m) => m.id)).toEqual(["a1", "m2", "reply-2"])
+    // The aside posted after it waits for the next mention, without making the room look stuck
+    expect(state.messages.find((m) => m.id === "a2")).toMatchObject({ answered: false, expectsAnswer: false })
+    expect(stallCandidate(run(state, done({ ...later, status: "done" })).messages)).toBeNull()
+  })
+
+  it("takes the newer copy of the room's settings: archived, pinned, answer mode", () => {
+    const archived = room({ updatedAt: "2026-10-12T20:01:00.000Z", archivedAt: "2026-10-12T20:01:00.000Z", pinnedAt: null, answerMode: "mention" })
+    const state = run(start(), { type: "room.updated", room: archived })
+    expect(state.room).toEqual(archived)
+    // A stale snapshot from before the archive doesn't bring the composer back
+    const stale = run(state, snapshot([], room({ archivedAt: null, answerMode: "always" })))
+    expect(stale.room).toBe(state.room)
+    // Unarchived later wins
+    const back = run(state, { type: "room.updated", room: room({ updatedAt: "2026-10-12T20:02:00.000Z", archivedAt: null, answerMode: "mention" }) })
+    expect(back.room.archivedAt).toBeNull()
+  })
+})
+
 describe("proposal statuses", () => {
   /** The proposal's updatedAt, `s` seconds in */
   const at = (s: number) => new Date(Date.UTC(2026, 9, 12, 20, 0, s)).toISOString()

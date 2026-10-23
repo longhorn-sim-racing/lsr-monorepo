@@ -109,6 +109,18 @@ describe("where knowledge can be saved", () => {
     expect(db.jackMessage.create).not.toHaveBeenCalled()
   })
 
+  it("never in a scheduled reply (a recurring question), whatever its reply state says", async () => {
+    const ctx = context({ requestType: "scheduled" })
+    for (const input of [save(), { action: "archive", id: ID }]) {
+      expect(await call(input, ctx)).toMatchObject({ isError: true, forModel: expect.stringMatching(/not in continue notes, recurring questions or the digest/) })
+    }
+    expect(ctx.reply?.knowledgeChanges).toBe(0)
+    expect(service.createKnowledgeEntry).not.toHaveBeenCalled()
+    expect(service.setKnowledgeArchived).not.toHaveBeenCalled()
+    // A room reply to an officer's message still saves
+    expect((await call(save(), context({ requestType: "room" }))).isError).toBeUndefined()
+  })
+
   it(`allows ${MAX_CHANGES_PER_REPLY} changes per reply, counting saves, updates and archives`, async () => {
     const ctx = context()
     expect((await call(save(), ctx)).isError).toBeUndefined()

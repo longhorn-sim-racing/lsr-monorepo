@@ -31,7 +31,8 @@ export default async function JackRoomPage({ params, searchParams }: JackRoomPag
   const anchorId = anchor.success ? anchor.data : undefined
 
   const [snapshot, rooms, spend] = await Promise.all([
-    getRoomSnapshot(roomId, { around: anchorId }),
+    // Archived rooms open too, read-only (with ?m= links from search still landing on their message)
+    getRoomSnapshot(roomId, { around: anchorId, viewerId: officer.id }),
     listRooms(),
     getMonthSpend().catch((error) => {
       console.error("[jack] Couldn't load this month's spend:", error)
@@ -39,7 +40,7 @@ export default async function JackRoomPage({ params, searchParams }: JackRoomPag
     }),
   ])
   if (!snapshot) notFound()
-  const { gap, ...initial } = snapshot
+  const { gap, feedback, ...initial } = snapshot
   const openAt = anchorId && snapshot.messages.some((message) => message.id === anchorId) ? anchorId : undefined
 
   return (
@@ -52,6 +53,7 @@ export default async function JackRoomPage({ params, searchParams }: JackRoomPag
       me={{ userId: officer.id, displayName: officer.displayName, avatarUrl: officer.avatarUrl }}
       anchorId={openAt}
       gap={gap}
+      feedback={feedback}
     />
   )
 }

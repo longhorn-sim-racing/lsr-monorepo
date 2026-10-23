@@ -20,7 +20,7 @@ vi.mock("@/server/db", () => ({ prisma: db }))
 
 import { search, sourcesFor } from "./search"
 import { SEARCH_READERS, SEARCH_SOURCES } from "./registry"
-import { documentsSource } from "./sources/documents"
+import { DOCUMENTS_OFF, documentsSource } from "./sources/documents"
 import { knowledgeAgeDays, knowledgeSource } from "./sources/knowledge"
 import { JACK_ANSWER_LABEL, roomsSource } from "./sources/rooms"
 import { siteSource } from "./sources/site"
@@ -161,7 +161,8 @@ describe("the knowledge source", () => {
     ])
     const [found] = await knowledgeSource.search({ query: "tiers", limit: 5, includeJackReplies: false })
     expect(sqlText()).toContain(`k."archivedAt" IS NULL`)
-    expect(found).toMatchObject({ type: "knowledge", url: "/admin/knowledge?entry=k1", meta: { notReviewed: true, tags: "sponsors", from: "GM 2 room", ageDays: 0 } })
+    // Linked to the entry's own page (the Knowledge list has no ?entry=)
+    expect(found).toMatchObject({ type: "knowledge", url: "/admin/knowledge/k1", meta: { notReviewed: true, tags: "sponsors", from: "GM 2 room", ageDays: 0 } })
   })
 
   it("reads an entry with its current version id, for updates", async () => {
@@ -181,7 +182,10 @@ describe("the knowledge source", () => {
       versions: [{ id: "v3" }],
     })
     const result = await knowledgeSource.readers[0].read("k1", {})
-    expect(result).toMatchObject({ ok: true, doc: { text: "# Tiers\nGold, Silver", meta: { versionId: "v3", owner: "Gray (@gray)" } } })
+    expect(result).toMatchObject({ ok: true, doc: { url: "/admin/knowledge/k1", text: "# Tiers\nGold, Silver", meta: { versionId: "v3", owner: "Gray (@gray)" } } })
+    // The newest version the way the knowledge service picks it (time, then id), so an update based on it isn't refused
+    const query = db.knowledgeEntry.findUnique.mock.calls[0][0] as { select: { versions: unknown } }
+    expect(query.select.versions).toEqual({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1, select: { id: true } })
     db.knowledgeEntry.findUnique.mockResolvedValue(null)
     expect(await knowledgeSource.readers[0].read("gone", {})).toEqual({ ok: false, error: expect.stringContaining("No knowledge entry gone") })
   })
@@ -196,11 +200,28 @@ describe("the documents source", () => {
   })
 
   it("won't read a deleted document or one with no text", async () => {
+    db.connectorState.findUnique.mockResolvedValue({ enabled: true })
     const base = { id: "d1", name: "Budget.xlsx", path: "/", source: "sharepoint", webUrl: "https://x.sharepoint.com/a", mimeType: "x", modifiedAt: new Date() }
     db.externalDocument.findUnique.mockResolvedValueOnce({ ...base, text: null, textStatus: "ok", deletedAt: new Date() })
     expect(await documentsSource.readers[0].read("d1", {})).toEqual({ ok: false, error: "Budget.xlsx was removed from SharePoint, so its text is gone." })
     db.externalDocument.findUnique.mockResolvedValueOnce({ ...base, text: null, textStatus: "too_large", deletedAt: null })
     expect(await documentsSource.readers[0].read("d1", {})).toEqual({ ok: false, error: expect.stringContaining("too large") })
+    db.externalDocument.findUnique.mockResolvedValueOnce({ ...base, text: null, textStatus: "restricted", deletedAt: null })
+    expect(await documentsSource.readers[0].read("d1", {})).toEqual({ ok: false, error: expect.stringContaining("turned off downloads") })
+  })
+
+  it("searches and reads only sources whose connector is switched on (documents track)", async () => {
+    // Drive on, SharePoint off
+    db.connectorState.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => ({ enabled: where.id === "google-drive" }))
+    expect(await documentsSource.unavailable!()).toBeNull()
+    await documentsSource.search({ query: "budget", limit: 5, includeJackReplies: false })
+    expect(sqlText()).toContain("e.source = ANY(")
+    expect(sqlValues()).toContainEqual(["drive"])
+    db.externalDocument.findUnique.mockResolvedValueOnce({ id: "d1", name: "Budget.xlsx", path: "/", source: "sharepoint", webUrl: "https://x.sharepoint.com/a", mimeType: "x", modifiedAt: new Date(), text: "secret plans", textStatus: "ok", deletedAt: null })
+    expect(await documentsSource.readers[0].read("d1", {})).toEqual({ ok: false, error: "SharePoint isn't connected, so its documents can't be read." })
+    // Both off: the source says so, and search skips it
+    db.connectorState.findUnique.mockResolvedValue({ enabled: false })
+    expect(await documentsSource.unavailable!()).toBe(DOCUMENTS_OFF)
   })
 })
 

@@ -1,5 +1,7 @@
 import type { JackRoomSummary } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
+import { EVAL_ROOM_PREFIX } from "./eval-support"
+import { jackRoomSummarySelect, toRoomSummary } from "./messages"
 import { roomMessageHref } from "./search/links"
 import { searchRoomMessages, type RoomMessageKind } from "./search/sources/rooms"
 
@@ -7,6 +9,7 @@ import { searchRoomMessages, type RoomMessageKind } from "./search/sources/rooms
  * The search box on the rooms list (design §13): rooms whose name matches, and messages that match,
  * each linking to the message in its room with the messages around it. Officers see every message
  * here, Jack's answers included (unlike Jack's own search, which leaves those out unless asked).
+ * Archived rooms are in it too, marked: they open read-only.
  */
 
 export const ROOM_SEARCH_MAX = 200
@@ -23,6 +26,8 @@ export type RoomSearchMessage = {
   createdAt: string
   snippet: string
   href: string
+  /** In an archived room (it opens read-only) */
+  roomArchived: boolean
 }
 
 export type RoomSearchResult = { query: string; rooms: JackRoomSummary[]; messages: RoomSearchMessage[] }
@@ -36,23 +41,21 @@ export function roomSearchQuery(raw: string | string[] | undefined): string | nu
 export async function searchRooms(query: string): Promise<RoomSearchResult> {
   const [rooms, messages] = await Promise.all([
     prisma.jackRoom.findMany({
-      where: { archivedAt: null, title: { contains: query, mode: "insensitive" } },
-      orderBy: { updatedAt: "desc" },
+      // Rooms in use first, then archived ones
+      where: { title: { contains: query, mode: "insensitive" }, NOT: { id: { startsWith: EVAL_ROOM_PREFIX } } },
+      orderBy: [{ archivedAt: { sort: "desc", nulls: "first" } }, { updatedAt: "desc" }],
       take: ROOM_MATCHES,
-      select: { id: true, title: true, persona: true, createdAt: true, updatedAt: true, createdBy: { select: { displayName: true } } },
+      select: jackRoomSummarySelect,
     }),
-    searchRoomMessages({ query, limit: MESSAGE_MATCHES, kinds: ["user", "system", "assistant"], includeArchived: false }),
+    searchRoomMessages({ query, limit: MESSAGE_MATCHES, kinds: ["user", "system", "assistant"], includeArchived: true }),
   ])
+  const roomIds = [...new Set(messages.map((hit) => hit.roomId))]
+  const archived = roomIds.length
+    ? new Set((await prisma.jackRoom.findMany({ where: { id: { in: roomIds }, archivedAt: { not: null } }, select: { id: true } })).map((room) => room.id))
+    : new Set<string>()
   return {
     query,
-    rooms: rooms.map((room) => ({
-      id: room.id,
-      title: room.title,
-      persona: room.persona,
-      createdByName: room.createdBy?.displayName ?? null,
-      createdAt: room.createdAt.toISOString(),
-      updatedAt: room.updatedAt.toISOString(),
-    })),
+    rooms: rooms.map(toRoomSummary),
     messages: messages.map((hit) => ({
       id: hit.id,
       roomId: hit.roomId,
@@ -62,6 +65,7 @@ export async function searchRooms(query: string): Promise<RoomSearchResult> {
       createdAt: hit.createdAt.toISOString(),
       snippet: hit.snippet,
       href: roomMessageHref(hit.roomId, hit.id),
+      roomArchived: archived.has(hit.roomId),
     })),
   }
 }

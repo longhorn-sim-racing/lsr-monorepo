@@ -24,7 +24,7 @@ export function decksIn(answer: Answer): { deckId: string; version: number }[] {
 }
 
 /** Checks the one deck a reply made: its size, how many slides, a fresh render of each, and anything else the question needs */
-function deckCheck(want: { size: JackDeckSizeKey; min: number; max: number; html?: (html: string) => string | null }): Pick<Expectation, "check" | "verify" | "needsModel"> {
+export function deckCheck(want: { size: JackDeckSizeKey; min: number; max: number; html?: (html: string) => string | null }): Pick<Expectation, "check" | "verify" | "needsModel"> {
   let made: { deckId: string; version: number }[] = [];
   return {
     needsModel: true,
@@ -43,7 +43,7 @@ function deckCheck(want: { size: JackDeckSizeKey; min: number; max: number; html
       if (count < want.min || count > want.max) return `it has ${count} slides, not ${want.min === want.max ? want.min : `${want.min} to ${want.max}`}`;
       const problems: string[] = [];
       for (const [i, slide] of deck.content.slides.entries()) {
-        const { issues } = await ensureRender({ size: deck.size, css: deck.content.css, html: slide.html });
+        const { issues } = await ensureRender({ size: deck.size, css: deck.content.css, html: slide.html, roomId: deck.roomId });
         problems.push(...issues.map((issue) => `slide ${i + 1}: ${issue}`));
       }
       if (problems.length) return `layout problems left: ${problems.slice(0, 3).join(" ")}`;
