@@ -28,8 +28,17 @@ The working record for Jack 2.0 (#188): what's done, what's next, and every call
 | E: eval harness 2.0 | Merged | #200 |
 | T1: club data (search and read, recruiting pipeline, race performance, room search) | Merged | #204 |
 | T2: memory (knowledge base, knowledge tool, officer profiles) | Merged | #202 |
-| Wave 2a: G6 files for Jack and who's asking, T3 changes, T4 Stripe/Resend/site traffic, T5 Twitch/Instagram insights, T6 documents, T7 Discord reading, T9a rooms, T10 sponsors and meetings, wave-1 follow-ups | Building (workflow: build, review, fix) | |
-| Wave 2b: T8 Discord posting, T9b Instagram publish and gallery, T11 automation | After 2a merges | |
+| I: wave-1 integration follow-ups | Merged | #206 |
+| T9a: rooms (archive, pin, mention mode, ratings, Usage page) | Merged | #207 |
+| G6: Jack reads room files, and who's asking | Merged | #208 |
+| T10: sponsors, meetings and action items | Merged | #209 |
+| T4: Stripe, Resend delivery and site traffic | Merged | #210 |
+| T3: event, news, notification, results, check-in and import proposals | Merged | #211 |
+| T6: documents (Drive, SharePoint, Teams; switchable) | Merged | #212 |
+| T5: Twitch and Instagram insights | Merged | #213 |
+| T7: Discord reading (sync, search, polls, activity, linking) | Merged | #214 |
+| Vercel function limit (narrow Chromium tracing, one time limit) | In review | #215 |
+| Wave 2b: T8 Discord posting, T9b Instagram publish and gallery, T11 automation, I2 wave-2a follow-ups | Building (workflow: build, review, fix) | |
 | Eval, security pass, docs, launch post | Not started | |
 
 ## Decisions
@@ -90,6 +99,17 @@ Calls made during the build, for Gray to review. Newest last.
   - **News:** a taken slug now says "Slug already exists" (the old check never matched, so it said "Failed to create post") (R).
   - **Release order (T2):** run the officer badge sync with `--apply` before loading the knowledge seed, so department owners resolve.
   - **Tests:** Vitest's per-test timeout is 20 s. A few tests import whole module graphs and took over 5 s while the full suite ran in parallel.
+- **Wave 2a calls (from the PRs):**
+  - **Claude Files is its own connector** (`claude-files`), off until an admin runs its smoke test and switches it on. While it's off, photos go to Claude as their model copy in the request and PDFs as their text (G6).
+  - **PDFs and web fetch:** while web fetch is on, an attached PDF goes into the officer's turn as text with its links neutralized, until one paid probe shows that a PDF document's links don't count as the officer's own input. `room_files read` still returns the PDF itself (G6).
+  - **Who's asking** is saved with each message as one line (name, title, department, major, handle). Deleting an account clears its labels (G6, T7).
+  - **Stripe charges get their own table** (`StripeCharge`, one additive migration), so a payout's contents and a payment's Stripe side show without calling Stripe live. Webhook events are stored even while their connector is off (otherwise Resend retries and disables the endpoint); Jack's tools still answer from stored data then, saying how old it is. Site traffic leaves out `/admin` pages (T4).
+  - **Twitch webhook messages are deduplicated in a table** (`TwitchEventSubMessage`, additive). A live stream isn't closed by Twitch's start-up lag; only `stream.offline` is final (T5).
+  - **Documents:** env names are `GOOGLE_SERVICE_ACCOUNT_JSON` and `GOOGLE_DRIVE_FOLDER_ID`; one Drive job does the change feed, the first walk and the weekly walk; a connector switched off hides its documents everywhere (search, read, tabs) (T6).
+  - **Discord:** threads are stored only for opted-in channels, private threads never; a thread's channel is a new nullable column (`DiscordChannel.parentId`) (T7).
+  - **Mention mode:** a turn keeps at most the newest 40 side messages (about 20,000 characters) and says how many it left out (T9a).
+  - **Meetings:** recording the same meeting twice is refused at apply (one per title per day, under a lock); a new-meeting proposal replaces an earlier one for the same day and type in the room (T10).
+  - **Vercel's Hobby plan allows 12 functions per deployment.** Since G5, previews failed at deploy (the build passed, so CI never saw it). Chromium is now traced only into the routes that render, the PDF worker only into those that read PDFs, and no page or route sets its own `maxDuration`: everything runs on the project default, 300 s (the 60 s and 120 s routes too). A test keeps new routes from adding settings (#215).
 - **For Gray to sign off, two key exceptions to "read-only or restricted":**
   - Vercel offers no read-only analytics token. A project-scoped, read-write token is used only by a daily snapshot job, with a short expiry (§12.5).
   - Resend's production key stays send-only, and delivery data arrives by webhook instead.
@@ -139,3 +159,11 @@ Calls made during the build, for Gray to review. Newest last.
     - G8: confirm live that tool search works with streamed tool input, with `url_sources` naming a deferred tool, and with dynamic filtering on Haiku (eval run).
   - **Noticed, not caused by 2.0:** in dev, an admin page's first load sometimes logs a hydration mismatch in the admin shell's menu button ids. It doesn't repeat on reload, and the admin layout hasn't changed on `jack-2`.
   - Wave 2a launched (9 builders).
+- **10/23 (early morning):**
+  - **Wave 2a done:** 9 PRs (#206–#214), each independently reviewed (56 findings: 13 major, 43 minor) and fixed. Two fix agents were flagged for "outside writes"; their only outside actions were pushing their own PR branches and posting PR comments, as briefed.
+  - Merged all nine into `jack-2`. The hard merge was G6 with T9a (both changed how a turn is built: files and author labels, and mention-mode side messages); both kept, and four tests were updated where the tracks met.
+  - The combined branch passes lint, typecheck and 2,973 tests; the migration drift check is clean (three new additive migrations: Discord thread parent, Stripe charges, Twitch EventSub ids).
+  - **Found and fixed: previews failing since G5.** Read the deployment error through Vercel's API: "No more than 12 Serverless Functions can be added to a Deployment on the Hobby plan". #215 brings it under the limit (11 with the tracing change alone).
+  - **Found on main, fixed separately:** the Stripe webhook logged the whole error on a bad signature, and Stripe's error carries the raw request body. #216 (to main, for Gray).
+  - Browser-checked (light, dark, 390 px): Overview cards, Sponsors, Meetings, Action items, Streams, Discord, Payments (Stripe panel), Notifications (Delivery tab), Usage, archived rooms, Knowledge tabs, Connections panels, the privacy page, and a room's new menu. No layout problems. In dev, each admin page's first load logs a hydration mismatch in the admin shell's menu button; the shell hasn't changed, and it's to be confirmed absent from a production build.
+  - Wave 2b launched: T8, T9b, T11 and I2 (wave-2a follow-ups).
