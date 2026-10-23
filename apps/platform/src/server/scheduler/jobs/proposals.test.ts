@@ -11,6 +11,7 @@ function context() {
   const ctx: JobContext = {
     signal: new AbortController().signal,
     deadline: Date.now() + 30_000,
+    startedAt: Date.now(),
     log: (line) => lines.push(line),
     config: null,
     job: { id: "job-1", key: "proposals.sweep" },
