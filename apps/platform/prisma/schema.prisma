@@ -1853,7 +1853,8 @@ model StripeCharge {
 }
 
 /// One Resend delivery event for one recipient (design §12.4). Personal data (addresses). Joins to
-/// Notification.emailMessageId and ApplicationEmail.resendMessageId. Pruned after 12 months
+/// Notification.emailMessageId and ApplicationEmail.resendMessageId. Pruned after 12 months, and a
+/// member's are deleted with their account (deleteAccount)
 model EmailEvent {
   id         String   @id @default(uuid())
   resendId   String

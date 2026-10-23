@@ -1,5 +1,5 @@
 import type { KnowledgeSource, Prisma } from "@prisma/client"
-import { KNOWLEDGE_STALE_DAYS } from "@/lib/jack/knowledge"
+import { KNOWLEDGE_STALE_DAYS, parseProvenance } from "@/lib/jack/knowledge"
 import { prisma } from "@/server/db"
 
 /**
@@ -151,7 +151,8 @@ export async function getKnowledgeEntryDetail(id: string) {
   })
   if (!entry) return null
 
-  const userIds = [entry.createdById, entry.updatedById, entry.reviewedById, ...entry.versions.map((v) => v.editedById)].filter((v): v is string => !!v)
+  const provenance = parseProvenance(entry.provenance)
+  const userIds = [entry.createdById, entry.updatedById, entry.reviewedById, provenance?.askedBy.userId, ...entry.versions.map((v) => v.editedById)].filter((v): v is string => !!v)
   const roomIds = entry.versions.map((v) => v.roomId).filter((v): v is string => !!v)
   const [users, rooms] = await Promise.all([
     userIds.length ? prisma.user.findMany({ where: { id: { in: [...new Set(userIds)] } }, select: { id: true, displayName: true, handle: true } }) : [],
@@ -167,9 +168,13 @@ export async function getKnowledgeEntryDetail(id: string) {
   const { versions, ...rest } = entry
   return {
     entry: rest,
+    /** Where Jack's latest save or change came from; its asker is `askedBy` */
+    provenance,
     createdBy: person(entry.createdById),
     updatedBy: person(entry.updatedById),
     reviewedBy: person(entry.reviewedById),
+    /** The officer whose message led to Jack's latest save or change (null: a script, or a proposal with no asker) */
+    askedBy: person(provenance?.askedBy.userId ?? null),
     versions: versions.map((v): KnowledgeVersionRow => ({ id: v.id, title: v.title, body: v.body, tags: v.tags, via: v.via, roomId: v.roomId, createdAt: v.createdAt, editedBy: person(v.editedById) })),
     latestVersionId: versions[0]?.id ?? null,
     unreviewed: !entry.archivedAt && !entry.reviewedAt && versions.some((v) => v.via === "jack"),

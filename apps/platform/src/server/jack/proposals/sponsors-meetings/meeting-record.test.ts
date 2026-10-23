@@ -210,10 +210,10 @@ describe("meeting.record", () => {
         roomId: "room-1",
         replyId: "reply-1",
         messageIds: ["msg-1"],
-        askedBy: { userId: "u-ana", name: "Ana" },
+        askedBy: { userId: "u-ana" },
         tools: [
           { name: "room_files", input: '{"fileId":"f-1"}', label: "Read board-10-19.vtt" },
-          { name: "propose_meeting", input: '{"proposalId":"prop-1","fileId":"f-1"}', label: "Meeting record applied by Gray, from board-10-19.vtt" },
+          { name: "propose_meeting", input: '{"proposalId":"prop-1","fileId":"f-1"}', label: "Meeting record applied, from board-10-19.vtt" },
         ],
         at: expect.any(String),
       },
@@ -320,7 +320,7 @@ describe("meeting.record from a synced document", () => {
     expect(service.createMeetingTx.mock.calls[0][3]).toEqual({ transcriptFileId: null, transcriptDocumentId: "doc-1", roomId: "room-1" })
     // The decision log says where the decision came from
     const provenance = service.linkDecisionsToLog.mock.calls[0][3].provenance
-    expect(provenance.tools.at(-1)).toEqual({ name: "propose_meeting", input: '{"proposalId":"prop-1","documentId":"doc-1"}', label: "Meeting record applied by Gray, from GM 2 transcript.vtt" })
+    expect(provenance.tools.at(-1)).toEqual({ name: "propose_meeting", input: '{"proposalId":"prop-1","documentId":"doc-1"}', label: "Meeting record applied, from GM 2 transcript.vtt" })
   })
 
   it("refuses a document it can't use: unknown, its source switched off, removed, without text, or not a transcript or notes", async () => {

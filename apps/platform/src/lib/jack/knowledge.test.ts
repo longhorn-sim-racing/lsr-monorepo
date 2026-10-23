@@ -74,7 +74,8 @@ describe("parseProvenance", () => {
       roomId: "room-1",
       replyId: "reply-1",
       messageIds: ["m1", 7],
-      askedBy: { userId: "u1", name: "Gray" },
+      // A name saved by earlier code: dropped, so it can't outlive the account (the page looks the id up)
+      askedBy: { userId: "u1", name: "Avery" },
       tools: [{ name: "read", input: '{"type":"document"}', label: "Read a document" }, { input: "no name" }, null],
       at: "2026-10-22T17:00:00.000Z",
     }
@@ -82,7 +83,7 @@ describe("parseProvenance", () => {
       roomId: "room-1",
       replyId: "reply-1",
       messageIds: ["m1"],
-      askedBy: { userId: "u1", name: "Gray" },
+      askedBy: { userId: "u1" },
       tools: [{ name: "read", input: '{"type":"document"}', label: "Read a document" }],
       at: "2026-10-22T17:00:00.000Z",
     })

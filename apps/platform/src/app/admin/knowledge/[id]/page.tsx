@@ -4,7 +4,7 @@ import { notFound } from "next/navigation"
 import { formatInTimeZone } from "date-fns-tz"
 import { Badge, DetailList, Notice, PageHeader, Panel, PanelBody, PanelHeader, SplitLayout } from "@/components/admin/kit"
 import { DEFAULT_TIMEZONE } from "@/lib/dates"
-import { describeAge, knowledgeAge, knowledgeEntryPath, parseProvenance, roomMessagePath } from "@/lib/jack/knowledge"
+import { describeAge, knowledgeAge, knowledgeEntryPath, roomMessagePath } from "@/lib/jack/knowledge"
 import { partLink } from "@/lib/jack/links"
 import { requireOfficerPage } from "@/server/auth/guards"
 import { getCachedSessionUser } from "@/server/auth/cached-session"
@@ -38,10 +38,9 @@ export default async function KnowledgeEntryPage({
   const [detail, owners] = await Promise.all([getKnowledgeEntryDetail(id), listKnowledgeOwners()])
   if (!detail) notFound()
 
-  const { entry, versions, latestVersionId } = detail
+  const { entry, versions, latestVersionId, provenance } = detail
   const now = new Date()
   const age = knowledgeAge(entry, now)
-  const provenance = parseProvenance(entry.provenance)
   const versionParam = Array.isArray(query.version) ? query.version[0] : query.version
   const viewing = versionParam && versionParam !== latestVersionId ? versions.find((v) => v.id === versionParam) : undefined
   const sourceLink = entry.sourceUrl ? partLink(entry.sourceUrl) : null
@@ -148,7 +147,7 @@ export default async function KnowledgeEntryPage({
                 <PanelHeader title="Where Jack got it" description="The reply behind Jack's latest save or change" />
                 <PanelBody className="flex flex-col gap-2 text-[13px]">
                   <p>
-                    Asked by {provenance.askedBy.name},{" "}
+                    Asked by {detail.askedBy ? who(detail.askedBy) : "an officer"},{" "}
                     <Link href={roomMessagePath(provenance.roomId, provenance.messageIds[0] ?? provenance.replyId)} className="font-medium hover:underline">
                       in {detail.roomTitles[provenance.roomId] ?? "a Jack room"}
                     </Link>

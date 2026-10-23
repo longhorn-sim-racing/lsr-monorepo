@@ -66,11 +66,21 @@ export async function deleteAccount() {
 
   // The Discord link goes with the account, and so does every Discord row that pointed at it
   await unlinkDiscord(user.id);
-  // Jack's room messages keep who posted them as a label (name, title, major, handle): it goes with the account
-  await prisma.$transaction([
-    prisma.jackMessage.updateMany({ where: { authorUserId: user.id }, data: { authorLabel: null } }),
-    prisma.user.delete({ where: { id: user.id } }),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    // Jack's room messages keep who posted them as a label (name, title, major, handle): it goes with the account
+    await tx.jackMessage.updateMany({ where: { authorUserId: user.id }, data: { authorLabel: null } });
+    // Resend's delivery events for mail to them (their address, bounces): by address, and by the club's emails
+    // to them, read before those rows go with the account (an application email may have gone to another address)
+    const [notifications, applicationEmails] = await Promise.all([
+      tx.notification.findMany({ where: { userId: user.id, emailMessageId: { not: null } }, select: { emailMessageId: true } }),
+      tx.applicationEmail.findMany({ where: { application: { userId: user.id }, resendMessageId: { not: null } }, select: { resendMessageId: true } }),
+    ]);
+    const resendIds = [...notifications.map((n) => n.emailMessageId), ...applicationEmails.map((e) => e.resendMessageId)].filter((id): id is string => !!id);
+    await tx.emailEvent.deleteMany({
+      where: { OR: [{ recipient: user.email.trim().toLowerCase() }, ...(resendIds.length ? [{ resendId: { in: resendIds } }] : [])] },
+    });
+    await tx.user.delete({ where: { id: user.id } });
+  }, { timeout: 30_000 });
 
   redirect('/?account=deleted');
 }

@@ -80,8 +80,11 @@ export type KnowledgeProvenance = {
   replyId: string | null
   /** The officer messages that reply answered */
   messageIds: string[]
-  /** The officer whose message started the reply */
-  askedBy: { userId: string | null; name: string }
+  /**
+   * The officer whose message started the reply: a plain id (null from a script), never a name, so the
+   * page shows their current name, or "Former officer" once the account is deleted (design §3.1)
+   */
+  askedBy: { userId: string | null }
   /** The tools the reply used before saving, outside sources included: each one's input (cut short) and what came back */
   tools: { name: string; input: string; label: string }[]
   /** ISO timestamp */
@@ -105,7 +108,8 @@ export function parseProvenance(value: unknown): KnowledgeProvenance | null {
     roomId: p.roomId,
     replyId: isString(p.replyId) ? p.replyId : null,
     messageIds: Array.isArray(p.messageIds) ? p.messageIds.filter(isString) : [],
-    askedBy: { userId: isString(askedBy.userId) ? askedBy.userId : null, name: isString(askedBy.name) ? askedBy.name : "An officer" },
+    // A name saved by earlier code is left out: it would outlive the account
+    askedBy: { userId: isString(askedBy.userId) ? askedBy.userId : null },
     tools: Array.isArray(p.tools)
       ? p.tools
           .filter((t): t is Record<string, unknown> => !!t && typeof t === "object")

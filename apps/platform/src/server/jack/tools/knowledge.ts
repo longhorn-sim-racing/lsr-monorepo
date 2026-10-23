@@ -144,7 +144,7 @@ export async function replyProvenance(ctx: JackToolContext, now = new Date()): P
     roomId: ctx.roomId,
     replyId: ctx.messageId ?? null,
     messageIds: asked.map((m) => m.id),
-    askedBy: { userId: ctx.actor.userId, name: ctx.actor.displayName },
+    askedBy: { userId: ctx.actor.userId },
     tools,
     at: now.toISOString(),
   }

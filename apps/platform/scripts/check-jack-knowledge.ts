@@ -175,7 +175,7 @@ async function main() {
     rooms.push(room.id)
     const word = `zebrafinch${MARK}`
     const noteId = randomUUID()
-    const provenance = { roomId: room.id, replyId: null, messageIds: [], askedBy: { userId: null, name: "Check" }, tools: [], at: new Date().toISOString() }
+    const provenance = { roomId: room.id, replyId: null, messageIds: [], askedBy: { userId: null }, tools: [], at: new Date().toISOString() }
     const saved = track(await service.createKnowledgeEntry({ title: `Private note ${MARK}`, body: `Only ${word} knows this.`, tags: [MARK] }, { ...jack, roomId: room.id }, { provenance, noteId }))
     check(saved.ok, "Jack's save keeps its note's id", saved.ok ? saved.entry.provenance : saved)
     if (saved.ok) {

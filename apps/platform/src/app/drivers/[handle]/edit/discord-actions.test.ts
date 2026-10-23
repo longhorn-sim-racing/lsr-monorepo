@@ -4,11 +4,17 @@ const guards = vi.hoisted(() => ({ requireUser: vi.fn() }));
 const service = vi.hoisted(() => ({ unlinkDiscord: vi.fn() }));
 const nav = vi.hoisted(() => ({ redirect: vi.fn() }));
 const cache = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
-const db = vi.hoisted(() => ({
-  user: { delete: vi.fn() },
-  jackMessage: { updateMany: vi.fn() },
-  $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
-}));
+const db = vi.hoisted(() => {
+  const db = {
+    user: { delete: vi.fn() },
+    jackMessage: { updateMany: vi.fn() },
+    notification: { findMany: vi.fn(async () => []) },
+    applicationEmail: { findMany: vi.fn(async () => []) },
+    emailEvent: { deleteMany: vi.fn() },
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(db)),
+  };
+  return db;
+});
 vi.mock('@/server/auth/guards', () => guards);
 vi.mock('@/server/services/discord-link.service', () => service);
 vi.mock('next/navigation', () => nav);
@@ -19,7 +25,7 @@ import { deleteAccount } from '@/app/account/actions';
 import { unlinkDiscordAction } from './discord-actions';
 
 beforeEach(() => {
-  guards.requireUser.mockResolvedValue({ id: 'user-1', handle: 'avery-lane' });
+  guards.requireUser.mockResolvedValue({ id: 'user-1', handle: 'avery-lane', email: 'avery@example.test' });
 });
 
 describe('unlinkDiscordAction', () => {
