@@ -12,7 +12,7 @@ Scheduled work for 2.0 (design §6; research: `research/supabase-pg-cron.md`). p
 - **The dispatcher** (`src/server/scheduler/dispatcher.ts`):
   - claims each due job with a conditional update (enabled, due, no live lock), setting `lockedUntil` = claim + 360 s and `nextRunAt` = the next run after now in America/Chicago (`schedule.ts`, cron-parser), so missed runs don't pile up;
   - runs at most 3 jobs at once, stops claiming 200 s into the request, and only claims an inline job whose `budgetMs` fits before 290 s;
-  - skips kinds this code doesn't know (never claims or fails them);
+  - skips kinds this code doesn't know: never claims or fails them, but moves their next run on, so an enabled job of a removed kind doesn't make the tick call the site every minute;
   - marks a run still `running` from a dead function as failed when its job is next claimed;
   - records each run in `ScheduledJobRun`; errors and summaries go through `redactSecrets()`. A job that ignores its abort signal is recorded as failed 5 s past its deadline and keeps its lock until the lock runs out, so no other tick starts it meanwhile.
 - **Hand-offs:** a kind with `handoff: true` is claimed, then posted to `POST /api/admin/jack/run` with `{ jobId, runId, lockedUntil }`, signed over `"run." + ts + "." + body` so a tick's signature can't be replayed there. The route swaps the lock using the exact `lockedUntil` as a one-time token (a replay gets 409), answers 202 and runs the job in `after()` with its own 300 s. It sits under `/api/admin/jack/**`, so the Chromium binary is traced into it. Hand-offs go to the canonical site in production and to the tick request's own origin elsewhere.
@@ -52,4 +52,5 @@ Add a `JobKind` to your `src/server/scheduler/jobs/<track>.ts`:
 - The lock is claim + 360 s (the design's "300 s + margin"), longer than any function lives, so a lock that ran out means its run is gone.
 - Run now needs the job switched on (it moves `nextRunAt` to now; the next tick runs it). Turning a job on sets its next run from now, so a job that's been off doesn't run straight away.
 - Officers see the Jobs page read-only; switching, Run now and schedule changes are admin-only and audited (`SCHEDULED_JOB`).
+- If the dispatcher's hand-off POST gets no answer, it cancels the hand-off only while the lock is still its own; if the route already took it over, the route records the run.
 - `JobKind` gained `singleton?: false` and `JobContext` gained `startedAt`.
