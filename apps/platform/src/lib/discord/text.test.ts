@@ -66,6 +66,50 @@ describe("cleanPostText", () => {
   it("keeps line breaks the writer meant", () => {
     expect(cleanPostText("Line one\n\nLine two\n- a\n- b", { officerTexts: [], siteHosts: SITE }).text).toBe("Line one\n\nLine two\n- a\n- b")
   })
+
+  it("never skips a link because its text only looks like a masked link", () => {
+    const gm = ["Post about GM 2 on Monday"]
+    const broken = cleanPostText("See [details](visit https://evil.example/a)", { officerTexts: gm, siteHosts: SITE })
+    expect(broken.removed.links).toEqual(["https://evil.example/a"])
+    expect(broken.text).not.toContain("evil.example")
+    const titled = cleanPostText('See [details](https://evil.example/a "tip")', { officerTexts: gm, siteHosts: SITE })
+    expect(titled.removed.links).toEqual(["https://evil.example/a"])
+    expect(titled.text).toBe("See details")
+  })
+
+  it("keeps a masked link to the site (with a title too), but not an outside link in its words", () => {
+    const kept = cleanPostText('Read [the rules](https://longhornsimracing.org/rules "LSC rules") and [https://evil.example/x](https://longhornsimracing.org/a)', { officerTexts: [], siteHosts: SITE })
+    expect(kept.text).toBe('Read [the rules](https://longhornsimracing.org/rules "LSC rules") and [](https://longhornsimracing.org/a)')
+    expect(kept.removed.links).toEqual(["https://evil.example/x"])
+  })
+
+  it("takes out a bare link right next to a kept one, and keeps the kept one", () => {
+    const out = cleanPostText("https://evil.example/a<https://longhornsimracing.org/b>", { officerTexts: [], siteHosts: SITE })
+    expect(out.text).toBe("<https://longhornsimracing.org/b>")
+    expect(out.removed.links).toEqual(["https://evil.example/a"])
+  })
+
+  it("keeps a Discord invite only when an officer's message has it, written with or without https://", () => {
+    const out = cleanPostText("Join discord.gg/scam or https://discord.com/invite/other", { officerTexts: officer, siteHosts: SITE })
+    expect(out.text).toBe("Join or")
+    expect(out.removed.links).toEqual(["https://discord.com/invite/other", "https://discord.gg/scam"])
+    const asked = ["Add our invite discord.gg/LSRclub to the post"]
+    expect(cleanPostText("Join us: https://discord.gg/LSRclub", { officerTexts: asked, siteHosts: SITE }).removed.links).toEqual([])
+    expect(cleanPostText("Join us: discord.gg/LSRclub", { officerTexts: asked, siteHosts: SITE }).text).toBe("Join us: discord.gg/LSRclub")
+    expect(cleanPostText("Join us: discord.gg/lsrclub", { officerTexts: asked, siteHosts: SITE }).removed.links).toEqual(["https://discord.gg/lsrclub"])
+  })
+
+  it("ignores stand-in characters in the text", () => {
+    expect(cleanPostText("a\uE0000\uE001b https://evil.example/x", { officerTexts: [], siteHosts: SITE }).text).toBe("a0b")
+  })
+})
+
+describe("invites", () => {
+  it("count as links, and come out of template values", () => {
+    expect(linksIn("join discord.gg/scam or discordapp.com/invite/x-y")).toEqual(["https://discord.gg/scam", "https://discord.gg/x-y"])
+    expect(templateValue("Live! join discord.gg/scam now")).toBe("Live! join now")
+    expect(tidy(stripLinks("join DISCORD.GG/abc today"))).toBe("join today")
+  })
 })
 
 describe("template values", () => {

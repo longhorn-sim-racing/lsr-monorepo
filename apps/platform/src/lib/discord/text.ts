@@ -27,12 +27,22 @@ export const DISCORD_LIMITS = {
 /** Mentions Discord turns into pings: @everyone, @here, a user (<@id>, <@!id>) or a role (<@&id>). A channel link (<#id>) pings nobody and stays */
 const MENTION = /@(?:everyone|here)\b|<@[!&]?\d{1,25}>/gi
 
-/** A masked link, [label](url), with or without <> around the url */
-const MASKED_LINK = /\[([^\]\n]{0,256})\]\(\s*<?(https?:\/\/[^\s)>]+)>?\s*\)/gi
+/** A masked link, [label](url), with or without <> around the url, and with or without a "title" (hover text) after it */
+const MASKED_LINK = /\[([^\]\n]{0,256})\]\(\s*<?(https?:\/\/[^\s)>]+)>?(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*\)/gi
 /** <url>: a link without its preview */
 const ANGLE_LINK = /<(https?:\/\/[^\s>]+)>/gi
 /** A bare http(s) link */
 const BARE_LINK = /\bhttps?:\/\/[^\s<>]+/gi
+/** A Discord invite, with or without https:// in front: Discord shows an invite card for either. The code is case-sensitive */
+const INVITE = /\b(?:discord(?:app)?\.com\/invite|discord\.gg)\/([\w-]+)/gi
+
+/** An invite's code, when a link is one */
+function inviteCode(link: string): string | null {
+  return link.match(/\b(?:discord(?:app)?\.com\/invite|discord\.gg)\/([\w-]+)/i)?.[1] ?? null
+}
+
+/** An invite as one link, however it was written */
+const inviteLink = (code: string) => `https://discord.gg/${code}`
 
 /** Punctuation that ends a sentence rather than a bare link ("see https://x.org/a."), and an unmatched ")" */
 function trimLink(url: string): string {
@@ -67,7 +77,7 @@ export function mentionsIn(text: string): string[] {
   return [...text.matchAll(MENTION)].map((m) => m[0])
 }
 
-/** The http(s) links in a text: masked, <angle> and bare */
+/** The links in a text: masked, <angle> and bare http(s) links, and Discord invites written without https:// (as https://discord.gg/<code>) */
 export function linksIn(text: string): string[] {
   const links: string[] = []
   const rest = text
@@ -79,7 +89,12 @@ export function linksIn(text: string): string[] {
       links.push(url)
       return " "
     })
-  for (const m of rest.matchAll(BARE_LINK)) links.push(trimLink(m[0]))
+    .replace(BARE_LINK, (m) => {
+      const url = trimLink(m)
+      links.push(url)
+      return ` ${m.slice(url.length)}`
+    })
+  for (const m of rest.matchAll(INVITE)) links.push(inviteLink(m[1]))
   return links
 }
 
@@ -100,12 +115,13 @@ export function stripMentions(text: string): string {
   return text.replace(MENTION, (m) => (m.startsWith("@") ? m.slice(1) : ""))
 }
 
-/** Takes out every link: a masked link keeps its words, any other link goes */
+/** Takes out every link: a masked link keeps its words, any other link (an invite without https:// too) goes */
 export function stripLinks(text: string): string {
   return text
     .replace(MASKED_LINK, (_, label: string) => label)
     .replace(ANGLE_LINK, "")
     .replace(BARE_LINK, (m) => m.slice(trimLink(m).length))
+    .replace(INVITE, "")
 }
 
 /**
@@ -141,11 +157,18 @@ export type CleanedText = {
   removed: { mentions: string[]; links: string[] }
 }
 
+/** Stands in for a link that stays while the rest of the text is checked; the text never holds these characters (they're taken out first) */
+const HELD = /\uE000(\d+)\uE001/g
+/** A bare http(s) link in text that may hold stand-ins (they end it) */
+const BARE_HELD = /\bhttps?:\/\/[^\s<>\uE000\uE001]+/gi
+
 /**
  * A post's text as Jack wrote it, checked against what officers wrote in the room (design §12.1): a
- * mention stays only when an officer's own message has the same one, and a link stays when it points at
- * the club's site or an officer's message has it. Everything else comes out (a masked link keeps its
- * words). The Discord-side guard is separate: a post pings nobody unless it names a ping
+ * mention stays only when an officer's own message has the same one, a link stays when it points at the
+ * club's site or an officer's message has it, and a Discord invite only when an officer's message has
+ * it. Everything else comes out (a masked link keeps its words). Links that stay are set aside while the
+ * rest is checked, so the bare-link pass skips exactly those, never text that only looks like a masked
+ * link. The Discord-side guard is separate: a post pings nobody unless it names a ping
  * (allowed_mentions), whatever its text says.
  */
 export function cleanPostText(text: string, { officerTexts, siteHosts }: { officerTexts: string[]; siteHosts: string[] }): CleanedText {
@@ -153,36 +176,51 @@ export function cleanPostText(text: string, { officerTexts, siteHosts }: { offic
   const officer = officerTexts.join("\n")
   const officerLower = officer.toLowerCase()
   const officerLinks = new Set(linksIn(officer).map(linkKey))
+  const officerInvites = new Set([...officer.matchAll(INVITE)].map((m) => m[1]))
   const ours = (url: string) => {
     const host = linkHost(url)
     return host !== null && siteHosts.some((site) => host === site || host.endsWith(`.${site}`))
   }
-  const keepLink = (url: string) => ours(url) || officerLinks.has(linkKey(url))
+  const keepLink = (url: string) => {
+    const code = inviteCode(url)
+    return code ? officerInvites.has(code) : ours(url) || officerLinks.has(linkKey(url))
+  }
+  const held: string[] = []
+  const hold = (kept: string) => `\uE000${held.push(kept) - 1}\uE001`
+  const restore = (part: string) => part.replace(HELD, (_, i: string) => held[Number(i)] ?? "")
+  /** Bare links and invites: the ones that stay set aside, the rest taken out */
+  const checkBare = (part: string) =>
+    part
+      .replace(BARE_HELD, (m) => {
+        const url = trimLink(m)
+        if (keepLink(url)) return hold(url) + m.slice(url.length)
+        removed.links.push(url)
+        return m.slice(url.length)
+      })
+      .replace(INVITE, (m, code: string) => {
+        if (officerInvites.has(code)) return hold(m)
+        removed.links.push(inviteLink(code))
+        return ""
+      })
 
-  let out = text.replace(MENTION, (m) => {
+  let out = text.replace(/[\uE000\uE001]/g, "")
+  out = out.replace(MENTION, (m) => {
     if (officerLower.includes(m.toLowerCase())) return m
     removed.mentions.push(m)
     return m.startsWith("@") ? m.slice(1) : ""
   })
   out = out.replace(MASKED_LINK, (whole, label: string, url: string) => {
-    if (keepLink(trimLink(url))) return whole
+    // A kept link's words are checked too, so they can't carry a link of their own
+    if (keepLink(trimLink(url))) return hold(`[${restore(checkBare(label))}]${whole.slice(label.length + 2)}`)
     removed.links.push(trimLink(url))
     return label
   })
   out = out.replace(ANGLE_LINK, (whole, url: string) => {
-    if (keepLink(url)) return whole
+    if (keepLink(url)) return hold(whole)
     removed.links.push(url)
     return ""
   })
-  // Bare links, skipping the ones a kept masked or <angle> link holds
-  out = out.replace(/\[[^\]\n]{0,256}\]\([^)]*\)|<https?:\/\/[^\s>]+>|\bhttps?:\/\/[^\s<>]+/gi, (m) => {
-    if (m.startsWith("[") || m.startsWith("<")) return m
-    const url = trimLink(m)
-    if (keepLink(url)) return m
-    removed.links.push(url)
-    return m.slice(url.length)
-  })
-  return { text: tidy(out), removed }
+  return { text: tidy(restore(checkBare(out))), removed }
 }
 
 /** The hosts that count as the club's own site: the canonical address and this deployment's */
