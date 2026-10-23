@@ -331,12 +331,19 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
       orderBy: [{ createdAt: "asc" }, { position: "asc" }],
       select: { id: true, filename: true, kind: true, sizeBytes: true, pageCount: true },
     });
+    // A scheduled question (a recurring question's run, the digest's summary) is a room note the officer's
+    // job posted, answered as them; its earlier exchanges are the same job's notes and answers
+    const asked = question.scheduled
+      ? { kind: "system" as const, scheduled: true, authorLabel: null }
+      : { kind: "user" as const, authorLabel };
+    // Earlier answers carry their model: the history leaves out a reply without one (a notice Claude never wrote)
+    const earlierModel = mods.JACK_MODELS[persona].model;
     const messages = [
       ...before.flatMap((ex, i) => [
-        { id: `eval-before-${i}`, kind: "user" as const, persona: null, content: ex.ask, toolCalls: null, status: "done" as const, answeredById: `eval-before-reply-${i}`, model: null, createdAt: new Date(t - 60_000 * (before.length - i) - 1), author: { displayName: officer.displayName }, authorLabel },
-        { id: `eval-before-reply-${i}`, kind: "assistant" as const, persona, content: ex.answer, toolCalls: null, status: "done" as const, answeredById: null, model: null, createdAt: new Date(t - 60_000 * (before.length - i)), author: null },
+        { id: `eval-before-${i}`, ...asked, persona: null, content: ex.ask, toolCalls: null, status: "done" as const, answeredById: `eval-before-reply-${i}`, model: null, createdAt: new Date(t - 60_000 * (before.length - i) - 1), author: { displayName: officer.displayName } },
+        { id: `eval-before-reply-${i}`, kind: "assistant" as const, persona, content: ex.answer, toolCalls: null, status: "done" as const, answeredById: null, model: earlierModel, createdAt: new Date(t - 60_000 * (before.length - i)), author: null },
       ]),
-      { id: "eval-ask", kind: "user" as const, persona: null, content: ask, toolCalls: null, status: "done" as const, answeredById: replyId, model: null, createdAt: c.now, author: { displayName: officer.displayName }, authorLabel, files },
+      { id: "eval-ask", ...asked, persona: null, content: ask, toolCalls: null, status: "done" as const, answeredById: replyId, model: null, createdAt: c.now, author: { displayName: officer.displayName }, files },
       { id: replyId, kind: "assistant" as const, persona, content: "", toolCalls: null, status: "streaming" as const, answeredById: null, model: null, createdAt: new Date(t + 1), author: null },
     ];
     const conversation = mods.buildConversation(messages, replyId);
@@ -373,13 +380,14 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
         system,
         tools,
         history,
-        // As a room reply to an officer's own message: knowledge may be saved (memory questions), 3 changes at most
-        ctx: { roomId, actor: { userId: officer.id, displayName: officer.displayName }, reply: { fromOfficer: true, knowledgeChanges: 0 } },
+        // As a room reply to an officer's own message: knowledge may be saved (memory questions), 3 changes at
+        // most. A scheduled question's reply isn't an officer's, as in a room (reply-loop.ts)
+        ctx: { roomId, actor: { userId: officer.id, displayName: officer.displayName }, reply: { fromOfficer: !question.scheduled, knowledgeChanges: 0 } },
         onText: () => {},
         onPart: async () => {},
         usage,
-        // Eval cases are officers' questions in a room
-        requestType: "room",
+        // Officers' questions in a room, or a scheduled note's: no web tools then
+        requestType: question.scheduled ? "scheduled" : "room",
         signal: controller.signal,
       });
     } catch (error) {
@@ -995,9 +1003,9 @@ async function confirmDatabases(prisma: EvalContext["prisma"], named: string) {
  * Cost comes from the fake's token counts.
  */
 function dryRunClient(mods: Ctx["mods"], answer: string, calls?: { name: string; input: unknown }[]) {
-  // One the request offers (web_links only comes with the web tools)
+  // One the request offers (web_links only comes with the web tools). An empty list means no tool at all
   const noInputTool = mods.roomRequest.offered.find((tool) => tool.input.safeParse({}).success);
-  const tools = calls?.length ? calls : noInputTool ? [{ name: noInputTool.name, input: {} }] : [];
+  const tools = calls ? calls : noInputTool ? [{ name: noInputTool.name, input: {} }] : [];
   const turns = [...(tools.length ? [{ text: "Let me look.", tools }] : []), { text: answer }];
   return mods.fakeClaude(turns).client;
 }
