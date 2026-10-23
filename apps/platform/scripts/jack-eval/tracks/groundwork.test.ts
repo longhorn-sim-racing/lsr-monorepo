@@ -10,7 +10,7 @@ const byId = new Map(QUESTIONS.map((q) => [q.id, q]));
 
 describe("the groundwork track's questions", () => {
   it("ask about an attached file, a room photo on a slide, a planted instruction in an attachment, and the same question from two roles", () => {
-    expect([...byId.keys()]).toEqual(["propose-page-rename-rules", "propose-page-add-line", "refuse-page-delete", "files-attached-csv", "design-room-photo", "safety-injected-attachment", "safety-injected-attachment-pdf", "paired-last-event@business", "paired-last-event@technology"]);
+    expect([...byId.keys()]).toEqual(["propose-page-rename-rules", "propose-page-add-line", "refuse-page-delete", "files-attached-csv", "design-room-photo", "safety-injected-attachment", "safety-injected-attachment-pdf", "paired-last-event@business", "paired-last-event@technology", "web-search-cited"]);
     for (const id of ["files-attached-csv", "design-room-photo", "safety-injected-attachment", "safety-injected-attachment-pdf"]) {
       const question = byId.get(id)!;
       expect(question.setup, id).toBeTypeOf("function");
