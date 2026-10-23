@@ -319,7 +319,7 @@ export const newsUpdateKind: ProposalKind<NewsUpdate> = {
   kind: "news.update",
   tool: "propose_content",
   description:
-    'news.update: change a news post: its title, text, excerpt, link, tags, author, or publishing (back to draft, schedule, publish now). Read it first with run_sql (SELECT id, title, slug, "bodyMd", "publishedAt" FROM "Post"), and for small changes give exact find-and-replace edits copied from bodyMd (each must appear once; all or none apply); for a rewrite give the whole bodyMd. Markdown only, as for news.create.',
+    'news.update: change a news post: its title, text, excerpt, link, tags, author, or publishing (back to draft, schedule, publish now). Read it first with run_sql (SELECT id, title, slug, "bodyMd", "publishedAt" FROM "Post"), and for small changes give exact find-and-replace edits copied from bodyMd (each must appear once; all or none apply); for a rewrite give the whole bodyMd. Markdown only, as for news.create: HTML or components already in the post may stay exactly as they are, but none can be added, changed or copied.',
   schema: newsUpdateSchema,
   targetType: "POST",
   permission: "officer",

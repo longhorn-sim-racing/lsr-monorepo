@@ -54,6 +54,29 @@ describe("mdxProblems: what the site's MDX would run", () => {
     expect(mdxError(was.replace("```\n<Secret />\n```", "<Secret />"), undefined, undefined, was)).toMatch(/line 5 has "<"/)
   })
 
+  it("keeps an officer's element only whole: a new attribute on a tag over several lines is refused", () => {
+    const was = 'Intro\n\n<iframe\n  src="https://www.youtube.com/embed/x"\n/>'
+    expect(mdxError(`${was}\n\nMore words.`, undefined, undefined, was)).toBeNull()
+    // The same opening line with a new src, or an srcDoc that MDX turns into a script: new elements
+    const newSrc = mdxError(`${was}\n\n<iframe\n  src="https://evil.example"\n/>`, undefined, undefined, was)
+    expect(newSrc).toMatch(/line 7 has "<"/)
+    expect(newSrc).toMatch(/may stay exactly as they are, but an edit can't add one/)
+    expect(mdxError(`${was}\n\n<iframe\n  srcDoc="&lt;script&gt;alert(document.domain)&lt;/script&gt;"\n/>`, undefined, undefined, was)).toMatch(/line 7 has "<"/)
+    // An attribute added to the kept tag, even past a blank line inside it
+    expect(mdxError(was.replace("\n/>", '\n  srcDoc="&lt;b&gt;x&lt;/b&gt;"\n/>'), undefined, undefined, was)).toMatch(/line 3 has "<"/)
+    expect(mdxError(was.replace("\n/>", '\n\n  srcDoc="&lt;b&gt;x&lt;/b&gt;"\n/>'), undefined, undefined, was)).toMatch(/line 3 has "<"/)
+  })
+
+  it("keeps each element as many times as the post has it, and only with what was inside it", () => {
+    const embed = '<iframe src="https://www.youtube.com/embed/x" />'
+    const was = `Intro\n\n${embed}`
+    expect(mdxError(`${embed}\n\nIntro`, undefined, undefined, was)).toBeNull()
+    expect(mdxError(`${was}\n\n${embed}`, undefined, undefined, was)).toMatch(/line 5 has "<"/)
+    const box = "<Callout>\n\nDoors open at 6.\n\n</Callout>"
+    expect(mdxError(`Intro!\n\n${box}`, undefined, undefined, `Intro\n\n${box}`)).toBeNull()
+    expect(mdxError(`Intro\n\n${box.replace("6", "7")}`, undefined, undefined, `Intro\n\n${box}`)).toContain('Here line 3 has "<" (<Callout>); line 7 has "<" (</Callout>).')
+  })
+
   it("says where and how to fix it, for the model", () => {
     const error = mdxError("Line one\n\nCome to <b>GM 2</b>, {free food}")
     expect(error).toMatch(/^The post's text must be plain Markdown/)

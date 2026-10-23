@@ -1,4 +1,5 @@
 import remarkGfm from "remark-gfm"
+import remarkMdx from "remark-mdx"
 import remarkParse from "remark-parse"
 import { unified, type Processor } from "unified"
 import type { JackProposalPreview, MdPreviewAlign, MdPreviewBlock, MdPreviewInline, MdPreviewListItem } from "@/lib/jack/markdown-preview"
@@ -12,6 +13,9 @@ import type { JackProposalPreview, MdPreviewAlign, MdPreviewBlock, MdPreviewInli
  * (indented code, HTML and <autolinks> switched off, as MDX switches them off). So the code spans and
  * fenced blocks found here are exactly the ones MDX treats as code, and the preview shows the structure
  * the site will show. Nothing here runs MDX or produces HTML.
+ *
+ * An edit may keep what the officer's post already runs as MDX (an embed, say), found with MDX's own
+ * parser, but only whole and unchanged: see keptMdx.
  */
 
 /** The mdast nodes read here, typed only as far as used (mdast's own types aren't a dependency) */
@@ -49,8 +53,8 @@ function walk(node: MdNode, visit: (node: MdNode) => void) {
   for (const child of node.children ?? []) walk(child, visit)
 }
 
-/** One place the text has something MDX would run; `text` is its whole line */
-export type MdxProblem = { line: number; what: string; excerpt: string; text: string }
+/** One place the text has something MDX would run, at `offset` */
+export type MdxProblem = { offset: number; line: number; what: string; excerpt: string }
 
 /** "<", "{", "}" outside code, and import/export lines: what MDX would treat as code. Empty when it's plain Markdown */
 export function mdxProblems(text: string, tree: MdNode = parseMarkdown(text)): MdxProblem[] {
@@ -78,7 +82,7 @@ export function mdxProblems(text: string, tree: MdNode = parseMarkdown(text)): M
     const to = lineEnd(line)
     const start = Math.max(from, offset - 25)
     const end = Math.min(to, offset + 25)
-    return { line: line + 1, what, excerpt: `${start > from ? "…" : ""}${text.slice(start, end).trim()}${end < to ? "…" : ""}`, text: text.slice(from, to) }
+    return { offset, line: line + 1, what, excerpt: `${start > from ? "…" : ""}${text.slice(start, end).trim()}${end < to ? "…" : ""}` }
   }
 
   for (let i = 0; i < text.length; i++) {
@@ -87,20 +91,79 @@ export function mdxProblems(text: string, tree: MdNode = parseMarkdown(text)): M
   }
   for (const start of lineStarts) {
     const match = /^[ \t]*(import|export)\s/.exec(text.slice(start, start + 20))
-    if (match && !inCode(start + match[0].indexOf(match[1]))) problems.push(problem(start, match[1]))
+    const at = match ? start + match[0].indexOf(match[1]) : -1
+    if (match && !inCode(at)) problems.push(problem(at, match[1]))
   }
   return problems.sort((a, b) => a.line - b.line)
 }
 
+/** The site's own parse (@mdx-js/mdx): Markdown, then MDX's components, expressions and import/export, then GFM */
+const mdxParser = unified().use(remarkParse).use(remarkMdx).use(remarkGfm)
+
+const MDX_NODES = new Set(["mdxJsxFlowElement", "mdxJsxTextElement", "mdxFlowExpression", "mdxTextExpression", "mdxjsEsm"])
+
+type MdxPart = { start: number; end: number; source: string }
+
+/**
+ * Each outermost thing the site runs as MDX (an element with everything inside it, an expression, an
+ * import or export), with its exact source text. Empty when the text isn't valid MDX
+ */
+function mdxParts(text: string): MdxPart[] {
+  let tree: MdNode
+  try {
+    tree = mdxParser.parse(text) as unknown as MdNode
+  } catch {
+    return []
+  }
+  const parts: MdxPart[] = []
+  const visit = (node: MdNode) => {
+    if (MDX_NODES.has(node.type)) {
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start !== undefined && end !== undefined) parts.push({ start, end, source: text.slice(start, end) })
+      return
+    }
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(tree)
+  return parts
+}
+
+/**
+ * Where `text` keeps what `was` runs as MDX unchanged: a whole element (its tag, every attribute and
+ * anything inside it), expression or import/export, character for character, and each only as many
+ * times as `was` has it. MDX's parser finds where each one ends, so a tag over several lines (blank
+ * lines included) is one part, and a new attribute makes it a different part
+ */
+function keptMdx(text: string, wasParts: MdxPart[]): [number, number][] {
+  const left = new Map<string, number>()
+  for (const part of wasParts) left.set(part.source, (left.get(part.source) ?? 0) + 1)
+  if (!left.size) return []
+  const kept: [number, number][] = []
+  for (const part of mdxParts(text)) {
+    const count = left.get(part.source) ?? 0
+    if (!count) continue
+    left.set(part.source, count - 1)
+    kept.push([part.start, part.end])
+  }
+  return kept
+}
+
 /**
  * Why `text` can't go in a post, written for the model to fix it, or null when it's plain Markdown.
- * `was`: the post's text as it is now (an edit). A line the site already runs as MDX, kept exactly as
- * it is (an officer's own HTML, say), isn't Jack's to fix, so only new or changed lines are held to the
- * rule. Only lines that were already outside code count: moving a line out of a code block is a change
+ * `was`: the post's text as it is now (an edit). What the site already runs as MDX there (an officer's
+ * own embed, say) isn't Jack's to fix, so it may stay exactly as it is (keptMdx); anything an edit adds,
+ * changes, copies or takes out of code is held to the rule
  */
 export function mdxError(text: string, what = "The post's text", tree?: MdNode, was?: string): string | null {
-  const existing = was === undefined ? null : new Set(mdxProblems(was).map((p) => p.text.trim()))
-  const problems = mdxProblems(text, tree).filter((p) => !existing?.has(p.text.trim()))
+  let problems = mdxProblems(text, tree)
+  let hasOwn = false
+  if (problems.length && was !== undefined) {
+    const wasParts = mdxParts(was)
+    hasOwn = wasParts.length > 0
+    const kept = keptMdx(text, wasParts)
+    problems = problems.filter((p) => !kept.some(([start, end]) => p.offset >= start && p.offset < end))
+  }
   if (!problems.length) return null
   // One mention per line, naming each thing it has
   const lines = new Map<number, { what: Set<string>; excerpt: string }>()
@@ -114,7 +177,8 @@ export function mdxError(text: string, what = "The post's text", tree?: MdNode, 
     .map(([n, line]) => `line ${n} has ${[...line.what].join(" and ")} (${line.excerpt})`)
     .join("; ")
   const more = lines.size > 3 ? ` and ${lines.size - 3} more lines` : ""
-  return `${what} must be plain Markdown: the site shows it with MDX, where "<" starts a component, "{" and "}" run code, and a line starting with import or export is code. Here ${shown}${more}. Use Markdown instead (**bold**, [text](https://…), - lists), leave out HTML and braces, and put any of these characters inside \`code\` if they must show.`
+  const own = hasOwn ? " The HTML or components the post already has may stay exactly as they are, but an edit can't add one, change one (an attribute or anything inside it) or copy one." : ""
+  return `${what} must be plain Markdown: the site shows it with MDX, where "<" starts a component, "{" and "}" run code, and a line starting with import or export is code. Here ${shown}${more}. Use Markdown instead (**bold**, [text](https://…), - lists), leave out HTML and braces, and put any of these characters inside \`code\` if they must show.${own}`
 }
 
 /** Most nodes a preview keeps; a post is at most 50,000 characters, so this is only a backstop */

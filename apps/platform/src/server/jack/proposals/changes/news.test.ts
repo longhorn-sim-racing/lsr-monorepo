@@ -152,6 +152,15 @@ describe("news.update", () => {
     await expect(newsUpdateKind.prepare(update({ edits: [{ find: "Fastest lap: Ben", replace: "Fastest lap: <b>Carla</b>" }] }), ctx)).rejects.toThrow(/must be plain Markdown/)
   })
 
+  it("refuses a new element that starts like the officer's own, over several lines", async () => {
+    const embed = '<iframe\n  src="https://www.youtube.com/embed/x"\n/>'
+    db.post.findUnique.mockResolvedValue({ ...POST, bodyMd: `${BODY}\n\n${embed}` })
+    const added = (tag: string) => update({ edits: [{ find: "Fastest lap: Ben", replace: `Fastest lap: Ben\n\n${tag}` }] })
+    await expect(newsUpdateKind.prepare(added('<iframe\n  srcDoc="&lt;script&gt;alert(document.domain)&lt;/script&gt;"\n/>'), ctx)).rejects.toThrow(/must be plain Markdown/)
+    await expect(newsUpdateKind.prepare(added('<iframe\n  src="https://evil.example"\n/>'), ctx)).rejects.toThrow(/must be plain Markdown/)
+    await expect(newsUpdateKind.prepare(added(embed), ctx)).rejects.toThrow(/can't add one, change one/)
+  })
+
   it("refuses edits that don't apply, MDX, a taken link and changes that change nothing", async () => {
     await expect(newsUpdateKind.prepare(update({ edits: [{ find: "Monza", replace: "Imola" }] }), ctx)).rejects.toThrow(/the find text isn't in the post's text/)
     await expect(newsUpdateKind.prepare(update({ bodyMd: "Now with {props}" }), ctx)).rejects.toThrow(/must be plain Markdown/)
