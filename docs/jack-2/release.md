@@ -11,7 +11,7 @@ The steps Gray follows to ship Jack 2.0 (#188): what to check before merging `ja
 ## 1. Before merging
 
 ### 1.1 Land what's still open
-1. Merge the open PRs into `jack-2`: the Phase F PRs (F-docs #226, this runbook #225, and the fixes from the wave 2b security pass). The security fixes #222, #223 and #224 are already in. [build log: Status]
+1. Done 10/23: everything for 2.0 is in `jack-2`, the last being F-docs #226, this runbook #225, the wave 2b security fixes #227–#229 and the eval fixes #230. [build log: Status]
 2. Merge the four fixes waiting on `main`, then merge `main` into `jack-2` so the release carries them. Checked with `git merge-tree` on 10/23 against `jack-2` with #222–#224 and F-docs in; if step 1 brings in anything else that touches these files, run `git merge-tree --write-tree --name-only origin/jack-2 origin/main` (after fetching) for the current list. [build log: Log, 10/22 and 10/23; merge check: added here]
    - #190: every cron route refuses all requests when `CRON_SECRET` is unset. **Conflicts** in `docs/deployment.md`: #222 added a sentence to the same notification-cron paragraph. Keep both sentences (#222's note on holding announcement emails past the day's limit, and #190's "Every cron route refuses all requests when `CRON_SECRET` is not set…"). The recruiting paragraph merges on its own, losing its recruiting-only `CRON_SECRET` sentence as #190 intends.
    - #191: Sonnet 5.5 cache reads priced at $0.10 per million tokens. Merges cleanly, `docs/jack.md`'s price table included.
@@ -21,8 +21,8 @@ The steps Gray follows to ship Jack 2.0 (#188): what to check before merging `ja
 ### 1.2 Gates from the build log
 - **Production upload path (G5): passed 10/23 on local Supabase Storage.** All 19 end-to-end checks with `JACK_FILE_STORE=supabase`, a browser upload, render-check, a deck's slides and exports. Production Storage is first used in 1.8 (the bucket) and 2.3 (render-check and the first room upload). [build log: Log, 10/23; files: Release gate]
 - **Live model checks (G8, G6): passed 10/23.** Tool search with streamed tool input, `url_sources` naming the deferred `web_links`, dynamic filtering on Sonnet and Haiku, Claude Files, and the PDF link probe. [build log: Log, 10/23]
-- **Security review of wave 2b**, and its fixes merged. Waves 1 and 2a were reviewed on 10/23 (their fixes are #222–#224). [build log: Log, 10/23]
-- **The eval**: one full run on all three models, on `lsr_eval`, with the spend recorded in the build log; the release PR's checklist also has "Eval run against Jack today". The dry run passed 108 of 110 per model on 10/23, and the two failing checks were fixed. How to run it: `tracks/eval.md`. [design §16; #189 checklist]
+- **Security review of wave 2b: done 10/23.** 18 confirmed findings, fixed in #227–#229. Waves 1 and 2a were reviewed the same day (their fixes are #222–#224). [build log: Log, 10/23]
+- **The eval**: one full run on all three models, on `lsr_eval`, with the spend recorded in the build log; the release PR's checklist also has "Eval run against Jack today". The dry run passed 108 of 110 per model on 10/23, and the two failing checks were fixed. How to run it: `tracks/eval.md`. [design §16; #189 checklist] **Done on Jack (Sonnet), 10/23:** 105 of 120 on every track, then 50 of 52 on the core track with #230's fixes in. One known failure is left (the digest summary runs long). Lift and Stand weren't run, because a run on all three doesn't fit the $25 test budget; that's for Gray (section 5). [build log: Log, 10/23 morning]
 - **Docs folded in** (`docs/jack.md`, `CLAUDE.md`, `docs/local-dev.md`, `.env.example`), and the launch post drafted. [build log: Status; design §18.1, F]
 - **The build log's future:** its first line says it's removed or folded into `docs/jack.md` before the release merges. Decide which (section 5). [build log: intro]
 
@@ -296,6 +296,7 @@ Run after the migrations are in production. The scripts run from a `jack-2` chec
 9. **Who owns the club Twitch account** and its developer app (design §15 says TBD). [design §15]
 10. **The build log and `docs/jack-2/`**: remove before the release merges, fold into `docs/jack.md`, or keep. [build log: intro]
 11. **Migrations from your machine or the workflow** (1.6): the workflow takes a backup first. [design §17 step 3]
+12. **The eval on Lift and Stand** (1.2): run them on `lsr_eval` before the merge (`--only=lift`, then `--only=stand`; more than the test budget had left), or accept the run on Jack alone. [build log: Log, 10/23 morning]
 
 ## 6. Rollback
 

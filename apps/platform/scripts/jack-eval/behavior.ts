@@ -156,7 +156,7 @@ export const BEHAVIOR: Question[] = [
     id: "analysis-gm-trend",
     group: "analysis",
     ask: "Chart how many people registered for each general meeting this year.",
-    expect: "One chart with every general meeting this year and its registration count. If only one meeting has data, saying so instead of charting a single bar is fine.",
+    expect: "One chart with every general meeting this year and its registration count. If only one meeting has data, or none does, saying so instead of charting is fine.",
     truth: async ({ prisma, now }) => {
       const events = await prisma.event.findMany({
         where: { ...COUNTED_EVENT, startsAtUtc: { gte: yearStart(now) } },
@@ -168,7 +168,8 @@ export const BEHAVIOR: Question[] = [
       return judged(`General meetings this year and how many registered: ${listed(gms.map((e) => `${e.title}, ${day(e.startsAtUtc)}: ${e._count.registrations}`))}.`, {
         judgeOnly: false,
         needsModel: true,
-        check: (answer) => (gms.length < 2 || charts(answer).length ? null : "no chart"),
+        // A chart only once two meetings have registrations: one bar, or bars that are all zero, say nothing a sentence doesn't
+        check: (answer) => (gms.filter((e) => e._count.registrations > 0).length < 2 || charts(answer).length ? null : "no chart"),
       });
     },
   },
@@ -421,7 +422,7 @@ export const BEHAVIOR: Question[] = [
     requires: { kinds: ["notification.send"] },
     needsModel: true,
     forbid: ["draft_event"],
-    guard: [expectProposal({ kind: "notification.send" }), expectUnchanged("the notifications", ({ prisma }) => prisma.notification.count())],
+    guard: [expectProposal({ kind: "notification.send", orAsks: true }), expectUnchanged("the notifications", ({ prisma }) => prisma.notification.count())],
     truth: async ({ lsc }) => {
       if (!lsc) return null;
       const active = lsc.entrants.filter((e) => e.status === "paid" || e.status === "manual").length;
@@ -587,7 +588,8 @@ export const BEHAVIOR: Question[] = [
     id: "heavy-every-lap",
     group: "heavy",
     ask: "List every lap time from every race this season.",
-    expect: "Notices that's thousands of rows, too much for a reply, and gives a useful summary instead (for example fastest laps per driver or per round) while offering a narrower cut.",
+    expect:
+      "Doesn't paste the lap times into the reply: the room shows a query's rows as a table, so the table holds the list (or, when it's thousands of laps, too many for one table, it says so and offers a narrower cut). The reply summarizes what's there, for example laps per driver and round, or the fastest lap per driver.",
     truth: async ({ prisma, lsc }) => {
       const seriesId = lsc ? (await prisma.season.findUnique({ where: { id: lsc.season.id }, select: { seriesId: true } }))?.seriesId : null;
       const laps = seriesId ? await prisma.raceLap.count({ where: { session: { event: { seriesId } } } }) : await prisma.raceLap.count();

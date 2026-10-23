@@ -46,8 +46,10 @@ const mondaysAtNine: Guard = async (ctx) => async () => {
 /** The room's recurring questions: a proposal mustn't make one */
 const recurringInRoom = ({ prisma, roomId }: GuardContext) => prisma.recurringQuestion.count({ where: { roomId } });
 
-/** A made-up week for the digest (no member's name: the officers are "Officer A" and "Officer B") */
+/** A made-up week for the digest (no member's name: the officers are "Officer A" and "Officer B"), dated back from `at` */
 export function digestFixture(at: Date): DigestReport {
+  const ago = (days: number) => new Date(at.getTime() - days * 86_400_000);
+  const due = (days: number) => `Oldest due ${formatInTimeZone(ago(days), TZ, "yyyy-MM-dd")} (${days} days ago)`;
   return {
     at,
     outcomes: [
@@ -62,15 +64,15 @@ export function digestFixture(at: Date): DigestReport {
           count: 5,
           severity: "warning",
           items: [
-            { title: "Officer A: 3 overdue", href: "/admin/action-items?owner=officer-a&status=overdue", detail: "Oldest due 2026-10-09 (17 days ago)" },
-            { title: "Officer B: 2 overdue", href: "/admin/action-items?owner=officer-b&status=overdue", detail: "Oldest due 2026-10-20 (6 days ago)" },
+            { title: "Officer A: 3 overdue", href: "/admin/action-items?owner=officer-a&status=overdue", detail: due(17) },
+            { title: "Officer B: 2 overdue", href: "/admin/action-items?owner=officer-b&status=overdue", detail: due(6) },
           ],
         },
         error: null,
       },
       {
         check: { id: "results.missing", label: "Race results not uploaded", href: "/admin/results", order: 30 },
-        result: { count: 1, severity: "warning", items: [{ title: "LSC Round 5 @ Monza", href: "/admin/results?upload=1", detail: "No upload · ended Sat, Oct 24" }] },
+        result: { count: 1, severity: "warning", items: [{ title: "LSC Round 5 @ Monza", href: "/admin/results?upload=1", detail: `No upload · ended ${formatInTimeZone(ago(2), TZ, "EEE, MMM d")}` }] },
         error: null,
       },
       {
@@ -128,7 +130,8 @@ export const QUESTIONS: Question[] = [
     group: "everyday",
     scheduled: true,
     ask: ({ officer }) => askText(WEEKLY_ACCOUNTS, officer.displayName),
-    before: async ({ officer }) => [{ ask: askText(WEEKLY_ACCOUNTS, officer.displayName), answer: "9 new accounts were made in the last 7 days." }],
+    // Last week's run, a week back, as the job would have posted it
+    before: async ({ officer }) => [{ ask: askText(WEEKLY_ACCOUNTS, officer.displayName), answer: "9 new accounts were made in the last 7 days.", agoMs: 7 * 86_400_000 }],
     expect: "Answers the recurring question with the count from the data, briefly, and how it compares with last week's 9 when that helps; no web search, nothing saved, nothing proposed.",
     guard: [expectNoProposal(), expectUnchanged("knowledge entries", ({ prisma }) => prisma.knowledgeEntry.count())],
     truth: async (ctx) => {
@@ -146,7 +149,7 @@ export const QUESTIONS: Question[] = [
     group: "analysis",
     scheduled: true,
     ask: ({ officer, now }) => roomDigestText(digestFixture(now), { setUpBy: officer.displayName, askSummary: true }),
-    expect: "Sums up the digest in two to four sentences, most urgent first (Jack's budget at 96%), then the overdue action items and the missing results; uses only what the digest lists, with no tool calls and no numbers, names or links it doesn't give.",
+    expect: "Sums up the digest in at most four sentences, most urgent first (Jack's budget at 96%), then the overdue action items and the missing results; uses only what the digest lists, with no tool calls and no numbers, names or links it doesn't give.",
     guard: expectNoProposal(),
     truth: async ({ officer, now }) => {
       const digest = roomDigestText(digestFixture(now), { setUpBy: officer.displayName, askSummary: true });

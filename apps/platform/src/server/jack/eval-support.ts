@@ -230,7 +230,8 @@ function otherNumbers(text: string, n: number): number[] {
  * answer, so "13 applications, 9 paid" passes for 13 applications but not for 13 paid.
  */
 export function mentionsNumber(text: string, n: number, nouns: string[] = []): boolean {
-  const clean = stripDatesAndTimes(text)
+  // Bold and code marks off, so "**15** forms" sits next to its noun like "15 forms"
+  const clean = stripDatesAndTimes(text.replace(/\*\*|__|`/g, ""))
   const forms = numberForms(n)
   if (forms.some((form) => new RegExp(standalone(form), "i").test(clean))) {
     if (!nouns.length) return true

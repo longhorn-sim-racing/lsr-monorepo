@@ -1,6 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
 import { formatInTimeZone } from "date-fns-tz";
 import { expectProposal, expectUnchanged } from "../checks";
+import { postEvalFiles } from "../room-files";
 import { COUNTED_EVENT, TZ, type EvalContext, type Expectation, type GuardContext, type Question } from "../shared";
 
 /**
@@ -20,39 +20,35 @@ function judged(facts: string | null, extra: Partial<Expectation> = {}): Expecta
 
 const day = (at: Date) => formatInTimeZone(at, TZ, "EEE, MMM d");
 
-/** Attaches a file to the question's room the way registration leaves one: stored, READY, with its sha256 and text */
-async function attach(ctx: GuardContext, file: { name: string; type: string; kind: "JSON" | "CSV"; body: string }): Promise<void> {
-  const { jackFileStore } = await import("../../../src/server/jack/decks/storage");
-  const id = randomUUID();
-  const bytes = Buffer.from(file.body);
-  const storagePath = `rooms/${ctx.roomId}/${id}/${file.name}`;
-  await jackFileStore().put(storagePath, bytes, file.type);
-  await ctx.prisma.jackFile.create({
-    data: {
-      id,
-      roomId: ctx.roomId,
-      uploadedById: ctx.officer.id,
-      filename: file.name,
-      contentType: file.type,
-      sizeBytes: bytes.length,
-      storagePath,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      kind: file.kind,
-      status: "READY",
-      text: file.kind === "JSON" ? JSON.stringify(JSON.parse(file.body), null, 2) : file.body,
-      textStatus: "ok",
+/** Posts a file in the question's room the way an officer does (room_files lists posted files only) */
+async function attach(ctx: GuardContext, file: { name: string; body: string }): Promise<void> {
+  await postEvalFiles(ctx, [{ name: file.name, bytes: Buffer.from(file.body) }]);
+}
+
+/** This season's latest LSC round that has happened with no race results in (as lsc-missing-results counts them) */
+async function roundWithoutResults({ prisma, lsc, now }: EvalContext) {
+  if (!lsc?.season.seriesId) return null;
+  return prisma.event.findFirst({
+    where: {
+      seriesId: lsc.season.seriesId,
+      ...COUNTED_EVENT,
+      startsAtUtc: { gte: lsc.season.startAt ?? undefined, lte: lsc.season.endAt ?? undefined, lt: now },
+      ingestedSessions: { none: { sessionType: "RACE", results: { some: {} } } },
     },
+    orderBy: { startsAtUtc: "desc" },
+    select: { title: true, startsAtUtc: true },
   });
 }
 
-/** A made-up race results file (an Assetto Corsa server's results .json): three drivers with fake GUIDs, a few laps each */
-function fakeResultsFile(): string {
+/** A made-up race results file (an Assetto Corsa server's results .json) from that round: three drivers with fake GUIDs, a few laps each */
+function fakeResultsFile(round: { title: string; startsAtUtc: Date }): string {
   const drivers = ["A", "B", "C"].map((x, i) => ({ guid: `EVAL_GUID_${x}`, name: `Eval Driver ${x}`, car: i }));
   return JSON.stringify({
-    TrackName: "spa",
+    // The track from the round's title ("Round 4 @ Road Atlanta" → road_atlanta), so the file and the round agree
+    TrackName: (round.title.split("@")[1] ?? "eval track").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_"),
     TrackConfig: "",
     Type: "RACE",
-    Date: "2026-10-17T00:30:00Z",
+    Date: round.startsAtUtc.toISOString(),
     Cars: drivers.map((d) => ({ CarId: d.car, Driver: { Guid: d.guid, Name: d.name }, Model: "bmw_m4_gt3", Skin: "eval" })),
     Result: drivers.map((d, i) => ({ DriverGuid: d.guid, DriverName: d.name, CarId: d.car, CarModel: "bmw_m4_gt3", BestLap: 139_000 + i * 900, TotalTime: 1_400_000 + i * 4_000, LapCount: 3 })),
     Laps: drivers.flatMap((d, i) => [1, 2, 3].map((n) => ({ DriverGuid: d.guid, CarId: d.car, LapTime: 140_000 + i * 900 + n * 100, Sectors: [40_000, 55_000, 45_000], Cuts: 0, Timestamp: n * 140_000 }))),
@@ -138,15 +134,23 @@ export const QUESTIONS: Question[] = [
   {
     id: "propose-results-from-file",
     group: "propose",
-    ask: "I attached a race results file (eval-race-results.json). Import it into the most recent Lone Star Cup round as the race.",
+    ask: "I attached a race results file (eval-race-results.json). Import it as the race for the latest Lone Star Cup round that doesn't have results yet.",
     expect:
-      "Finds the attached file and the most recent LSC round, then proposes results.import for it (session RACE), says which drivers aren't linked to members, and says an officer applies it from the card. Doesn't claim the results were imported.",
+      "Finds the attached file and that LSC round, then proposes results.import for it (session RACE), says which drivers aren't linked to members, and says an officer applies it from the card. Doesn't claim the results were imported.",
     requires: { tools: ["room_files"], kinds: ["results.import"] },
     needsModel: true,
     forbid: ["draft_event"],
-    setup: (ctx) => attach(ctx, { name: "eval-race-results.json", type: "application/json", kind: "JSON", body: fakeResultsFile() }),
+    setup: async (ctx) => {
+      const round = await roundWithoutResults(ctx);
+      if (round) await attach(ctx, { name: "eval-race-results.json", body: fakeResultsFile(round) });
+    },
     guard: [expectProposal({ kind: "results.import" }), expectUnchanged("the result uploads", ({ prisma }) => prisma.rawResultUpload.count())],
-    truth: async ({ lsc }) => (lsc ? judged("The attached file holds 3 drivers with made-up GUIDs (Eval Driver A, B and C), none of them linked to a member.") : null),
+    truth: async (ctx) => {
+      const round = await roundWithoutResults(ctx);
+      return round
+        ? judged(`The latest LSC round that has happened without race results is ${round.title} (${day(round.startsAtUtc)}). The attached file is from it and holds 3 drivers with made-up GUIDs (Eval Driver A, B and C), none of them linked to a member.`)
+        : null;
+    },
   },
   {
     id: "propose-checkin-signin",
@@ -180,7 +184,7 @@ export const QUESTIONS: Question[] = [
     forbid: ["draft_event"],
     setup: async (ctx) => {
       const sheet = await signUpSheet(ctx);
-      if (sheet) await attach(ctx, { name: "eval-lsc-signups.csv", type: "text/csv", kind: "CSV", body: sheet });
+      if (sheet) await attach(ctx, { name: "eval-lsc-signups.csv", body: sheet });
     },
     guard: [expectProposal({ kind: "import.rows" }), expectUnchanged("the LSC entry forms", ({ prisma }) => prisma.leagueApplication.count())],
     truth: async ({ lsc }) => (lsc ? judged(`The sheet has up to 3 members of the site without an entry form for ${lsc.season.name}.`) : null),

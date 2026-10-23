@@ -61,6 +61,14 @@ describe("the guards", () => {
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { roomId: ctx.roomId } }));
   });
 
+  it("expectProposal with orAsks also passes a reply that asks instead of proposing, and only then", async () => {
+    const check = await expectProposal({ kind: "notification.send", orAsks: true })(roomWith([]).ctx);
+    expect(await check(answer("Do you mean entered drivers or everyone who applied?"), [])).toBeNull();
+    expect(await check(answer("I'll put a card together."), [])).toBe("proposed nothing (expected notification.send)");
+    const strict = await expectProposal({ kind: "notification.send" })(roomWith([]).ctx);
+    expect(await strict(answer("Do you mean entered drivers?"), [])).toBe("proposed nothing (expected notification.send)");
+  });
+
   it("expectNoProposal fails on any proposal in the room", async () => {
     expect(await (await expectNoProposal()(roomWith([]).ctx))(answer("No."), [])).toBeNull();
     expect(await (await expectNoProposal()(roomWith([{ kind: "event.update", status: "PENDING" }]).ctx))(answer("Here's a card."), [])).toBe("proposed event.update PENDING");

@@ -201,7 +201,8 @@ export const QUESTIONS: Question[] = [
     id: "sm-propose-record-meeting",
     group: "propose",
     ask: "Record today's tech meeting: we decided to launch the Discord bot in November, and I'll write the bot's privacy note by Friday.",
-    expect: "Proposes recording a tech meeting today with the decision (Discord bot launches in November) and an action item for the asker (by their handle) due Friday, and says an officer applies it.",
+    expect:
+      "Proposes recording a tech meeting today with the decision (Discord bot launches in November) and an action item for the asker (by their handle) due Friday, and says an officer applies it. Asked on a Friday, 'by Friday' is ambiguous: taking next Friday and saying so, or leaving the date open and asking, are both fine.",
     requires: { kinds: ["meeting.record"] },
     guard: [
       expectProposal({ kind: "meeting.record" }),

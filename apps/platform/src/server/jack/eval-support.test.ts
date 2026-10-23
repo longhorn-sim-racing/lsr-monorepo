@@ -127,6 +127,9 @@ describe("mentionsNumber", () => {
     expect(mentionsNumber("There are 13 applications.", 13)).toBe(true)
     expect(mentionsNumber("1,234 accounts", 1234)).toBe(true)
     expect(mentionsNumber("Seven people checked in.", 7)).toBe(true)
+    // Markdown around the count doesn't keep it from its noun
+    expect(mentionsNumber("There are **15** LSC entry forms. 12 came from the old form.", 15, ["application", "form", "entr"])).toBe(true)
+    expect(mentionsNumber("There are `3` new forms. 12 came from the old form.", 15, ["application", "form", "entr"])).toBe(false)
     // None, said in words: still has to sit next to what it counts
     expect(mentionsNumber("No drivers have paid the LSC entry fee yet.", 0, ["paid", "driver"])).toBe(true)
     expect(mentionsNumber("Nobody has paid yet.", 0, ["paid", "driver"])).toBe(true)

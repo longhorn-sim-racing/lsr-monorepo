@@ -38,6 +38,7 @@ export async function withPayments(charges: StripeCharge[]): Promise<ChargeWithP
             userId: true,
             status: true,
             providerRef: true,
+            metadata: true,
             product: { select: { name: true, type: true } },
             eventRegistration: { select: { event: { select: { title: true } } } },
             user: { select: { displayName: true } },
@@ -74,7 +75,7 @@ async function membersByIntent(intents: (string | null)[]) {
   if (!ids.length) return new Map<string, { member: string; item: string }>()
   const payments = await prisma.payment.findMany({
     where: { providerRef: { in: ids } },
-    select: { providerRef: true, product: { select: { name: true, type: true } }, eventRegistration: { select: { event: { select: { title: true } } } }, user: { select: { displayName: true } } },
+    select: { providerRef: true, metadata: true, product: { select: { name: true, type: true } }, eventRegistration: { select: { event: { select: { title: true } } } }, user: { select: { displayName: true } } },
   })
   return new Map(payments.map((p) => [p.providerRef!, { member: p.user.displayName, item: itemName(p) }]))
 }
