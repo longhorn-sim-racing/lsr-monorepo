@@ -211,6 +211,8 @@ export async function deliverClaimed(post: DiscordPost, writer: DiscordWriter, d
       await pause(RETRY_PAUSES_MS[attempt] ?? 3_000, deps.signal).catch(() => {})
     }
   }
+  // Out of time mid-send: it stays SENDING, and a later run checks the channel for it (sendDuePosts)
+  if (deps.signal?.aborted) return { status: "SKIPPED", reason: "The run ran out of time while sending; the next run checks the channel for it." }
   return confirmFromHistory(post, writer, cause, deps)
 }
 

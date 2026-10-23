@@ -6,7 +6,7 @@ import type { User } from "@prisma/client"
 import { prisma } from "@/server/db"
 import { requireOfficer } from "@/server/auth/guards"
 import { setPostingChannels } from "@/server/discord-post/channels"
-import { discordPosting, discordPostingForPage, NOT_CONNECTED } from "@/server/discord-post/connection"
+import { discordPostingForPage, NOT_CONNECTED } from "@/server/discord-post/connection"
 import { cancelScheduledPost, createOfficerPost, retryFailedPost } from "@/server/discord-post/officer-posts"
 import { readRoles } from "@/server/discord-post/role-sync"
 import { createRule, deleteRule, isRuleKind, setRuleEnabled, updateRule, type RuleConfig } from "@/server/discord-post/rules"
@@ -135,7 +135,7 @@ export async function setPostingChannelsAction(ids: string[]): Promise<ActionRes
 export async function createPostAction(raw: unknown): Promise<ActionResult<{ summary: string; url: string | null }>> {
   const me = await officer()
   if (!me) return { ok: false, error: SIGNED_OUT }
-  const posting = await discordPosting()
+  const posting = await discordPostingForPage()
   if (!posting) return { ok: false, error: NOT_CONNECTED }
   const result = await createOfficerPost(raw, { userId: me.user.id, displayName: me.user.displayName }, posting)
   refresh()
@@ -155,7 +155,7 @@ export async function cancelPostAction(id: string): Promise<ActionResult> {
 export async function retryPostAction(id: string): Promise<ActionResult<{ summary: string; url: string | null }>> {
   const me = await officer()
   if (!me) return { ok: false, error: SIGNED_OUT }
-  const result = await retryFailedPost(id, { userId: me.user.id, displayName: me.user.displayName }, await discordPosting())
+  const result = await retryFailedPost(id, { userId: me.user.id, displayName: me.user.displayName }, await discordPostingForPage())
   refresh()
   if (!result.ok) return result
   return { ok: true, data: { summary: result.summary, url: result.url } }

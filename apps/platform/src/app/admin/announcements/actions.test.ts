@@ -95,7 +95,7 @@ describe("posts", () => {
   })
 
   it("won't post while Discord is off", async () => {
-    connection.discordPosting.mockResolvedValue(null)
+    connection.discordPostingForPage.mockResolvedValue(null)
     expect(await createPostAction({ channelId: CHANNEL, text: "Hi" })).toEqual({ ok: false, error: "Discord isn't connected." })
     expect(posts.createOfficerPost).not.toHaveBeenCalled()
   })

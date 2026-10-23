@@ -135,6 +135,16 @@ describe("sending", () => {
     expect(table.rows[0]).toMatchObject({ status: "SCHEDULED", claimedAt: null })
   })
 
+  it("leaves a send cut off by the run's deadline SENDING, for a later run to check the channel", async () => {
+    const { writer } = setup()
+    const post = await claimed()
+    const stop = new AbortController()
+    stop.abort()
+    const outcome = await deliverClaimed(post, writer, { pause: noPause, signal: stop.signal })
+    expect(outcome).toMatchObject({ status: "SKIPPED" })
+    expect(table.rows[0].status).toBe("SENDING")
+  })
+
   it("sendPostNow claims first: a post someone already sent isn't sent again", async () => {
     const { fakes, writer } = setup()
     const { post } = await queueDiscordPost({ source: "proposal", channelId: CHANNEL, body: body() })

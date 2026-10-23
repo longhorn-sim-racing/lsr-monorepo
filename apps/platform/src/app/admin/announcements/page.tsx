@@ -15,6 +15,9 @@ import { ChannelsPanel, PrivacyNotePanel } from "./_components/side-panels"
 
 export const dynamic = "force-dynamic"
 
+/** An officer's post is sent from this page's action: a slow Discord gets a minute (the same as Connections and Notifications) */
+export const maxDuration = 60
+
 export const metadata: Metadata = { title: "Announcements" }
 
 const MAX_PAGE = 1_000
