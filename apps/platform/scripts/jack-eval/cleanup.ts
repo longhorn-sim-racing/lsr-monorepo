@@ -12,13 +12,17 @@
  * - through audit entries naming the room (`metadata.roomId`): events draft_event created, and
  *   knowledge entries archived.
  * A track whose tool writes anything else must make it findable one of these ways.
+ *
+ * Knowledge versions, action items and audit entries keep a plain room id (no foreign key), so a write
+ * that lands after its room was cleaned up is found by that id instead (orphanedEvalRooms).
  */
+import { EVAL_ROOM_PREFIX } from "../../src/server/jack/eval-support";
 import type { EvalContext } from "./shared";
 
 type Db = EvalContext["prisma"];
 
 /** Every eval room's id starts with this; real rooms have uuids */
-export const EVAL_ROOM_PREFIX = "jack-eval-";
+export { EVAL_ROOM_PREFIX };
 /** Before 2.0 every question's tools ran with this room id, which has no JackRoom row; drafts made then are still found by it */
 export const LEGACY_EVAL_ROOM_ID = "jack-eval";
 
@@ -113,38 +117,54 @@ type KnowledgeRow = { id: string; createdAt: Date; archivedAt: Date | null; prov
 export type KnowledgePlan = {
   /** Entries the eval created: deleted with their versions */
   remove: string[];
-  /** Entries that existed before: put back as their newest version from outside the eval, and unarchived if the eval archived them */
+  /**
+   * Entries that existed before: put back as their newest version from outside the eval (when there's
+   * one: no content means nothing to put back), losing the eval's versions, and unarchived if the eval
+   * archived them
+   */
   restore: { id: string; content?: { title: string; body: string; tags: string[] }; unarchive: boolean; dropVersions: string[] }[];
+  /** Entries left alone that a person should look at */
+  left: string[];
 };
 
 /** Room times come from the database's clock and archive times from the app's: allow for them differing a little */
 const CLOCK_SKEW_MS = 60_000;
 
 /**
- * What to do with the knowledge entries eval rooms touched. An entry whose first version was saved in an
- * eval room (or, with no versions, whose provenance names one) is the eval's: delete it. One that existed
- * before goes back to its newest version saved anywhere else, losing the eval's versions, and is unarchived
- * when it was archived after `since` (when the eval's rooms were made, less a minute for clock skew)
+ * What to do with the knowledge entries eval rooms touched, given `since` (when the eval's rooms were
+ * made, less a minute for clock skew). An entry made after `since` whose first version was saved in an
+ * eval room (or, with no versions, whose provenance names one) is the eval's: delete it. Any other entry
+ * existed before: it goes back to its newest version saved anywhere else, losing the eval's versions, and
+ * is unarchived when it was archived after `since`. With no `since`, nothing is deleted
  */
 export function knowledgePlan(entries: KnowledgeRow[], roomIds: string[], since: Date | null): KnowledgePlan {
   const evalRoom = (roomId: string | null) => roomId !== null && roomIds.includes(roomId);
-  const archivedSince = since ? new Date(since.getTime() - CLOCK_SKEW_MS) : null;
-  const plan: KnowledgePlan = { remove: [], restore: [] };
+  const after = since ? new Date(since.getTime() - CLOCK_SKEW_MS) : null;
+  const plan: KnowledgePlan = { remove: [], restore: [], left: [] };
   for (const entry of entries) {
     const versions = [...entry.versions].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     const provenance = entry.provenance === null || entry.provenance === undefined ? "" : JSON.stringify(entry.provenance);
-    const createdHere = versions.length ? evalRoom(versions[0].roomId) : roomIds.some((id) => provenance.includes(`"${id}"`));
-    if (createdHere) {
+    const startedHere = versions.length ? evalRoom(versions[0].roomId) : roomIds.some((id) => provenance.includes(`"${id}"`));
+    // An entry older than the eval's rooms with no history before the eval's edit is restored, not deleted
+    if (startedHere && after && entry.createdAt >= after) {
       plan.remove.push(entry.id);
       continue;
     }
+    if (startedHere && !after) plan.left.push(`knowledge entry ${entry.id} was saved in an eval room, but when the room was made is unknown: left in place`);
     const dropVersions = versions.filter((v) => evalRoom(v.roomId)).map((v) => v.id);
     const keep = versions.filter((v) => !evalRoom(v.roomId)).at(-1);
-    const unarchive = Boolean(entry.archivedAt && archivedSince && entry.archivedAt >= archivedSince);
+    const unarchive = Boolean(entry.archivedAt && after && entry.archivedAt >= after);
     if (!dropVersions.length && !unarchive) continue;
     plan.restore.push({ id: entry.id, ...(dropVersions.length && keep ? { content: { title: keep.title, body: keep.body, tags: keep.tags } } : {}), unarchive, dropVersions });
   }
   return plan;
+}
+
+/** What a person should check about an entry the cleanup restored */
+function restoredNote(entry: KnowledgePlan["restore"][number]): string {
+  if (entry.content) return `knowledge entry ${entry.id} existed before the eval changed it: restored its last version; check its reviewed status`;
+  if (entry.dropVersions.length) return `knowledge entry ${entry.id} existed before the eval changed it, with no earlier version to restore: it keeps the eval's text; check it`;
+  return `knowledge entry ${entry.id} existed before the eval archived it: unarchived it; check its reviewed status`;
 }
 
 const SENT_POSTS = ["SENT", "SENDING"];
@@ -168,13 +188,14 @@ export async function cleanUpEvalRooms(prisma: Db, roomIds: string[], options: C
     }
   };
 
+  /** When the rooms were made; for rooms already gone, when the eval first wrote anything naming them */
   let since: Date | null = null;
+  const earliest = (dates: Date[]) => dates.reduce<Date | null>((min, at) => (!min || at < min ? at : min), null);
   let proposalIds: string[] = [];
-  let audits: { id: string; actionType: string; entityType: string; entityId: string }[] = [];
+  let audits: { id: string; actionType: string; entityType: string; entityId: string; createdAt: Date }[] = [];
 
   await step("rooms", async () => {
-    const rooms = await prisma.jackRoom.findMany({ where: { id: { in: ids } }, select: { createdAt: true } });
-    since = rooms.reduce<Date | null>((min, room) => (!min || room.createdAt < min ? room.createdAt : min), null);
+    since = earliest((await prisma.jackRoom.findMany({ where: { id: { in: ids } }, select: { createdAt: true } })).map((r) => r.createdAt));
   });
   await step("proposals", async () => {
     proposalIds = (await prisma.jackProposal.findMany({ where: { roomId: { in: ids } }, select: { id: true } })).map((p) => p.id);
@@ -183,7 +204,7 @@ export async function cleanUpEvalRooms(prisma: Db, roomIds: string[], options: C
   await step("audit entries", async () => {
     audits = await prisma.auditLog.findMany({
       where: { OR: ids.map((id) => ({ metadata: { path: ["roomId"], equals: id } })) },
-      select: { id: true, actionType: true, entityType: true, entityId: true },
+      select: { id: true, actionType: true, entityType: true, entityId: true, createdAt: true },
     });
   });
 
@@ -210,20 +231,24 @@ export async function cleanUpEvalRooms(prisma: Db, roomIds: string[], options: C
   });
 
   await step("knowledge", async () => {
-    const touched = new Set((await prisma.knowledgeEntryVersion.findMany({ where: { roomId: { in: ids } }, select: { entryId: true } })).map((v) => v.entryId));
+    const saved = await prisma.knowledgeEntryVersion.findMany({ where: { roomId: { in: ids } }, select: { entryId: true, createdAt: true } });
+    const touched = new Set(saved.map((v) => v.entryId));
     for (const a of audits) touched.add(a.entityId);
     if (!touched.size) return;
+    // Rooms already gone (a write that landed after its room's cleanup): the eval's first write naming them stands in for when they were made
+    since ??= earliest([...saved, ...audits].map((row) => row.createdAt));
     const entries = await prisma.knowledgeEntry.findMany({
       where: { id: { in: [...touched] } },
       select: { id: true, createdAt: true, archivedAt: true, provenance: true, versions: { select: { id: true, roomId: true, title: true, body: true, tags: true, createdAt: true } } },
     });
     const plan = knowledgePlan(entries, ids, since);
+    report.left.push(...plan.left);
     if (plan.remove.length) report.knowledgeDeleted = (await prisma.knowledgeEntry.deleteMany({ where: { id: { in: plan.remove } } })).count;
     for (const entry of plan.restore) {
-      await prisma.knowledgeEntry.update({ where: { id: entry.id }, data: { ...entry.content, ...(entry.unarchive ? { archivedAt: null } : {}) } });
+      if (entry.content || entry.unarchive) await prisma.knowledgeEntry.update({ where: { id: entry.id }, data: { ...entry.content, ...(entry.unarchive ? { archivedAt: null } : {}) } });
       if (entry.dropVersions.length) await prisma.knowledgeEntryVersion.deleteMany({ where: { id: { in: entry.dropVersions } } });
       report.knowledgeRestored++;
-      report.left.push(`knowledge entry ${entry.id} existed before the eval changed it: restored ${entry.content ? "its last version" : "it"}; check its reviewed status`);
+      report.left.push(restoredNote(entry));
     }
   });
 
@@ -299,4 +324,23 @@ export async function leftoverEvalRooms(prisma: Db, olderThan: Date): Promise<st
 /** This run's rooms that are still there (a question whose own cleanup failed) */
 export async function runRooms(prisma: Db, tag: string): Promise<string[]> {
   return (await prisma.jackRoom.findMany({ where: { id: { startsWith: `${EVAL_ROOM_PREFIX}${tag}-` } }, select: { id: true } })).map((r) => r.id);
+}
+
+/**
+ * Eval rooms that are gone but still named by a write: knowledge versions, action items and audit
+ * entries keep a plain room id, so a tool that finished after its question's cleanup (a reply stopped at
+ * the time limit, say) leaves rows that only these ids find. cleanUpEvalRooms takes them like any room.
+ * The eval runs it before and after a run
+ */
+export async function orphanedEvalRooms(prisma: Db): Promise<string[]> {
+  const prefix = { startsWith: EVAL_ROOM_PREFIX };
+  const [versions, items, audits] = await Promise.all([
+    prisma.knowledgeEntryVersion.findMany({ where: { roomId: prefix }, select: { roomId: true }, distinct: ["roomId"] }),
+    prisma.actionItem.findMany({ where: { roomId: prefix }, select: { roomId: true }, distinct: ["roomId"] }),
+    prisma.$queryRaw<{ roomId: string }[]>`SELECT DISTINCT "metadata"->>'roomId' AS "roomId" FROM "AuditLog" WHERE "metadata"->>'roomId' LIKE ${`${EVAL_ROOM_PREFIX}%`}`,
+  ]);
+  const named = [...new Set([...versions, ...items, ...audits].flatMap((row) => (row.roomId ? [row.roomId] : [])))];
+  if (!named.length) return [];
+  const live = new Set((await prisma.jackRoom.findMany({ where: { id: { in: named } }, select: { id: true } })).map((r) => r.id));
+  return named.filter((id) => !live.has(id));
 }

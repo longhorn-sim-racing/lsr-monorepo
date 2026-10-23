@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { cleanUpEvalRooms, describeCleanup, EVAL_ROOM_PREFIX, evalRoomId, isEvalRoomId, knowledgePlan, leftoverEvalRooms, LEGACY_EVAL_ROOM_ID, runRooms, runTag } from "./cleanup";
+import { cleanUpEvalRooms, describeCleanup, EVAL_ROOM_PREFIX, evalRoomId, isEvalRoomId, knowledgePlan, leftoverEvalRooms, LEGACY_EVAL_ROOM_ID, orphanedEvalRooms, runRooms, runTag } from "./cleanup";
 import type { EvalContext } from "./shared";
 
 const ROOM = "jack-eval-mh2k1-jack-propose-email-lsc-ab12";
@@ -29,9 +29,10 @@ function fakeDb(data: Partial<Record<string, unknown[]>> = {}) {
     scheduledJob: { deleteMany: remove("scheduledJob") },
     meeting: { findMany: list("meeting"), deleteMany: remove("meeting") },
     meetingDecision: { deleteMany: remove("meetingDecision") },
-    actionItem: { deleteMany: remove("actionItem") },
+    actionItem: { findMany: list("actionItem"), deleteMany: remove("actionItem") },
     jackDeck: { deleteMany: remove("jackDeck") },
     jackUsage: { deleteMany: remove("jackUsage") },
+    $queryRaw: method("$queryRaw", () => data.$queryRaw ?? []),
   };
   return { db, calls, prisma: db as unknown as EvalContext["prisma"] };
 }
@@ -139,6 +140,26 @@ describe("cleanUpEvalRooms", () => {
     expect(db.knowledgeEntry.update).toHaveBeenCalledWith({ where: { id: "old" }, data: { title: "Rules", body: "Real text", tags: ["policy"] } });
     expect(db.knowledgeEntryVersion.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["v2"] } } });
     expect(report).toMatchObject({ knowledgeDeleted: 1, knowledgeRestored: 1 });
+    expect(report.left).toEqual(["knowledge entry old existed before the eval changed it: restored its last version; check its reviewed status"]);
+  });
+
+  it("for a room already gone, times knowledge from the eval's first write naming it", async () => {
+    const write = at("2026-10-23T02:01:00Z");
+    const { prisma, db } = fakeDb({
+      jackRoom: [],
+      knowledgeEntryVersion: [{ entryId: "late", createdAt: write }, { entryId: "officers", createdAt: write }],
+      knowledgeEntry: [
+        // Saved by a tool that finished after the room's cleanup: the eval's
+        { id: "late", createdAt: write, archivedAt: null, provenance: null, versions: [{ id: "v1", roomId: ROOM, title: "T", body: "B", tags: [], createdAt: write }] },
+        // An officer's entry from before, with no history, that the late write changed: kept
+        { id: "officers", createdAt: at("2026-09-01T00:00:00Z"), archivedAt: null, provenance: null, versions: [{ id: "v2", roomId: ROOM, title: "T", body: "Jack's", tags: [], createdAt: write }] },
+      ],
+    });
+    const report = await cleanUpEvalRooms(prisma, [ROOM]);
+    expect(db.knowledgeEntry.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["late"] } } });
+    expect(db.knowledgeEntryVersion.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["v2"] } } });
+    expect(db.knowledgeEntry.update).not.toHaveBeenCalled();
+    expect(report.left).toEqual(["knowledge entry officers existed before the eval changed it, with no earlier version to restore: it keeps the eval's text; check it"]);
   });
 });
 
@@ -158,6 +179,20 @@ describe("knowledgePlan", () => {
     );
     expect(plan.remove).toEqual(["a", "b"]);
     expect(plan.restore).toEqual([]);
+  });
+
+  it("restores an entry older than the eval's rooms even when its only version is the eval's", () => {
+    const plan = knowledgePlan([{ id: "old", createdAt: at("2026-09-01T00:00:00Z"), archivedAt: null, provenance: null, versions: [v("v1", ROOM, "2026-10-23T02:01:00Z")] }], [ROOM], since);
+    expect(plan.remove).toEqual([]);
+    expect(plan.restore).toEqual([{ id: "old", unarchive: false, dropVersions: ["v1"] }]);
+    // Made a little before the room by the clocks (skew), it's still the eval's
+    expect(knowledgePlan([{ id: "new", createdAt: at("2026-10-23T01:59:30Z"), archivedAt: null, provenance: null, versions: [v("v1", ROOM, "2026-10-23T01:59:30Z")] }], [ROOM], since).remove).toEqual(["new"]);
+  });
+
+  it("deletes nothing when it can't tell when the eval's rooms were made", () => {
+    const plan = knowledgePlan([{ id: "a", createdAt: since, archivedAt: null, provenance: { roomId: ROOM }, versions: [] }], [ROOM], null);
+    expect(plan.remove).toEqual([]);
+    expect(plan.left).toEqual(["knowledge entry a was saved in an eval room, but when the room was made is unknown: left in place"]);
   });
 
   it("puts an older entry back to its last version from outside the eval, and unarchives it if the eval archived it", () => {
@@ -193,6 +228,27 @@ describe("finding eval rooms", () => {
     const { prisma, db } = fakeDb({ jackRoom: [{ id: "jack-eval-tag1-jack-q-1" }] });
     expect(await runRooms(prisma, "tag1")).toEqual(["jack-eval-tag1-jack-q-1"]);
     expect(db.jackRoom.findMany).toHaveBeenCalledWith({ where: { id: { startsWith: "jack-eval-tag1-" } }, select: { id: true } });
+  });
+
+  it("orphans are eval rooms that are gone but still named by knowledge versions, action items or audit entries", async () => {
+    const { prisma, db } = fakeDb({
+      knowledgeEntryVersion: [{ roomId: "jack-eval-a" }],
+      actionItem: [{ roomId: "jack-eval-b" }],
+      $queryRaw: [{ roomId: "jack-eval-c" }, { roomId: "jack-eval-a" }],
+      // b is still there (a question in progress, in this run or another)
+      jackRoom: [{ id: "jack-eval-b" }],
+    });
+    expect(await orphanedEvalRooms(prisma)).toEqual(["jack-eval-a", "jack-eval-c"]);
+    expect(db.knowledgeEntryVersion.findMany).toHaveBeenCalledWith({ where: { roomId: { startsWith: EVAL_ROOM_PREFIX } }, select: { roomId: true }, distinct: ["roomId"] });
+    expect(db.actionItem.findMany).toHaveBeenCalledWith({ where: { roomId: { startsWith: EVAL_ROOM_PREFIX } }, select: { roomId: true }, distinct: ["roomId"] });
+    expect(db.$queryRaw.mock.calls[0]).toContain("jack-eval-%");
+    expect(db.jackRoom.findMany).toHaveBeenCalledWith({ where: { id: { in: ["jack-eval-a", "jack-eval-b", "jack-eval-c"] } }, select: { id: true } });
+  });
+
+  it("finds no orphans without asking about rooms when nothing names one", async () => {
+    const { prisma, calls } = fakeDb();
+    expect(await orphanedEvalRooms(prisma)).toEqual([]);
+    expect(calls).not.toContain("jackRoom.findMany");
   });
 });
 
