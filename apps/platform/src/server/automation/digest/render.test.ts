@@ -25,6 +25,8 @@ const report: DigestReport = {
         { title: "No owner: 1 overdue", href: "/admin/action-items?owner=none&status=overdue" },
         { title: "Alex Example: 1 overdue", href: "/admin/action-items?owner=alex&status=overdue" },
       ],
+      // Items are owners: the check lists them all
+      moreItems: 0,
     }),
     outcome("jack.spend", "Jack's monthly budget", "/admin/jack/usage", 95, { count: 1, severity: "danger", items: [{ title: "October: $50.20 of $50 spent", href: "/admin/jack/usage" }] }),
     outcome("email.bounces", "Email that didn't arrive", "/admin/notifications?tab=delivery", 70, {
@@ -36,6 +38,8 @@ const report: DigestReport = {
         { title: "x", href: "/admin" },
         { title: "y", href: "/admin" },
       ],
+      // Items are emails, the count is addresses
+      moreItems: 0,
     }),
     outcome("knowledge.stale", "Knowledge over 6 months old", "/admin/knowledge?view=stale", 81, { count: 0, severity: "info", items: [] }),
     outcome("twitch.attention", "Twitch connection", "/admin/streams", 60, null, "Twitch answered 401 on /streams"),
@@ -80,6 +84,23 @@ describe("the room's copy", () => {
     )
     // Every item line opens its page in the room
     for (const line of lines.filter((l) => l.startsWith("- ") || (l.startsWith("  - ") && !l.includes("more")))) expect(noteLink(line), line).not.toBeNull()
+  })
+
+  it("counts \"and N more\" in the items' units: the count past what's shown, or the check's own moreItems", () => {
+    const items = (n: number) => Array.from({ length: n }, (_, i) => ({ title: `Proposal ${i + 1}`, href: `/admin/jack/proposals/p-${i + 1}` }))
+    const more: DigestReport = {
+      at: AT,
+      outcomes: [
+        // 12 pending, the check lists its first 5, the room shows 3
+        outcome("proposals.pending", "Proposals waiting for an officer", "/admin/jack/proposals", 10, { count: 12, severity: "warning", items: items(5) }),
+        // 9 overdue items over 6 owners, the check lists 4 owners
+        outcome("action_items.overdue", "Overdue action items", "/admin/action-items?status=overdue", 20, { count: 9, severity: "warning", items: items(4), moreItems: 2 }),
+        // 2 bounced addresses on 1 email: nothing more
+        outcome("email.bounces", "Email that didn't arrive", "/admin/notifications?tab=delivery", 70, { count: 2, severity: "warning", items: items(1), moreItems: 0 }),
+      ],
+    }
+    const lines = roomDigestText(more, { setUpBy: "Gray", askSummary: false }).split("\n")
+    expect(lines.filter((line) => line.includes("more"))).toEqual(["  - and 9 more", "  - and 3 more"])
   })
 
   it("never carries a check's error text, and asks for no summary unless told to or when nothing needs attention", () => {

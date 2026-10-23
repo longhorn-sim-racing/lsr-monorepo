@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 vi.mock("./registry", () => ({ DIGEST_CHECKS: [] }))
 
-import { attentionCount, failedChecks, needingAttention, runDigestChecks } from "./run-checks"
+import { attentionCount, failedChecks, moreThanShown, needingAttention, runDigestChecks } from "./run-checks"
 import type { DigestCheck, DigestCheckResult } from "./types"
 
 const NOW = new Date("2026-10-26T14:00:00Z")
@@ -62,5 +62,22 @@ describe("running the checks", () => {
     controller.abort(new Error("the job ran out of time"))
     const report = await runDigestChecks({ now: NOW, signal: controller.signal, checks: [check("never", 1, () => new Promise(() => {}))] })
     expect(report.outcomes[0]).toMatchObject({ result: null, error: "the job ran out of time" })
+  })
+})
+
+describe("\"and N more\"", () => {
+  const items = (n: number) => Array.from({ length: n }, (_, i) => ({ title: `${i}`, href: "/admin" }))
+
+  it("is the count past what's shown when the items are the things counted", () => {
+    expect(moreThanShown({ count: 12, severity: "info", items: items(5) }, 3)).toBe(9)
+    expect(moreThanShown({ count: 3, severity: "info", items: items(3) }, 3)).toBe(0)
+    expect(moreThanShown({ count: 2, severity: "info", items: items(2) }, 3)).toBe(0)
+  })
+
+  it("counts items, not the count, when a check says how many items it left out", () => {
+    // 6 bounced addresses on 4 emails, every email listed
+    expect(moreThanShown({ count: 6, severity: "info", items: items(4), moreItems: 0 }, 3)).toBe(1)
+    // 20 overdue items over 10 owners, the check lists 8
+    expect(moreThanShown({ count: 20, severity: "info", items: items(8), moreItems: 2 }, 3)).toBe(7)
   })
 })

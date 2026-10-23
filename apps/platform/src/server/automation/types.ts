@@ -28,6 +28,11 @@ export type DigestCheckResult = {
   severity: "info" | "warning" | "danger"
   /** The first few, for the room and the Overview; never posted outside */
   items: DigestItem[]
+  /**
+   * Only when `count` counts something other than `items` (bounces listed by email, overdue items by
+   * owner): how many items the check left out. Otherwise "and N more" is `count` minus what's shown
+   */
+  moreItems?: number
 }
 
 /** What a check gets when it runs */

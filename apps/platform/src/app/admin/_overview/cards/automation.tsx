@@ -2,7 +2,7 @@ import Link from "next/link"
 import { ChevronRight } from "lucide-react"
 import { Badge, Button, Panel, PanelHeader, type Tone } from "@/components/admin/kit"
 import { DIGEST_SETTINGS_PATH } from "@/lib/jack/recurring"
-import { failedChecks, needingAttention, runDigestChecks } from "@/server/automation/run-checks"
+import { failedChecks, moreThanShown, needingAttention, runDigestChecks } from "@/server/automation/run-checks"
 import type { DigestCheckResult } from "@/server/automation/types"
 import type { OverviewCard } from "./types"
 
@@ -36,8 +36,7 @@ async function NeedsAttentionCard() {
       {found.length ? (
         <ul className="grid grid-cols-1 md:grid-cols-2">
           {found.map(({ check, result }) => {
-            // Only the items cut here: a check's count can be in other units than its items (addresses, by email)
-            const more = result.items.length - ITEMS_PER_CHECK
+            const more = moreThanShown(result, ITEMS_PER_CHECK)
             return (
               <li key={check.id} className="flex min-w-0 flex-col border-b border-admin-row md:odd:border-r">
                 <Link href={check.href} className="group flex items-center gap-2.5 px-4 pb-1.5 pt-2.5 text-[13px] hover:bg-admin-surface">

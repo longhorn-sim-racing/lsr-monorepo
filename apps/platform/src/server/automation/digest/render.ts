@@ -1,6 +1,6 @@
 import { formatInTimeZone } from "date-fns-tz"
 import { DEFAULT_TIMEZONE } from "@/lib/dates"
-import { attentionCount, failedChecks, needingAttention, type DigestReport } from "../run-checks"
+import { attentionCount, failedChecks, moreThanShown, needingAttention, type DigestReport } from "../run-checks"
 
 /**
  * The weekly digest, rendered from a template (design §11.2): no model writes any of it.
@@ -51,8 +51,7 @@ export function roomDigestText(report: DigestReport, { setUpBy, askSummary }: { 
     for (const { check, result } of checks) {
       lines.push(linked(`- ${check.label}: ${result.count}`, check.href))
       for (const item of result.items.slice(0, ROOM_ITEMS_PER_CHECK)) lines.push(`  ${linked(`- ${item.title}${item.detail ? ` (${item.detail})` : ""}`, item.href)}`)
-      // Only the items cut here: a check's count can be in other units than its items (addresses, by email)
-      const more = result.items.length - ROOM_ITEMS_PER_CHECK
+      const more = moreThanShown(result, ROOM_ITEMS_PER_CHECK)
       if (more > 0) lines.push(`  - and ${more} more`)
     }
   }

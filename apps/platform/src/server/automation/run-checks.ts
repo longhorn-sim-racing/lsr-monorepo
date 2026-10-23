@@ -78,3 +78,13 @@ export function failedChecks(report: DigestReport): CheckOutcome[] {
 export function attentionCount(report: DigestReport): number {
   return needingAttention(report).reduce((sum, outcome) => sum + outcome.result.count, 0)
 }
+
+/**
+ * The "and N more" under a check that lists its first `shown` items: the items cut there, plus what the
+ * check itself left out (its count past its items, or `moreItems` when they count different things)
+ */
+export function moreThanShown(result: DigestCheckResult, shown: number): number {
+  const cutHere = Math.max(0, result.items.length - shown)
+  const leftOut = result.moreItems ?? result.count - result.items.length
+  return cutHere + Math.max(0, leftOut)
+}
