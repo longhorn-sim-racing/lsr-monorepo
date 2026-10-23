@@ -442,7 +442,8 @@ export const twitchFake: FakeService = {
         const local = callback.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]", "host.docker.internal"].includes(callback.hostname)
         if (!local && (callback.protocol !== "https:" || (callback.port && callback.port !== "443"))) return error(400, "Callback must use https on port 443", rateHeaders())
         if (!transport.secret || transport.secret.length < 10 || transport.secret.length > 100) return error(400, "Secret must be 10 to 100 characters", rateHeaders())
-        if (subscriptions.some((sub) => sub.type === type && sub.condition.broadcaster_user_id === condition.broadcaster_user_id && sub.status !== "webhook_callback_verification_failed" && sub.callback === transport.callback)) {
+        // Failed and revoked ones stay listed (for days) and still count, until deleted
+        if (subscriptions.some((sub) => sub.type === type && sub.condition.broadcaster_user_id === condition.broadcaster_user_id && sub.callback === transport.callback)) {
           return error(409, "subscription already exists", rateHeaders())
         }
         const sub: FakeSubscription = { id: randomUUID(), type, version, status: "webhook_callback_verification_pending", condition: { broadcaster_user_id: condition.broadcaster_user_id }, callback: transport.callback, secret: transport.secret, createdAt: new Date().toISOString(), failures: 0 }
