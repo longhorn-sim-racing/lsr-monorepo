@@ -51,7 +51,8 @@ export function roomDigestText(report: DigestReport, { setUpBy, askSummary }: { 
     for (const { check, result } of checks) {
       lines.push(linked(`- ${check.label}: ${result.count}`, check.href))
       for (const item of result.items.slice(0, ROOM_ITEMS_PER_CHECK)) lines.push(`  ${linked(`- ${item.title}${item.detail ? ` (${item.detail})` : ""}`, item.href)}`)
-      const more = result.count - Math.min(result.items.length, ROOM_ITEMS_PER_CHECK)
+      // Only the items cut here: a check's count can be in other units than its items (addresses, by email)
+      const more = result.items.length - ROOM_ITEMS_PER_CHECK
       if (more > 0) lines.push(`  - and ${more} more`)
     }
   }

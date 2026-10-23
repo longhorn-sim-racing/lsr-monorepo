@@ -36,7 +36,8 @@ async function NeedsAttentionCard() {
       {found.length ? (
         <ul className="grid grid-cols-1 md:grid-cols-2">
           {found.map(({ check, result }) => {
-            const more = result.count - Math.min(result.items.length, ITEMS_PER_CHECK)
+            // Only the items cut here: a check's count can be in other units than its items (addresses, by email)
+            const more = result.items.length - ITEMS_PER_CHECK
             return (
               <li key={check.id} className="flex min-w-0 flex-col border-b border-admin-row md:odd:border-r">
                 <Link href={check.href} className="group flex items-center gap-2.5 px-4 pb-1.5 pt-2.5 text-[13px] hover:bg-admin-surface">

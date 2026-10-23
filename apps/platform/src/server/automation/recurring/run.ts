@@ -66,10 +66,9 @@ export async function runRecurringQuestion(ctx: Pick<JobContext, "job" | "starte
     postAutomationNote({ roomId: question.roomId, jobKey: ctx.job.key, content, scheduled, authorUserId }, deps.broadcast)
 
   if (question.room.archivedAt) {
-    if (await pauseRecurringQuestion(question.id, "its room is archived")) {
-      await note(`Paused the recurring question ${label}: this room is archived. Unarchive it, then turn the question back on → ${RECURRING_PAGE}`)
-    }
-    return { status: "skipped", summary: `Paused ${label}: its room is archived.` }
+    const paused = await pauseRecurringQuestion(question.id, "its room is archived")
+    if (paused) await note(`Paused the recurring question ${label}: this room is archived. Unarchive it, then turn the question back on → ${RECURRING_PAGE}`)
+    return { status: "skipped", summary: `${paused ? "Paused" : "Didn't ask"} ${label}: its room is archived.` }
   }
 
   const ownerId = question.createdById
@@ -77,10 +76,9 @@ export async function runRecurringQuestion(ctx: Pick<JobContext, "job" | "starte
   if (!owner) {
     const who = question.createdBy?.displayName ?? "The officer who set it up"
     const reason = question.createdBy ? `${who} isn't an officer any more` : "the officer who set it up deleted their account"
-    if (await pauseRecurringQuestion(question.id, reason)) {
-      await note(`Paused the recurring question ${label}: ${reason}. Another officer can turn it back on and take it over → ${RECURRING_PAGE}`)
-    }
-    return { status: "skipped", summary: `Paused ${label}: ${reason}.` }
+    const paused = await pauseRecurringQuestion(question.id, reason)
+    if (paused) await note(`Paused the recurring question ${label}: ${reason}. Another officer can turn it back on and take it over → ${RECURRING_PAGE}`)
+    return { status: "skipped", summary: `${paused ? "Paused" : "Didn't ask"} ${label}: ${reason}.` }
   }
 
   // A note from an earlier try that's still waiting: get it answered rather than ask again

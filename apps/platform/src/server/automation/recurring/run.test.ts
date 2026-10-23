@@ -92,7 +92,7 @@ describe("a recurring question's run", () => {
   it("posts no pause note when an officer switched it off meanwhile", async () => {
     db.recurringQuestion.findUnique.mockResolvedValue(question({ room: { id: "room-1", archivedAt: NOW } }))
     service.pauseRecurringQuestion.mockResolvedValue(false)
-    await runRecurringQuestion(ctx, deps)
+    expect(await runRecurringQuestion(ctx, deps)).toEqual({ status: "skipped", summary: "Didn't ask “Weekly signups”: its room is archived." })
     expect(notes.postAutomationNote).not.toHaveBeenCalled()
   })
 
