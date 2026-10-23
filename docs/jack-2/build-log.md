@@ -19,16 +19,17 @@ The working record for Jack 2.0 (#188): what's done, what's next, and every call
 | G1: interfaces, plug-in slots, display kinds | Merged | #193 |
 | G1: 2.0 prompt, run_sql hardening, CI, dependencies | Merged | #194 |
 | G1 follow-ups (search index revoke, typed prompt slots) | Merged | #196 |
-| Wave 1: refactors, connectors, scheduler, proposals, files, model loop, eval harness, club data, memory | Building (workflow: build, review, fix) | |
-| Club data: recruiting, race performance, site content, room search | Not started | |
-| Memory: knowledge base, seed drafts, officer profiles | Not started | |
-| Outside sources: Stripe, Resend, Vercel analytics, Instagram, Twitch, web search | Not started | |
-| Documents: Drive, Teams/SharePoint | Not started | |
-| Discord: sync, polls, activity, linking, posting, role sync | Not started | |
-| Proposed changes in use: news, events, pages, notifications, results, check-ins, imports | Not started | |
-| Automation: digest, recurring questions | Not started | |
-| Sponsors and meetings | Not started | |
-| Decks and rooms | Not started | |
+| R: services for event, results and news changes | Merged | #197 |
+| G2: connector framework, HTTP fakes, Connections page | Merged | #199 |
+| G3: scheduler (signed tick, dispatcher, hand-offs, Scheduled jobs page) | Merged | #205 |
+| G4: proposals (cards, Proposals page, `page.update`) | Merged | #201 |
+| G5: file storage and room uploads | Merged | #203 |
+| G8: model loop 2.0 (web search and fetch, citations, tool search, documents, cost) | Merged | #198 |
+| E: eval harness 2.0 | Merged | #200 |
+| T1: club data (search and read, recruiting pipeline, race performance, room search) | Merged | #204 |
+| T2: memory (knowledge base, knowledge tool, officer profiles) | Merged | #202 |
+| Wave 2a: G6 files for Jack and who's asking, T3 changes, T4 Stripe/Resend/site traffic, T5 Twitch/Instagram insights, T6 documents, T7 Discord reading, T9a rooms, T10 sponsors and meetings, wave-1 follow-ups | Building (workflow: build, review, fix) | |
+| Wave 2b: T8 Discord posting, T9b Instagram publish and gallery, T11 automation | After 2a merges | |
 | Eval, security pass, docs, launch post | Not started | |
 
 ## Decisions
@@ -77,6 +78,18 @@ Calls made during the build, for Gray to review. Newest last.
 - **Jack's SQL role has no grant on the search index** (`JackSearchDoc`). `run_sql` reports it off-limits, like `SystemSetting`.
 - **`run_sql` refuses `ts_rewrite`** (it runs a query from a string). Found in the G1-prompt review; also live on main, so it's fixed there in #195.
 - **The `propose_*` tools are generic:** each builds its input from the kinds registered for it (`kindsForTool`), so tracks add kinds without editing each other's tool files.
+- **Wave 1 calls (from the PRs):**
+  - **Connections:** switching a connection on is refused until its code, env vars and settings are there; switching on without a passing smoke test asks first; off always works. One `JACK_FAKES` switch points every client at the local fakes (G2).
+  - **Scheduler:** a job's lock lasts claim + 360 s; "Run now" needs the job switched on; officers see Scheduled jobs read-only, and only admins switch, run or reschedule (audited) (G3).
+  - **Proposals:** one new nullable column, `JackProposal.view`, keeps the card as it was proposed. The sweep job (every 10 min) marks stuck applies failed and expired proposals stale (G4).
+  - **Files:**
+    - HEIC photos are refused with "export it as JPEG" (the installed sharp can't decode HEVC).
+    - Supabase Storage is used whenever the service-role key and a hosted Supabase URL are set; locally the files store stays the default.
+    - Registration is a route, not a server action, so reading a big PDF doesn't hold up the room (G5).
+  - **Model loop:** web tools stay off until `JACK_WEB_TOOLS=on` and the Console allows them. Recurring-question notes are flagged `JackMessage.scheduled` (one new column) so their replies get no web tools (G8).
+  - **News:** a taken slug now says "Slug already exists" (the old check never matched, so it said "Failed to create post") (R).
+  - **Release order (T2):** run the officer badge sync with `--apply` before loading the knowledge seed, so department owners resolve.
+  - **Tests:** Vitest's per-test timeout is 20 s. A few tests import whole module graphs and took over 5 s while the full suite ran in parallel.
 - **For Gray to sign off, two key exceptions to "read-only or restricted":**
   - Vercel offers no read-only analytics token. A project-scoped, read-write token is used only by a daily snapshot job, with a short expiry (§12.5).
   - Resend's production key stays send-only, and delivery data arrives by webhook instead.
@@ -97,7 +110,7 @@ Calls made during the build, for Gray to review. Newest last.
   - API research done: 11 specs in `research/`, each double-checked against official docs.
   - Six-lens design review done (`reviews/`). Design v2 written.
   - **Found on main, fixed separately:** `cost.ts` priced Sonnet 5.5 cache reads at $0.20 per million tokens; Anthropic's pricing page says $0.10. PR #191 (to main, for Gray).
-- **10/22–23 (night):**
+- **10/22 (evening):**
   - G1 split into three parallel PRs:
     - **#192 G1-data** (me): the schema, three migrations and the role checks.
     - **#193 G1-slots** (agent): interfaces, slots and display kinds.
@@ -107,7 +120,7 @@ Calls made during the build, for Gray to review. Newest last.
     - the audit log leaked officer-applicant review scores.
   - Verified locally as `jack_readonly` with temporary data.
   - Wave-1 briefs written (9 builders); a shared build lock keeps parallel Next builds from exhausting memory.
-- **10/23 (early):**
+- **10/22 (later):**
   - #193 and #194 reviewed independently: 12 and 15 findings, all fixed.
   - Merged #192, #193, #194 and follow-up #196. The combined branch passes lint, typecheck and 1,044 tests.
   - **Found on main, fixed separately:** `run_sql`'s name check could be bypassed with `ts_rewrite()`. PR #195 (P1, for Gray).
@@ -116,3 +129,13 @@ Calls made during the build, for Gray to review. Newest last.
   - **Knowledge seed drafted:** 99 entries plus an index in the private seed folder (not the repo). Topics: the club 5, who does what 27, decisions 14, policies 7, brand 5, sponsors 6, events playbook 7, recruiting 3, services and access 20, calendar 5.
     - **Waiting on Gray:** 26 questions at the end of `_index.md` (conflicts between sources, facts not found, judgment calls).
     - **Note for the memory PR:** the seed's `owner` is a department name. The loader maps it to a person when one clearly owns it, otherwise leaves `ownerId` empty and keeps the department as a tag.
+- **10/22 (night):**
+  - **Wave 1 done:** 9 PRs built in parallel, each independently reviewed (51 findings: 1 critical, 14 major, 36 minor) and fixed on its branch.
+  - Merged #197, #199, #205, #201, #203, #198, #200, #204, #202 into `jack-2`. Conflicts were where tracks meet (slot files, the room client, the room snapshot, the tool context); both sides kept every time.
+  - The combined branch passes lint, typecheck, 1,957 tests and the production build; the migration drift check is clean.
+  - Browser-checked (light, dark, 390 px): Connections, Scheduled jobs, Proposals, Knowledge, Recruiting, Results, the rooms list with search, and a room opened at a search result.
+  - **Before release (gates):**
+    - G5: run the production upload path end to end on a working Storage (steps in `tracks/files.md`).
+    - G8: confirm live that tool search works with streamed tool input, with `url_sources` naming a deferred tool, and with dynamic filtering on Haiku (eval run).
+  - **Noticed, not caused by 2.0:** in dev, an admin page's first load sometimes logs a hydration mismatch in the admin shell's menu button ids. It doesn't repeat on reload, and the admin layout hasn't changed on `jack-2`.
+  - Wave 2a launched (9 builders).
