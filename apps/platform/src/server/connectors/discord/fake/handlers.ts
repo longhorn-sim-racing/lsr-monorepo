@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto"
 import type { FakeRoute, FakeService } from "../../fakes/types"
 import { APP_FLAG, CHANNEL_TYPE, THREAD_PARENT_TYPES, THREAD_TYPES, type DiscordChannel, type DiscordMember, type DiscordMessage, type DiscordPoll } from "../types"
 import { buildFakeServer, FAKE_DISCORD, fakeSnowflake } from "./data"
+import { fakeWriteRoutes } from "./writes"
 
 /**
  * Discord's REST API and OAuth, faked (research §7), mounted at /discord: "https://discord.com/api/v10"
@@ -21,6 +22,7 @@ import { buildFakeServer, FAKE_DISCORD, fakeSnowflake } from "./data"
  *   form bodies and checks the PKCE verifier; /users/@me; revoke.
  *
  * Test hooks under /_fake: intents, rate-limit, search, polls, oauth, messages, channels, members, state.
+ * The write routes (messages, polls, roles, scheduled events) and their hooks are in writes.ts.
  */
 
 const API = "/api/v10"
@@ -341,6 +343,9 @@ export const discordFake: FakeService = {
         }),
       },
       { method: "GET", path: `${API}/guilds/:guildId/messages/search`, handle: api((request, { guildId }) => (guildId === server.guild.id ? search(request) : error(404, 10004, "Unknown Guild"))) },
+
+      // Writes (discord-post): messages and polls, roles, scheduled events, and their hooks
+      ...fakeWriteRoutes(server, { api, readable, error }),
 
       // Test hooks
       {
