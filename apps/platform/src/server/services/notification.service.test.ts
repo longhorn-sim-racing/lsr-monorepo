@@ -32,6 +32,7 @@ vi.mock("@/lib/email/templates", async (importOriginal) => {
 import { MAX_BATCH_EMAILS } from "@/lib/email/resend"
 import {
   countEmailRecipients,
+  countScheduledAnnouncementEmails,
   failInterruptedEmails,
   getEmailUsage,
   processScheduledNotifications,
@@ -336,6 +337,12 @@ describe("processing pending notifications", () => {
     user: { id: `user-${id}`, email: `user-${id}@utexas.edu` },
   })
 
+  // Nothing sent yet today, unless a test says otherwise
+  beforeEach(() => {
+    db.notification.count.mockResolvedValue(0)
+    db.applicationEmail.count.mockResolvedValue(0)
+  })
+
   it("delivers only the rows it claimed, emails in one batch", async () => {
     db.notification.findMany.mockResolvedValue([due("a", "EMAIL"), due("b", "EMAIL"), due("c", "IN_APP"), due("d", "EMAIL")])
     // "b" was claimed by another path first
@@ -356,10 +363,48 @@ describe("processing pending notifications", () => {
     expect(claims.b).toMatchObject({ where: { id: "b", status: "PENDING" }, data: { status: "SENT", sentAt: expect.any(Date) } })
   })
 
-  it("only picks up scheduled rows that are due", async () => {
+  it("only picks up scheduled rows that are due, oldest first", async () => {
     vi.useFakeTimers({ now: NOW })
     await processScheduledNotifications()
-    expect(db.notification.findMany.mock.calls[0][0].where).toEqual({ status: "PENDING", scheduledFor: { lte: NOW } })
+    expect(db.notification.findMany.mock.calls[0][0]).toMatchObject({ where: { status: "PENDING", scheduledFor: { lte: NOW } }, orderBy: [{ scheduledFor: "asc" }, { createdAt: "asc" }] })
+  })
+
+  it("holds back the scheduled announcement emails today's limit can't take, keeping the headroom for receipts", async () => {
+    vi.stubEnv("RESEND_DAILY_LIMIT", "")
+    db.notification.count.mockResolvedValue(84) // 84 of 100 sent today, 10 kept for receipts: room for 6 announcements
+    templates.getEmailTemplate.mockReturnValue({ html: "<p>Hi</p>", text: "Hi" })
+    const announcements = ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"]
+    db.notification.findMany.mockResolvedValue([...announcements.map((id) => due(id, "EMAIL")), due("bell", "IN_APP"), { ...due("reminder", "EMAIL"), type: "EVENT_REMINDER_24H" }])
+
+    // Six announcements, the bell and the reminder
+    await expect(processScheduledNotifications()).resolves.toBe(8)
+
+    const held = db.notification.updateMany.mock.calls.filter(([args]) => args.data.status === "FAILED").map(([args]) => args)
+    expect(held).toEqual([{ where: { id: { in: ["a7", "a8"] }, status: "PENDING" }, data: { status: "FAILED", emailError: expect.stringContaining("used up today's email limit") } }])
+    expect(held[0].data.emailError).toContain("Retry it after the limit resets")
+    const claimed = db.notification.updateMany.mock.calls.filter(([args]) => args.data.status === "SENT").map(([args]) => args.where.id)
+    expect(claimed).not.toContain("a7")
+    expect(email.sendBatchEmails.mock.calls[0][0].map((e: { to: string }) => e.to)).toEqual([...announcements.slice(0, 6), "reminder"].map((id) => `user-${id}@utexas.edu`))
+  })
+
+  it("sends every scheduled announcement when there's room, or the plan has no daily limit", async () => {
+    db.notification.findMany.mockResolvedValue([due("a", "EMAIL"), due("b", "EMAIL")])
+    db.notification.count.mockResolvedValue(88)
+    vi.stubEnv("RESEND_DAILY_LIMIT", "none")
+    await processScheduledNotifications()
+    expect(db.notification.updateMany.mock.calls.every(([args]) => args.data.status === "SENT")).toBe(true)
+    expect(email.sendBatchEmails.mock.calls[0][0]).toHaveLength(2)
+
+    // 88 sent today: room for exactly these two
+    vi.stubEnv("RESEND_DAILY_LIMIT", "")
+    db.notification.updateMany.mockClear()
+    await processScheduledNotifications()
+    expect(db.notification.updateMany.mock.calls.every(([args]) => args.data.status === "SENT")).toBe(true)
+    // 90 sent: none
+    db.notification.count.mockResolvedValue(90)
+    db.notification.updateMany.mockClear()
+    await expect(processScheduledNotifications()).resolves.toBe(0)
+    expect(db.notification.updateMany.mock.calls.map(([args]) => args.where)).toEqual([{ id: { in: ["a", "b"] }, status: "PENDING" }])
   })
 
   it("retries unscheduled rows stuck between 5 minutes and 48 hours old", async () => {
@@ -426,6 +471,22 @@ describe("retryNotification", () => {
     await retryNotification("s1")
     expect(db.notification.update).not.toHaveBeenCalled()
     expect(email.sendEmail).not.toHaveBeenCalled()
+  })
+})
+
+describe("countScheduledAnnouncementEmails", () => {
+  it("counts the announcement emails still waiting to go out on that UTC day", async () => {
+    db.notification.count.mockResolvedValue(12)
+    // 6 pm Central on Oct 23 is still Oct 23 in UTC
+    await expect(countScheduledAnnouncementEmails(new Date("2026-10-23T23:00:00Z"))).resolves.toBe(12)
+    expect(db.notification.count).toHaveBeenCalledWith({
+      where: {
+        channel: "EMAIL",
+        status: "PENDING",
+        type: { in: ["EVENT_POSTED", "REGISTRATION_OPENED", "RESULTS_POSTED", "CUSTOM"] },
+        scheduledFor: { gte: new Date("2026-10-23T00:00:00Z"), lt: new Date("2026-10-24T00:00:00Z") },
+      },
+    })
   })
 })
 

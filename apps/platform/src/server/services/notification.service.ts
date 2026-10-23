@@ -161,21 +161,43 @@ function dailyEmailLimit(): number | null {
   return Number.isInteger(limit) && limit > 0 ? limit : 100;
 }
 
+/** Midnight UTC on the day `at` falls on: Resend's day, when its daily limit resets */
+function startOfUtcDay(at: Date): Date {
+  const start = new Date(at);
+  start.setUTCHours(0, 0, 0, 0);
+  return start;
+}
+
 /**
  * Emails sent today against Resend's daily limit. Resend's day is the UTC day (it resets at
  * 7 pm Central, 6 pm in winter). Counts the app's own emails (notifications AND recruiting
  * mail, which is tracked separately), so other mail on the account can make the real number higher.
  */
 export async function getEmailUsage(): Promise<{ sentToday: number; dailyLimit: number | null }> {
-  const startOfUtcDay = new Date();
-  startOfUtcDay.setUTCHours(0, 0, 0, 0);
+  const today = startOfUtcDay(new Date());
   const [notifications, recruiting] = await Promise.all([
     prisma.notification.count({
-      where: { channel: "EMAIL", emailMessageId: { not: null }, sentAt: { gte: startOfUtcDay } },
+      where: { channel: "EMAIL", emailMessageId: { not: null }, sentAt: { gte: today } },
     }),
-    prisma.applicationEmail.count({ where: { status: "SENT", sentAt: { gte: startOfUtcDay } } }),
+    prisma.applicationEmail.count({ where: { status: "SENT", sentAt: { gte: today } } }),
   ]);
   return { sentToday: notifications + recruiting, dailyLimit: dailyEmailLimit() };
+}
+
+/**
+ * Announcement emails scheduled for the UTC day `at` falls on and not sent yet. A send scheduled
+ * that day shares the day's limit with them.
+ */
+export async function countScheduledAnnouncementEmails(at: Date): Promise<number> {
+  const start = startOfUtcDay(at);
+  return prisma.notification.count({
+    where: {
+      channel: "EMAIL",
+      status: "PENDING",
+      type: { in: [...MARKETING_TYPES] },
+      scheduledFor: { gte: start, lt: new Date(start.getTime() + 24 * 60 * 60 * 1000) },
+    },
+  });
 }
 
 // Announcement-style emails: these also need the marketing opt-in. Everything else is about
@@ -273,7 +295,9 @@ export async function processUserNotifications(userId: string): Promise<void> {
 }
 
 /**
- * Process all pending scheduled notifications (for cron job).
+ * Process all pending scheduled notifications (for cron job). Announcement emails past the day's
+ * limit (less TRANSACTIONAL_HEADROOM) are held back as failed rather than sent, so they never use the
+ * emails kept for confirmations and receipts; officers retry them on Notifications after the reset.
  */
 export async function processScheduledNotifications(): Promise<number> {
   const notifications = await prisma.notification.findMany({
@@ -282,10 +306,38 @@ export async function processScheduledNotifications(): Promise<number> {
       scheduledFor: { lte: new Date() },
     },
     include: { user: true },
+    orderBy: [{ scheduledFor: "asc" }, { createdAt: "asc" }],
     take: 100, // Process in batches
   });
 
-  return processNotifications(notifications);
+  const held = await holdAnnouncementEmailsOverLimit(notifications);
+  return processNotifications(notifications.filter((n) => !held.has(n.id)));
+}
+
+const HELD_OVER_LIMIT =
+  "Not sent: announcements had used up today's email limit, and the rest is kept for confirmations and receipts. Retry it after the limit resets at 7 pm Central (6 pm in winter).";
+
+/**
+ * Marks the announcement emails in this batch that today's limit can't take (after what's sent today
+ * and the TRANSACTIONAL_HEADROOM) as failed, in the batch's order. Returns their ids.
+ */
+async function holdAnnouncementEmailsOverLimit(notifications: NotificationWithUser[]): Promise<Set<string>> {
+  const announcements = notifications.filter(
+    (n) => n.channel === "EMAIL" && MARKETING_TYPES.has(n.type as NotificationType)
+  );
+  if (announcements.length === 0) return new Set();
+  const { sentToday, dailyLimit } = await getEmailUsage();
+  if (dailyLimit === null) return new Set();
+  const over = announcements.slice(Math.max(0, dailyLimit - TRANSACTIONAL_HEADROOM - sentToday));
+  if (over.length === 0) return new Set();
+
+  const ids = over.map((n) => n.id);
+  await prisma.notification.updateMany({
+    where: { id: { in: ids }, status: "PENDING" },
+    data: { status: "FAILED", emailError: HELD_OVER_LIMIT },
+  });
+  console.warn(`[Notification] Held back ${over.length} scheduled announcement emails over today's limit`);
+  return new Set(ids);
 }
 
 /**
