@@ -80,6 +80,11 @@ export type QueuePostInput = {
 export async function queueDiscordPost(input: QueuePostInput, db: Prisma.TransactionClient = prisma): Promise<{ post: DiscordPost; created: boolean }> {
   const problems = messageProblems(input.body)
   if (problems.length) throw new Error(`The message can't be sent: ${problems.join(" ")}`)
+  // Taken already (a second Apply, a rule's next run): the usual case, so it's read first; the unique index still settles a race
+  if (input.dedupeKey) {
+    const existing = await db.discordPost.findUnique({ where: { dedupeKey: input.dedupeKey } })
+    if (existing) return { post: existing, created: false }
+  }
   const id = randomUUID()
   try {
     const post = await db.discordPost.create({
