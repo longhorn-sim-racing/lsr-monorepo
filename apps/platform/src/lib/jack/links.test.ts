@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatFileSize, linkHost, partLink } from "./links"
+import { carriesData, formatFileSize, labelShowsHost, linkHost, partLink } from "./links"
 
 describe("linkHost", () => {
   it("reads the host from the URL, without www.", () => {
@@ -63,6 +63,47 @@ describe("partLink", () => {
     expect(partLink("data:text/html,hi")).toBeNull()
     expect(partLink("mailto:someone@example.com")).toBeNull()
     expect(partLink("")).toBeNull()
+  })
+})
+
+describe("labelShowsHost", () => {
+  it("is true only when the text is the URL and starts with the host the browser opens", () => {
+    expect(labelShowsHost("https://www.fia.com/esports", "https://www.fia.com/esports")).toBe(true)
+    expect(labelShowsHost("HTTPS://FIA.COM", "HTTPS://FIA.COM")).toBe(true)
+    expect(labelShowsHost("Sponsors", "https://evil.example/")).toBe(false)
+    expect(labelShowsHost("https://lsr.example", "https://evil.example/")).toBe(false)
+    expect(labelShowsHost("https://stripe.com@evil.example/", "https://stripe.com@evil.example/")).toBe(false)
+    expect(labelShowsHost("https://strípe.com/", "https://strípe.com/")).toBe(false)
+    expect(labelShowsHost("mailto:a@example.com", "mailto:a@example.com")).toBe(false)
+  })
+})
+
+describe("carriesData", () => {
+  it("flags a link that would hand its site data: a long query, an @ or a long number in it, an email in the path, a user name", () => {
+    expect(carriesData("https://evil.example/?d=a@b.c")).toBe(true)
+    expect(carriesData("https://evil.example/c?d=a%40b.c")).toBe(true)
+    expect(carriesData(`https://evil.example/c?d=${"x".repeat(40)}`)).toBe(true)
+    expect(carriesData("https://evil.example/#ZW1haWxzOmFsaWNlQHV0ZXhhcy5lZHUsYm9iQHV0ZXhhcy5lZHU")).toBe(true)
+    expect(carriesData("https://evil.example/c?p=5125550123")).toBe(true)
+    expect(carriesData("https://evil.example/alice@utexas.edu/bob@utexas.edu")).toBe(true)
+    expect(carriesData("https://evil.example/alice%40utexas.edu")).toBe(true)
+    expect(carriesData("https://evil.example/%zz?d=a%40b.c")).toBe(true)
+    expect(carriesData("https://stripe.com@evil.example/")).toBe(true)
+  })
+
+  it("leaves ordinary links alone", () => {
+    expect(carriesData("https://www.longhornsimracing.org/events")).toBe(false)
+    expect(carriesData("https://www.youtube.com/@LonghornSimRacing")).toBe(false)
+    expect(carriesData("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42")).toBe(false)
+    expect(carriesData("https://www.google.com/maps/place/Austin/@30.2849,-97.7341,17z")).toBe(false)
+    expect(carriesData("https://discord.com/channels/123456789012345678/876543210987654321")).toBe(false)
+    expect(carriesData("https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit")).toBe(false)
+  })
+
+  it("is false for site paths, email links and anything that isn't a URL", () => {
+    expect(carriesData("/admin/events?x=a@b.c")).toBe(false)
+    expect(carriesData("mailto:a@example.com?body=hi")).toBe(false)
+    expect(carriesData("not a url")).toBe(false)
   })
 })
 

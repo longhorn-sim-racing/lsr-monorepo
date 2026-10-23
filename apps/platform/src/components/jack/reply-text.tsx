@@ -1,7 +1,9 @@
 import Link from "next/link"
 import { Fragment, memo, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
+import { carriesData, labelShowsHost, partLink } from "@/lib/jack/links"
 import { parseReply, type MdBlock, type MdInline, type MdList } from "@/lib/jack/reply-markdown"
+import { LinkHost } from "./parts/part-link"
 
 /*
  * A stretch of a reply's text, with the light formatting Jack writes (#185). Everything is drawn as
@@ -107,16 +109,51 @@ function Inlines({ nodes }: { nodes: MdInline[] }) {
           </code>
         )
       case "link":
-        // Site pages open in place, like the deck card's links; anything else in a new tab
-        return node.href.startsWith("/") ? (
-          <Link key={i} href={node.href} className={LINK_CLASS}>
-            <Inlines nodes={node.children} />
-          </Link>
-        ) : (
-          <a key={i} href={node.href} target="_blank" rel="noreferrer" className={LINK_CLASS}>
-            <Inlines nodes={node.children} />
-          </a>
-        )
+        return <ReplyLink key={i} href={node.href} label={node.children} />
     }
   })
+}
+
+/**
+ * A link in a reply (design §7.5). Jack can be talked into writing a link by something he read, with a
+ * label that hides where it goes, so it's checked like a part's link (partLink): site pages open in place,
+ * like the deck card's links, and only while they stay on this site; web links open in a new tab, show
+ * their host after them (unless the text is the URL itself) and the whole URL on hover, and are flagged
+ * when opening them hands the site data (carriesData). Email links open as before: the mail app shows the
+ * address and waits for Send. Anything else is plain text
+ */
+function ReplyLink({ href, label }: { href: string; label: MdInline[] }) {
+  const text = <Inlines nodes={label} />
+  if (/^mailto:/i.test(href))
+    return (
+      <a href={href} target="_blank" rel="noreferrer" className={LINK_CLASS}>
+        {text}
+      </a>
+    )
+  const link = partLink(href)
+  if (!link) return text
+  if (link.internal)
+    return (
+      <Link href={link.href} className={LINK_CLASS}>
+        {text}
+      </Link>
+    )
+  return (
+    <>
+      <a href={link.href} title={link.href} target="_blank" rel="noreferrer" className={LINK_CLASS}>
+        {text}
+      </a>
+      {!labelShowsHost(plainText(label), href) && <LinkHost host={link.host} />}
+      {carriesData(link.href) && (
+        <span title="Opening this link sends the site what's in it (a long query, an email address or a long number). Check it before you open it." className="ml-1.5 whitespace-nowrap text-xs font-medium text-tone-warning-foreground">
+          sends data
+        </span>
+      )}
+    </>
+  )
+}
+
+/** A label's text as shown, marks left out */
+function plainText(nodes: MdInline[]): string {
+  return nodes.map((node) => (node.kind === "text" || node.kind === "code" ? node.text : plainText(node.children))).join("")
 }
