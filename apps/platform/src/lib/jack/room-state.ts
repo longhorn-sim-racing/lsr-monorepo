@@ -1,6 +1,7 @@
 import type { JackToolPart } from "./parts"
+import { isNewerProposalState } from "./proposals"
 import { ROOM_LOCK_STALE_MS } from "./timing"
-import type { JackMessageView, JackProposalState, JackProposalStatusKey, JackRoomEvent, JackRoomView } from "./types"
+import type { JackMessageView, JackProposalState, JackRoomEvent, JackRoomView } from "./types"
 
 /**
  * A room's messages as one viewer sees them, built from a snapshot (the database) plus the live
@@ -21,7 +22,7 @@ import type { JackMessageView, JackProposalState, JackProposalStatusKey, JackRoo
  *
  * The room's own settings (its persona) come the same two ways; the newer copy wins.
  *
- * Proposals' live statuses (#188) come from `proposal.updated` events and, once G4 sends them, from
+ * Proposals' live statuses (#188) come from `proposal.updated` events and from
  * snapshots. The newer copy (by the proposal's updatedAt) wins, like the room's settings; two copies
  * from the same moment go by stage (pending, then applying, then a final one), so a late or stale copy
  * never takes a proposal back.
@@ -49,7 +50,7 @@ export type RoomState = {
 export type RoomSnapshotData = {
   room: JackRoomView
   messages: JackMessageView[]
-  /** The room's proposals' statuses as the database has them (G4); absent until then */
+  /** The room's proposals' statuses as the database has them; absent in older snapshots */
   proposals?: Record<string, JackProposalState>
 }
 
@@ -158,23 +159,12 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
   }
 }
 
-/** How far along a status is, to break a tie between two copies from the same moment */
-function proposalStage(status: JackProposalStatusKey): number {
-  return status === "PENDING" ? 0 : status === "APPLYING" ? 1 : 2
-}
-
-/** Whether an incoming copy of a proposal's status replaces the one this viewer has: newer wins, then further along */
-function newerProposal(current: JackProposalState, next: JackProposalState): boolean {
-  if (next.updatedAt !== current.updatedAt) return next.updatedAt > current.updatedAt
-  return proposalStage(next.status) > proposalStage(current.status)
-}
-
 /** Takes each incoming status that's newer than the one this viewer has; returns `known` itself when nothing changes */
 function mergeProposals(known: Record<string, JackProposalState>, incoming: Record<string, JackProposalState>): Record<string, JackProposalState> {
   let merged: Record<string, JackProposalState> | null = null
   for (const [id, next] of Object.entries(incoming)) {
     const current = known[id]
-    if (current && !newerProposal(current, next)) continue
+    if (current && !isNewerProposalState(current, next)) continue
     merged ??= { ...known }
     merged[id] = next
   }

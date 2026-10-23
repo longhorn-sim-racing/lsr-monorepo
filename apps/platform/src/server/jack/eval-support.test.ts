@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { checkEvalDatabase, localDatabaseProblem, mentionsDollars, mentionsNumber, parseDatabaseUrl, stripDatesAndTimes } from "./eval-support"
+import { checkEvalDatabase, evalCopyUrl, localDatabaseProblem, mentionsDollars, mentionsNumber, parseDatabaseUrl, stripDatesAndTimes, withDatabaseName } from "./eval-support"
 
 const LOCAL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 const LOCAL_JACK = "postgresql://jack_readonly:pw@127.0.0.1:54322/postgres"
@@ -77,6 +77,32 @@ describe("checkEvalDatabase", () => {
     expect(checkEvalDatabase({}).ok).toBe(false)
     expect(checkEvalDatabase({ DATABASE_URL: "mysql://127.0.0.1/x", JACK_DATABASE_URL: LOCAL_JACK }).ok).toBe(false)
     expect(parseDatabaseUrl("not a url")).toBeNull()
+  })
+})
+
+describe("withDatabaseName", () => {
+  it("points a URL at another database on the same server, keeping the user, password and options", () => {
+    expect(withDatabaseName(LOCAL, "lsr_eval")).toBe("postgresql://postgres:postgres@127.0.0.1:54322/lsr_eval")
+    expect(withDatabaseName(`${LOCAL_JACK}?pgbouncer=true`, "lsr_eval")).toBe("postgresql://jack_readonly:pw@127.0.0.1:54322/lsr_eval?pgbouncer=true")
+    expect(parseDatabaseUrl(withDatabaseName(LOCAL, "lsr_eval_copy") ?? undefined)).toMatchObject({ host: "127.0.0.1", database: "lsr_eval_copy" })
+  })
+
+  it("gives the eval copy's URL on this machine only, and only for databases named lsr_eval…", () => {
+    expect(evalCopyUrl(LOCAL, "lsr_eval")).toEqual({ ok: true, url: "postgresql://postgres:postgres@127.0.0.1:54322/lsr_eval" })
+    expect(evalCopyUrl(LOCAL, "lsr_eval_copy")).toMatchObject({ ok: true })
+    expect(evalCopyUrl(LOCAL, "postgres")).toMatchObject({ ok: false, error: expect.stringContaining("lsr_eval") })
+    expect(evalCopyUrl(LOCAL, "lsr_eval;drop")).toMatchObject({ ok: false })
+    expect(evalCopyUrl(POOLER, "lsr_eval")).toMatchObject({ ok: false, error: expect.stringContaining("not the local database") })
+    expect(evalCopyUrl(`${LOCAL}?host=db.example.com`, "lsr_eval")).toMatchObject({ ok: false, error: expect.stringContaining("host=") })
+    expect(evalCopyUrl(undefined, "lsr_eval")).toMatchObject({ ok: false })
+  })
+
+  it("refuses names that aren't plain identifiers, and URLs that aren't Postgres", () => {
+    expect(withDatabaseName(LOCAL, "lsr_eval/../postgres")).toBeNull()
+    expect(withDatabaseName(LOCAL, "lsr eval")).toBeNull()
+    expect(withDatabaseName(LOCAL, "")).toBeNull()
+    expect(withDatabaseName("mysql://127.0.0.1/x", "lsr_eval")).toBeNull()
+    expect(withDatabaseName(undefined, "lsr_eval")).toBeNull()
   })
 })
 

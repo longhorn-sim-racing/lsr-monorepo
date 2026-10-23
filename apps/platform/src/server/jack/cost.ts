@@ -30,6 +30,12 @@ export const LONG_PROMPT_PRICES: Record<string, { overTokens: number; price: Mod
 }
 
 /**
+ * Dollars per web search, on top of the tokens its results add ($10 per 1,000, from the response's
+ * `usage.server_tool_use.web_search_requests`; a failed search isn't counted). Web fetch costs tokens only
+ */
+export const WEB_SEARCH_USD = 0.01
+
+/**
  * Tokens one or more API calls used. `inputTokens` is the uncached remainder only; the whole prompt
  * is inputTokens + cacheWriteTokens + cacheReadTokens.
  */
@@ -103,11 +109,17 @@ export function usageByModel(message: Pick<BetaMessage, "model" | "usage">, requ
   return out
 }
 
-/** Adds up a reply's API calls: tokens per model, and what they cost (each request priced on its own) */
+/**
+ * Adds up a reply's API calls: tokens per model, web searches and fetches, and what they cost (each
+ * request priced on its own, plus WEB_SEARCH_USD a search)
+ */
 export class UsageTally {
   private readonly byModel = new Map<string, TokenUsage>()
   private dollars = 0
   calls = 0
+  /** Web searches and fetches the calls made (server tools), as their usage reported them */
+  webSearches = 0
+  webFetches = 0
 
   constructor(private readonly requestedModel: string) {}
 
@@ -117,6 +129,12 @@ export class UsageTally {
       this.byModel.set(model, addTokens(this.byModel.get(model) ?? NO_TOKENS, usage))
       this.dollars += costUsd(model, usage, this.requestedModel)
     }
+    // A response only lists the counter for the tool that ran, so a missing one is 0
+    const server = message.usage.server_tool_use
+    const searches = server?.web_search_requests ?? 0
+    this.webSearches += searches
+    this.webFetches += server?.web_fetch_requests ?? 0
+    this.dollars += searches * WEB_SEARCH_USD
   }
 
   get tokens(): TokenUsage {

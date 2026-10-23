@@ -1,10 +1,13 @@
 import type { SnapshotGap } from "@/lib/jack/room-gap"
-import type { JackMessageView, JackRoomPersonaKey, JackRoomSummary, JackRoomView } from "@/lib/jack/types"
+import type { JackMessageView, JackProposalState, JackRoomPersonaKey, JackRoomSummary, JackRoomView } from "@/lib/jack/types"
 import { JACK_EVENT, JACK_PERSONA_NAME } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
 import { runAfterResponse } from "@/server/after-response"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
+import { EVAL_ROOM_PREFIX } from "./eval-support"
+import { linkAttachments } from "./files/attach"
 import { jackMessageInclude, jackRoomViewSelect, toMessageView, toRoomView } from "./messages"
+import { roomProposalStates } from "./proposals/service"
 import { defaultReplyDeps, runRoom, type ReplyLoopDeps } from "./reply-loop"
 import { isRoomLockHeld } from "./room-lock"
 
@@ -13,7 +16,8 @@ export const SNAPSHOT_LIMIT = 500
 
 export async function listRooms(): Promise<JackRoomSummary[]> {
   const rooms = await prisma.jackRoom.findMany({
-    where: { archivedAt: null },
+    // Not the eval's rooms (scripts/jack-eval.ts): they only last a question, and their ids aren't uuids
+    where: { archivedAt: null, NOT: { id: { startsWith: EVAL_ROOM_PREFIX } } },
     orderBy: { updatedAt: "desc" },
     take: 200,
     select: {
@@ -45,6 +49,8 @@ export type RoomSnapshot = {
   messages: JackMessageView[]
   /** Opened at an old message in a long room: the newer messages this window left out */
   gap?: SnapshotGap
+  /** The live status of each proposal made in the room, by id: the cards read it (#188) */
+  proposals: Record<string, JackProposalState>
 }
 
 /** A snapshot opened at a message (?m=, design §10) also loads this many messages before it */
@@ -61,6 +67,12 @@ const placed = (message: { id: string; createdAt: Date }) => ({ id: message.id, 
 export async function getRoomSnapshot(roomId: string, { around }: { around?: string } = {}): Promise<RoomSnapshot | null> {
   const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: jackRoomViewSelect })
   if (!room) return null
+  const [messages, proposals] = await Promise.all([snapshotMessages(roomId, around), roomProposalStates(roomId)])
+  return { room: toRoomView(room), ...messages, proposals }
+}
+
+/** The snapshot's messages: the latest, or a window around `around` and the gap it leaves (see getRoomSnapshot) */
+async function snapshotMessages(roomId: string, around: string | undefined): Promise<Pick<RoomSnapshot, "messages" | "gap">> {
   const anchor = around ? await prisma.jackMessage.findFirst({ where: { id: around, roomId }, select: { id: true, createdAt: true } }) : null
   if (anchor) {
     const after = { OR: [{ createdAt: { gt: anchor.createdAt } }, { createdAt: anchor.createdAt, id: { gt: anchor.id } }] }
@@ -83,7 +95,7 @@ export async function getRoomSnapshot(roomId: string, { around }: { around?: str
       ])
       const last = fromAnchor.at(-1) ?? anchor
       const gap: SnapshotGap | null = newest && newest.id !== last.id ? { after: placed(last), through: placed(newest), count: Math.max(1, newer - (fromAnchor.length - 1)) } : null
-      return { room: toRoomView(room), messages: [...before.reverse(), ...fromAnchor].map(toMessageView), ...(gap ? { gap } : {}) }
+      return { messages: [...before.reverse(), ...fromAnchor].map(toMessageView), ...(gap ? { gap } : {}) }
     }
   }
   const latest = await prisma.jackMessage.findMany({
@@ -92,7 +104,7 @@ export async function getRoomSnapshot(roomId: string, { around }: { around?: str
     take: SNAPSHOT_LIMIT,
     include: jackMessageInclude,
   })
-  return { room: toRoomView(room), messages: latest.reverse().map(toMessageView) }
+  return { messages: latest.reverse().map(toMessageView) }
 }
 
 /**
@@ -105,21 +117,25 @@ export type RunRequest = { startedAt?: number; replyDeps?: ReplyLoopDeps }
 /**
  * Saves an officer's message, then (after the response) shows it to the room and gets the room's
  * persona answering: if a run is already going, it picks this message up on its next pass.
- * Null when the room doesn't exist or is archived.
+ * `fileIds` are the officer's READY uploads to post with it (G5): checked first with
+ * attachmentProblem(), then claimed in the same transaction, which throws AttachmentError (and saves
+ * nothing) if one was taken meanwhile. Null when the room doesn't exist or is archived.
  */
 export async function postOfficerMessage(
   roomId: string,
   authorUserId: string,
   content: string,
-  { startedAt = Date.now(), replyDeps = defaultReplyDeps }: RunRequest = {}
+  { startedAt = Date.now(), replyDeps = defaultReplyDeps, fileIds = [] }: RunRequest & { fileIds?: string[] } = {}
 ): Promise<JackMessageView | null> {
   const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: { id: true } })
   if (!room) return null
 
-  const [row] = await prisma.$transaction([
-    prisma.jackMessage.create({ data: { roomId, kind: "user", authorUserId, content }, include: jackMessageInclude }),
-    prisma.jackRoom.update({ where: { id: roomId }, data: { updatedAt: new Date() } }),
-  ])
+  const row = await prisma.$transaction(async (tx) => {
+    const created = await tx.jackMessage.create({ data: { roomId, kind: "user", authorUserId, content } })
+    await linkAttachments(tx, { messageId: created.id, roomId, officerId: authorUserId, fileIds })
+    await tx.jackRoom.update({ where: { id: roomId }, data: { updatedAt: new Date() } })
+    return tx.jackMessage.findUniqueOrThrow({ where: { id: created.id }, include: jackMessageInclude })
+  })
   const message = toMessageView(row)
 
   await runAfterResponse(async () => {

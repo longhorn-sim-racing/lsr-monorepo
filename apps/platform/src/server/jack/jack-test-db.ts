@@ -31,6 +31,7 @@ export type FakeMessage = {
   streamSeq: number
   answeredById: string | null
   continues?: boolean
+  scheduled?: boolean
   model: string | null
   inputTokens: number | null
   outputTokens: number | null
@@ -155,6 +156,7 @@ export function createFakeJackDb() {
         streamSeq: 0,
         answeredById: null,
         continues: false,
+        scheduled: false,
         model: null,
         inputTokens: null,
         outputTokens: null,

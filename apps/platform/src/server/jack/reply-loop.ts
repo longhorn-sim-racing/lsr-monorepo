@@ -16,7 +16,7 @@ import { releaseRoomLock, renewRoomLock, tryAcquireRoomLock } from "./room-lock"
 import { getMonthSpend } from "./spend"
 import { nameRoom, STAND_TIMEOUT_MS } from "./stand"
 import { JACK_TOOLS } from "./tools"
-import type { AnyJackTool } from "./tools/types"
+import type { AnyJackTool, JackRequestType } from "./tools/types"
 
 export type ReplyLoopDeps = {
   broadcast: RoomBroadcaster
@@ -92,8 +92,30 @@ function deadline(ms: number, reason: string) {
   return { signal: controller.signal, clear: () => clearTimeout(timer) }
 }
 
-/** What a reply answers: officer messages, and notes asking Jack to keep going on a deck (#177) */
-const ANSWERABLE = [{ kind: "user" as const }, { kind: "system" as const, continues: true }]
+/**
+ * What a reply answers: officer messages, notes asking Jack to keep going on a deck (#177), and notes a
+ * scheduled run posted (`scheduled`, a recurring question)
+ */
+const ANSWERABLE = [{ kind: "user" as const }, { kind: "system" as const, continues: true }, { kind: "system" as const, scheduled: true }]
+
+/**
+ * The messages the next reply answers, from the waiting ones (oldest first): a scheduled note on its own,
+ * or else everything up to the next scheduled note. So whichever run picks up a scheduled note, it's
+ * never answered together with officer messages
+ */
+function nextReplyBatch(waiting: JackMessageRow[]): JackMessageRow[] {
+  if (waiting[0]?.scheduled) return waiting.slice(0, 1)
+  const end = waiting.findIndex((m) => m.scheduled)
+  return end === -1 ? waiting : waiting.slice(0, end)
+}
+
+/**
+ * What a reply is for, from the messages it answers (design §7.2): "scheduled" when any is a scheduled
+ * note, so it gets no web tools and its tools see ctx.requestType "scheduled"; "room" otherwise
+ */
+function replyRequestType(answering: JackMessageRow[]): JackRequestType {
+  return answering.some((m) => m.scheduled) ? "scheduled" : "room"
+}
 
 /** Messages nobody has answered yet, oldest first (other room notes don't get answers) */
 function findUnanswered(roomId: string) {
@@ -118,10 +140,10 @@ async function hasUnanswered(roomId: string) {
  * officer asking Jack to continue).
  *
  * Each pass answers every officer message that's waiting, together in one reply, so messages posted
- * mid-answer are picked up by the next pass. When nothing is waiting the run lets go of the lock,
- * then looks once more: a message posted just before that found the lock taken and left it to this
- * run, so if one is there the run takes the lock back (or sees that a newer run has it). That way
- * nothing is left unanswered while the run has time.
+ * mid-answer are picked up by the next pass; a scheduled note gets a reply of its own (nextReplyBatch).
+ * When nothing is waiting the run lets go of the lock, then looks once more: a message posted just
+ * before that found the lock taken and left it to this run, so if one is there the run takes the lock
+ * back (or sees that a newer run has it). That way nothing is left unanswered while the run has time.
  *
  * A run has RUN_TIMING.runDeadlineMs in all. It doesn't start an answer with less than minAnswerMs
  * left: it lets go of the lock instead and leaves the messages waiting, for the next post or for an
@@ -132,6 +154,10 @@ async function hasUnanswered(roomId: string) {
  *
  * `startedAt` is when the request that started the run began (posting, or "continue"), since the
  * function's own time limit counts from then; it defaults to now.
+ *
+ * A scheduled run (a recurring question) posts its note with `scheduled: true` and then calls this like
+ * any other run. What a reply may do comes from the messages it answers, not from the run, so the note
+ * gets a scheduled reply whichever run answers it (one an officer's post started included).
  */
 export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultReplyDeps, { startedAt = Date.now() }: { startedAt?: number } = {}): Promise<void> {
   const runId = randomUUID()
@@ -160,7 +186,7 @@ export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultReply
           holding = false // a newer run took over a lock it thought was stale; it answers from here
           return
         }
-        await answer(roomId, waiting, deps, sideJobs, { runSignal: run.signal, deadlineAt, leftMs, replyDeadlineMs: timing.replyDeadlineMs })
+        await answer(roomId, nextReplyBatch(waiting), deps, sideJobs, { runSignal: run.signal, deadlineAt, leftMs, replyDeadlineMs: timing.replyDeadlineMs })
         continue
       }
 
@@ -205,6 +231,7 @@ type AnswerTiming = { runSignal: AbortSignal; deadlineAt: number; leftMs: number
 
 /** One reply to every message in `waiting`, from the room's persona as it is now */
 async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoopDeps, sideJobs: Promise<void>[], timing: AnswerTiming) {
+  const requestType = replyRequestType(waiting)
   const reply = await prisma.$transaction(async (tx) => {
     const room = await tx.jackRoom.findUnique({ where: { id: roomId }, select: { persona: true } })
     const created = await tx.jackMessage.create({
@@ -247,7 +274,7 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   let status: "done" | "error"
   let result: { content: string; streamSeq: number }
   try {
-    produced = await produce(roomId, reply, persona, waiting, deps, stream, usage, { signal, limits }, (latest) => {
+    produced = await produce(roomId, reply, persona, waiting, deps, stream, usage, { signal, limits, requestType }, (latest) => {
       parts = latest
     })
     status = produced.status
@@ -270,7 +297,9 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
     console.info(
       `[jack] Reply ${reply.id} in room ${roomId}: ${JACK_PERSONA_NAME[persona]} (${usage.models.join(", ")}) $${usage.costUsd}, ` +
         `${tokens.inputTokens} in + ${tokens.cacheWriteTokens} cache write + ${tokens.cacheReadTokens} cache read, ${tokens.outputTokens} out, ` +
-        `${usage.calls} calls, ${produced?.toolCalls ?? 0} tool calls, ${((Date.now() - startedAt) / 1000).toFixed(1)} s, ${produced?.outcome ?? "failed"}`
+        `${usage.calls} calls, ${produced?.toolCalls ?? 0} tool calls, ` +
+        `${usage.webSearches || usage.webFetches ? `${usage.webSearches} web searches, ${usage.webFetches} pages opened, ` : ""}` +
+        `${((Date.now() - startedAt) / 1000).toFixed(1)} s, ${produced?.outcome ?? "failed"}`
     )
   }
 
@@ -295,7 +324,8 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   }
   await deps.broadcast(roomId, { type: JACK_EVENT.done, message: toMessageView(final) })
 
-  if (produced?.unfinishedDesign) {
+  // Not after a scheduled reply: its continue note would be answered as a room reply, with the web tools
+  if (produced?.unfinishedDesign && requestType === "room") {
     await leaveContinueNote(roomId, persona, waiting, deps).catch((error) => console.error(`[jack] Couldn't leave a continue note in room ${roomId}:`, error))
   }
 
@@ -332,7 +362,7 @@ async function produce(
   deps: ReplyLoopDeps,
   stream: DeltaStream,
   usage: UsageTally,
-  run: { signal: AbortSignal; limits: Partial<ReplyLimits> },
+  run: { signal: AbortSignal; limits: Partial<ReplyLimits>; requestType: JackRequestType },
   onParts: (parts: JackToolPart[]) => void
 ): Promise<Produced> {
   const name = JACK_PERSONA_NAME[persona]
@@ -390,6 +420,7 @@ async function produce(
     },
     usage,
     limits: run.limits,
+    requestType: run.requestType,
     signal: run.signal,
   })
   return {

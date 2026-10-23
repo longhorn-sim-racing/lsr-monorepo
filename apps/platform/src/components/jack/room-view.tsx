@@ -17,6 +17,7 @@ import {
 import { replyPieces } from "@/lib/jack/reply-pieces"
 import { JACK_TITLE_MAX } from "@/schemas/jack.schema"
 import type { JackSpend } from "@/lib/jack/spend"
+import { NoteText } from "./note-text"
 import { FilesView } from "./parts/files-view"
 import { JackToolPartView } from "./parts/tool-part"
 import { PersonaAvatar } from "./persona-avatar"
@@ -71,6 +72,8 @@ type RoomViewProps = {
 export type JackComposerOptions = {
   /** Drawn beside the Send button (an attach button, chips for files waiting to go) */
   addons?: ReactNode
+  /** Drawn above the message box (G5: the chips for files waiting to go, which need the composer's full width) */
+  attachments?: ReactNode
   /** Runs on paste into the message box (files pasted in); call preventDefault to keep the paste out of the text */
   onPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void
   /** Runs when something is dropped on the composer (files dragged in); the composer only accepts drops when this is set */
@@ -456,7 +459,7 @@ const MessageRow = memo(function MessageRow({ message, anchored = false, message
       <li data-message-id={message.id} tabIndex={tabIndex} className={cn("flex items-center gap-2.5 text-xs text-admin-subtle", highlight)}>
         <span aria-hidden className="h-px flex-1 bg-admin-row" />
         <span>
-          {message.content} · {timeOfDay.format(new Date(message.createdAt))}
+          <NoteText text={message.content} /> · {timeOfDay.format(new Date(message.createdAt))}
         </span>
         <span aria-hidden className="h-px flex-1 bg-admin-row" />
       </li>
@@ -573,7 +576,7 @@ function ContinueBar({ stall, name, onContinue }: { stall: "unanswered" | "stuck
 }
 
 function Composer({ persona, onSend, options }: { persona: JackRoomPersonaKey; onSend: RoomViewProps["onSend"]; options: JackComposerOptions }) {
-  const { addons, onPaste, onDrop, canSendEmpty = false, placeholder } = options
+  const { addons, attachments, onPaste, onDrop, canSendEmpty = false, placeholder } = options
   const [content, setContent] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
@@ -611,6 +614,7 @@ function Composer({ persona, onSend, options }: { persona: JackRoomPersonaKey; o
       onDragOver={onDrop ? (e) => e.preventDefault() : undefined}
       onDrop={onDrop}
     >
+      {attachments}
       <label htmlFor="jack-message" className="sr-only">
         Message the room
       </label>

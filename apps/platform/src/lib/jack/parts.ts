@@ -49,8 +49,11 @@ export type JackProposalDisplay = {
   summary: string
   /** e.g. { matched: 12, unmatched: 2 } for list kinds */
   counts?: Record<string, number>
-  /** The first few changed fields, formatted on the server */
-  preview: { label: string; before: string | null; after: string | null }[]
+  /**
+   * The first few changed fields, formatted on the server and cut short. A markdown row (long text) has
+   * no before, and a count of changed lines as its after; the card loads the real diff
+   */
+  preview: { label: string; before: string | null; after: string | null; format?: "text" | "value" | "markdown" }[]
 }
 
 /** A link in a `links` part */

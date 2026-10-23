@@ -5,8 +5,8 @@ import type { JackProposalLink, JackProposalResult } from "@/lib/jack/types"
  * Proposed changes (#188, design §4). Jack proposes; an officer presses Apply. A `propose_*` tool
  * validates its input against a kind's schema, the kind describes the change on the server (the model
  * never writes the title, summary or diff), and the change itself runs only when an officer applies it,
- * with that officer's permissions. The claim/apply framework, card and Proposals page arrive in G4;
- * these types are what every kind is written against.
+ * with that officer's permissions. The claim/apply framework is `./service.ts`; these types are what
+ * every kind is written against. How a track adds a kind: docs/jack-2/tracks/groundwork.md.
  *
  * Plain JSON only in ProposalView, ProposalRow and ProposalResult: they're saved on JackProposal and
  * sent to the room.
@@ -48,8 +48,8 @@ export type ProposalDiffRow = {
 }
 
 /**
- * One row of a list kind (check-ins, imports, notification audiences). The card gives each a checkbox,
- * so an officer can apply some rows and not others
+ * One row of a proposal with rows (check-ins, imports, notification audiences). The card gives each a
+ * checkbox, so an officer can apply some rows and not others
  */
 export type ProposalRow = {
   /** Stable within the proposal: `selectedRows` lists these ids */
@@ -78,7 +78,12 @@ export type ProposalView = {
   diff: ProposalDiffRow[]
   people?: ProposalPerson[]
   links?: ProposalLink[]
-  /** List kinds only: the rows to pick from, with the same ids as `list.rows()` */
+  /**
+   * The rows to pick from, for kinds whose rows `prepare()` builds on the server (an import's file rows,
+   * a notification's audience, names matched to members). Saved with the proposal: Apply checks the
+   * officer's picks against these and passes them as `selectedRows`. A kind can give its rows here
+   * alone, without `list`; when it has both, these win
+   */
   rows?: ProposalRow[]
 }
 
@@ -105,13 +110,30 @@ export type ProposalApplyContext = {
   officer: { userId: string; displayName: string }
   proposalId: string
   roomId: string
-  /** List kinds: the row ids the officer left checked; undefined means every row */
+  /** Proposals with rows (`view.rows` or `list.rows`): the row ids the officer left checked; undefined means every row */
   selectedRows?: string[]
   /**
    * Derived from the proposal id ("proposal:<id>"), the same on every try. Pass it to outside services
    * (Resend's Idempotency-Key, Discord's dedupeKey) so a retried apply never sends twice
    */
   idempotencyKey: string
+  /**
+   * What `prepare()` snapshotted, the same value `checkStale()` just passed. A kind can make its write
+   * conditional on it (the page service's `expected`), closing the gap between the check and the write;
+   * throw StaleProposalError (./errors) when that write misses
+   */
+  before: unknown
+  /** For the audit entry of the change itself (the service the kind calls writes it): links it back to the proposal */
+  auditMetadata: ProposalAuditMetadata
+}
+
+/** Added to every audit entry a proposal leads to: the framework's own (entityType JACK_PROPOSAL) and the change's */
+export type ProposalAuditMetadata = {
+  via: "jack"
+  proposalId: string
+  roomId: string
+  /** The officer it was proposed for (the asker); null outside a room reply */
+  proposedFor: string | null
 }
 
 /** What `prepare()` returns: a snapshot of the target as it is now, and the card */
@@ -121,7 +143,10 @@ export type ProposalPrepared = {
   view: ProposalView
   /** The record it changes (JackProposal.targetId), with `targetType`; a newer proposal for the same kind and target supersedes this one */
   targetId?: string
-  /** For kinds built from a room file: its sha256, checked again before applying */
+  /**
+   * For kinds built from a room file: its sha256, checked again before applying. The payload must then
+   * name the file as `fileId` (a JackFile id): Apply compares that file's sha256 with this one
+   */
   fileSha256?: string
 }
 
@@ -147,7 +172,18 @@ export type ProposalKind<P> = {
   /** AuditLog entityType of what it changes, e.g. "Event" */
   targetType?: string
   permission: ProposalPermission
-  /** List kinds: the payload's rows, so the card can offer per-row checkboxes (partial approval) */
+  /**
+   * When some payloads need more than `permission` (an import into an admin-only target): the
+   * permission for this payload. Checked before the claim and for the card's Apply button; it can only
+   * make `permission` stricter, and one that throws means admin
+   */
+  permissionFor?(p: P): ProposalPermission
+  /** Applying it can't be taken back (it sends, posts or deletes): the card asks the officer to confirm first */
+  destructive?: boolean
+  /**
+   * For kinds whose rows come from the payload alone: rebuilds them, so the card can offer per-row
+   * checkboxes (partial approval). Kinds that build rows on the server give them in `view.rows` instead
+   */
   list?: { rows(p: P): ProposalRow[] }
   prepare(p: P, ctx: ProposalContext): Promise<ProposalPrepared>
   checkStale(p: P, before: unknown): Promise<string | null>
@@ -194,7 +230,10 @@ export type ImportTarget<R> = {
   target: string
   /** e.g. "LSC applications" */
   label: string
-  /** Who may apply an import into it, when that's stricter than the import.rows kind's own permission (the stricter one applies) */
+  /**
+   * Who may apply an import into it, when that's stricter than the import.rows kind's own permission
+   * (the stricter one applies: import.rows returns it from its `permissionFor`)
+   */
   permission?: ProposalPermission
   columns: ImportColumn[]
   /** Checks one row and resolves what it refers to (a member by email, say). Reads only; runs at propose time and again at apply */

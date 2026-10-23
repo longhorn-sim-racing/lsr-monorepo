@@ -11,6 +11,7 @@ vi.mock("@/server/db", () => ({ prisma: db }))
 vi.mock("./reply-loop", () => ({ defaultReplyDeps: {}, runRoom: vi.fn() }))
 vi.mock("./broadcast", () => ({ broadcastRoomEvent: vi.fn() }))
 vi.mock("@/server/after-response", () => ({ runAfterResponse: vi.fn() }))
+vi.mock("./proposals/service", () => ({ roomProposalStates: vi.fn(async () => ({})) }))
 
 import { roomSearchQuery, searchRooms } from "./room-search"
 import { ANCHOR_BEFORE, getRoomSnapshot, SNAPSHOT_LIMIT } from "./rooms"

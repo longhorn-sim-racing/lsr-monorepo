@@ -1,8 +1,10 @@
 /**
  * Outside services (#188, design §12): Discord, Twitch, Stripe, Resend, site traffic, Instagram,
- * Google Drive, Microsoft Graph, Supabase Storage. Each one implements `Connector` and is registered in
- * `slots/<track>.ts`; Jack's tools, the sync jobs and the admin pages all reach the service through
- * it. G2 builds the shared pieces (ConnectorState reads, the HTTP fakes, the Connections page).
+ * Google Drive, Microsoft Graph, Supabase Storage. Each one implements `Connector` (usually through
+ * defineConnector() in `define.ts`) and is registered in `slots/<track>.ts`; Jack's tools, the sync
+ * jobs and the admin pages all reach the service through it. The shared pieces: ConnectorState reads
+ * and writes (`state.ts`), statuses and smoke tests (`status.ts`), base URLs and the HTTP fakes
+ * (`base-url.ts`, `fakes/`), and the Connections page.
  *
  * Connectors ship switched off. When one is missing env, switched off or failing, its tools say "not
  * connected" and the app keeps working. Credentials stay in env or in revoked SystemSetting keys, and
@@ -49,7 +51,10 @@ export type ConnectorSmokeResult = {
   ms?: number
 }
 
-/** One outside service. `C` is its client: a real HTTP client, pointed at the local fake when `<SERVICE>_BASE_URL` says so */
+/** What a smoke test gets: `signal` aborts when the Connections page stops waiting (about 25 s) */
+export type ConnectorSmokeOptions = { signal?: AbortSignal }
+
+/** One outside service. `C` is its client: a real HTTP client whose base URL comes from serviceBaseUrl(), so JACK_FAKES points it at the local fake */
 export type Connector<C> = {
   /** Stable, the ConnectorState row id: "discord" */
   id: string
@@ -71,7 +76,7 @@ export type Connector<C> = {
   /** A ready client, or null when it isn't configured (env or settings) or is switched off, so callers say "not connected" */
   client(): Promise<C | null>
   /** A live check against the real service, run on demand from the Connections page or a script; works while switched off, never runs in tests */
-  smoke?(): Promise<ConnectorSmokeResult>
+  smoke?(options?: ConnectorSmokeOptions): Promise<ConnectorSmokeResult>
   status(): Promise<ConnectorStatus>
 }
 
