@@ -1,6 +1,6 @@
 import type { JackToolPart } from "./parts"
 import { ROOM_LOCK_STALE_MS } from "./timing"
-import type { JackMessageView, JackRoomEvent, JackRoomView } from "./types"
+import type { JackMessageView, JackProposalState, JackProposalStatusKey, JackRoomEvent, JackRoomView } from "./types"
 
 /**
  * A room's messages as one viewer sees them, built from a snapshot (the database) plus the live
@@ -20,6 +20,11 @@ import type { JackMessageView, JackRoomEvent, JackRoomView } from "./types"
  * the live ones rather than replacing them. A part for a message not seen yet is held like a delta.
  *
  * The room's own settings (its persona) come the same two ways; the newer copy wins.
+ *
+ * Proposals' live statuses (#188) come from `proposal.updated` events and, once G4 sends them, from
+ * snapshots. The newer copy (by the proposal's updatedAt) wins, like the room's settings; two copies
+ * from the same moment go by stage (pending, then applying, then a final one), so a late or stale copy
+ * never takes a proposal back.
  */
 /** A delta held until it can be applied: its text, and whether it replaces the text so far */
 export type HeldDelta = { text: string; replace?: true }
@@ -37,23 +42,31 @@ export type RoomState = {
   needsResync: boolean
   /** Snapshots in a row (or failed fetches) that didn't close the gap, so the page can back off and try again */
   resyncAttempts: number
+  /** The live status of each proposal made in this room that the page has heard about, by proposal id */
+  proposals: Record<string, JackProposalState>
 }
 
-export type RoomSnapshotData = { room: JackRoomView; messages: JackMessageView[] }
+export type RoomSnapshotData = {
+  room: JackRoomView
+  messages: JackMessageView[]
+  /** The room's proposals' statuses as the database has them (G4); absent until then */
+  proposals?: Record<string, JackProposalState>
+}
 
 /** Live events, a snapshot, or word that fetching a snapshot failed (so the page backs off and tries again) */
 export type RoomAction = JackRoomEvent | ({ type: "snapshot" } & RoomSnapshotData) | { type: "resync_failed" }
 
 type Held = Pick<RoomState, "pending" | "pendingParts" | "incomplete">
 
-export function initRoomState({ room, messages }: RoomSnapshotData): RoomState {
-  return { room, messages: [...messages].sort(byTime), pending: {}, pendingParts: {}, incomplete: {}, needsResync: false, resyncAttempts: 0 }
+export function initRoomState({ room, messages, proposals = {} }: RoomSnapshotData): RoomState {
+  return { room, messages: [...messages].sort(byTime), pending: {}, pendingParts: {}, incomplete: {}, needsResync: false, resyncAttempts: 0, proposals }
 }
 
 export function roomReducer(state: RoomState, action: RoomAction): RoomState {
   switch (action.type) {
     case "snapshot": {
       const room = newerRoom(state.room, action.room)
+      const proposals = action.proposals ? mergeProposals(state.proposals, action.proposals) : state.proposals
       let messages = state.messages
       let incomplete = state.incomplete
       for (const message of action.messages) {
@@ -66,7 +79,7 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
       }
       let held: Held = { pending: state.pending, pendingParts: state.pendingParts, incomplete }
       for (const id of new Set([...Object.keys(held.pending), ...Object.keys(held.pendingParts)])) ({ messages, held } = drain(messages, held, id))
-      return settle({ ...state, room }, messages, held, true)
+      return settle({ ...state, room, proposals }, messages, held, true)
     }
 
     case "resync_failed":
@@ -75,6 +88,13 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
     case "room.updated": {
       const room = newerRoom(state.room, action.room)
       return room === state.room ? state : { ...state, room }
+    }
+
+    case "proposal.updated": {
+      if (action.roomId !== state.room.id) return state
+      const { id, ...incoming } = action.proposal
+      const proposals = mergeProposals(state.proposals, { [id]: incoming })
+      return proposals === state.proposals ? state : { ...state, proposals }
     }
 
     case "message.created": {
@@ -138,6 +158,29 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
   }
 }
 
+/** How far along a status is, to break a tie between two copies from the same moment */
+function proposalStage(status: JackProposalStatusKey): number {
+  return status === "PENDING" ? 0 : status === "APPLYING" ? 1 : 2
+}
+
+/** Whether an incoming copy of a proposal's status replaces the one this viewer has: newer wins, then further along */
+function newerProposal(current: JackProposalState, next: JackProposalState): boolean {
+  if (next.updatedAt !== current.updatedAt) return next.updatedAt > current.updatedAt
+  return proposalStage(next.status) > proposalStage(current.status)
+}
+
+/** Takes each incoming status that's newer than the one this viewer has; returns `known` itself when nothing changes */
+function mergeProposals(known: Record<string, JackProposalState>, incoming: Record<string, JackProposalState>): Record<string, JackProposalState> {
+  let merged: Record<string, JackProposalState> | null = null
+  for (const [id, next] of Object.entries(incoming)) {
+    const current = known[id]
+    if (current && !newerProposal(current, next)) continue
+    merged ??= { ...known }
+    merged[id] = next
+  }
+  return merged ?? known
+}
+
 function heldOf(state: RoomState): Held {
   return { pending: state.pending, pendingParts: state.pendingParts, incomplete: state.incomplete }
 }
@@ -193,8 +236,11 @@ function sameFinal(a: JackMessageView, b: JackMessageView): boolean {
     a.status === b.status &&
     a.streamSeq === b.streamSeq &&
     a.answered === b.answered &&
+    a.continues === b.continues &&
+    a.expectsAnswer === b.expectsAnswer &&
     a.createdAt === b.createdAt &&
     JSON.stringify(a.author) === JSON.stringify(b.author) &&
+    JSON.stringify(a.files ?? []) === JSON.stringify(b.files ?? []) &&
     a.tools.length === b.tools.length &&
     a.tools.every((part, i) => {
       const other = b.tools[i]
@@ -301,7 +347,7 @@ function drain(messages: JackMessageView[], held: Held, id: string): Drained {
 function settle(state: RoomState, messages: JackMessageView[], held: Held, fromSnapshot: boolean): RoomState {
   const needsResync = [held.pending, held.pendingParts, held.incomplete].some((group) => Object.keys(group).length > 0)
   const resyncAttempts = !needsResync ? 0 : fromSnapshot ? state.resyncAttempts + 1 : state.resyncAttempts
-  return { room: state.room, messages, pending: held.pending, pendingParts: held.pendingParts, incomplete: held.incomplete, needsResync, resyncAttempts }
+  return { room: state.room, messages, pending: held.pending, pendingParts: held.pendingParts, incomplete: held.incomplete, needsResync, resyncAttempts, proposals: state.proposals }
 }
 
 /** Quiet this long with officer messages no reply has picked up (and nothing streaming), the run stopped short of them */
@@ -317,11 +363,12 @@ export const STUCK_QUIET_MS = ROOM_LOCK_STALE_MS + 15_000
  * What the room may be stuck on, before counting how long it's been quiet: "unanswered" when an
  * officer message hasn't been picked up by a reply (`answered`, not the order: one posted while a reply
  * was being set up sorts above it) and nothing is streaming; "stuck" when a reply is still streaming.
- * Null when nothing is waiting
+ * An officer message that expects no answer (a mention-mode room, no mention) never counts. Null when
+ * nothing is waiting
  */
 export function stallCandidate(messages: JackMessageView[]): "unanswered" | "stuck" | null {
   if (messages.some((m) => m.status === "streaming")) return "stuck"
-  return messages.some((m) => (m.author.kind === "user" || m.continues) && !m.answered) ? "unanswered" : null
+  return messages.some((m) => (m.author.kind === "user" || m.continues) && !m.answered && m.expectsAnswer !== false) ? "unanswered" : null
 }
 
 /** How long a stall candidate has to stay quiet before the room offers to ask Jack to continue */

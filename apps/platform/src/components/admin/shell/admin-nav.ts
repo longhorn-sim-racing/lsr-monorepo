@@ -18,6 +18,9 @@ export const ADMIN_NAV: AdminNavGroup[] = [
       { title: "Overview", href: "/admin", keywords: ["home", "dashboard"] },
       { title: "Jack", href: "/admin/jack", keywords: ["ai", "assistant", "ask", "chat", "rooms"] },
       { title: "Decks and graphics", href: "/admin/jack/decks", keywords: ["slides", "presentation", "instagram", "story", "post", "promo", "jack"] },
+      { title: "Proposals", href: "/admin/jack/proposals", keywords: ["proposed changes", "apply", "discard", "pending", "jack"] },
+      { title: "Recurring questions", href: "/admin/jack/recurring", keywords: ["scheduled questions", "automation", "weekly", "daily", "jack"] },
+      { title: "Usage", href: "/admin/jack/usage", keywords: ["cost", "spend", "budget", "feedback", "jack"] },
     ],
   },
   {
@@ -46,6 +49,21 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     ],
   },
   {
+    label: "Community",
+    items: [
+      { title: "Discord", href: "/admin/discord", keywords: ["server", "channels", "polls", "activity", "members", "role sync", "linked accounts"] },
+      { title: "Announcements", href: "/admin/announcements", keywords: ["discord posts", "reminders", "standing rules", "scheduled posts"] },
+    ],
+  },
+  {
+    label: "Club",
+    items: [
+      { title: "Meetings", href: "/admin/meetings", keywords: ["agenda", "minutes", "summary", "transcript", "decisions", "gm", "board"] },
+      { title: "Action items", href: "/admin/action-items", keywords: ["tasks", "to-dos", "owners", "follow-ups", "overdue"] },
+      { title: "Sponsors", href: "/admin/sponsors", keywords: ["prospects", "outreach", "sponsorship", "partners", "pipeline"] },
+    ],
+  },
+  {
     label: "Money",
     items: [
       { title: "Payments", href: "/admin/payments", keywords: ["stripe", "refunds", "donations"] },
@@ -60,6 +78,8 @@ export const ADMIN_NAV: AdminNavGroup[] = [
       { title: "Pages", href: "/admin/pages", keywords: ["rules"] },
       { title: "Gallery", href: "/admin/gallery", keywords: ["photos", "albums"] },
       { title: "Instagram", href: "/admin/instagram" },
+      { title: "Knowledge", href: "/admin/knowledge", keywords: ["knowledge base", "memory", "notes", "documents", "drive", "sharepoint", "teams", "jack"] },
+      { title: "Streams", href: "/admin/streams", keywords: ["twitch", "live", "vods", "viewers", "followers"] },
     ],
   },
   {
@@ -68,6 +88,8 @@ export const ADMIN_NAV: AdminNavGroup[] = [
       { title: "Notifications", href: "/admin/notifications", keywords: ["email"] },
       { title: "Audit log", href: "/admin/audit", keywords: ["history", "changes"] },
       { title: "Tools", href: "/admin/tools" },
+      { title: "Connections", href: "/admin/connections", keywords: ["integrations", "connectors", "services", "env", "smoke test"] },
+      { title: "Scheduled jobs", href: "/admin/jobs", keywords: ["cron", "scheduler", "sync", "runs", "heartbeat"] },
     ],
   },
 ]

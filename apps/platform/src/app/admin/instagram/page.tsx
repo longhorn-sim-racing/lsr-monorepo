@@ -6,6 +6,7 @@ import { getInstagramPostsForAdmin } from "@/server/queries/instagram"
 import { cloudinaryUploadsConfigured } from "@/server/cloudinary"
 import { PageHeader } from "@/components/admin/kit"
 import { DEFAULT_TIMEZONE } from "@/lib/dates"
+import { InstagramSections } from "./_sections"
 import { InstagramAdmin } from "./client"
 
 export const dynamic = "force-dynamic"
@@ -49,6 +50,8 @@ export default async function AdminInstagramPage() {
           postedAt: day(post.postedAt.toISOString())!,
         }))}
       />
+      {/* Sections the Jack 2.0 tracks add (insights, publish history); nothing while there are none */}
+      <InstagramSections />
     </>
   )
 }

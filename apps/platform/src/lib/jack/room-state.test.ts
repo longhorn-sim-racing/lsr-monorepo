@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { JackToolPart } from "./parts"
 import { initRoomState, roomReducer, stallCandidate, stallQuietMs, STALL_QUIET_MS, STUCK_QUIET_MS, type RoomAction, type RoomState } from "./room-state"
 import { ROOM_LOCK_STALE_MS } from "./timing"
-import type { JackMessageView, JackRoomView } from "./types"
+import type { JackMessageFile, JackMessageView, JackProposalResult, JackProposalState, JackProposalStatusKey, JackRoomView } from "./types"
 
 const officerMessage = (id: string, createdAt: string, content = "How many LSC applications?", answered = true): JackMessageView => ({
   id,
@@ -409,6 +409,11 @@ describe("stallCandidate", () => {
     expect(stallCandidate([])).toBeNull()
   })
 
+  it("ignores an officer message that expects no answer (a mention-mode room, no mention)", () => {
+    const aside: JackMessageView = { ...waitingMessage("m2", "2026-10-12T20:00:09.000Z"), expectsAnswer: false }
+    expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" }), aside])).toBeNull()
+  })
+
   it("is stuck while a reply is streaming, which only counts after the room lock would be stale", () => {
     expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply()])).toBe("stuck")
     expect(stallQuietMs("stuck")).toBe(STUCK_QUIET_MS)
@@ -443,6 +448,62 @@ describe("answered officer messages", () => {
   })
 })
 
+describe("proposal statuses", () => {
+  /** The proposal's updatedAt, `s` seconds in */
+  const at = (s: number) => new Date(Date.UTC(2026, 9, 12, 20, 0, s)).toISOString()
+  const copyOf = (status: JackProposalStatusKey, s: number, result?: JackProposalResult): JackProposalState => (result ? { status, result, updatedAt: at(s) } : { status, updatedAt: at(s) })
+  const update = (id: string, status: JackProposalStatusKey, s: number, result?: JackProposalResult, roomId = "room-1"): RoomAction => ({
+    type: "proposal.updated",
+    roomId,
+    proposal: { id, ...copyOf(status, s, result) },
+  })
+  const applied: JackProposalResult = { summary: "Changed GM 2's start time to 7 PM", links: [{ title: "GM 2", url: "/admin/events/e1/manage" }] }
+
+  it("starts empty, or from a snapshot's statuses", () => {
+    expect(start().proposals).toEqual({})
+    expect(initRoomState({ room: room(), messages: [], proposals: { p1: copyOf("PENDING", 1) } }).proposals).toEqual({ p1: copyOf("PENDING", 1) })
+  })
+
+  it("follows a proposal through its statuses, keeping the result", () => {
+    const state = run(start(), update("p1", "PENDING", 1), update("p1", "APPLYING", 2), update("p1", "APPLIED", 3, applied))
+    expect(state.proposals.p1).toEqual(copyOf("APPLIED", 3, applied))
+  })
+
+  it("keeps the newer copy when events arrive out of order", () => {
+    const state = run(start(), update("p1", "APPLIED", 3, applied), update("p1", "APPLYING", 2), update("p1", "PENDING", 1))
+    expect(state.proposals.p1).toEqual(copyOf("APPLIED", 3, applied))
+  })
+
+  it("goes by time, not stage, so a later status wins even if it reads as earlier", () => {
+    // e.g. a FAILED apply that an officer retried: the newer PENDING copy is the truth
+    expect(run(start(), update("p1", "FAILED", 2), update("p1", "PENDING", 5)).proposals.p1.status).toBe("PENDING")
+  })
+
+  it("breaks a tie between copies from the same moment by stage", () => {
+    expect(run(start(), update("p1", "APPLYING", 2), update("p1", "PENDING", 2)).proposals.p1.status).toBe("APPLYING")
+    expect(run(start(), update("p1", "APPLYING", 2), update("p1", "APPLIED", 2, applied)).proposals.p1).toEqual(copyOf("APPLIED", 2, applied))
+  })
+
+  it("ignores another room's proposals, and an update that changes nothing", () => {
+    const state = run(start(), update("p1", "STALE", 4))
+    expect(run(state, update("p9", "APPLIED", 5, applied, "room-2"))).toBe(state)
+    expect(run(state, update("p1", "STALE", 4))).toBe(state)
+  })
+
+  it("takes statuses from a snapshot unless they're older, and leaves messages alone", () => {
+    const live = run(start([officerMessage("m1", "2026-10-12T20:00:00.000Z")]), update("p1", "APPLIED", 3, applied), update("p3", "PENDING", 1))
+    const proposals = { p1: copyOf("PENDING", 1), p2: copyOf("DISCARDED", 2), p3: copyOf("STALE", 9) }
+    const state = run(live, { type: "snapshot", room: room(), messages: [officerMessage("m1", "2026-10-12T20:00:00.000Z")], proposals })
+    expect(state.proposals).toEqual({ p1: copyOf("APPLIED", 3, applied), p2: copyOf("DISCARDED", 2), p3: copyOf("STALE", 9) })
+    expect(state.messages).toBe(live.messages)
+  })
+
+  it("keeps what it knows through other events and snapshots without statuses", () => {
+    const state = run(start(), update("p1", "FAILED", 2, { summary: "Couldn't apply: the event was deleted" }), created(reply()), delta(1, "Hi"), snapshot([]))
+    expect(state.proposals.p1.status).toBe("FAILED")
+  })
+})
+
 describe("snapshots and unchanged messages", () => {
   it("keeps each finished message's object when a snapshot has the same copy, so rows don't re-render", () => {
     const table = { kind: "table" as const, columns: ["n"], rows: [[13]], truncated: false }
@@ -465,5 +526,20 @@ describe("snapshots and unchanged messages", () => {
 
     expect(after.messages[0]).not.toBe(before.messages[0])
     expect(after.messages[0].status).toBe("error")
+  })
+
+  it("compares files, expectsAnswer and continue notes too", () => {
+    const photo: JackMessageFile = { id: "f1", filename: "sign-in.jpg", kind: "IMAGE", sizeBytes: 120_000, url: "/api/admin/jack/files/f1" }
+    const withFile: JackMessageView = { ...officerMessage("m1", "2026-10-12T20:00:00.000Z"), files: [photo] }
+    const before = start([withFile])
+
+    // The same files in fresh objects: nothing to redraw
+    expect(run(before, snapshot([structuredClone(withFile)])).messages[0]).toBe(before.messages[0])
+    // Another file, no files, or a changed flag: the snapshot's copy is new
+    const renamed = run(before, snapshot([{ ...withFile, files: [{ ...photo, filename: "sign-in-2.jpg" }] }]))
+    expect(renamed.messages[0].files?.[0].filename).toBe("sign-in-2.jpg")
+    expect(run(before, snapshot([{ ...withFile, files: undefined }])).messages[0].files).toBeUndefined()
+    expect(run(before, snapshot([{ ...withFile, expectsAnswer: false }])).messages[0].expectsAnswer).toBe(false)
+    expect(run(before, snapshot([{ ...withFile, continues: true }])).messages[0].continues).toBe(true)
   })
 })
