@@ -3,20 +3,22 @@ import type { Prisma } from "@prisma/client"
 
 const db = vi.hoisted(() => ({
   $queryRaw: vi.fn(),
-  jackRoom: { findFirst: vi.fn(), findMany: vi.fn() },
+  jackRoom: { findUnique: vi.fn(), findMany: vi.fn() },
   jackMessage: { findFirst: vi.fn(), findMany: vi.fn(), count: vi.fn() },
 }))
+const feedback = vi.hoisted(() => ({ roomFeedback: vi.fn() }))
 vi.mock("@/server/db", () => ({ prisma: db }))
 // rooms.ts pulls in the reply loop; none of it runs here
 vi.mock("./reply-loop", () => ({ defaultReplyDeps: {}, runRoom: vi.fn() }))
 vi.mock("./broadcast", () => ({ broadcastRoomEvent: vi.fn() }))
 vi.mock("@/server/after-response", () => ({ runAfterResponse: vi.fn() }))
 vi.mock("./proposals/service", () => ({ roomProposalStates: vi.fn(async () => ({})) }))
+vi.mock("./feedback", () => feedback)
 
 import { roomSearchQuery, searchRooms } from "./room-search"
 import { ANCHOR_BEFORE, getRoomSnapshot, SNAPSHOT_LIMIT } from "./rooms"
 
-const room = { id: "room-1", title: "GM 2", persona: "jack", updatedAt: new Date("2026-10-20T00:00:00Z") }
+const room = { id: "room-1", title: "GM 2", persona: "jack", updatedAt: new Date("2026-10-20T00:00:00Z"), pinnedAt: null, answerMode: "always", archivedAt: null }
 const message = (id: string) => ({
   id,
   roomId: "room-1",
@@ -34,7 +36,7 @@ const message = (id: string) => ({
 })
 
 beforeEach(() => {
-  db.jackRoom.findFirst.mockResolvedValue(room)
+  db.jackRoom.findUnique.mockResolvedValue(room)
   db.jackMessage.findMany.mockResolvedValue([])
 })
 
@@ -95,9 +97,34 @@ describe("getRoomSnapshot with an anchor (?m=)", () => {
     expect((await getRoomSnapshot("room-1", { around: "m50" }))!.gap).toBeUndefined()
   })
 
-  it("finds nothing for an archived or missing room", async () => {
-    db.jackRoom.findFirst.mockResolvedValue(null)
+  it("finds nothing for a missing room", async () => {
+    db.jackRoom.findUnique.mockResolvedValue(null)
     expect(await getRoomSnapshot("gone", { around: "m1" })).toBeNull()
+  })
+
+  it("opens an archived room too (its page is read-only), with the room's settings", async () => {
+    const archivedAt = new Date("2026-10-21T15:00:00Z")
+    db.jackRoom.findUnique.mockResolvedValue({ ...room, archivedAt, pinnedAt: archivedAt, answerMode: "mention" })
+    const snapshot = await getRoomSnapshot("room-1")
+    expect(db.jackRoom.findUnique.mock.calls[0][0].where).toEqual({ id: "room-1" })
+    expect(snapshot!.room).toEqual({
+      id: "room-1",
+      title: "GM 2",
+      persona: "jack",
+      updatedAt: "2026-10-20T00:00:00.000Z",
+      archivedAt: "2026-10-21T15:00:00.000Z",
+      pinnedAt: "2026-10-21T15:00:00.000Z",
+      answerMode: "mention",
+    })
+  })
+
+  it("holds the replies' ratings as the viewing officer sees them, only when asked for a viewer", async () => {
+    const ratings = { r1: { up: 1, down: 0, mine: { rating: "up", note: null }, raters: [] } }
+    feedback.roomFeedback.mockResolvedValue(ratings)
+    expect((await getRoomSnapshot("room-1"))!.feedback).toBeUndefined()
+    expect(feedback.roomFeedback).not.toHaveBeenCalled()
+    expect((await getRoomSnapshot("room-1", { viewerId: "u1" }))!.feedback).toEqual(ratings)
+    expect(feedback.roomFeedback).toHaveBeenCalledWith("room-1", "u1")
   })
 })
 
@@ -109,17 +136,41 @@ describe("the rooms list search", () => {
     expect(roomSearchQuery("x".repeat(300))).toHaveLength(200)
   })
 
-  it("finds rooms by name and every kind of message, leaving out archived rooms, linking each message in place", async () => {
-    db.jackRoom.findMany.mockResolvedValue([{ id: "room-1", title: "Budget planning", persona: "jack", createdAt: new Date(), updatedAt: new Date(), createdBy: null }])
-    db.$queryRaw.mockResolvedValue([{ id: "m1", roomId: "room-1", kind: "assistant", persona: "jack", createdAt: new Date("2026-10-19T23:00:00Z"), roomTitle: "Budget planning", author: null, rank: 0.5, snippet: "the budget" }])
+  it("finds rooms by name and every kind of message, archived rooms included and marked, linking each message in place", async () => {
+    const archivedAt = new Date("2026-10-21T15:00:00Z")
+    db.jackRoom.findMany
+      .mockResolvedValueOnce([
+        { id: "room-1", title: "Budget planning", persona: "jack", createdAt: new Date(), updatedAt: new Date(), pinnedAt: null, archivedAt: null, createdBy: null },
+        { id: "room-2", title: "Old budget", persona: "jack", createdAt: new Date(), updatedAt: new Date(), pinnedAt: null, archivedAt, createdBy: null },
+      ])
+      .mockResolvedValueOnce([{ id: "room-2" }])
+    db.$queryRaw.mockResolvedValue([
+      { id: "m1", roomId: "room-1", kind: "assistant", persona: "jack", createdAt: new Date("2026-10-19T23:00:00Z"), roomTitle: "Budget planning", author: null, rank: 0.5, snippet: "the budget" },
+      { id: "m2", roomId: "room-2", kind: "user", persona: null, createdAt: new Date("2026-10-18T23:00:00Z"), roomTitle: "Old budget", author: "Gray", rank: 0.4, snippet: "budget again" },
+    ])
     const result = await searchRooms("budget")
-    expect(db.jackRoom.findMany.mock.calls[0][0].where).toEqual({ archivedAt: null, title: { contains: "budget", mode: "insensitive" } })
+    const [byName, archived] = db.jackRoom.findMany.mock.calls.map((call) => call[0])
+    expect(byName.where).toEqual({ title: { contains: "budget", mode: "insensitive" }, NOT: { id: { startsWith: "jack-eval-" } } })
+    // Rooms in use first
+    expect(byName.orderBy[0]).toEqual({ archivedAt: { sort: "desc", nulls: "first" } })
+    expect(archived.where).toEqual({ id: { in: ["room-1", "room-2"] }, archivedAt: { not: null } })
     const sql = db.$queryRaw.mock.calls[0][0] as Prisma.Sql
     expect(sql.values).toEqual(expect.arrayContaining(["user", "system", "assistant"]))
-    expect(sql.sql).toContain(`r."archivedAt" IS NULL`)
-    expect(result.rooms.map((r) => r.title)).toEqual(["Budget planning"])
-    expect(result.messages).toEqual([
-      { id: "m1", roomId: "room-1", roomTitle: "Budget planning", kind: "assistant", author: "Jack", createdAt: "2026-10-19T23:00:00.000Z", snippet: "the budget", href: "/admin/jack/room-1?m=m1" },
+    expect(sql.sql).not.toContain(`r."archivedAt" IS NULL`)
+    expect(result.rooms.map((r) => [r.title, r.archivedAt])).toEqual([
+      ["Budget planning", null],
+      ["Old budget", "2026-10-21T15:00:00.000Z"],
     ])
+    expect(result.messages).toEqual([
+      { id: "m1", roomId: "room-1", roomTitle: "Budget planning", kind: "assistant", author: "Jack", createdAt: "2026-10-19T23:00:00.000Z", snippet: "the budget", href: "/admin/jack/room-1?m=m1", roomArchived: false },
+      { id: "m2", roomId: "room-2", roomTitle: "Old budget", kind: "user", author: "Gray", createdAt: "2026-10-18T23:00:00.000Z", snippet: "budget again", href: "/admin/jack/room-2?m=m2", roomArchived: true },
+    ])
+  })
+
+  it("asks nothing more when no message matched", async () => {
+    db.jackRoom.findMany.mockResolvedValueOnce([])
+    db.$queryRaw.mockResolvedValue([])
+    expect(await searchRooms("nothing")).toEqual({ query: "nothing", rooms: [], messages: [] })
+    expect(db.jackRoom.findMany).toHaveBeenCalledTimes(1)
   })
 })

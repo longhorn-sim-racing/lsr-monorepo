@@ -17,6 +17,8 @@ export type FakeRoom = {
   archivedAt: Date | null
   runId: string | null
   runStartedAt: Date | null
+  pinnedAt: Date | null
+  answerMode: "always" | "mention"
 }
 
 export type FakeMessage = {
@@ -32,6 +34,7 @@ export type FakeMessage = {
   answeredById: string | null
   continues?: boolean
   scheduled?: boolean
+  expectsAnswer?: boolean
   model: string | null
   inputTokens: number | null
   outputTokens: number | null
@@ -117,6 +120,16 @@ export function createFakeJackDb() {
     await Promise.resolve() // every call yields, like a real round trip
   }
 
+  /** A message filter, with the relation filter on its room (`room: { archivedAt: null }`) the reply loop uses */
+  function messageMatches(message: FakeMessage, where: Where = {}): boolean {
+    const { room: roomWhere, ...rest } = where
+    if (roomWhere) {
+      const room = state.rooms.find((r) => r.id === message.roomId)
+      if (!room || !matches(room, roomWhere as Where)) return false
+    }
+    return matches(message, rest)
+  }
+
   const db = {
     state,
     reset() {
@@ -138,6 +151,8 @@ export function createFakeJackDb() {
         archivedAt: null,
         runId: null,
         runStartedAt: null,
+        pinnedAt: null,
+        answerMode: "always",
         ...fields,
       }
       state.rooms.push(room)
@@ -157,6 +172,7 @@ export function createFakeJackDb() {
         answeredById: null,
         continues: false,
         scheduled: false,
+        expectsAnswer: true,
         model: null,
         inputTokens: null,
         outputTokens: null,
@@ -171,6 +187,14 @@ export function createFakeJackDb() {
     },
     room(id: string) {
       return state.rooms.find((r) => r.id === id)!
+    },
+
+    // Posting labels the officer from their profile (author-label.ts); these tests have no profiles, so
+    // messages posted here carry no label and history shows the name, as for messages from before labels
+    user: {
+      async findUnique() {
+        return null
+      },
     },
 
     jackRoom: {
@@ -215,13 +239,19 @@ export function createFakeJackDb() {
         take?: number
       }) {
         await step("jackMessage.findMany", { where })
-        const rows = sortRows(state.messages.filter((m) => matches(m, where)), orderBy).slice(0, take)
+        const rows = sortRows(state.messages.filter((m) => messageMatches(m, where)), orderBy).slice(0, take)
         return rows.map((m) => (select ? pick(m, select) : withAuthor(m, include)))
       },
       async findFirst({ where, select }: { where: Where; select?: Record<string, boolean> }) {
         await step("jackMessage.findFirst", { where })
-        const message = state.messages.find((m) => matches(m, where))
+        const message = state.messages.find((m) => messageMatches(m, where))
         return message ? pick(message, select) : null
+      },
+      async findUniqueOrThrow({ where, include }: { where: Where; include?: { author?: unknown } }) {
+        await step("jackMessage.findUniqueOrThrow", { where })
+        const message = state.messages.find((m) => messageMatches(m, where))
+        if (!message) throw new Error("No JackMessage found")
+        return withAuthor(message, include)
       },
       async update({ where, data, include }: { where: Where; data: Row; include?: { author?: unknown } }) {
         await step("jackMessage.update", { where, data })

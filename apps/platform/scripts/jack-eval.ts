@@ -59,11 +59,11 @@ import { checkEvalDatabase } from "../src/server/jack/eval-support";
 import { describeAsker, firstOfficer, resolveAsker, type Asker } from "./jack-eval/askers";
 import { BEHAVIOR } from "./jack-eval/behavior";
 import { guardsOf, missingRequirements } from "./jack-eval/checks";
-import { cleanUpEvalRooms, describeCleanup, evalRoomId, leftoverEvalRooms, orphanedEvalRooms, runRooms, runTag, type CleanupOptions } from "./jack-eval/cleanup";
+import { cleanUpEvalRooms, describeCleanup, evalRoomId, fileStoreCleanup, leftoverEvalRooms, orphanedEvalRooms, runRooms, runTag, type CleanupOptions } from "./jack-eval/cleanup";
 import { decksIn, DESIGN } from "./jack-eval/design";
 import { APP_DIR } from "./jack-eval/env";
 import { EVERYDAY } from "./jack-eval/everyday";
-import { JudgeDeclined, judgeAnswer, judgeCostUsd, judgePair, judgeSystem, judgeTools, type JudgeGrade, type PairGrade, type ToolTrace } from "./jack-eval/judge";
+import { JudgeDeclined, judgeAnswer, judgeCostUsd, judgePair, judgeSystem, requestJudgeTools, toolInstructions, type JudgeGrade, type PairGrade, type ToolTrace } from "./jack-eval/judge";
 import { loadLsc, type Answer, type EvalContext, type Exchange, type Group, type GuardCheck, type GuardContext, type Question } from "./jack-eval/shared";
 import { questionSet } from "./jack-eval/tracks";
 
@@ -222,8 +222,10 @@ type Ctx = {
 
 async function loadModules() {
   const [
-    { buildHistory },
-    { runModelReply, anthropicJackClient, toolDefinitions },
+    { buildConversation },
+    { officerAuthorLabel },
+    { attachTurnFiles },
+    { runModelReply, anthropicJackClient, requestTools },
     { JACK_MODELS },
     { buildSystemPrompt },
     { JACK_TOOLS, findJackTool },
@@ -231,8 +233,11 @@ async function loadModules() {
     { UsageTally, costUsd },
     { findProposalKind },
     { PROPOSE_TOOLS },
+    { webToolsOn },
   ] = await Promise.all([
     import("../src/server/jack/history"),
+    import("../src/server/jack/author-label"),
+    import("../src/server/jack/files/turn"),
     import("../src/server/jack/model-loop"),
     import("../src/server/jack/models"),
     import("../src/server/jack/prompt"),
@@ -241,25 +246,41 @@ async function loadModules() {
     import("../src/server/jack/cost"),
     import("../src/server/jack/proposals/registry"),
     import("../src/server/jack/proposals/types"),
+    import("../src/server/jack/web-tools"),
   ]);
-  return { buildHistory, runModelReply, anthropicJackClient, toolDefinitions, JACK_MODELS, buildSystemPrompt, JACK_TOOLS, findJackTool, fakeClaude, UsageTally, costUsd, findProposalKind, PROPOSE_TOOLS };
+  /** What every question's request sends: a room reply's tools (the web tools too when JACK_WEB_TOOLS=on), as runModelReply builds them */
+  const roomRequest = requestTools(JACK_TOOLS, { web: webToolsOn() });
+  return { buildConversation, officerAuthorLabel, attachTurnFiles, runModelReply, anthropicJackClient, roomRequest, JACK_MODELS, buildSystemPrompt, JACK_TOOLS, findJackTool, fakeClaude, UsageTally, costUsd, findProposalKind, PROPOSE_TOOLS };
 }
 
 /**
- * What a model was told, for the judge: its system prompt, then every tool as the API sends it (name,
- * description and inputs), so an ability that only an input names ("takeRegistrations") isn't invented
+ * How the cleanup deletes room files' copies on Claude Files: with the API key, switched on or not,
+ * like the files.cleanup job. Without a key they're listed as left behind
+ */
+async function claudeFileCleanup(): Promise<Pick<CleanupOptions, "deleteClaudeFile">> {
+  const { claudeFilesForCleanup, deleteClaudeFiles } = await import("../src/server/jack/files/claude");
+  const client = claudeFilesForCleanup();
+  if (!client) return {};
+  return {
+    deleteClaudeFile: async (id) => {
+      const { failed } = await deleteClaudeFiles([id], { client });
+      if (failed.length) throw new Error("the Files API didn't delete it (the log above says why)");
+    },
+  };
+}
+
+/**
+ * What a model was told, for the judge: its system prompt, then every tool its request sends (name,
+ * description and inputs; web search and fetch when they're on), so an ability that only an input names
+ * ("takeRegistrations") isn't invented
  */
 function instructionsFor(mods: Ctx["mods"], persona: JackRoomPersonaKey): string {
   const system = mods.buildSystemPrompt(persona).map((b) => b.text).join("\n\n");
-  const tools = mods
-    .toolDefinitions(mods.JACK_TOOLS)
-    .map((t) => `- ${t.name}: ${t.description}\n  Inputs: ${JSON.stringify(t.input_schema)}`)
-    .join("\n");
-  return `${system}\n\n# Tools\n${tools}`;
+  return `${system}\n\n# Tools\n${toolInstructions(mods.roomRequest.defs)}`;
 }
 
-/** The judge's system prompt, with its overview of the tools built from the live list (no tool names written into the judge) */
-const judgeSystemFor = (mods: Ctx["mods"]) => judgeSystem(judgeTools(mods.JACK_TOOLS, mods.PROPOSE_TOOLS));
+/** The judge's system prompt, with its overview of the tools a question's request sends (no tool names written into the judge) */
+const judgeSystemFor = (mods: Ctx["mods"]) => judgeSystem(requestJudgeTools(mods.roomRequest, mods.PROPOSE_TOOLS));
 
 const TYPED_TOOLS = new Set(["club_members", "events_overview", "lsc_entries", "payments_summary", "standings", "audit_log"]);
 
@@ -300,18 +321,26 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
   async function answerAndGrade(roomId: string, guards: GuardCheck[]): Promise<{ row: Row; trace: unknown[] } | { error: string; usage?: unknown }> {
     if (!truth || !officer) return { error: "no expectation" }; // checked above; this keeps TypeScript's narrowing inside the function
 
-    // The room so far: any earlier exchanges, then this question and the reply being written
+    // The room so far: any earlier exchanges, then this question and the reply being written. Officers'
+    // lines carry their label the way posting saves it, and the question carries the files its setup posted
     const replyId = "eval-reply";
     const t = c.now.getTime();
+    const authorLabel = await mods.officerAuthorLabel(officer.id);
+    const files = await c.prisma.jackFile.findMany({
+      where: { roomId, status: "READY", messageId: { not: null } },
+      orderBy: [{ createdAt: "asc" }, { position: "asc" }],
+      select: { id: true, filename: true, kind: true, sizeBytes: true, pageCount: true },
+    });
     const messages = [
       ...before.flatMap((ex, i) => [
-        { id: `eval-before-${i}`, kind: "user" as const, persona: null, content: ex.ask, toolCalls: null, status: "done" as const, answeredById: `eval-before-reply-${i}`, model: null, createdAt: new Date(t - 60_000 * (before.length - i) - 1), author: { displayName: officer.displayName } },
+        { id: `eval-before-${i}`, kind: "user" as const, persona: null, content: ex.ask, toolCalls: null, status: "done" as const, answeredById: `eval-before-reply-${i}`, model: null, createdAt: new Date(t - 60_000 * (before.length - i) - 1), author: { displayName: officer.displayName }, authorLabel },
         { id: `eval-before-reply-${i}`, kind: "assistant" as const, persona, content: ex.answer, toolCalls: null, status: "done" as const, answeredById: null, model: null, createdAt: new Date(t - 60_000 * (before.length - i)), author: null },
       ]),
-      { id: "eval-ask", kind: "user" as const, persona: null, content: ask, toolCalls: null, status: "done" as const, answeredById: replyId, model: null, createdAt: c.now, author: { displayName: officer.displayName } },
+      { id: "eval-ask", kind: "user" as const, persona: null, content: ask, toolCalls: null, status: "done" as const, answeredById: replyId, model: null, createdAt: c.now, author: { displayName: officer.displayName }, authorLabel, files },
       { id: replyId, kind: "assistant" as const, persona, content: "", toolCalls: null, status: "streaming" as const, answeredById: null, model: null, createdAt: new Date(t + 1), author: null },
     ];
-    const history = mods.buildHistory(messages, replyId);
+    const conversation = mods.buildConversation(messages, replyId);
+    const history = await mods.attachTurnFiles(conversation.history, conversation.attached);
     const system = mods.buildSystemPrompt(persona);
 
     // The tools, wrapped to keep what each call returned to the model (the parts only keep what the room shows)
@@ -344,7 +373,8 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
         system,
         tools,
         history,
-        ctx: { roomId, actor: { userId: officer.id, displayName: officer.displayName } },
+        // As a room reply to an officer's own message: knowledge may be saved (memory questions), 3 changes at most
+        ctx: { roomId, actor: { userId: officer.id, displayName: officer.displayName }, reply: { fromOfficer: true, knowledgeChanges: 0 } },
         onText: () => {},
         onPart: async () => {},
         usage,
@@ -495,7 +525,7 @@ async function slideImages(answer: Answer) {
     if (!deck) continue;
     for (const [i, slide] of deck.content.slides.entries()) {
       if (images.length >= 8) break;
-      const { view } = await ensureRender({ size: deck.size, css: deck.content.css, html: slide.html }, { withView: true });
+      const { view } = await ensureRender({ size: deck.size, css: deck.content.css, html: slide.html, roomId: deck.roomId }, { withView: true });
       if (view) images.push({ caption: `"${deck.title}", slide ${i + 1} of ${deck.content.slides.length}:`, mediaType: "image/jpeg", data: view.toString("base64") });
     }
   }
@@ -753,7 +783,7 @@ async function main() {
   const questions = QUESTIONS.filter((q) => selected(q) && (!GROUP || (q.group ?? "everyday") === GROUP));
   const now = new Date();
   const startedAt = new Date();
-  const cleanup = await cleanupOptions();
+  const cleanup: CleanupOptions = { ...(await cleanupOptions()), ...(await claudeFileCleanup()) };
 
   const judge = NO_JUDGE ? null : new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim(), maxRetries: 4 });
   const base = { prisma, officer, now, startedAt, judge, judgeSystem: judgeSystemFor(mods), mods, run: runTag(startedAt), planted: new Set<string>(), cleanup };
@@ -901,11 +931,13 @@ async function sweepOrphans(prisma: EvalContext["prisma"], cleanup: CleanupOptio
   }
 }
 
-/** How the cleanup deletes room files' stored objects: through the file store, once it can delete */
+/**
+ * How the cleanup deletes room files' stored objects: through the file store the app uses (missing
+ * paths are fine). Claude Files are G6's to wire (deleteClaudeFile); until then they're listed as left
+ */
 async function cleanupOptions(): Promise<CleanupOptions> {
   const { jackFileStore } = await import("../src/server/jack/decks/storage");
-  const store = jackFileStore() as ReturnType<typeof jackFileStore> & { delete?: (path: string) => Promise<void> };
-  return typeof store.delete === "function" ? { deleteObject: (path) => store.delete!(path) } : {};
+  return fileStoreCleanup(jackFileStore());
 }
 
 /** The officer the eval asks as: --as (an officer or admin, found the way a question's `as` is), or the first officer or admin */
@@ -963,7 +995,8 @@ async function confirmDatabases(prisma: EvalContext["prisma"], named: string) {
  * Cost comes from the fake's token counts.
  */
 function dryRunClient(mods: Ctx["mods"], answer: string, calls?: { name: string; input: unknown }[]) {
-  const noInputTool = mods.JACK_TOOLS.find((tool) => tool.input.safeParse({}).success);
+  // One the request offers (web_links only comes with the web tools)
+  const noInputTool = mods.roomRequest.offered.find((tool) => tool.input.safeParse({}).success);
   const tools = calls?.length ? calls : noInputTool ? [{ name: noInputTool.name, input: {} }] : [];
   const turns = [...(tools.length ? [{ text: "Let me look.", tools }] : []), { text: answer }];
   return mods.fakeClaude(turns).client;

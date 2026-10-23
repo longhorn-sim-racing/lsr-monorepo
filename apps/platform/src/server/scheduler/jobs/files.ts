@@ -7,7 +7,7 @@ export const JOBS: JobKind[] = [
     kind: "files.cleanup",
     label: "Room file cleanup",
     description:
-      "Deletes files attached in Jack's rooms that were never sent: uploads still unfinished after 24 hours, and files not posted with a message after 7 days. Their stored copies go too, and any stored room file that no longer belongs to a file. Posted files are never touched.",
+      "Deletes files attached in Jack's rooms that were never sent: uploads still unfinished after 24 hours, and files not posted with a message after 7 days. Their stored copies and their copies on Claude Files go too, and any stored room file that no longer belongs to a file. Posted files are never touched.",
     defaultSchedule: "15 4 * * *",
     budgetMs: 60_000,
     async run({ signal, log }) {
@@ -16,12 +16,16 @@ export const JOBS: JobKind[] = [
       const swept = await sweepOrphanFiles({ signal })
       if (result.more || swept.more) log("More are due; the next run continues.")
       const done = [
-        result.deleted ? `Deleted ${plural(result.deleted, "unsent file")} (${plural(result.objects, "stored copy", "stored copies")})` : "",
+        result.deleted
+          ? `Deleted ${plural(result.deleted, "unsent file")} (${plural(result.objects, "stored copy", "stored copies")}${result.claudeFiles ? `, ${plural(result.claudeFiles, "copy", "copies")} on Claude Files` : ""})`
+          : "",
         swept.deleted ? `removed ${plural(swept.deleted, "leftover stored file")}` : "",
+        // Their rows are gone, so only the function log has the ids
+        result.claudeErrors.length ? `couldn't delete ${plural(result.claudeErrors.length, "copy", "copies")} on Claude Files (ids in the function log)` : "",
       ].filter(Boolean)
       return {
         summary: done.length ? capitalize(done.join("; ")) : "Nothing to clean up",
-        counts: { files: result.deleted, objects: result.objects, leftovers: swept.deleted },
+        counts: { files: result.deleted, objects: result.objects, claudeFiles: result.claudeFiles, claudeErrors: result.claudeErrors.length, leftovers: swept.deleted },
       }
     },
   },

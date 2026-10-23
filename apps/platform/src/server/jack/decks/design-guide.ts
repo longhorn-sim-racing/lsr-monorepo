@@ -26,7 +26,8 @@ export const DESIGN_GUIDE = `# LSR slide kit
 - A deck is slides at one canvas size. Each slide is HTML: one root \`<section class="slide dark">\` (or \`light\`). Its children stack top to bottom (a flex column with the size's padding and gap); \`end\` pushes them to the bottom, \`center\` to the middle.
 - Every slide renders with the kit stylesheet below, then the deck's CSS (deck_write \`css\`), then the slide. Put classes you reuse across slides in the deck CSS; use inline styles for one-offs. A \`<style>\` inside a slide only affects that slide.
 - No JavaScript. Fonts: only Kanit and Montserrat load. No emoji (they render as empty boxes); use plain text, or an inline \`<svg>\` for a simple icon.
-- Images load only from: the club site (relative paths from deck_assets, like /images/lsr-hero.webp), club photos on res.cloudinary.com (from deck_assets), QR codes from https://jack.assets/qr?text=<URL-encoded link>, and screenshots of the site from deck_screenshot. Never invent an image URL or use one from elsewhere; it's blocked.
+- Images load only from: the club site (relative paths from deck_assets, like /images/lsr-hero.webp), club photos on res.cloudinary.com (from deck_assets), photos officers posted in this room (https://jack.assets/room/<file id>, listed by deck_assets and room_files; they load only in this room's decks), QR codes from https://jack.assets/qr?text=<URL-encoded link>, and screenshots of the site from deck_screenshot. Never invent an image URL or use one from elsewhere; it's blocked.
+- Officers' own photos are welcome on slides when they ask for them or they fit: frame them with object-fit: cover and a scrim for text, as with the club's photos.
 - After each write you get the layout checks (cut-off or overlapping text, text too small, wrong fonts, images that didn't load). Fix every one unless it's deliberate. Then deck_render the slides and look at them before you call the work done.
 
 ## Brand

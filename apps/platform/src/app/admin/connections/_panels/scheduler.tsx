@@ -1,19 +1,12 @@
-import { Panel, PanelBody, PanelHeader } from "@/components/admin/kit"
+import { SchedulerHeartbeat } from "@/app/admin/jobs/_components/scheduler-heartbeat"
 
 /**
- * SLOT for G3 (the scheduler): the scheduler's heartbeat on the Connections page, from
- * SchedulerHeartbeat ("Last tick 2 min ago", or "Never" when pg_cron isn't calling), with a link to
- * Scheduled jobs (/admin/jobs). G3 replaces this placeholder and nothing else on the page. It's a server
- * component that loads its own data; the page renders it through SafeSlot, so a throw here shows a
- * short notice instead of breaking the page.
+ * The scheduler's heartbeat on the Connections page (design §6, §13): whether pg_cron is ticking, the
+ * last tick, how many jobs are on and failing, and a link to Scheduled jobs. Connectors' syncs run as
+ * scheduled jobs, so a stopped scheduler means stale data here too. It's the Jobs page's panel with its
+ * own data; the page renders it through SafeSlot, so a throw here shows a short notice instead.
  */
 export async function SchedulerPanel() {
-  return (
-    <Panel>
-      <PanelHeader title="Scheduler" description="Runs the sync jobs and other scheduled work when it's due." />
-      <PanelBody>
-        <p className="text-[13px] text-admin-subtle">Not built yet. When the scheduler last ran shows here once it&apos;s set up.</p>
-      </PanelBody>
-    </Panel>
-  )
+  // Called, not rendered as <SchedulerHeartbeat />, so its data loads inside SafeSlot's guard
+  return await SchedulerHeartbeat({ jobsLink: true })
 }

@@ -45,7 +45,8 @@ describe("the connector registry", () => {
     vi.doMock("./slots/groundwork", () => ({ CONNECTORS: [fakeConnector("storage")] }))
     vi.doMock("./slots/sources-b", () => ({ CONNECTORS: [] }))
     const { CONNECTORS, findConnector } = await import("./registry")
-    expect(CONNECTORS.map((c) => c.id)).toEqual(["storage", "discord"])
+    // Only the mocked ones: the other tracks' real connectors sit among them
+    expect(CONNECTORS.map((c) => c.id).filter((id) => ["storage", "discord"].includes(id))).toEqual(["storage", "discord"])
     expect(findConnector("discord")?.configured({ FAKE_TOKEN: "x" })).toBe(true)
   })
 

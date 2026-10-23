@@ -36,7 +36,7 @@ describe("search", () => {
     expect(searchTool.input.parse({ query: "  budget " })).toEqual({ query: "budget", includeJackReplies: false, limit: 10 })
   })
 
-  const sponsorHit = { source: "knowledge", type: "knowledge", id: "k1", title: "Sponsor tiers", url: "/admin/knowledge?entry=k1", snippet: "Gold tier gets a logo", date: "2026-10-19T23:00:00.000Z", meta: { ageDays: 3 }, rank: 0.5 }
+  const sponsorHit = { source: "knowledge", type: "knowledge", id: "k1", title: "Sponsor tiers", url: "/admin/knowledge/k1", snippet: "Gold tier gets a logo", date: "2026-10-19T23:00:00.000Z", meta: { ageDays: 3 }, rank: 0.5 }
 
   it("returns each hit's type and id for read, its link, Central date and snippet, and shows them as links", async () => {
     fake.search.mockResolvedValue({ hits: [sponsorHit], outcomes: [{ source: "knowledge", status: "searched", hits: 1 }] })
@@ -45,10 +45,10 @@ describe("search", () => {
     expect(JSON.parse(result.forModel)).toEqual({
       query: "sponsor tiers",
       searched: ["knowledge"],
-      results: [{ type: "knowledge", id: "k1", title: "Sponsor tiers", url: "/admin/knowledge?entry=k1", date: "Mon 2026-10-19 18:00 CT", snippet: "Gold tier gets a logo", ageDays: 3 }],
+      results: [{ type: "knowledge", id: "k1", title: "Sponsor tiers", url: "/admin/knowledge/k1", date: "Mon 2026-10-19 18:00 CT", snippet: "Gold tier gets a logo", ageDays: 3 }],
     })
     expect(result.label).toBe("Searched for “sponsor tiers” (1 result)")
-    expect(result.displays).toEqual([{ kind: "links", items: [{ title: "Sponsor tiers", url: "/admin/knowledge?entry=k1", meta: "Knowledge · Oct 19, 2026", snippet: "Gold tier gets a logo" }], caption: undefined }])
+    expect(result.displays).toEqual([{ kind: "links", items: [{ title: "Sponsor tiers", url: "/admin/knowledge/k1", meta: "Knowledge · Oct 19, 2026", snippet: "Gold tier gets a logo" }], caption: undefined }])
   })
 
   it("mentions a switched-off source only when the call named it; a failed one always", async () => {
@@ -82,7 +82,7 @@ describe("read", () => {
   const long = ["# Rules", "Intro.", "## Points", "P".repeat(900), "## Penalties", "Q".repeat(900)].join("\n\n")
 
   beforeEach(() => {
-    fake.read.mockResolvedValue({ ok: true, doc: { type: "knowledge", id: "k1", title: "LSC rules", url: "/admin/knowledge?entry=k1", date: null, meta: { versionId: "v1" }, text: long } })
+    fake.read.mockResolvedValue({ ok: true, doc: { type: "knowledge", id: "k1", title: "LSC rules", url: "/admin/knowledge/k1", date: null, meta: { versionId: "v1" }, text: long } })
   })
 
   it("returns a page with the next offset, the total and an outline", async () => {

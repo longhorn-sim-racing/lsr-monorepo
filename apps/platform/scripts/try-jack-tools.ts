@@ -75,6 +75,12 @@ async function main() {
     ["read", { type: "site_page", id: "/admin" }],
     ["recruiting_pipeline", { applicants: true }],
     ["race_performance", { season: "all", focus: "rounds" }],
+    // Jack 2.0 sources-a: they read the synced tables (fill them from the fakes: docs/jack-2/tracks/sources-a.md)
+    ["stripe_overview", {}],
+    ["stripe_overview", { show: "charges", days: 60, limit: 5 }],
+    ["email_delivery", { view: "bounces", days: 30 }],
+    ["email_delivery", { view: "recipient", recipient: "complained@resend.dev" }],
+    ["site_traffic", { by: "path", compare: true, limit: 5 }],
   ];
   if (draft) {
     calls.push(["draft_event", { title: "Jack local check event", startsAt: "2026-11-02T18:00", endsAt: "2026-11-02T20:00", summary: "Drafted by scripts/try-jack-tools.ts" }]);

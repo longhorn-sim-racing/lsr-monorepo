@@ -243,8 +243,19 @@ const fileKind: AnyProposalKind = {
   },
 }
 
+/* A rendered preview on the card (news posts) */
+const previewKind: AnyProposalKind = {
+  ...fileKind,
+  kind: "test.preview",
+  schema: z.object({ text: z.string() }),
+  async prepare(p: { text: string }) {
+    return { before: null, view: { title: "Post it", summary: "Posts it.", diff: [], preview: { label: "How it reads", title: "Post", blocks: [{ t: "p" as const, c: [{ t: "text" as const, v: p.text }] }] } } }
+  },
+}
+
 const KINDS: Record<string, AnyProposalKind> = {
   "test.change": thingKind("test.change"),
+  "test.preview": previewKind,
   "test.admin": thingKind("test.admin", { permission: "admin" }),
   "test.list": listKind,
   "test.file": fileKind,
@@ -593,6 +604,12 @@ describe("reading proposals", () => {
     })
     expect((await getProposalDetail(proposal.proposalId, admin.id, deps))?.canApply).toBe(true)
     expect(await getProposalDetail("missing", gray.id, deps)).toBeNull()
+    expect(forGray!.preview).toBeNull()
+  })
+
+  it("gives the card the preview the kind built when proposing", async () => {
+    const { proposal } = await propose("test.preview", { text: "Hello" })
+    expect((await getProposalDetail(proposal.proposalId, gray.id, deps))?.preview).toEqual({ label: "How it reads", title: "Post", blocks: [{ t: "p", c: [{ t: "text", v: "Hello" }] }] })
   })
 
   it("gives the card the rows Apply honours: saved ones, list.rows() ones, or none", async () => {

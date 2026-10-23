@@ -61,7 +61,10 @@ function RoomSearchResults({ result }: { result: RoomSearchResult }) {
           {rooms.map((room) => (
             <li key={room.id} className="border-b border-admin-row last:border-b-0">
               <Link href={`/admin/jack/${room.id}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-0.5 px-4 py-2.5 hover:bg-admin-surface">
-                <span className="min-w-0 truncate font-semibold">{jackRoomTitle(room)}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="min-w-0 truncate font-semibold">{jackRoomTitle(room)}</span>
+                  {room.archivedAt ? <Badge tone="neutral">Archived</Badge> : null}
+                </span>
                 <span className="text-xs text-admin-subtle">Room · {formatRoomTime(room.updatedAt)}</span>
               </Link>
             </li>
@@ -79,6 +82,7 @@ function RoomSearchResults({ result }: { result: RoomSearchResult }) {
                     {message.author} · {formatRoomTime(message.createdAt)}
                   </span>
                   {message.kind === "assistant" ? <Badge tone="neutral">Answer</Badge> : null}
+                  {message.roomArchived ? <Badge tone="neutral">Archived room</Badge> : null}
                 </span>
                 {message.snippet ? <span className="line-clamp-2 break-words text-[13px] text-muted-foreground">{message.snippet}</span> : null}
               </Link>

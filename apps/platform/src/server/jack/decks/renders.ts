@@ -1,5 +1,6 @@
 import QRCode from "qrcode"
 import type { JackRenderKind } from "@/lib/jack/decks"
+import { prisma } from "@/server/db"
 import { JACK_ASSET_HOST, renderKey, type SlideSource } from "./document"
 import { renderSlide, type AssetResolver } from "./renderer"
 import { jackFileStore } from "./storage"
@@ -82,7 +83,7 @@ function renderOnce(key: string, source: SlideSource, signal?: AbortSignal): Pro
   const running = inFlight.get(key)
   if (running) return running
   const work = (async () => {
-    const rendered = await renderSlide(source, { assets: resolveJackAsset, signal })
+    const rendered = await renderSlide(source, { assets: (url) => resolveJackAsset(url, { roomId: source.roomId }), signal })
     const files: Record<RenderFileKind, Buffer> = { png: rendered.png, jpg: rendered.jpg, view: rendered.view, thumb: rendered.thumb }
     const store = jackFileStore()
     // A render that may come out better next time isn't kept. A store that can't be written to (a
@@ -110,10 +111,14 @@ const HEX = /^[0-9a-f]{6}$/i
 /**
  * Answers https://jack.assets/… for the renderer:
  * - `/qr?text=<url or text>` (optional `dark` and `light`, hex without #): a QR code PNG;
- * - `/files/<name>`: a private image from the file store, like a site screenshot.
+ * - `/files/<name>`: a private image from the file store, like a site screenshot;
+ * - `/room/<fileId>`: a photo an officer posted in the deck's room (`roomId`), as its model copy (a
+ *   JPEG, long edge ≤2000 px, no metadata). Another room's photo, or any with no room given, isn't found.
  */
-export const resolveJackAsset: AssetResolver = async (url) => {
+export async function resolveJackAsset(url: URL, { roomId }: { roomId?: string | null } = {}): ReturnType<AssetResolver> {
   if (url.host !== JACK_ASSET_HOST) return null
+  const room = /^\/room\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(url.pathname)
+  if (room) return roomPhoto(room[1], roomId)
   if (url.pathname === "/qr") {
     const text = url.searchParams.get("text") ?? ""
     if (!text || text.length > MAX_QR_TEXT) return null
@@ -134,4 +139,16 @@ export const resolveJackAsset: AssetResolver = async (url) => {
     return body ? { body, contentType: file[2] === "png" ? "image/png" : "image/jpeg" } : null
   }
   return null
+}
+
+/** A photo posted in this room, as its model copy; null for anything else (another room's, unsent, not a photo) */
+async function roomPhoto(fileId: string, roomId: string | null | undefined): Promise<{ body: Buffer; contentType: string } | null> {
+  if (!roomId) return null
+  const photo = await prisma.jackFile.findFirst({
+    where: { id: fileId, roomId, kind: "IMAGE", status: "READY", messageId: { not: null } },
+    select: { modelCopyPath: true },
+  })
+  if (!photo?.modelCopyPath) return null
+  const body = await jackFileStore().get(photo.modelCopyPath)
+  return body ? { body, contentType: "image/jpeg" } : null
 }

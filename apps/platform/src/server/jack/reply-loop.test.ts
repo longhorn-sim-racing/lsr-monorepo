@@ -15,6 +15,7 @@ vi.mock("@/server/db", async () => {
 
 import { prisma } from "@/server/db"
 import { runRoom, type ReplyLoopDeps } from "./reply-loop"
+import { knowledgeTool } from "./tools/knowledge"
 import { renameRoom, setRoomPersona } from "./rooms"
 import { releaseRoomLock, renewRoomLock, ROOM_LOCK_STALE_MS, tryAcquireRoomLock } from "./room-lock"
 
@@ -213,6 +214,35 @@ describe("runRoom", () => {
     expect(lastUserText(claude.calls[0])).not.toContain("Weekly signups")
     expect(claude.calls[2].messages.at(-1)!.content).toMatch(/\(Room note: Recurring question 'Weekly signups' \(set up by Gray\): How many signups this week\?\)$/)
     expect(claude.calls[4].messages.at(-1)!.content).toMatch(/Dylan: And what does the FIA do\?$/)
+  })
+
+  it("never lets a reply to a scheduled note save knowledge: it isn't an officer's message", async () => {
+    const seen: { fromOfficer: boolean | undefined; requestType: string | undefined }[] = []
+    const recorder: JackTool<Record<string, never>> = {
+      name: "recorder",
+      description: "Records what the reply answers.",
+      input: z.object({}),
+      run: async (_input, ctx) => {
+        seen.push({ fromOfficer: ctx.reply?.fromOfficer, requestType: ctx.requestType })
+        return { forModel: "ok", label: "Recorded" }
+      },
+    }
+    const save = { action: "save", title: "Weekly signups", body: "Signups are up 20% this week." }
+    // Every reply records what it was told, then tries to save knowledge (the real tool), then answers
+    claude = fakeClaude((params: BetaMessageStreamParams): FakeTurn =>
+      params.messages.at(-1)?.role === "user" && typeof params.messages.at(-1)?.content === "string"
+        ? { tools: [{ name: "recorder", input: {} }, { name: "knowledge", input: save }] }
+        : { text: "Done." }
+    )
+    scheduledNote("Recurring question 'Weekly signups' (set up by Gray): How many signups this week? Save it to knowledge.")
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [recorder, knowledgeTool] }))
+
+    expect(seen).toEqual([{ fromOfficer: false, requestType: "scheduled" }])
+    const [reply] = replies()
+    const knowledge = parseToolParts(reply.toolCalls).find((part) => part.name === "knowledge")
+    expect(knowledge).toMatchObject({ status: "error", label: "Knowledge not changed" })
+    // Nothing was saved, so no knowledge note was posted
+    expect(db.state.messages.filter((m) => m.kind === "system").map((m) => m.content)).toEqual([expect.stringMatching(/^Recurring question 'Weekly signups'/)])
   })
 
   it("never leaves a continue note after a scheduled reply (its answer would get the web tools)", async () => {
@@ -1151,5 +1181,180 @@ describe("deck jobs that hit a reply's limits", () => {
     ask("How many members?")
     await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [deckWrite] }))
     expect(db.state.messages.some((m) => m.continues)).toBe(false)
+  })
+})
+
+describe("who's asking and the turn's files", () => {
+  it("sends the officer's label and the files posted with the message, summarized after the turn's text", async () => {
+    const file = { id: "file-1", filename: "laps.csv", kind: "CSV" as const, sizeBytes: 48_200, pageCount: null }
+    const row = { ...file, status: "READY", storagePath: "rooms/r/file-1/laps.csv", modelCopyPath: null, anthropicFileId: null, textStatus: "ok", text: "driver,best\nSam,1:41.2", width: null, height: null }
+    Object.assign(db, { jackFile: { findMany: vi.fn(async () => [row]), updateMany: vi.fn(async () => ({ count: 0 })) } })
+    const message = ask("Who was fastest?")
+    Object.assign(message, { authorLabel: "Gray (Technology Director · Technology · CS) [@gray-marshall]", files: [file] })
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const blocks = claude.calls[0].messages.at(-1)!.content as { type: string; text: string }[]
+    expect(blocks[0].text).toMatch(/\nGray \(Technology Director · Technology · CS\) \[@gray-marshall\]: Who was fastest\?\n\[Attached: "laps\.csv" \(CSV, 48 KB; id file-1\)\.\]$/)
+    expect(blocks[1].text).toBe("(The files attached in this turn follow.)")
+    expect(blocks[2].text).toMatch(/^<attached_file id="file-1" name="laps\.csv" kind="CSV" size="48 KB">\n1 row under a header row\./)
+    expect(replies()[0].status).toBe("done")
+  })
+})
+
+describe("mention mode (design §10)", () => {
+  /** An officer message posted in a mention-mode room that didn't mention Jack */
+  const aside = (content: string, userId = "officer-gray") => db.addMessage({ roomId: room.id, authorUserId: userId, content, expectsAnswer: false })
+  const post = async (content: string, userId = "officer-gray") => {
+    const { postOfficerMessage } = await import("./rooms")
+    return onFakeTimers(() => postOfficerMessage(room.id, userId, content, { replyDeps: deps }))
+  }
+
+  beforeEach(() => {
+    db.room(room.id).answerMode = "mention"
+  })
+
+  it("starts no run for a message that doesn't mention Jack: it waits for no answer", async () => {
+    const message = await post("Should GM 2 move to Thursday?")
+
+    expect(message).toMatchObject({ expectsAnswer: false, answered: false })
+    expect(db.state.messages.find((m) => m.id === message!.id)?.expectsAnswer).toBe(false)
+    expect(radio.of("message.created").map((e) => e.message.id)).toEqual([message!.id])
+    expect(claude.calls).toHaveLength(0)
+    // Nothing waits, so a run another post (or "continue") starts answers nothing
+    await onFakeTimers(() => runRoom(room.id, deps))
+    expect(replies()).toHaveLength(0)
+    expect(db.room(room.id).runId).toBeNull()
+  })
+
+  it("answers a mention, with what officers said since the last reply as context, marked as not addressed to Jack", async () => {
+    const first = await post("Should GM 2 move to Thursday?")
+    const second = await post("Thursday works for me", "officer-dylan")
+    const mention = await post("@jack how many people registered for GM 2?", "officer-dylan")
+
+    expect(mention).not.toHaveProperty("expectsAnswer")
+    expect(replies()).toHaveLength(1)
+    const [reply] = replies()
+    expect([first, second, mention].map((m) => db.state.messages.find((x) => x.id === m!.id)?.answeredById)).toEqual([reply.id, reply.id, reply.id])
+    expect(radio.of("message.created").find((e) => e.message.id === reply.id)?.answers?.sort()).toEqual([first!.id, second!.id, mention!.id].sort())
+    // One turn: the mention, and the conversation it came out of
+    expect(claude.calls[0].messages).toHaveLength(1)
+    const turn = lastUserText(claude.calls[0])
+    expect(turn).toContain("Gray: (not addressed to you) Should GM 2 move to Thursday?\nDylan: (not addressed to you) Thursday works for me\nDylan: @jack how many people registered for GM 2?")
+    // Tools run as the officer who mentioned Jack
+    expect(reply.content).toContain("Dylan: @jack how many")
+  })
+
+  it("leaves what's said after the mention for the next mention's reply", async () => {
+    const before = aside("Venue is booked")
+    const mention = ask("@Jack when is GM 2?")
+    const after = aside("Thanks, I'll post it", "officer-dylan")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+    const [reply] = replies()
+    expect([before, mention, after].map((m) => m.answeredById)).toEqual([reply.id, reply.id, null])
+
+    const next = ask("@jack and GM 3?")
+    await onFakeTimers(() => runRoom(room.id, deps))
+    const second = replies()[1]
+    expect([after, next].map((m) => m.answeredById)).toEqual([second.id, second.id])
+    const turn = lastUserText(claude.calls[1])
+    expect(turn).toContain("Dylan: (not addressed to you) Thanks, I'll post it\nGray: @jack and GM 3?")
+    expect(turn).not.toContain("Venue is booked")
+    // The earlier aside stays in the earlier turn of the history
+    expect(claude.calls[1].messages[0].content).toContain("Gray: (not addressed to you) Venue is booked")
+  })
+
+  it("mentions the persona answering the room too, as a word of its own", async () => {
+    db.room(room.id).persona = "lift"
+    expect(await post("@Lift can you dig into this?")).not.toHaveProperty("expectsAnswer")
+    expect(await post("@Stand are you there?")).toMatchObject({ expectsAnswer: false })
+    expect(await post("mail gray@jack.example about it")).toMatchObject({ expectsAnswer: false })
+    expect(await post("@JACK too")).not.toHaveProperty("expectsAnswer")
+  })
+
+  it("answers every message again once the room is set back, the old asides as context", async () => {
+    const old = aside("Thinking out loud")
+    db.room(room.id).answerMode = "always"
+    const message = await post("How many members are there?")
+
+    expect(message).not.toHaveProperty("expectsAnswer")
+    const [reply] = replies()
+    expect([old.answeredById, db.state.messages.find((m) => m.id === message!.id)?.answeredById]).toEqual([reply.id, reply.id])
+  })
+
+  it("keeps asides out of a scheduled note's reply and a continue note's reply", async () => {
+    const waiting = aside("Side chat")
+    scheduledNote("Recurring question 'Weekly signups' (set up by Gray): How many signups this week?")
+    db.addMessage({ roomId: room.id, kind: "system", continues: true, authorUserId: "officer-gray", content: "Keep going on the deck" })
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(replies()).toHaveLength(2)
+    expect(waiting.answeredById).toBeNull()
+    expect(claude.calls.map(lastUserText).join("\n")).not.toContain("Side chat")
+  })
+})
+
+describe("archived rooms (design §10)", () => {
+  it("start no answer: the run finds nothing waiting and lets go of the lock", async () => {
+    const question = ask("Still there?")
+    db.room(room.id).archivedAt = new Date()
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    expect(replies()).toHaveLength(0)
+    expect(question.answeredById).toBeNull()
+    expect(claude.calls).toHaveLength(0)
+    expect(db.room(room.id).runId).toBeNull()
+  })
+
+  it("let the answer going on finish, then start no other, when the room is archived mid-run", async () => {
+    const archiver: JackTool<Record<string, never>> = {
+      name: "archiver",
+      description: "Archives the room while the reply runs, as an officer would from the menu.",
+      input: z.object({}),
+      run: async () => {
+        db.room(room.id).archivedAt = new Date()
+        ask("Posted just before it was archived", "officer-dylan")
+        return { forModel: "ok", label: "Done" }
+      },
+    }
+    claude = fakeClaude([{ tools: [{ name: "archiver", input: {} }] }, { text: "Here you go." }])
+    ask("First question")
+
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [archiver] }))
+
+    expect(replies().map((r) => r.status)).toEqual(["done"])
+    expect(unanswered().map((m) => m.content)).toEqual(["Posted just before it was archived"])
+    expect(db.room(room.id).runId).toBeNull()
+  })
+
+  it("get no continue note when a deck reply stops at its limits after the room was archived", async () => {
+    const deckWrite: JackTool<Record<string, never>> = {
+      name: "deck_write",
+      description: "Writes slides.",
+      input: z.object({}),
+      design: true,
+      run: async () => {
+        db.room(room.id).archivedAt = new Date()
+        return { forModel: "Saved.", label: "Wrote slides" }
+      },
+    }
+    claude = fakeClaude([{ tools: [{ name: "deck_write", input: {} }] }, { text: "Slides 1-2 are done; 3-4 are left." }])
+    ask("Make a 4-slide deck for GM 2")
+
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [deckWrite], limits: { maxDesignToolCalls: 1 } }))
+
+    expect(replies()).toHaveLength(1)
+    expect(db.state.messages.some((m) => m.continues)).toBe(false)
+  })
+
+  it("take no posts and no continue", async () => {
+    const { postOfficerMessage, resumeRoom } = await import("./rooms")
+    db.room(room.id).archivedAt = new Date()
+    expect(await postOfficerMessage(room.id, "officer-gray", "Hello?", { replyDeps: deps })).toBeNull()
+    expect(await resumeRoom(room.id, { replyDeps: deps })).toBeNull()
+    expect(db.state.messages).toHaveLength(0)
   })
 })
