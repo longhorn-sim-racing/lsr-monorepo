@@ -10,6 +10,10 @@ const nextConfig: NextConfig = {
   // from there, so the binary is included at that real path as well as through the link.
   // pdfjs-dist (text from PDFs Jack reads) loads its worker file from next to its own build at runtime;
   // bundled, it can't find it ("Setting up fake worker failed"), so it stays a plain Node package too.
+  // That alone doesn't get the worker onto Vercel: file tracing only follows legacy/build/pdf.mjs. The
+  // code that reads PDFs must import "pdfjs-dist/legacy/build/pdf.worker.mjs" statically and set
+  // globalThis.pdfjsWorker to it (pdfjs checks that before loading the file), or the worker has to be
+  // added to outputFileTracingIncludes for the routes that read PDFs.
   serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core", "pdfjs-dist"],
   outputFileTracingIncludes: {
     "/admin/jack/**": CHROMIUM_BINARY,
