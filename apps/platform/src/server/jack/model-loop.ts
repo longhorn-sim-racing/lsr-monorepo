@@ -143,6 +143,8 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
 
   let text = ""
   const parts: JackToolPart[] = []
+  // Tools read the reply's calls from here (knowledge provenance): the copy saved on the reply lags behind
+  if (ctx.reply) ctx.reply.toolParts = () => parts
   let partChain: Promise<void> = Promise.resolve()
   let toolCalls = 0
   let wrapUp = false

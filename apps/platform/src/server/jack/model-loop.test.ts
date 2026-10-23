@@ -470,6 +470,27 @@ describe("runModelReply", () => {
     expect(seen).toMatchObject({ roomId: "room-1", actor: { displayName: "Gray" } })
     expect(seen!.signal).toBeInstanceOf(AbortSignal)
   })
+
+  it("lets a tool read the reply's calls as they stand, ahead of the saved copy", async () => {
+    let seen: string[] = []
+    const peek: JackTool<{ table: string }> = {
+      ...countTool(),
+      name: "peek",
+      run: async (_input, ctx) => {
+        await Promise.resolve()
+        seen = (ctx.reply?.toolParts?.() ?? []).map((p) => `${p.name}:${JSON.stringify(p.input)}`)
+        return { forModel: "ok", label: "ok" }
+      },
+    }
+    // Saving parts is slow here, as it can be for real: nothing has reached the reply when peek runs
+    const { run } = setup([{ tools: [{ name: "peek", input: { table: "a" } }, { name: "count_rows", input: { table: "b" } }] }, { text: "ok" }], [countTool(), peek], {
+      ctx: { roomId: "room-1", actor: { userId: "officer-gray", displayName: "Gray" }, reply: { fromOfficer: true, knowledgeChanges: 0 } },
+      onPart: (part) => new Promise((resolve) => setTimeout(() => resolve(void parts.push([part])), 20)),
+    })
+    await run()
+    // The call made alongside it is there, with its input
+    expect(seen).toEqual(['peek:{"table":"a"}', 'count_rows:{"table":"b"}'])
+  })
 })
 
 describe("cancelling a reply", () => {

@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest"
-import { applyTextEdits, describeAge, formatAge, knowledgeAge, normalizeTags, parseProvenance, roomMessagePath } from "./knowledge"
+import {
+  applyTextEdits,
+  DELETED_KNOWLEDGE_LABEL,
+  describeAge,
+  formatAge,
+  knowledgeAge,
+  knowledgeNoteIds,
+  normalizeTags,
+  parseProvenance,
+  roomMessagePath,
+  scrubDeletedKnowledge,
+} from "./knowledge"
 
 const DAY = 86_400_000
 const now = new Date("2026-10-22T17:00:00Z")
@@ -85,5 +96,70 @@ describe("roomMessagePath", () => {
   it("anchors the message when there is one", () => {
     expect(roomMessagePath("r1", "m 1")).toBe("/admin/jack/r1?m=m%201")
     expect(roomMessagePath("r1", null)).toBe("/admin/jack/r1")
+  })
+})
+
+describe("knowledgeNoteIds", () => {
+  it("reads the note ids from the provenance, and nothing from anything else", () => {
+    expect(knowledgeNoteIds({ roomId: "r", noteIds: ["n1", 2, "n2"] })).toEqual(["n1", "n2"])
+    for (const value of [null, "x", [], { noteIds: "n1" }]) expect(knowledgeNoteIds(value)).toEqual([])
+  })
+})
+
+describe("scrubDeletedKnowledge", () => {
+  const ID = "11111111-1111-4111-8111-111111111111"
+  const entry = { id: ID, titles: ["Dues policy", "Dues this semester"] }
+  const part = (overrides: Record<string, unknown>) => ({ id: "t", name: "knowledge", label: "", status: "done", at: 0, input: {}, displays: [], ...overrides })
+
+  it("takes the text out of the knowledge calls that saved or changed the entry", () => {
+    const saved = part({
+      id: "t1",
+      input: { action: "save", title: "Dues policy", body: "Private text", tags: ["dues"] },
+      label: "Saved “Dues policy” to knowledge",
+      displays: [{ kind: "links", items: [{ title: "Dues policy", url: `/admin/knowledge/${ID}`, snippet: "Private text" }] }],
+    })
+    const updated = part({ id: "t2", input: { action: "update", id: ID, baseVersionId: "v1", edits: [{ find: "Private", replace: "Secret" }] }, label: "Updated “Dues policy” to knowledge" })
+    const { toolCalls, changed } = scrubDeletedKnowledge([saved, updated], entry)
+    expect(changed).toBe(true)
+    expect(toolCalls).toEqual([
+      { ...saved, input: { action: "save" }, label: DELETED_KNOWLEDGE_LABEL, displays: [] },
+      { ...updated, input: { action: "update", id: ID }, label: DELETED_KNOWLEDGE_LABEL, displays: [] },
+    ])
+    expect(JSON.stringify(toolCalls)).not.toMatch(/Private|Dues policy/)
+  })
+
+  it("catches a refused attempt at the same save, and a refusal that quoted the entry", () => {
+    const refused = part({ input: { action: "save", title: "dues policy ", body: "Private text" }, status: "error", error: "There's already an entry like this", label: "Knowledge not saved: similar entries exist" })
+    const conflict = part({ id: "t2", input: { action: "update", id: ID, body: "x" }, status: "error", error: `{"current":{"body":"Private text"}}` })
+    const { toolCalls } = scrubDeletedKnowledge([refused, conflict], entry)
+    expect(toolCalls).toMatchObject([
+      { input: { action: "save" }, error: DELETED_KNOWLEDGE_LABEL },
+      { input: { action: "update", id: ID }, error: DELETED_KNOWLEDGE_LABEL },
+    ])
+  })
+
+  it("drops other tools' links to it and leaves everything else alone", () => {
+    const search = part({
+      name: "search",
+      input: { query: "dues" },
+      label: "Searched (2 results)",
+      displays: [
+        {
+          kind: "links",
+          items: [
+            { title: "Dues policy", url: `/admin/knowledge/${ID}` },
+            { title: "LSC fees", url: "/admin/knowledge/other" },
+          ],
+        },
+        { kind: "note", text: `See ${ID}` },
+      ],
+    })
+    const other = part({ id: "t9", name: "run_sql", input: { sql: "select 1" }, label: "Ran a query (1 row)" })
+    const otherSave = part({ id: "t8", input: { action: "save", title: "LSC fees", body: "Kept" }, displays: [{ kind: "links", items: [{ title: "LSC fees", url: "/admin/knowledge/other" }] }] })
+    const { toolCalls, changed } = scrubDeletedKnowledge([search, other, otherSave], entry)
+    expect(changed).toBe(true)
+    expect(toolCalls).toEqual([{ ...search, displays: [{ kind: "links", items: [{ title: "LSC fees", url: "/admin/knowledge/other" }] }] }, other, otherSave])
+    expect(scrubDeletedKnowledge([other, otherSave], entry)).toEqual({ toolCalls: [other, otherSave], changed: false })
+    expect(scrubDeletedKnowledge(null, entry)).toEqual({ toolCalls: [], changed: false })
   })
 })

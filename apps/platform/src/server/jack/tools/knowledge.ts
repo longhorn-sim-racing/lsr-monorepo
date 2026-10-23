@@ -1,6 +1,8 @@
-import type { Prisma } from "@prisma/client"
+import { randomUUID } from "node:crypto"
+import { formatInTimeZone } from "date-fns-tz"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
+import { DEFAULT_TIMEZONE } from "@/lib/dates"
 import { applyTextEdits, KNOWLEDGE_LIMITS, knowledgeEntryPath, normalizeTags, type KnowledgeProvenance } from "@/lib/jack/knowledge"
 import { parseToolParts } from "@/lib/jack/parts"
 import { JACK_EVENT } from "@/lib/jack/types"
@@ -21,8 +23,9 @@ import type { JackTool, JackToolContext, JackToolResult } from "./types"
  * - at most MAX_CHANGES_PER_REPLY saves, updates and archives per reply, counted before the first
  *   await so parallel calls can't all slip under it;
  * - the service's checks: duplicates, the base version on updates, secrets;
- * - every change posts a room note with the full text, writes an audit entry, records where it came
- *   from (provenance), and leaves the entry "not reviewed" until an officer reviews it.
+ * - every change posts a room note with the full text (and any details it changed), writes an audit
+ *   entry and a version, records where it came from (provenance, with the note's id, so a hard delete
+ *   can clear the note), and leaves the entry "not reviewed" until an officer reviews it.
  * Reading and searching knowledge go through search and read.
  */
 
@@ -43,13 +46,17 @@ const input = z
     id: id.optional().describe("update, archive: the entry's id (from search, read or an earlier save)"),
     baseVersionId: id.optional().describe("update: the entry's versionId as you last read or saved it"),
     title: z.string().trim().min(3).max(KNOWLEDGE_LIMITS.titleMax).optional().describe("save: required; a clear, specific title. update: a new title"),
+    // Up to bodyMax so Jack can rewrite a longer entry from the page or the seed; the service keeps
+    // his saves to jackBodyMax and never lets him make an entry longer than it was past that
     body: z
       .string()
       .trim()
       .min(1)
-      .max(KNOWLEDGE_LIMITS.jackBodyMax)
+      .max(KNOWLEDGE_LIMITS.bodyMax)
       .optional()
-      .describe("save: required; markdown, one topic, in the officer's words. update: the whole new text (or use edits)"),
+      .describe(
+        `save: required; markdown, one topic, in the officer's words, at most ${KNOWLEDGE_LIMITS.jackBodyMax.toLocaleString("en-US")} characters. update: the whole new text (or use edits)`,
+      ),
     edits: z
       .array(z.object({ find: z.string().min(1).max(KNOWLEDGE_LIMITS.jackBodyMax), replace: z.string().max(KNOWLEDGE_LIMITS.jackBodyMax) }))
       .min(1)
@@ -74,6 +81,9 @@ const input = z
     if (value.action === "save") {
       need("title", "save needs a title")
       need("body", "save needs the body")
+      if (value.body && value.body.length > KNOWLEDGE_LIMITS.jackBodyMax) {
+        ctx.addIssue({ code: "custom", path: ["body"], message: `keep a new entry to ${KNOWLEDGE_LIMITS.jackBodyMax.toLocaleString("en-US")} characters; split a longer one into several entries` })
+      }
       if (value.id) ctx.addIssue({ code: "custom", path: ["id"], message: "save makes a new entry; to change an existing one, use update" })
       if (value.edits) ctx.addIssue({ code: "custom", path: ["edits"], message: "save takes the whole body; edits are for update" })
     } else if (value.action === "update") {
@@ -109,15 +119,21 @@ async function officerByHandle(handle: string): Promise<{ id: string } | { error
   return user ?? { error: `No officer has the handle @${clean}. An entry's owner must be an officer; leave owner out to make it the officer who asked.` }
 }
 
-/** The room, the reply and the tools it used before this call, for the entry's provenance */
+/**
+ * The room, the reply and the tools it used before this call, for the entry's provenance. The tool
+ * calls come from the model loop's own list (ctx.reply.toolParts) when there is one: the copy saved on
+ * the reply is written in the background, so it can miss a call made alongside this one. That list is
+ * read after the first await, by when every call started in the same turn has its input in it
+ */
 export async function replyProvenance(ctx: JackToolContext, now = new Date()): Promise<KnowledgeProvenance> {
+  const live = ctx.reply?.toolParts
   const [reply, asked] = ctx.messageId
     ? await Promise.all([
-        prisma.jackMessage.findUnique({ where: { id: ctx.messageId }, select: { toolCalls: true } }),
+        live ? null : prisma.jackMessage.findUnique({ where: { id: ctx.messageId }, select: { toolCalls: true } }),
         prisma.jackMessage.findMany({ where: { answeredById: ctx.messageId, kind: "user" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } }),
       ])
     : [null, []]
-  const tools = parseToolParts(reply?.toolCalls)
+  const tools = (live ? live() : parseToolParts(reply?.toolCalls))
     .filter((part) => part.name !== "knowledge")
     .slice(-PROVENANCE_TOOLS)
     .map((part) => {
@@ -135,10 +151,10 @@ export async function replyProvenance(ctx: JackToolContext, now = new Date()): P
 }
 
 /** A note in the room for every change, with the full text, so every officer sees exactly what was kept */
-async function postRoomNote(ctx: JackToolContext, content: string) {
+async function postRoomNote(ctx: JackToolContext, content: string, id?: string) {
   try {
     const note = await prisma.jackMessage.create({
-      data: { roomId: ctx.roomId, kind: "system", authorUserId: ctx.actor.userId, content },
+      data: { ...(id ? { id } : {}), roomId: ctx.roomId, kind: "system", authorUserId: ctx.actor.userId, content },
       include: jackMessageInclude,
     })
     await broadcastRoomEvent(ctx.roomId, { type: JACK_EVENT.created, message: toMessageView(note) })
@@ -148,8 +164,33 @@ async function postRoomNote(ctx: JackToolContext, content: string) {
   }
 }
 
-function noteText(lead: string, entry: { title: string; body: string; tags: string[] }) {
-  return [`${lead}: “${entry.title}” (not reviewed yet)`, entry.body, entry.tags.length ? `Tags: ${entry.tags.join(", ")}` : ""].filter(Boolean).join("\n\n")
+type NoteEntry = { title: string; body: string; tags: string[]; sourceNote: string | null; sourceDate: Date | null; ownerId: string | null }
+
+function noteText(lead: string, entry: NoteEntry, changed: string[] = []) {
+  return [
+    `${lead}: “${entry.title}” (not reviewed yet)`,
+    changed.length ? `Changed: ${changed.join("; ")}` : "",
+    entry.body,
+    entry.tags.length ? `Tags: ${entry.tags.join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+}
+
+const centralDay = (date: Date | null) => (date ? formatInTimeZone(date, DEFAULT_TIMEZONE, "yyyy-MM-dd") : "none")
+
+/** The details an update changed, for its note ("source date 2025-01-10 → 2026-10-22"): they leave no trace in the text */
+async function detailChanges(before: NoteEntry, after: NoteEntry): Promise<string[]> {
+  const changed: string[] = []
+  if (before.sourceNote !== after.sourceNote) changed.push(`source “${before.sourceNote ?? "none"}” → “${after.sourceNote ?? "none"}”`)
+  if (centralDay(before.sourceDate) !== centralDay(after.sourceDate)) changed.push(`source date ${centralDay(before.sourceDate)} → ${centralDay(after.sourceDate)}`)
+  if (before.ownerId !== after.ownerId) {
+    const ids = [before.ownerId, after.ownerId].filter((id): id is string => !!id)
+    const users = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, handle: true } })
+    const name = (id: string | null) => (id ? `@${users.find((u) => u.id === id)?.handle ?? "a former officer"}` : "none")
+    changed.push(`owner ${name(before.ownerId)} → ${name(after.ownerId)}`)
+  }
+  return changed
 }
 
 /** What the model hears back when the service refuses */
@@ -224,7 +265,9 @@ async function change(value: KnowledgeInput, ctx: JackToolContext): Promise<Jack
     }
   }
 
-  const provenance = (await replyProvenance(ctx)) as unknown as Prisma.InputJsonValue
+  const provenance = await replyProvenance(ctx)
+  // The note's id is kept with the entry, so a hard delete can clear the note; it's posted once the change is in
+  const noteId = randomUUID()
 
   if (value.action === "save") {
     const result = await createKnowledgeEntry(
@@ -237,10 +280,10 @@ async function change(value: KnowledgeInput, ctx: JackToolContext): Promise<Jack
         ownerId: owner ? owner.id : ctx.actor.userId,
       },
       writer,
-      { provenance, notDuplicateOf: value.notDuplicateOf },
+      { provenance, noteId, notDuplicateOf: value.notDuplicateOf },
     )
     if (!result.ok) return refusal(result)
-    return done("Saved", result.entry, result.versionId, ctx)
+    return done("Saved", result.entry, result.versionId, ctx, noteId)
   }
 
   // update: edits apply to the text as it is now; if that isn't the base version, the service refuses it anyway
@@ -256,16 +299,23 @@ async function change(value: KnowledgeInput, ctx: JackToolContext): Promise<Jack
     value.id!,
     { title: value.title, body, tags, sourceNote: value.sourceNote, sourceDate, ...(owner ? { ownerId: owner.id } : {}) },
     writer,
-    { baseVersionId: value.baseVersionId, provenance },
+    { baseVersionId: value.baseVersionId, provenance, noteId },
   )
   if (!result.ok) return refusal(result)
   if (!result.changed) return fail(`Nothing changed: “${result.entry.title}” already says that.`, "Knowledge not changed")
-  return done("Updated", result.entry, result.versionId, ctx)
+  return done("Updated", result.entry, result.versionId, ctx, noteId, result.before ? await detailChanges(result.before, result.entry) : [])
 }
 
-async function done(verb: "Saved" | "Updated", entry: { id: string; title: string; body: string; tags: string[] }, versionId: string | null, ctx: JackToolContext): Promise<JackToolResult> {
+async function done(
+  verb: "Saved" | "Updated",
+  entry: NoteEntry & { id: string },
+  versionId: string | null,
+  ctx: JackToolContext,
+  noteId: string,
+  changed: string[] = [],
+): Promise<JackToolResult> {
   revalidateKnowledge(entry.id)
-  await postRoomNote(ctx, noteText(`${verb} in knowledge for ${ctx.actor.displayName}`, entry))
+  await postRoomNote(ctx, noteText(`${verb} in knowledge for ${ctx.actor.displayName}`, entry, changed), noteId)
   const path = knowledgeEntryPath(entry.id)
   return {
     forModel: forModel({

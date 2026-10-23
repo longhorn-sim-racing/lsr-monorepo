@@ -2,17 +2,18 @@
  * Checks the knowledge service (src/server/jack/knowledge) against the LOCAL database (#188, design §9):
  * the parts unit tests can't, because they live in Postgres. The duplicate check's lexeme counts (the
  * english parser, the search index row the trigger writes), the page's full-text search, versions under
- * the row lock, the "not reviewed" and stale views, and that a hard delete takes the versions and the
- * search index row with it.
+ * the row lock (edits and marking reviewed), the "not reviewed" and stale views, and that a hard delete
+ * takes the versions and the search index row with it and clears Jack's notes and tool calls in a room.
  *
  *   DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres pnpm --filter @lsr/platform exec tsx scripts/check-jack-knowledge.ts
  *
  * Refuses to run unless DATABASE_URL points at this machine. Writes only entries tagged with this run's
- * marker (and their audit entries), and deletes them all at the end, pass or fail.
+ * marker (and their audit entries) and one room of its own, and deletes them all at the end, pass or fail.
  */
-import { randomBytes } from "node:crypto"
+import { randomBytes, randomUUID } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { DELETED_KNOWLEDGE_NOTE } from "../src/lib/jack/knowledge"
 import { localDatabaseProblem } from "../src/server/jack/eval-support"
 
 for (const file of [".env.local", ".env"]) {
@@ -54,6 +55,7 @@ async function main() {
   const admin = { userId: null, via: "admin" as const }
   const jack = { userId: null, via: "jack" as const, roomId: `room-${MARK}` }
   const created: string[] = []
+  const rooms: string[] = []
   const track = <T extends { ok: boolean }>(result: T) => {
     if (result.ok && "entry" in result) created.push((result as unknown as { entry: { id: string } }).entry.id)
     return result
@@ -117,6 +119,8 @@ async function main() {
       service.updateKnowledgeEntry(dues.entry.id, { title: `Membership dues (race B) ${MARK}` }, admin, { baseVersionId: latest }),
     ])
     check(race.filter((r) => r.ok).length === 1 && race.some((r) => !r.ok && r.reason === "conflict"), "of two edits on the same version, one wins and one conflicts", race.map((r) => (r.ok ? "ok" : r.reason)))
+    const staleReview = await service.markKnowledgeReviewed(dues.entry.id, admin, { baseVersionId: base })
+    check(!staleReview.ok && staleReview.reason === "conflict", "marking reviewed on an older version is refused (under the row lock)", staleReview)
 
     console.log("\nSecrets")
     // Built from pieces so no scanner mistakes it for a real key
@@ -165,7 +169,48 @@ async function main() {
       prisma.jackSearchDoc.count({ where: { source: "knowledge", sourceId: dues.entry.id } }),
     ])
     check(removed.ok && left[0] === 0 && left[1] === 0, "a hard delete takes the versions and the search index row", left)
+
+    console.log("\nDelete clears Jack's copies in rooms")
+    const room = await prisma.jackRoom.create({ data: { title: `Knowledge check ${MARK}` }, select: { id: true } })
+    rooms.push(room.id)
+    const word = `zebrafinch${MARK}`
+    const noteId = randomUUID()
+    const provenance = { roomId: room.id, replyId: null, messageIds: [], askedBy: { userId: null, name: "Check" }, tools: [], at: new Date().toISOString() }
+    const saved = track(await service.createKnowledgeEntry({ title: `Private note ${MARK}`, body: `Only ${word} knows this.`, tags: [MARK] }, { ...jack, roomId: room.id }, { provenance, noteId }))
+    check(saved.ok, "Jack's save keeps its note's id", saved.ok ? saved.entry.provenance : saved)
+    if (saved.ok) {
+      const knowledgePart = {
+        id: "t1",
+        name: "knowledge",
+        label: `Saved “${saved.entry.title}” to knowledge`,
+        status: "done",
+        at: 0,
+        input: { action: "save", title: saved.entry.title, body: `Only ${word} knows this.` },
+        displays: [{ kind: "links", items: [{ title: saved.entry.title, url: `/admin/knowledge/${saved.entry.id}` }] }],
+      }
+      const sqlPart = { id: "t2", name: "run_sql", label: "Ran a query (1 row)", status: "done", at: 0, input: { sql: "select 1" }, displays: [] }
+      await prisma.jackMessage.create({ data: { id: noteId, roomId: room.id, kind: "system", content: `Saved in knowledge for Check: “${saved.entry.title}”\n\nOnly ${word} knows this.` } })
+      const reply = await prisma.jackMessage.create({ data: { roomId: room.id, kind: "assistant", persona: "jack", content: "Saved it.", toolCalls: [knowledgePart, sqlPart] }, select: { id: true } })
+      const other = await prisma.jackMessage.create({ data: { roomId: room.id, kind: "assistant", persona: "jack", content: "Something else.", toolCalls: [sqlPart] }, select: { id: true, updatedAt: true } })
+      const findsNote = async () =>
+        Number(
+          (
+            await prisma.$queryRaw<{ n: bigint }[]>`
+              SELECT count(*) AS n FROM "JackSearchDoc" WHERE source = 'room_message' AND "sourceId" = ${noteId} AND search @@ plainto_tsquery('english'::regconfig, ${word}::text)`
+          )[0].n,
+        )
+      check((await findsNote()) === 1, "the note is in the search index first (trigger)")
+
+      const deleted = await service.deleteKnowledgeEntry(saved.entry.id, admin)
+      check(deleted.ok && deleted.cleared.notes === 1 && deleted.cleared.replies === 1, "the delete clears one note and one reply", deleted)
+      const [note, replyAfter, otherAfter] = await Promise.all([noteId, reply.id, other.id].map((id) => prisma.jackMessage.findUniqueOrThrow({ where: { id } })))
+      check(note.content === DELETED_KNOWLEDGE_NOTE, "Jack's note says it was deleted instead", note.content)
+      check((await findsNote()) === 0, "and search no longer finds the note by its text (the trigger re-indexed it)")
+      check(!JSON.stringify(replyAfter.toolCalls).includes(word) && JSON.stringify(replyAfter.toolCalls).includes('"run_sql"'), "the reply's knowledge call lost the text; its other calls stayed", replyAfter.toolCalls)
+      check(otherAfter.updatedAt.getTime() === other.updatedAt.getTime(), "other replies are left alone (not even rewritten)", otherAfter.toolCalls)
+    }
   } finally {
+    await prisma.jackRoom.deleteMany({ where: { id: { in: rooms } } })
     const ids = [...new Set(created)]
     await prisma.knowledgeEntry.deleteMany({ where: { OR: [{ id: { in: ids } }, { tags: { has: MARK } }, { title: { contains: MARK } }] } })
     await prisma.auditLog.deleteMany({ where: { entityType: "KNOWLEDGE_ENTRY", OR: [{ entityId: { in: ids } }, { summary: { contains: MARK } }] } })

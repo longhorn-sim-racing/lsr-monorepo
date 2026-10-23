@@ -1,5 +1,5 @@
 import type { z } from "zod"
-import type { JackToolDisplay } from "@/lib/jack/parts"
+import type { JackToolDisplay, JackToolPart } from "@/lib/jack/parts"
 
 /** Who a tool call runs for, and where */
 export type JackToolContext = {
@@ -32,6 +32,11 @@ export type JackReplyState = {
   fromOfficer: boolean
   /** Knowledge changes made in this reply so far (the knowledge tool allows 3) */
   knowledgeChanges: number
+  /**
+   * The reply's tool calls so far, as the model loop holds them (it sets this). The copy saved on the
+   * reply is written in the background and can lag behind, e.g. a call made alongside this one
+   */
+  toolParts?: () => readonly JackToolPart[]
 }
 
 /** An image a tool shows the model (base64), after a line of text that says what it is */

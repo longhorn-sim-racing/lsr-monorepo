@@ -1,6 +1,6 @@
 import { Prisma, type KnowledgeEntry, type KnowledgeSource } from "@prisma/client"
 import { z } from "zod"
-import { KNOWLEDGE_LIMITS, normalizeTags } from "@/lib/jack/knowledge"
+import { DELETED_KNOWLEDGE_NOTE, KNOWLEDGE_LIMITS, knowledgeNoteIds, normalizeTags, scrubDeletedKnowledge, type KnowledgeProvenance } from "@/lib/jack/knowledge"
 import { partLink } from "@/lib/jack/links"
 import { findSecret } from "@/lib/redact"
 import { createAuditLog } from "@/server/audit/log"
@@ -17,8 +17,10 @@ import { duplicateMatch, type LexemeCounts } from "./similarity"
  * - Nothing that looks like a secret is saved (findSecret, the same check as redactSecrets).
  * - A new entry is checked against the existing ones (title and full-text similarity) and refused
  *   with the close ones, unless the caller names them in `notDuplicateOf`.
- * - Jack's saves and edits leave the entry "not reviewed" (reviewedAt cleared) until an officer marks
- *   it reviewed. Archive hides an entry; delete removes it and its versions for good.
+ * - Jack's saves and changes (to the text or the details) leave the entry "not reviewed" (reviewedAt
+ *   cleared) until an officer marks it reviewed, and each writes a version, so they show in History.
+ * - Archive hides an entry. Delete removes it and its versions for good, and clears the copies Jack
+ *   left in rooms: his notes with its text, and its text in his tool calls.
  * - Each change writes an audit entry with titles and tags, never bodies, so a hard delete really
  *   removes the text. Callers revalidate pages (scripts have no Next.js cache to revalidate).
  */
@@ -53,12 +55,13 @@ export type KnowledgeDuplicate = { id: string; title: string; updatedAt: Date; s
 export type KnowledgeCurrent = { versionId: string | null; title: string; body: string; tags: string[]; updatedAt: Date; updatedById: string | null }
 
 export type KnowledgeWriteResult =
-  | { ok: true; entry: KnowledgeEntry; versionId: string | null; changed: boolean }
+  /** `before`: an update's entry as it was */
+  | { ok: true; entry: KnowledgeEntry; versionId: string | null; changed: boolean; before?: KnowledgeEntry }
   | { ok: false; reason: "invalid" | "secret" | "not_found" | "archived" | "missing_base"; error: string }
   | { ok: false; reason: "duplicate"; error: string; duplicates: KnowledgeDuplicate[] }
   | { ok: false; reason: "conflict"; error: string; current: KnowledgeCurrent }
 
-export type KnowledgeChangeResult = { ok: true; entry: KnowledgeEntry; changed: boolean } | { ok: false; reason: "not_found"; error: string }
+export type KnowledgeChangeResult = { ok: true; entry: KnowledgeEntry; changed: boolean } | { ok: false; reason: "not_found" | "conflict"; error: string }
 
 const NOT_FOUND = { ok: false, reason: "not_found", error: "That knowledge entry doesn't exist (it may have been deleted)." } as const
 
@@ -74,8 +77,7 @@ const sourceUrl = z.preprocess(
     .nullable(),
 )
 
-function fieldsSchema(via: KnowledgeVia) {
-  const bodyMax = via === "jack" ? KNOWLEDGE_LIMITS.jackBodyMax : KNOWLEDGE_LIMITS.bodyMax
+function fieldsSchema(bodyMax: number) {
   return z.object({
     title: z
       .string()
@@ -97,8 +99,17 @@ function fieldsSchema(via: KnowledgeVia) {
 
 type CleanFields = z.output<ReturnType<typeof fieldsSchema>>
 
-function validate(fields: KnowledgeFields, via: KnowledgeVia): { ok: true; data: CleanFields } | { ok: false; reason: "invalid"; error: string } {
-  const parsed = fieldsSchema(via).safeParse(fields)
+/**
+ * The longest body a writer may leave. Jack writes short notes (jackBodyMax), but he can still change a
+ * longer entry from the page or the seed, as long as he doesn't make it longer than it was
+ */
+function bodyLimit(via: KnowledgeVia, before?: { body: string }): number {
+  if (via !== "jack") return KNOWLEDGE_LIMITS.bodyMax
+  return Math.min(KNOWLEDGE_LIMITS.bodyMax, Math.max(KNOWLEDGE_LIMITS.jackBodyMax, before?.body.length ?? 0))
+}
+
+function validate(fields: KnowledgeFields, bodyMax: number): { ok: true; data: CleanFields } | { ok: false; reason: "invalid"; error: string } {
+  const parsed = fieldsSchema(bodyMax).safeParse(fields)
   if (!parsed.success) return { ok: false, reason: "invalid", error: parsed.error.issues[0]?.message ?? "Check the entry." }
   return { ok: true, data: parsed.data }
 }
@@ -142,13 +153,31 @@ const auditMetadata = (writer: KnowledgeWriter, extra: Record<string, unknown> =
 
 const SOURCE_FOR: Record<KnowledgeVia, KnowledgeSource> = { admin: "MANUAL", jack: "JACK", seed: "SEED" }
 
+/**
+ * The provenance to keep: the reply's (when there's a new one), with the ids of every room note Jack
+ * has posted about the entry, carried from one change to the next, so a hard delete can clear them all
+ */
+function provenanceToStore(provenance: KnowledgeProvenance | undefined, previous: unknown, noteId: string | undefined): Prisma.InputJsonValue | undefined {
+  if (!provenance && !noteId) return undefined
+  const base = provenance ?? (previous && typeof previous === "object" && !Array.isArray(previous) ? previous : {})
+  return { ...base, noteIds: [...knowledgeNoteIds(previous), ...(noteId ? [noteId] : [])] } as Prisma.InputJsonValue
+}
+
+/** Locks an entry's row for the rest of the transaction: one change at a time per entry */
+const lockEntry = (tx: Prisma.TransactionClient, id: string) => tx.$queryRaw`SELECT id FROM "KnowledgeEntry" WHERE id = ${id} FOR UPDATE`
+
+const latestVersion = (tx: Prisma.TransactionClient, entryId: string) =>
+  tx.knowledgeEntryVersion.findFirst({ where: { entryId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, createdAt: true } })
+
 export type CreateKnowledgeOptions = {
   /** Defaults from the writer: MANUAL for the page, JACK for Jack, SEED for the seed loader */
   sourceType?: KnowledgeSource
   /** Seeds: the sign-off date. Jack's saves are never reviewed */
   reviewedAt?: Date | null
   /** Jack's saves: the room, reply and tools behind it */
-  provenance?: Prisma.InputJsonValue
+  provenance?: KnowledgeProvenance
+  /** Jack's saves: the id of the room note he posts with the text (kept, so a hard delete clears it) */
+  noteId?: string
   /** Entries the caller has seen and says this isn't a duplicate of */
   notDuplicateOf?: string[]
   /** The seed loader reports duplicates itself */
@@ -157,7 +186,7 @@ export type CreateKnowledgeOptions = {
 
 /** Saves a new entry and its first version */
 export async function createKnowledgeEntry(fields: KnowledgeFields, writer: KnowledgeWriter, options: CreateKnowledgeOptions = {}): Promise<KnowledgeWriteResult> {
-  const valid = validate(fields, writer.via)
+  const valid = validate(fields, bodyLimit(writer.via))
   if (!valid.ok) return valid
   const data = valid.data
   const secret = knowledgeSecret(data)
@@ -183,7 +212,7 @@ export async function createKnowledgeEntry(fields: KnowledgeFields, writer: Know
         sourceType: options.sourceType ?? SOURCE_FOR[writer.via],
         reviewedAt,
         reviewedById: reviewedAt ? writer.userId : null,
-        provenance: options.provenance ?? Prisma.DbNull,
+        provenance: provenanceToStore(options.provenance, null, options.noteId) ?? Prisma.DbNull,
         createdById: writer.userId,
         updatedById: writer.userId,
       },
@@ -211,7 +240,9 @@ export type UpdateKnowledgeOptions = {
   /** The version the change was made from; a change based on an older one is refused with the current text. Jack's updates need one */
   baseVersionId?: string | null
   /** Jack's changes: the room, reply and tools behind it (replaces the entry's provenance) */
-  provenance?: Prisma.InputJsonValue
+  provenance?: KnowledgeProvenance
+  /** Jack's changes: the id of the room note he posts with the text (added to the ones kept) */
+  noteId?: string
   /** An officer saving from the page can mark it reviewed as of now in the same step */
   markReviewed?: boolean
   /** The seed loader: reviewed as of the sign-off date */
@@ -222,7 +253,8 @@ export type UpdateKnowledgeOptions = {
 
 /**
  * Changes an entry. Fields left out stay as they are. A change to the title, body or tags writes a new
- * version; one to the source or owner only updates the entry. Jack's changes clear the review.
+ * version; one to the source or owner only updates the entry, unless it's Jack's: every change of his
+ * writes a version (so it shows in History and the base check sees it) and clears the review.
  */
 export async function updateKnowledgeEntry(
   id: string,
@@ -234,17 +266,16 @@ export async function updateKnowledgeEntry(
     return { ok: false, reason: "missing_base", error: "Read the entry first and pass the versionId you read as baseVersionId." }
   }
 
-  type Outcome = KnowledgeWriteResult | { ok: true; entry: KnowledgeEntry; versionId: string | null; changed: boolean; before: KnowledgeEntry }
-  const outcome: Outcome = await prisma.$transaction(async (tx) => {
+  const outcome: KnowledgeWriteResult = await prisma.$transaction(async (tx) => {
     // One change at a time per entry: the base check and the new version can't interleave with another
-    await tx.$queryRaw`SELECT id FROM "KnowledgeEntry" WHERE id = ${id} FOR UPDATE`
+    await lockEntry(tx, id)
     const before = await tx.knowledgeEntry.findUnique({ where: { id } })
     if (!before) return NOT_FOUND
     if (before.archivedAt && !options.allowArchived) {
       return { ok: false, reason: "archived", error: `“${before.title}” is archived. An officer can unarchive it on the Knowledge page first.` }
     }
 
-    const latest = await tx.knowledgeEntryVersion.findFirst({ where: { entryId: id }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, createdAt: true } })
+    const latest = await latestVersion(tx, id)
     if (options.baseVersionId && options.baseVersionId !== latest?.id) {
       return {
         ok: false,
@@ -264,7 +295,7 @@ export async function updateKnowledgeEntry(
         sourceDate: changes.sourceDate !== undefined ? changes.sourceDate : before.sourceDate,
         ownerId: changes.ownerId !== undefined ? changes.ownerId : before.ownerId,
       },
-      writer.via,
+      bodyLimit(writer.via, before),
     )
     if (!valid.ok) return valid
     const data = valid.data
@@ -278,25 +309,27 @@ export async function updateKnowledgeEntry(
     if (!contentChanged && !otherChanged && !options.markReviewed && !reviewChanged) return { ok: true, entry: before, versionId: latest?.id ?? null, changed: false }
 
     const now = new Date()
-    const review =
-      writer.via === "jack" && contentChanged
-        ? { reviewedAt: null, reviewedById: null }
-        : options.reviewedAt
-          ? { reviewedAt: options.reviewedAt, reviewedById: writer.userId }
-          : options.markReviewed
-            ? { reviewedAt: now, reviewedById: writer.userId }
-            : {}
+    // Any change of Jack's, details included: a new source date would otherwise make his entry look fresh
+    const byJack = writer.via === "jack" && (contentChanged || otherChanged)
+    const provenance = provenanceToStore(options.provenance, before.provenance, options.noteId)
+    const review = byJack
+      ? { reviewedAt: null, reviewedById: null }
+      : options.reviewedAt
+        ? { reviewedAt: options.reviewedAt, reviewedById: writer.userId }
+        : options.markReviewed
+          ? { reviewedAt: now, reviewedById: writer.userId }
+          : {}
     const entry = await tx.knowledgeEntry.update({
       where: { id },
       data: {
         ...data,
         ...review,
-        ...(options.provenance !== undefined ? { provenance: options.provenance } : {}),
+        ...(provenance !== undefined ? { provenance } : {}),
         updatedById: writer.userId,
       },
     })
     let versionId = latest?.id ?? null
-    if (contentChanged) {
+    if (contentChanged || byJack) {
       // Versions are ordered by createdAt; keep each one after the last even if clocks disagree
       const createdAt = new Date(Math.max(now.getTime(), (latest?.createdAt.getTime() ?? 0) + 1))
       const version = await tx.knowledgeEntryVersion.create({
@@ -308,7 +341,8 @@ export async function updateKnowledgeEntry(
     return { ok: true, entry, versionId, changed: true, before }
   })
 
-  if (!outcome.ok || !("before" in outcome)) return outcome
+  // Nothing to audit unless something changed (only a change carries `before`)
+  if (!outcome.ok || !outcome.before) return outcome
   const { entry, versionId, before } = outcome
   const bodyChanged = entry.body !== before.body
   await createAuditLog({
@@ -321,14 +355,27 @@ export async function updateKnowledgeEntry(
     after: auditView(entry),
     metadata: auditMetadata(writer, { versionId, bodyChanged, ...(options.markReviewed ? { markedReviewed: true } : {}) }),
   })
-  return { ok: true, entry, versionId, changed: true }
+  return { ok: true, entry, versionId, changed: true, before }
 }
 
-/** Marks an entry reviewed as of now: an officer checked it still holds. Restarts its age */
-export async function markKnowledgeReviewed(id: string, writer: KnowledgeWriter): Promise<KnowledgeChangeResult> {
-  const before = await prisma.knowledgeEntry.findUnique({ where: { id } })
-  if (!before) return NOT_FOUND
-  const entry = await prisma.knowledgeEntry.update({ where: { id }, data: { reviewedAt: new Date(), reviewedById: writer.userId } })
+/**
+ * Marks an entry reviewed as of now: an officer checked it still holds. Restarts its age. With
+ * `baseVersionId` (the version the officer was looking at), it's refused if the entry has a newer one:
+ * text nobody has seen can't be marked reviewed
+ */
+export async function markKnowledgeReviewed(id: string, writer: KnowledgeWriter, options: { baseVersionId?: string | null } = {}): Promise<KnowledgeChangeResult> {
+  const outcome = await prisma.$transaction(async (tx) => {
+    await lockEntry(tx, id)
+    const before = await tx.knowledgeEntry.findUnique({ where: { id } })
+    if (!before) return NOT_FOUND
+    if (options.baseVersionId !== undefined && options.baseVersionId !== ((await latestVersion(tx, id))?.id ?? null)) {
+      return { ok: false, reason: "conflict", error: `“${before.title}” changed since you opened it. Reload, check the new version, then mark it reviewed.` } as const
+    }
+    const entry = await tx.knowledgeEntry.update({ where: { id }, data: { reviewedAt: new Date(), reviewedById: writer.userId } })
+    return { ok: true, entry, before } as const
+  })
+  if (!outcome.ok) return outcome
+  const { entry, before } = outcome
   await createAuditLog({
     actorUserId: writer.userId,
     actionType: "REVIEW",
@@ -363,30 +410,63 @@ export async function setKnowledgeArchived(id: string, archived: boolean, writer
   return { ok: true, entry, changed: true }
 }
 
-/** Deletes an entry and every version of it for good (the search index row goes with it, by trigger) */
-export async function deleteKnowledgeEntry(id: string, writer: KnowledgeWriter): Promise<{ ok: true; title: string } | typeof NOT_FOUND> {
-  try {
-    const entry = await prisma.knowledgeEntry.delete({ where: { id } })
-    await createAuditLog({
-      actorUserId: writer.userId,
-      actionType: "DELETE",
-      entityType: "KNOWLEDGE_ENTRY",
-      entityId: id,
-      summary: `Deleted knowledge entry and its history: ${entry.title}`,
-      before: auditView(entry),
-      metadata: auditMetadata(writer),
-    })
-    return { ok: true, title: entry.title }
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") return NOT_FOUND
-    throw error
-  }
+/** What a hard delete cleared in rooms besides the entry: Jack's notes with its text, and replies whose tool calls held it */
+export type KnowledgeDeleteResult = { ok: true; title: string; cleared: { notes: number; replies: number } } | typeof NOT_FOUND
+
+/** A LIKE pattern that matches `text` anywhere, literally */
+const containsPattern = (text: string) => `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+
+/**
+ * Deletes an entry and every version of it for good (the search index row goes with it, by trigger),
+ * and in the same transaction clears the copies Jack left in rooms: his notes with its text say it was
+ * deleted instead (the trigger re-indexes them), and the tool calls that saved, changed or showed it
+ * lose its text (scrubDeletedKnowledge). Officers' own messages and Jack's reply text aren't changed.
+ */
+export async function deleteKnowledgeEntry(id: string, writer: KnowledgeWriter): Promise<KnowledgeDeleteResult> {
+  const outcome = await prisma.$transaction(async (tx) => {
+    // Locked, so a change can't land between finding its copies and deleting it
+    await lockEntry(tx, id)
+    const entry = await tx.knowledgeEntry.findUnique({ where: { id } })
+    if (!entry) return null
+    const versions = await tx.knowledgeEntryVersion.findMany({ where: { entryId: id }, select: { title: true } })
+
+    const noteIds = knowledgeNoteIds(entry.provenance)
+    const notes = noteIds.length ? await tx.jackMessage.updateMany({ where: { id: { in: noteIds }, kind: "system" }, data: { content: DELETED_KNOWLEDGE_NOTE } }) : { count: 0 }
+
+    // Every reply whose tool calls mention the entry: the calls that saved or changed it link to it or name its id
+    const replies = await tx.$queryRaw<{ id: string; toolCalls: unknown }[]>`
+      SELECT id, "toolCalls" FROM "JackMessage" WHERE "toolCalls" IS NOT NULL AND "toolCalls"::text LIKE ${containsPattern(id)}
+    `
+    const titles = [...new Set([entry.title, ...versions.map((v) => v.title)])]
+    let replyCount = 0
+    for (const reply of replies) {
+      const scrubbed = scrubDeletedKnowledge(reply.toolCalls, { id, titles })
+      if (!scrubbed.changed) continue
+      await tx.jackMessage.update({ where: { id: reply.id }, data: { toolCalls: scrubbed.toolCalls as Prisma.InputJsonValue } })
+      replyCount++
+    }
+
+    await tx.knowledgeEntry.delete({ where: { id } })
+    return { entry, cleared: { notes: notes.count, replies: replyCount } }
+  })
+  if (!outcome) return NOT_FOUND
+
+  const { entry, cleared } = outcome
+  await createAuditLog({
+    actorUserId: writer.userId,
+    actionType: "DELETE",
+    entityType: "KNOWLEDGE_ENTRY",
+    entityId: id,
+    summary: `Deleted knowledge entry and its history: ${entry.title}`,
+    before: auditView(entry),
+    metadata: auditMetadata(writer, { cleared }),
+  })
+  return { ok: true, title: entry.title, cleared }
 }
 
 /** The id of an entry's newest version: what an update passes as baseVersionId */
 export async function latestKnowledgeVersionId(entryId: string): Promise<string | null> {
-  const latest = await prisma.knowledgeEntryVersion.findFirst({ where: { entryId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true } })
-  return latest?.id ?? null
+  return (await latestVersion(prisma, entryId))?.id ?? null
 }
 
 /** Most entries the duplicate check scores closely */

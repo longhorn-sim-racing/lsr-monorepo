@@ -9,7 +9,7 @@ export const SCHEMA_NOTES: SchemaNotesSlot = {
 - Officer profiles are columns on "User": department (executive, business, community, competition, media or technology: the About page's teams), isBoard (holds a board seat) and workingOn (what they say they work on, in their own words).`,
   tableNotes: {
     User: "department, isBoard and workingOn are an officer's profile (set by officers only).",
-    KnowledgeEntry: "Club knowledge entries. provenance (Jack's saves) records the room, the reply and the tools used before saving.",
+    KnowledgeEntry: "Club knowledge entries. provenance (Jack's saves) records the room, the reply, the tools used before saving, and noteIds: your room notes about it.",
     KnowledgeEntryVersion: "Every saved state of a knowledge entry; editedById and roomId say who and where.",
   },
 }

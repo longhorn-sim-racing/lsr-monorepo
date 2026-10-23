@@ -10,7 +10,7 @@ const service = vi.hoisted(() => ({
   setKnowledgeArchived: vi.fn(),
 }))
 const db = vi.hoisted(() => ({
-  user: { findFirst: vi.fn() },
+  user: { findFirst: vi.fn(), findMany: vi.fn() },
   knowledgeEntry: { findUnique: vi.fn() },
   jackMessage: { findUnique: vi.fn(), findMany: vi.fn(), create: vi.fn() },
 }))
@@ -153,6 +153,7 @@ describe("save", () => {
       { userId: "officer-dylan", via: "jack", roomId: "room-1", messageId: "reply-1" },
       {
         notDuplicateOf: undefined,
+        noteId: expect.stringMatching(/^[0-9a-f-]{36}$/),
         provenance: {
           roomId: "room-1",
           replyId: "reply-1",
@@ -167,7 +168,8 @@ describe("save", () => {
     expect(notes()).toEqual([
       "Saved in knowledge for Dylan: “Dues this semester” (not reviewed yet)\n\nNo dues this semester; only activity fees like the LSC entry.\n\nTags: dues, policy",
     ])
-    expect(db.jackMessage.create.mock.calls[0][0].data).toMatchObject({ roomId: "room-1", kind: "system", authorUserId: "officer-dylan" })
+    // The note has the id kept with the entry, so a hard delete can clear it
+    expect(db.jackMessage.create.mock.calls[0][0].data).toMatchObject({ id: service.createKnowledgeEntry.mock.calls[0][2].noteId, roomId: "room-1", kind: "system", authorUserId: "officer-dylan" })
     expect(broadcast.broadcastRoomEvent).toHaveBeenCalledWith("room-1", expect.objectContaining({ type: "message.created" }))
 
     expect(result.label).toBe("Saved “Dues this semester” to knowledge")
@@ -176,10 +178,10 @@ describe("save", () => {
   })
 
   it("takes an owner by handle, only an officer's", async () => {
-    db.user.findFirst.mockResolvedValueOnce({ id: "officer-armando" }).mockResolvedValueOnce(null)
-    await call(save({ owner: "@Armando-Martinez", sourceDate: "2026-09-28", sourceNote: "Armando, exec meeting" }))
-    expect(db.user.findFirst.mock.calls[0][0].where).toMatchObject({ handle: "armando-martinez", roles: { some: { role: { key: { in: ["officer", "admin"] } } } } })
-    expect(service.createKnowledgeEntry.mock.calls[0][0]).toMatchObject({ ownerId: "officer-armando", sourceNote: "Armando, exec meeting", sourceDate: new Date("2026-09-28T05:00:00Z") })
+    db.user.findFirst.mockResolvedValueOnce({ id: "officer-test" }).mockResolvedValueOnce(null)
+    await call(save({ owner: "@Test-Owner", sourceDate: "2026-09-28", sourceNote: "Test Owner, exec meeting" }))
+    expect(db.user.findFirst.mock.calls[0][0].where).toMatchObject({ handle: "test-owner", roles: { some: { role: { key: { in: ["officer", "admin"] } } } } })
+    expect(service.createKnowledgeEntry.mock.calls[0][0]).toMatchObject({ ownerId: "officer-test", sourceNote: "Test Owner, exec meeting", sourceDate: new Date("2026-09-28T05:00:00Z") })
 
     expect(await call(save({ owner: "someone" }))).toMatchObject({ isError: true, forModel: expect.stringMatching(/No officer has the handle @someone/) })
   })
@@ -236,6 +238,37 @@ describe("update", () => {
     expect(db.jackMessage.create).not.toHaveBeenCalled()
   })
 
+  it("rewrites a long entry from the page (the service keeps him from making it longer)", async () => {
+    const long = "x".repeat(12_000)
+    expect((await call({ action: "update", id: ID, baseVersionId: VERSION, body: long })).isError).toBeUndefined()
+    expect(service.updateKnowledgeEntry.mock.calls[0][1]).toMatchObject({ body: long })
+  })
+
+  it("lists the details an update changed in its note, and keeps the note's id", async () => {
+    const before = entry({ sourceNote: "Exec meeting", sourceDate: new Date("2025-01-10T06:00:00Z"), ownerId: "officer-a" })
+    service.updateKnowledgeEntry.mockResolvedValueOnce({
+      ok: true,
+      changed: true,
+      versionId: "v-next",
+      before,
+      entry: { ...before, sourceNote: "Dylan, in a Jack room", sourceDate: NOW, ownerId: "officer-b" },
+    })
+    db.user.findFirst.mockResolvedValueOnce({ id: "officer-b" })
+    db.user.findMany.mockResolvedValueOnce([
+      { id: "officer-a", handle: "test-officer" },
+      { id: "officer-b", handle: "test-owner" },
+    ])
+    await call({ action: "update", id: ID, baseVersionId: VERSION, sourceDate: "2026-10-22", sourceNote: "Dylan, in a Jack room", owner: "test-owner" })
+
+    expect(notes()[0].split("\n\n").slice(0, 2)).toEqual([
+      "Updated in knowledge for Dylan: “Dues this semester” (not reviewed yet)",
+      "Changed: source “Exec meeting” → “Dylan, in a Jack room”; source date 2025-01-10 → 2026-10-22; owner @test-officer → @test-owner",
+    ])
+    const options = service.updateKnowledgeEntry.mock.calls[0][3]
+    expect(options).toMatchObject({ baseVersionId: VERSION, noteId: expect.any(String) })
+    expect(db.jackMessage.create.mock.calls[0][0].data.id).toBe(options.noteId)
+  })
+
   it("says so when nothing changed, without a note", async () => {
     service.updateKnowledgeEntry.mockResolvedValueOnce({ ok: true, changed: false, versionId: VERSION, entry: entry() })
     expect(await call({ action: "update", id: ID, baseVersionId: VERSION, title: "Dues this semester" })).toMatchObject({ isError: true, forModel: expect.stringMatching(/Nothing changed/) })
@@ -274,6 +307,17 @@ describe("the input", () => {
 })
 
 describe("replyProvenance", () => {
+  it("takes the tools from the model loop's own list when there is one: the saved copy can lag behind", async () => {
+    const parts = [
+      { id: "t1", name: "read", label: "Read the sponsor packet", status: "done" as const, at: 0, input: { path: "Drive/Sponsors/packet.pdf" }, displays: [] },
+      { id: "t2", name: "knowledge", label: "Using knowledge", status: "running" as const, at: 0, input: { action: "save" }, displays: [] },
+    ]
+    const ctx = context({ reply: { fromOfficer: true, knowledgeChanges: 0, toolParts: () => parts } })
+    const provenance = await replyProvenance(ctx, NOW)
+    expect(provenance.tools).toEqual([{ name: "read", input: '{"path":"Drive/Sponsors/packet.pdf"}', label: "Read the sponsor packet" }])
+    expect(db.jackMessage.findUnique).not.toHaveBeenCalled()
+  })
+
   it("works outside a room reply too", async () => {
     expect(await replyProvenance({ roomId: "local", actor: { userId: null, displayName: "Script" } }, NOW)).toEqual({
       roomId: "local",

@@ -8,12 +8,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 type Entry = Record<string, unknown> & { id: string; title: string; body: string; tags: string[]; archivedAt: Date | null; reviewedAt: Date | null; updatedAt: Date }
 type Version = { id: string; entryId: string; title: string; body: string; tags: string[]; via: string; roomId: string | null; editedById: string | null; createdAt: Date }
+type Message = { id: string; kind: string; content: string; toolCalls: unknown }
 
-const store = vi.hoisted(() => ({ entries: new Map<string, Entry>(), versions: [] as Version[], ids: 0 }))
+const store = vi.hoisted(() => ({ entries: new Map<string, Entry>(), versions: [] as Version[], messages: new Map<string, Message>(), ids: 0 }))
+/** Raw SQL: the row lock returns nothing; the delete's search for replies matches toolCalls as text, as LIKE does */
+const queryRaw = vi.hoisted(() => async (sql: unknown, ...values: unknown[]): Promise<unknown[]> => {
+  if (!(sql as string[]).join("?").includes('"toolCalls"::text LIKE')) return []
+  const needle = String(values[0]).slice(1, -1)
+  return [...store.messages.values()].filter((m) => m.toolCalls && JSON.stringify(m.toolCalls).includes(needle)).map((m) => ({ id: m.id, toolCalls: m.toolCalls }))
+})
 const db = vi.hoisted(() => {
   const byNewest = (a: Version, b: Version) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1)
   const db = {
-    $queryRaw: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(async () => []),
+    $queryRaw: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(queryRaw),
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
     knowledgeEntry: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -55,6 +62,19 @@ const db = vi.hoisted(() => {
       findFirst: vi.fn(async ({ where }: { where: { entryId: string } }) => {
         const [latest] = store.versions.filter((v) => v.entryId === where.entryId).sort(byNewest)
         return latest ? { id: latest.id, createdAt: latest.createdAt } : null
+      }),
+      findMany: vi.fn(async ({ where }: { where: { entryId: string } }) => store.versions.filter((v) => v.entryId === where.entryId)),
+    },
+    jackMessage: {
+      updateMany: vi.fn(async ({ where, data }: { where: { id: { in: string[] }; kind: string }; data: Partial<Message> }) => {
+        const hits = where.id.in.map((id) => store.messages.get(id)).filter((m): m is Message => !!m && m.kind === where.kind)
+        for (const m of hits) store.messages.set(m.id, { ...m, ...data })
+        return { count: hits.length }
+      }),
+      update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<Message> }) => {
+        const m = { ...store.messages.get(where.id)!, ...data }
+        store.messages.set(m.id, m)
+        return m
       }),
     },
   }
@@ -109,9 +129,10 @@ async function seedEntry(fields: Partial<{ title: string; body: string; tags: st
 beforeEach(() => {
   store.entries.clear()
   store.versions = []
+  store.messages.clear()
   store.ids = 0
   vi.clearAllMocks()
-  db.$queryRaw.mockResolvedValue([])
+  db.$queryRaw.mockReset().mockImplementation(queryRaw)
 })
 
 describe("createKnowledgeEntry", () => {
@@ -140,6 +161,18 @@ describe("createKnowledgeEntry", () => {
     const result = await createKnowledgeEntry({ title: "Club colors", body: "Burnt orange and charcoal." }, { userId: "gray", via: "seed" }, { reviewedAt: signedOff, skipDuplicateCheck: true })
     expect(result).toMatchObject({ ok: true, entry: { sourceType: "SEED", reviewedAt: signedOff, reviewedById: "gray" } })
     expect(db.$queryRaw).not.toHaveBeenCalled()
+  })
+
+  it("keeps the ids of Jack's room notes with the entry, from one change to the next", async () => {
+    const provenance = (replyId: string) => ({ roomId: "room-1", replyId, messageIds: [], askedBy: { userId: "officer-2", name: "Dylan" }, tools: [], at: "2026-10-22T17:00:00.000Z" })
+    const saved = await createKnowledgeEntry({ title: "Dues policy", body: "No dues this semester." }, jack, { provenance: provenance("reply-1"), noteId: "note-1" })
+    if (!saved.ok) throw new Error(saved.error)
+    expect(saved.entry.provenance).toMatchObject({ replyId: "reply-1", noteIds: ["note-1"] })
+
+    await updateKnowledgeEntry(saved.entry.id, { body: "No dues this year." }, jack, { baseVersionId: saved.versionId, provenance: provenance("reply-2"), noteId: "note-2" })
+    // An officer's edit on the page leaves them as they are
+    await updateKnowledgeEntry(saved.entry.id, { title: "Dues policy 2026" }, officer)
+    expect(store.entries.get(saved.entry.id)!.provenance).toMatchObject({ replyId: "reply-2", noteIds: ["note-1", "note-2"] })
   })
 
   it("refuses what doesn't validate, with the reason", async () => {
@@ -204,20 +237,46 @@ describe("updateKnowledgeEntry", () => {
     expect(db.$transaction).not.toHaveBeenCalled()
   })
 
-  it("clears the review when Jack changes the text, and keeps it for a details-only change", async () => {
+  it("keeps the review for an officer's details-only change, without a version", async () => {
     const { entry, versionId } = await seedEntry()
     const reviewed = await updateKnowledgeEntry(entry.id, {}, officer, { baseVersionId: versionId, markReviewed: true })
     expect(reviewed).toMatchObject({ ok: true, entry: { reviewedById: "officer-1" } })
     expect(reviewed.ok && reviewed.entry.reviewedAt).toBeInstanceOf(Date)
 
-    const details = await updateKnowledgeEntry(entry.id, { sourceNote: "Armando, Discord" }, jack, { baseVersionId: versionId })
-    expect(details).toMatchObject({ ok: true, changed: true, versionId, entry: { sourceNote: "Armando, Discord" } })
+    const details = await updateKnowledgeEntry(entry.id, { sourceNote: "Test Officer, Discord" }, officer, { baseVersionId: versionId })
+    expect(details).toMatchObject({ ok: true, changed: true, versionId, entry: { sourceNote: "Test Officer, Discord" }, before: { sourceNote: null } })
     expect(details.ok && details.entry.reviewedAt).toBeInstanceOf(Date)
     expect(versionsOf(entry.id)).toHaveLength(1)
+  })
 
-    const text = await updateKnowledgeEntry(entry.id, { body: "$12 now." }, jack, { baseVersionId: versionId })
+  it("clears the review on any change of Jack's, details included, and versions each one", async () => {
+    const { entry, versionId } = await seedEntry()
+    await updateKnowledgeEntry(entry.id, {}, officer, { baseVersionId: versionId, markReviewed: true })
+
+    // A new source date alone would make a stale entry look fresh: it's his change, so it's not reviewed
+    const details = await updateKnowledgeEntry(entry.id, { sourceDate: new Date("2026-10-22T05:00:00Z") }, jack, { baseVersionId: versionId })
+    expect(details).toMatchObject({ ok: true, changed: true, entry: { reviewedAt: null, reviewedById: null } })
+    expect(details.ok && details.versionId).not.toBe(versionId)
+    expect(versionsOf(entry.id).at(-1)).toMatchObject({ via: "jack", body: entry.body })
+
+    const text = await updateKnowledgeEntry(entry.id, { body: "$12 now." }, jack, { baseVersionId: details.ok ? details.versionId : null })
     expect(text).toMatchObject({ ok: true, entry: { reviewedAt: null, reviewedById: null } })
     expect(versionsOf(entry.id).at(-1)).toMatchObject({ via: "jack", roomId: "room-1", body: "$12 now." })
+    expect(versionsOf(entry.id)).toHaveLength(3)
+  })
+
+  it("lets Jack change a long entry from the page, as long as he doesn't make it longer", async () => {
+    const long = "Long text. ".repeat(1_100).trim()
+    const { entry, versionId } = await seedEntry({ body: long })
+    expect(entry.body.length).toBeGreaterThan(8_000)
+
+    const retagged = await updateKnowledgeEntry(entry.id, { tags: ["lsc", "fees"] }, jack, { baseVersionId: versionId })
+    expect(retagged).toMatchObject({ ok: true, changed: true })
+    const base = retagged.ok ? retagged.versionId : null
+    expect(await updateKnowledgeEntry(entry.id, { body: long.replace("Long text.", "Short.") }, jack, { baseVersionId: base })).toMatchObject({ ok: true, changed: true })
+    const grown = await updateKnowledgeEntry(entry.id, { body: `${long} More.` }, jack, { baseVersionId: await latestKnowledgeVersionId(entry.id) })
+    // Past what it is now (his shorter text), it's refused
+    expect(grown).toMatchObject({ ok: false, reason: "invalid", error: expect.stringMatching(/Keep the entry to 12,095 characters/) })
   })
 
   it("re-dates a seed's review on a new sign-off, with a new version only for new text", async () => {
@@ -257,11 +316,23 @@ describe("updateKnowledgeEntry", () => {
 
 describe("review, archive and delete", () => {
   it("marks an entry reviewed now, by the officer", async () => {
-    const { entry } = await seedEntry()
-    const result = await markKnowledgeReviewed(entry.id, officer)
+    const { entry, versionId } = await seedEntry()
+    const result = await markKnowledgeReviewed(entry.id, officer, { baseVersionId: versionId })
     expect(result).toMatchObject({ ok: true, entry: { reviewedById: "officer-1" } })
+    expect((db.$queryRaw.mock.calls[0][0] as string[]).join("?")).toContain("FOR UPDATE")
     expect(auditCall()).toMatchObject({ actionType: "REVIEW" })
     expect(await markKnowledgeReviewed("missing", officer)).toMatchObject({ ok: false, reason: "not_found" })
+  })
+
+  it("won't mark reviewed a version the officer hasn't seen", async () => {
+    const { entry, versionId } = await seedEntry()
+    // Jack changed it in a room while the officer had the page open
+    await updateKnowledgeEntry(entry.id, { body: "Jack's newer text." }, jack, { baseVersionId: versionId })
+    vi.clearAllMocks()
+
+    expect(await markKnowledgeReviewed(entry.id, officer, { baseVersionId: versionId })).toMatchObject({ ok: false, reason: "conflict", error: expect.stringMatching(/changed since you opened it/) })
+    expect(store.entries.get(entry.id)!.reviewedAt).toBeNull()
+    expect(audit.createAuditLog).not.toHaveBeenCalled()
   })
 
   it("archives and unarchives once each, auditing only real changes", async () => {
@@ -277,12 +348,34 @@ describe("review, archive and delete", () => {
 
   it("deletes an entry with its versions, keeping only its title in the audit log", async () => {
     const { entry } = await seedEntry({ body: "Private details nobody should keep." })
-    expect(await deleteKnowledgeEntry(entry.id, officer)).toEqual({ ok: true, title: "LSC entry fee" })
+    expect(await deleteKnowledgeEntry(entry.id, officer)).toEqual({ ok: true, title: "LSC entry fee", cleared: { notes: 0, replies: 0 } })
     expect(store.entries.has(entry.id)).toBe(false)
     expect(versionsOf(entry.id)).toEqual([])
     expect(auditCall()).toMatchObject({ actionType: "DELETE", before: { title: "LSC entry fee" } })
     expect(JSON.stringify(auditCall())).not.toContain("Private details")
     expect(await deleteKnowledgeEntry(entry.id, officer)).toMatchObject({ ok: false, reason: "not_found" })
+  })
+
+  it("clears Jack's room notes and tool calls that held the text, and nothing else", async () => {
+    const provenance = { roomId: "room-1", replyId: "reply-1", messageIds: [], askedBy: { userId: "officer-2", name: "Dylan" }, tools: [], at: "2026-10-22T17:00:00.000Z" }
+    const { entry } = await seedEntry({ body: "Private details nobody should keep." }, jack)
+    await updateKnowledgeEntry(entry.id, { body: "Private details, changed." }, jack, { baseVersionId: await latestKnowledgeVersionId(entry.id), provenance, noteId: "note-1" })
+    const savePart = { id: "t1", name: "knowledge", label: "Saved “LSC entry fee” to knowledge", status: "done", at: 0, input: { action: "save", title: "LSC entry fee", body: "Private details nobody should keep." }, displays: [{ kind: "links", items: [{ title: "LSC entry fee", url: `/admin/knowledge/${entry.id}`, snippet: "Private details" }] }] }
+    const sqlPart = { id: "t2", name: "run_sql", label: "Ran a query (1 row)", status: "done", at: 0, input: { sql: "select 1" }, displays: [] }
+    store.messages.set("note-1", { id: "note-1", kind: "system", content: "Updated in knowledge for Dylan: “LSC entry fee”\n\nPrivate details, changed.", toolCalls: null })
+    store.messages.set("reply-1", { id: "reply-1", kind: "assistant", content: "Saved it.", toolCalls: [savePart, sqlPart] })
+    store.messages.set("reply-9", { id: "reply-9", kind: "assistant", content: "Unrelated.", toolCalls: [sqlPart] })
+    vi.clearAllMocks()
+
+    expect(await deleteKnowledgeEntry(entry.id, officer)).toEqual({ ok: true, title: "LSC entry fee", cleared: { notes: 1, replies: 1 } })
+    expect(store.messages.get("note-1")!.content).toBe("A knowledge entry saved here was deleted.")
+    expect(store.messages.get("reply-1")!.toolCalls).toEqual([{ ...savePart, input: { action: "save" }, label: "A knowledge entry, deleted since", displays: [] }, sqlPart])
+    expect(JSON.stringify([...store.messages.values()])).not.toContain("Private details")
+    expect(db.jackMessage.update).toHaveBeenCalledTimes(1)
+    // All in one transaction, after the row lock
+    expect(db.$transaction).toHaveBeenCalledTimes(1)
+    expect((db.$queryRaw.mock.calls[0][0] as string[]).join("?")).toContain("FOR UPDATE")
+    expect(auditCall().metadata).toMatchObject({ cleared: { notes: 1, replies: 1 } })
   })
 })
 

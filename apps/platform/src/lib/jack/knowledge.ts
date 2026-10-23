@@ -86,6 +86,11 @@ export type KnowledgeProvenance = {
   tools: { name: string; input: string; label: string }[]
   /** ISO timestamp */
   at: string
+  /**
+   * Every room note Jack posted with the entry's text, from its first save on (the service keeps them
+   * from one change to the next). A hard delete clears them
+   */
+  noteIds?: string[]
 }
 
 const isString = (value: unknown): value is string => typeof value === "string"
@@ -109,6 +114,69 @@ export function parseProvenance(value: unknown): KnowledgeProvenance | null {
       : [],
     at: p.at,
   }
+}
+
+/** The room notes Jack posted about an entry (KnowledgeEntry.provenance.noteIds), read defensively */
+export function knowledgeNoteIds(provenance: unknown): string[] {
+  if (!provenance || typeof provenance !== "object" || Array.isArray(provenance)) return []
+  const ids = (provenance as Record<string, unknown>).noteIds
+  return Array.isArray(ids) ? ids.filter(isString) : []
+}
+
+/** What a room note about a deleted entry says instead of its text */
+export const DELETED_KNOWLEDGE_NOTE = "A knowledge entry saved here was deleted."
+/** What a tool call that saved, changed or showed a deleted entry says instead */
+export const DELETED_KNOWLEDGE_LABEL = "A knowledge entry, deleted since"
+
+/**
+ * A reply's tool calls (JackMessage.toolCalls) with a deleted entry's copies taken out, for a hard
+ * delete (design §9). Knowledge calls that saved, changed or named the entry keep only their action
+ * and id; so does a refused attempt at it in the same reply (one with any of its titles). Other tools'
+ * results drop what links to it. Everything else is left exactly as it was
+ */
+export function scrubDeletedKnowledge(toolCalls: unknown, entry: { id: string; titles: string[] }): { toolCalls: unknown[]; changed: boolean } {
+  if (!Array.isArray(toolCalls)) return { toolCalls: [], changed: false }
+  const titles = entry.titles.map((t) => t.trim().toLowerCase()).filter(Boolean)
+  const mentions = (value: unknown) => JSON.stringify(value ?? null).includes(entry.id)
+  // Labels quote a title (“Dues policy”), so a short title doesn't catch unrelated labels
+  const namesIt = (text: unknown) => typeof text === "string" && (text.includes(entry.id) || titles.some((t) => text.toLowerCase().includes(`“${t}”`)))
+  let changed = false
+  const out = toolCalls.map((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw
+    const part = raw as Record<string, unknown>
+    const input = part.input && typeof part.input === "object" && !Array.isArray(part.input) ? (part.input as Record<string, unknown>) : {}
+
+    if (part.name === "knowledge") {
+      const sameTitle = typeof input.title === "string" && titles.includes(input.title.trim().toLowerCase())
+      if (!mentions(part) && !sameTitle) return raw
+      changed = true
+      return {
+        ...part,
+        input: { action: input.action, ...(isString(input.id) ? { id: input.id } : {}) },
+        label: DELETED_KNOWLEDGE_LABEL,
+        displays: [],
+        ...(part.error !== undefined ? { error: DELETED_KNOWLEDGE_LABEL } : {}),
+      }
+    }
+
+    if (!mentions(part.displays) && !namesIt(part.label) && !namesIt(part.error)) return raw
+    // Another tool showed it (a search or a read): drop the links and displays that held it
+    const displays = (Array.isArray(part.displays) ? part.displays : []).flatMap((display: unknown) => {
+      if (!mentions(display)) return [display]
+      const d = display as { kind?: unknown; items?: unknown }
+      if (d.kind !== "links" || !Array.isArray(d.items)) return []
+      const items = d.items.filter((item) => !mentions(item))
+      return items.length ? [{ ...d, items }] : []
+    })
+    changed = true
+    return {
+      ...part,
+      displays,
+      ...(namesIt(part.label) ? { label: DELETED_KNOWLEDGE_LABEL } : {}),
+      ...(namesIt(part.error) ? { error: DELETED_KNOWLEDGE_LABEL } : {}),
+    }
+  })
+  return { toolCalls: out, changed }
 }
 
 /** A room message's link: the room, scrolled to the message once rooms take anchors (?m=) */
