@@ -1,14 +1,19 @@
 import type { Prisma } from "@prisma/client"
 import { prisma } from "@/server/db"
+import type { ClaudeFilesClient } from "@/server/connectors/anthropic/files"
 import { jackFileStore, type JackFileStore } from "@/server/jack/decks/storage"
+import { claudeFilesForCleanup, deleteClaudeFiles } from "./claude"
 import { fileIdOfPath, filePaths, storedPaths } from "./paths"
 
 /**
- * Deletes room files nobody will use (design §5), with their stored copies: uploads that never
- * finished (still UPLOADING after 24 hours) and files never posted with a message after 7 days
- * (removed chips, failed uploads, a tab closed before sending). Files a meeting uses as its
- * transcript are kept. Then sweeps the store for room files no row points at. Run daily by the
- * `files.cleanup` job (scheduler/jobs/files.ts).
+ * Deletes room files nobody will use (design §5), with their stored copies and their copies on Claude
+ * Files: uploads that never finished (still UPLOADING after 24 hours) and files never posted with a
+ * message after 7 days (removed chips, failed uploads, a tab closed before sending). Files a meeting
+ * uses as its transcript are kept. Then sweeps the store for room files no row points at. Run daily by
+ * the `files.cleanup` job (scheduler/jobs/files.ts).
+ *
+ * There's no sweep for Claude Files: the key's workspace can hold other environments' files (a local
+ * database doesn't know production's), so only copies whose rows are deleted here are deleted.
  */
 
 export const ABANDONED_UPLOAD_MS = 24 * 60 * 60 * 1000
@@ -28,18 +33,29 @@ export function cleanupWhere(now: Date): Prisma.JackFileWhereInput {
   }
 }
 
-/** `objects` counts the copies the deleted rows recorded; photo copies a registration stored but never recorded are deleted too */
-export type CleanupResult = { deleted: number; objects: number; objectErrors: number; more: boolean }
+/**
+ * `objects` counts the copies the deleted rows recorded; photo copies a registration stored but never
+ * recorded are deleted too. `claudeFiles` counts their copies deleted from Claude Files, and
+ * `claudeErrors` the ids that couldn't be (logged: nothing points at them any more)
+ */
+export type CleanupResult = { deleted: number; objects: number; objectErrors: number; claudeFiles: number; claudeErrors: string[]; more: boolean }
 
-export async function cleanupRoomFiles({ now = new Date(), signal, store = jackFileStore(), limit = CLEANUP_BATCH }: { now?: Date; signal?: AbortSignal; store?: JackFileStore; limit?: number } = {}): Promise<CleanupResult> {
+export async function cleanupRoomFiles({
+  now = new Date(),
+  signal,
+  store = jackFileStore(),
+  claude = claudeFilesForCleanup(),
+  limit = CLEANUP_BATCH,
+}: { now?: Date; signal?: AbortSignal; store?: JackFileStore; claude?: ClaudeFilesClient | null; limit?: number } = {}): Promise<CleanupResult> {
   const where = cleanupWhere(now)
   const due = await prisma.jackFile.findMany({
     where,
     orderBy: { createdAt: "asc" },
     take: limit + 1,
-    select: { id: true, roomId: true, storagePath: true, modelCopyPath: true, thumbPath: true },
+    select: { id: true, roomId: true, storagePath: true, modelCopyPath: true, thumbPath: true, anthropicFileId: true },
   })
   const paths = new Set<string>()
+  const claudeIds: string[] = []
   let deleted = 0
   let objects = 0
   for (const file of due.slice(0, limit)) {
@@ -50,7 +66,10 @@ export async function cleanupRoomFiles({ now = new Date(), signal, store = jackF
     deleted++
     objects += storedPaths(file).length
     for (const path of [...storedPaths(file), ...filePaths(file)]) paths.add(path)
+    if (file.anthropicFileId) claudeIds.push(file.anthropicFileId)
   }
+  // A registration still uploading when its row went deletes its own copy (register.ts)
+  const claudeResult = await deleteClaudeFiles(claudeIds, { client: claude, signal })
   let objectErrors = 0
   if (paths.size) {
     try {
@@ -60,7 +79,14 @@ export async function cleanupRoomFiles({ now = new Date(), signal, store = jackF
       console.error(`[jack] File cleanup removed ${deleted} rows but couldn't delete their stored objects:`, error instanceof Error ? error.message : error)
     }
   }
-  return { deleted, objects: objects - objectErrors, objectErrors, more: due.length > limit || (signal?.aborted ?? false) }
+  return {
+    deleted,
+    objects: objects - objectErrors,
+    objectErrors,
+    claudeFiles: claudeResult.deleted,
+    claudeErrors: claudeResult.failed,
+    more: due.length > limit || (signal?.aborted ?? false),
+  }
 }
 
 /**

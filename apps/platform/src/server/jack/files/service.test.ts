@@ -13,6 +13,7 @@ vi.mock("@/server/db", () => ({
 import { docxFile, imageFile, pdfFile } from "./fixtures"
 import { registerFile } from "./register"
 import { createUpload, MAX_PENDING_UPLOADS, removeUpload, storeLocalUpload } from "./service"
+import { memoryClaudeFiles } from "./test-claude"
 
 const ROOM = "11111111-1111-4111-8111-111111111111"
 const OFFICER = "officer-1"
@@ -193,7 +194,88 @@ describe("registerFile", () => {
   })
 })
 
+describe("registerFile with Claude Files on", () => {
+  let claude: ReturnType<typeof memoryClaudeFiles>
+  beforeEach(() => {
+    claude = memoryClaudeFiles()
+  })
+
+  it("uploads a photo's model copy (no metadata) under our id, never the officer's file name", async () => {
+    const row = await uploaded("IMG_1234.JPG", await imageFile("jpeg", { width: 2400, height: 1200 }), "image/jpeg")
+    expect((await registerFile(row.id, OFFICER, store, claude.client)).ok).toBe(true)
+    const saved = fake.file(row.id)!
+    const [id, sent] = [...claude.files][0]
+    expect(saved.anthropicFileId).toBe(id)
+    expect(sent).toMatchObject({ name: `jack-${row.id}.jpg`, type: "image/jpeg" })
+    expect(sent.bytes.equals(store.files.get(saved.modelCopyPath!)!.body)).toBe(true)
+    expect((await sharp(sent.bytes).metadata()).exif).toBeUndefined()
+  })
+
+  it("uploads a PDF as it is, and nothing for other kinds", async () => {
+    const body = await pdfFile(["Sponsor packet"])
+    const pdf = await uploaded("packet.pdf", body)
+    await registerFile(pdf.id, OFFICER, store, claude.client)
+    const [id, sent] = [...claude.files][0]
+    expect(fake.file(pdf.id)).toMatchObject({ status: "READY", pageCount: 1, anthropicFileId: id })
+    expect(sent).toMatchObject({ name: `jack-${pdf.id}.pdf`, type: "application/pdf" })
+    expect(sent.bytes.equals(body)).toBe(true)
+
+    const text = await uploaded("notes.txt", Buffer.from("hello"))
+    await registerFile(text.id, OFFICER, store, claude.client)
+    expect(fake.file(text.id)?.anthropicFileId).toBeNull()
+    expect(claude.files.size).toBe(1)
+  })
+
+  it("keeps the file READY without a copy when the upload fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    claude.state.failUploads = true
+    const row = await uploaded("photo.png", await imageFile("png"))
+    expect((await registerFile(row.id, OFFICER, store, claude.client)).ok).toBe(true)
+    expect(fake.file(row.id)).toMatchObject({ status: "READY", anthropicFileId: null })
+  })
+
+  it("never uploads an encrypted PDF, and deletes the copy of one Claude can't read as a document", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const locked = await uploaded("locked.pdf", Buffer.concat([await pdfFile(["Secret"]), Buffer.from("\n%/Encrypt\n")]))
+    await registerFile(locked.id, OFFICER, store, claude.client)
+    expect(claude.calls).toEqual([])
+    expect(fake.file(locked.id)).toMatchObject({ status: "READY", anthropicFileId: null })
+
+    // pdf.js couldn't open it, so its page count is unknown: an upload made alongside is deleted again
+    const broken = await uploaded("scan.pdf", Buffer.from("%PDF-1.7\nnot really a pdf body"))
+    await registerFile(broken.id, OFFICER, store, claude.client)
+    expect(fake.file(broken.id)).toMatchObject({ status: "READY", textStatus: "failed", anthropicFileId: null })
+    expect(claude.calls.map((call) => call.split(" ")[0])).toEqual(["upload", "delete"])
+    expect(claude.files.size).toBe(0)
+  })
+
+  it("deletes its copy when the file was removed while it was being checked", async () => {
+    const row = await uploaded("IMG_1.JPG", await imageFile("jpeg"), "image/jpeg")
+    const put = store.put.bind(store)
+    let removed = false
+    store.put = async (pathname, body, contentType) => {
+      if (!removed) {
+        removed = true
+        await removeUpload(row.id, OFFICER, store, claude.client)
+      }
+      await put(pathname, body, contentType)
+    }
+    expect(await registerFile(row.id, OFFICER, store, claude.client)).toMatchObject({ ok: false, code: "not_found" })
+    expect(claude.calls.filter((call) => call.startsWith("upload"))).toHaveLength(1)
+    expect(claude.files.size).toBe(0)
+  })
+})
+
 describe("removeUpload", () => {
+  it("deletes the file's copy on Claude Files too", async () => {
+    const claude = memoryClaudeFiles()
+    const row = await uploaded("packet.pdf", await pdfFile(["A"]))
+    await registerFile(row.id, OFFICER, store, claude.client)
+    expect(claude.files.size).toBe(1)
+    expect((await removeUpload(row.id, OFFICER, store, claude.client)).ok).toBe(true)
+    expect(claude.files.size).toBe(0)
+  })
+
   it("deletes an unsent file and its stored copies; only its uploader can, and never a posted one", async () => {
     const row = await uploaded("photo.png", await imageFile("png"))
     await registerFile(row.id, OFFICER, store)

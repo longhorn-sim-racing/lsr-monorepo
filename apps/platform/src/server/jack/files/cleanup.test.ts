@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { memoryStore, type MemoryStore } from "@/server/jack/decks/memory-store"
 import { derivedFilePath } from "./paths"
+import { memoryClaudeFiles } from "./test-claude"
 import { createFakeFileDb, matches, type FakeFile } from "./test-db"
 
 const db = vi.hoisted(() => ({ current: null as unknown }))
@@ -60,9 +61,31 @@ describe("cleanupRoomFiles", () => {
     file("posted", 10 * DAY, { status: "READY", messageId: "msg-1" })
     file("fresh", HOUR, { status: "READY" })
     const result = await cleanupRoomFiles({ now: fake.now(), store })
-    expect(result).toEqual({ deleted: 2, objects: 4, objectErrors: 0, more: false })
+    expect(result).toEqual({ deleted: 2, objects: 4, objectErrors: 0, claudeFiles: 0, claudeErrors: [], more: false })
     expect(fake.state.files.map((f) => f.id).sort()).toEqual(["fresh", "posted"])
     expect([...store.files.keys()].sort()).toEqual(["rooms/r/fresh/a.png", "rooms/r/posted/a.png"])
+  })
+
+  it("deletes the deleted files' copies on Claude Files, and only theirs", async () => {
+    const claude = memoryClaudeFiles()
+    const upload = (name: string) => claude.client.upload({ name, bytes: Buffer.from("x"), type: "image/jpeg" }).then((r) => r.id)
+    const [unsent, posted] = [await upload("unsent.jpg"), await upload("posted.jpg")]
+    file("old-photo", 10 * DAY, { status: "READY", anthropicFileId: unsent })
+    file("posted", 10 * DAY, { status: "READY", messageId: "msg-1", anthropicFileId: posted })
+    expect(await cleanupRoomFiles({ now: fake.now(), store, claude: claude.client })).toMatchObject({ deleted: 1, claudeFiles: 1, claudeErrors: [] })
+    expect([...claude.files.keys()]).toEqual([posted])
+  })
+
+  it("reports the Claude copies it couldn't delete (their rows are gone), and goes on", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const claude = memoryClaudeFiles()
+    const { id } = await claude.client.upload({ name: "a.pdf", bytes: Buffer.from("%PDF"), type: "application/pdf" })
+    file("a", 10 * DAY, { status: "FAILED", anthropicFileId: id })
+    claude.state.failDeletes = true
+    expect(await cleanupRoomFiles({ now: fake.now(), store, claude: claude.client })).toMatchObject({ deleted: 1, claudeFiles: 0, claudeErrors: [id] })
+    // No key: nothing can delete them, so they're reported the same way
+    file("b", 10 * DAY, { status: "FAILED", anthropicFileId: "file_b" })
+    expect(await cleanupRoomFiles({ now: fake.now(), store, claude: null })).toMatchObject({ deleted: 1, claudeErrors: ["file_b"] })
   })
 
   it("keeps a file that was posted after it was picked, and its bytes", async () => {
@@ -95,7 +118,7 @@ describe("cleanupRoomFiles", () => {
     const row = file(id, 2 * DAY, { status: "UPLOADING", storagePath: `rooms/${ROOM}/${id}/IMG_1.jpg` })
     await store.put(derivedFilePath(row, "model"), Buffer.from("jpg"), "image/jpeg")
     await store.put(derivedFilePath(row, "thumb"), Buffer.from("jpg"), "image/jpeg")
-    expect(await cleanupRoomFiles({ now: fake.now(), store })).toEqual({ deleted: 1, objects: 1, objectErrors: 0, more: false })
+    expect(await cleanupRoomFiles({ now: fake.now(), store })).toEqual({ deleted: 1, objects: 1, objectErrors: 0, claudeFiles: 0, claudeErrors: [], more: false })
     expect([...store.files.keys()]).toEqual([])
   })
 
@@ -105,7 +128,7 @@ describe("cleanupRoomFiles", () => {
     store.delete = async () => {
       throw new Error("storage down")
     }
-    expect(await cleanupRoomFiles({ now: fake.now(), store })).toEqual({ deleted: 1, objects: 0, objectErrors: 1, more: false })
+    expect(await cleanupRoomFiles({ now: fake.now(), store })).toEqual({ deleted: 1, objects: 0, objectErrors: 1, claudeFiles: 0, claudeErrors: [], more: false })
   })
 })
 
@@ -154,12 +177,21 @@ describe("the files.cleanup job", () => {
     try {
       const { setJackFileStore } = await import("@/server/jack/decks/storage")
       setJackFileStore(store)
-      expect(await job.run(ctx())).toEqual({ summary: "Nothing to clean up", counts: { files: 0, objects: 0, leftovers: 0 } })
+      const none = { claudeFiles: 0, claudeErrors: 0 }
+      expect(await job.run(ctx())).toEqual({ summary: "Nothing to clean up", counts: { files: 0, objects: 0, ...none, leftovers: 0 } })
       file("a", 10 * DAY, { status: "FAILED" })
-      expect(await job.run(ctx())).toEqual({ summary: "Deleted 1 unsent file (1 stored copy)", counts: { files: 1, objects: 1, leftovers: 0 } })
+      expect(await job.run(ctx())).toEqual({ summary: "Deleted 1 unsent file (1 stored copy)", counts: { files: 1, objects: 1, ...none, leftovers: 0 } })
       await store.put(`rooms/${ROOM}/77777777-7777-4777-8777-777777777777/late.pdf`, Buffer.from("%PDF"), "application/pdf")
       vi.setSystemTime(fake.now().getTime() + 2 * DAY)
-      expect(await job.run(ctx())).toEqual({ summary: "Removed 1 leftover stored file", counts: { files: 0, objects: 0, leftovers: 1 } })
+      expect(await job.run(ctx())).toEqual({ summary: "Removed 1 leftover stored file", counts: { files: 0, objects: 0, ...none, leftovers: 1 } })
+      // A copy on Claude Files that couldn't be deleted (no key here) is in the summary, without its id
+      vi.stubEnv("ANTHROPIC_API_KEY", "")
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      file("c", 10 * DAY, { status: "FAILED", anthropicFileId: "file_c" })
+      expect(await job.run(ctx())).toEqual({
+        summary: "Deleted 1 unsent file (1 stored copy); couldn't delete 1 copy on Claude Files (ids in the function log)",
+        counts: { files: 1, objects: 1, claudeFiles: 0, claudeErrors: 1, leftovers: 0 },
+      })
       file("b", 10 * DAY, { status: "FAILED" })
       vi.spyOn(console, "error").mockImplementation(() => {})
       store.delete = async () => {

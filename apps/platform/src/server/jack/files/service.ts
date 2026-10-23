@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto"
 import { checkFile, MAX_FILE_BYTES, type JackUploadTicket } from "@/lib/jack/files"
 import { redactSecrets } from "@/lib/redact"
 import { prisma } from "@/server/db"
+import type { ClaudeFilesClient } from "@/server/connectors/anthropic/files"
 import { jackFileStore, type JackFileStore } from "@/server/jack/decks/storage"
+import { claudeFilesForCleanup, deleteClaudeFiles } from "./claude"
 import { filePaths, roomFilePath } from "./paths"
 
 /**
@@ -12,8 +14,9 @@ import { filePaths, roomFilePath } from "./paths"
  * 2. The browser uploads straight to Supabase Storage (or, with the local files store, to
  *    /api/admin/jack/files/[id]/upload).
  * 3. registerFile (register.ts): checks the object arrived whole, its magic bytes against its type,
- *    takes its sha256, makes the model copy and thumbnail for photos, extracts text, and sets READY
- *    or FAILED. Kept apart so the room's server actions, which import this file, never load the parsers.
+ *    takes its sha256, makes the model copy and thumbnail for photos, extracts text, puts photos and
+ *    PDFs on Claude Files (claude.ts), and sets READY or FAILED. Kept apart so the room's server
+ *    actions, which import this file, never load the parsers.
  * 4. Posting a message links READY files to it (attach.ts).
  * Files never attached are deleted by the cleanup job (cleanup.ts).
  */
@@ -92,8 +95,11 @@ export async function storeLocalUpload(fileId: string, officerId: string, body: 
   return ok(null)
 }
 
-/** Removes a file the officer attached but hasn't posted (the chip's remove button). Gone already is fine */
-export async function removeUpload(fileId: string, officerId: string, store: JackFileStore = jackFileStore()): Promise<FileResult<null>> {
+/**
+ * Removes a file the officer attached but hasn't posted (the chip's remove button), with its stored
+ * copies and its copy on Claude Files. Gone already is fine. `claude` is for tests
+ */
+export async function removeUpload(fileId: string, officerId: string, store: JackFileStore = jackFileStore(), claude?: ClaudeFilesClient | null): Promise<FileResult<null>> {
   const row = await prisma.jackFile.findUnique({ where: { id: fileId } })
   if (!row) return ok(null)
   if (row.uploadedById !== officerId) return problem("forbidden", "Only the officer who attached a file can remove it.")
@@ -105,5 +111,7 @@ export async function removeUpload(fileId: string, officerId: string, store: Jac
     // The row is gone; the cleanup job's sweep deletes them later
     console.error(`[jack] Couldn't delete the stored copies of removed file ${row.id}:`, error)
   })
+  // A registration still uploading deletes its own copy when it finds the row gone (register.ts)
+  if (row.anthropicFileId) await deleteClaudeFiles([row.anthropicFileId], { client: claude === undefined ? claudeFilesForCleanup() : claude })
   return ok(null)
 }
