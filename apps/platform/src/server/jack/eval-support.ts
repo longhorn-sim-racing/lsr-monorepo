@@ -1,8 +1,15 @@
 /**
  * Pure helpers for scripts/jack-eval.ts (#161): which database the eval may run against (the local-only
- * check scripts use the same test), and how its checks read numbers out of an answer. Here rather than
- * in the scripts so they're unit-tested. No imports, no environment: the scripts pass everything in.
+ * check scripts use the same test), how its checks read numbers out of an answer, and its rooms' id
+ * prefix. Here rather than in the scripts so they're unit-tested. No imports, no environment: the
+ * scripts pass everything in.
  */
+
+/**
+ * Every eval room's id starts with this; real rooms have uuids. The eval's cleanup finds its rooms by
+ * it, and officers' room lists leave them out (their pages and actions only take uuids)
+ */
+export const EVAL_ROOM_PREFIX = "jack-eval-"
 
 // ---------------------------------------------------------------------------
 // which database
