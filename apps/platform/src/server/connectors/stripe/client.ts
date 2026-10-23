@@ -53,7 +53,9 @@ export function stripeErrorText(error: unknown, what: string): StripeReadError {
   if (error instanceof Stripe.errors.StripeError) {
     const status = error.statusCode ?? null
     const hint = status ? HINTS[status] : undefined
-    return new StripeReadError(status, error.type, `Stripe ${status ?? "request"} on ${what} (${error.type}${error.code ? `, ${error.code}` : ""}): ${error.message}${hint ? `. Likely ${hint}` : ""}`)
+    // rawType is the body's error type (authentication_error); type is the SDK's class name
+    const type = error.rawType ?? error.type
+    return new StripeReadError(status, type, `Stripe ${status ?? "request"} on ${what} (${type}${error.code ? `, ${error.code}` : ""}): ${error.message}${hint ? `. Likely ${hint}` : ""}`)
   }
   const message = error instanceof Error ? error.message : String(error)
   return new StripeReadError(null, "connection_error", `Stripe call failed on ${what}: ${message}`)
@@ -67,11 +69,19 @@ export type StripeReadOptions = {
   env?: ConnectorEnv
 }
 
-/** Most objects Stripe returns say whether they're live (refunds and balance transactions don't); a test key's data must never land in production's tables, or the other way round */
-function checkMode(items: object[], env: ConnectorEnv) {
+/**
+ * Most objects Stripe returns say whether they're live (refunds and balance transactions don't). A test
+ * key's data must never land in production's tables, or the other way round: why it would, or null
+ */
+export function modeProblem(items: object[], env: ConnectorEnv): string | null {
   const live = env.VERCEL_ENV === "production"
   const wrong = items.find((item): item is { livemode: boolean } => "livemode" in item && typeof item.livemode === "boolean" && item.livemode !== live)
-  if (wrong) throw new StripeReadError(null, "mode_mismatch", `Stripe returned ${wrong.livemode ? "live" : "test"}-mode data ${live ? "in production" : "outside production"}; check STRIPE_READONLY_KEY`)
+  return wrong ? `Stripe returned ${wrong.livemode ? "live" : "test"}-mode data ${live ? "in production" : "outside production"}; check STRIPE_READONLY_KEY` : null
+}
+
+function checkMode(items: object[], env: ConnectorEnv) {
+  const problem = modeProblem(items, env)
+  if (problem) throw new StripeReadError(null, "mode_mismatch", problem)
 }
 
 /** A fetch that also stops when `signal` aborts */

@@ -78,8 +78,8 @@ function bareLink(link: string | undefined): string | undefined {
 
 function eventTime(...values: (string | undefined)[]): Date {
   for (const value of values) {
-    // Webhooks send ISO times; Resend's API sends "2026-04-03 22:13:42.674981+00", which Date reads once it has a "T"
-    const date = value ? new Date(value.includes("T") ? value : value.replace(" ", "T")) : null
+    // Webhooks send ISO times; Resend's API sends "2026-04-03 22:13:42.674981+00", which Date reads with a "T", milliseconds and "+00:00"
+    const date = value ? new Date(value.replace(" ", "T").replace(/(\.\d{3})\d+/, "$1").replace(/([+-]\d{2})$/, "$1:00")) : null
     if (date && !Number.isNaN(date.getTime())) return date
   }
   return new Date()
