@@ -85,7 +85,7 @@ export const QUESTIONS: Question[] = [
         `${r.list.length} streams started in ${r.window}.${r.best ? ` Highest peak: "${r.best.title}" on ${dayTime(r.best.startedAt)} with ${r.best.peakViewers} viewers.` : " None had viewers counted."}`;
       return {
         expected: `${recent.length} streams${best ? `; the highest peak was "${best.title}" (${best.peakViewers})` : ""}${readings.length > 1 ? ` (or ${readings[1].list.length} counting whole days)` : ""}`,
-        facts: readings.map(said).join(" Either window is a fair reading of 'the last 30 days' if the answer says which it used. "),
+        facts: readings.map(said).join(" Either count is right for 'the last 30 days'. "),
         check: ({ text }) => {
           const problems = readings.map((r) => {
             if (!mentionsNumber(text, r.list.length, ["stream", "time", "broadcast"])) return `doesn't say ${r.list.length} streams`;

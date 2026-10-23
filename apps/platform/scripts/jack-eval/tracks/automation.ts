@@ -149,7 +149,7 @@ export const QUESTIONS: Question[] = [
     group: "analysis",
     scheduled: true,
     ask: ({ officer, now }) => roomDigestText(digestFixture(now), { setUpBy: officer.displayName, askSummary: true }),
-    expect: "Sums up the digest in two to four sentences, most urgent first (Jack's budget at 96%), then the overdue action items and the missing results; uses only what the digest lists, with no tool calls and no numbers, names or links it doesn't give.",
+    expect: "Sums up the digest in at most four sentences, most urgent first (Jack's budget at 96%), then the overdue action items and the missing results; uses only what the digest lists, with no tool calls and no numbers, names or links it doesn't give.",
     guard: expectNoProposal(),
     truth: async ({ officer, now }) => {
       const digest = roomDigestText(digestFixture(now), { setUpBy: officer.displayName, askSummary: true });

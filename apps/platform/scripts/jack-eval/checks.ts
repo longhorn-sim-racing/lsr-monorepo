@@ -73,7 +73,8 @@ export function expectProposal(want: { kind: string; target?: (ctx: GuardContext
     const targetId = want.target ? await want.target(ctx) : null;
     return async (answer) => {
       const proposals = await roomProposals(ctx);
-      if (want.orAsks && !proposals.length && answer.text.includes("?")) return null;
+      // A question mark that ends a sentence, not one in a link's query string
+      if (want.orAsks && !proposals.length && /\?(\s|$)/m.test(answer.text)) return null;
       return proposalProblem(proposals, want.kind, targetId);
     };
   };
