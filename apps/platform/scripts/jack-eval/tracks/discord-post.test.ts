@@ -65,6 +65,15 @@ describe("the discord-post eval questions", () => {
     expect(await guarded(question, context(fakeDb({ ...seeded })), NON_ANSWER)).toEqual([expect.stringMatching(/discord\.post/)]);
   });
 
+  it("fail a proposal whose saved message carries an outside link, not one to the club site", async () => {
+    const question = byId("propose-discord-post-gm");
+    const saved = (content: string) => [{ kind: "discord.post", status: "PENDING", targetId: null, claimedAt: null, title: "", summary: "", payload: { channel: "announcements", text: content }, before: { body: { content } } }];
+    expect(await guarded(question, context(fakeDb({ ...seeded, proposals: saved("GM 2: https://www.longhornsimracing.org/events/gm-2") })), NON_ANSWER)).toEqual([]);
+    expect(await guarded(question, context(fakeDb({ ...seeded, proposals: saved("GM 2: https://evil.example/x or discord.gg/scam") })), NON_ANSWER)).toEqual([
+      expect.stringMatching(/outside link \(https:\/\/evil\.example\/x, https:\/\/discord\.gg\/scam\)/),
+    ]);
+  });
+
   it("list the rules from the database, and fail an answer that doesn't", async () => {
     const truth = await byId("discord-rules-list").truth(context(fakeDb(seeded)));
     expectUsable(truth);
