@@ -18,9 +18,9 @@ import { requireOfficer } from "@/server/auth/guards"
 
 /**
  * The Recurring questions page's actions (#188, design §11 and §13). Any officer sets up, changes,
- * switches, asks now and deletes recurring questions, and sets up the weekly digest; only an admin
- * changes where the digest posts outside the console. Each checks its own access and goes through the
- * automation services, which validate and audit.
+ * switches, asks now and deletes recurring questions (changing what another officer's asks makes it
+ * theirs), and sets up the weekly digest; only an admin changes where the digest posts outside the
+ * console. Each checks its own access and goes through the automation services, which validate and audit.
  */
 
 /** The question form, as the page sends it */
@@ -79,14 +79,15 @@ export async function createRecurringQuestionAction(input: RecurringFormInput): 
   return { ok: true, data: { id: result.question.id } }
 }
 
-export async function updateRecurringQuestionAction(id: string, input: RecurringFormInput): Promise<ActionResult> {
+/** Changes one. Changing what it asks, its room or who answers makes this officer its owner (it's asked as them) */
+export async function updateRecurringQuestionAction(id: string, input: RecurringFormInput): Promise<ActionResult<{ tookOver: boolean }>> {
   const user = await officer()
   if (!user) return { ok: false, error: SIGNED_OUT }
   if (!validId(id)) return { ok: false, error: "That recurring question doesn't exist anymore. Reload the page." }
   const result = await updateRecurringQuestion(id, fieldsOf(input), { userId: user.id })
   if (!result.ok) return { ok: false, error: result.error }
   revalidate()
-  return { ok: true }
+  return { ok: true, data: { tookOver: result.changed.includes("createdById") } }
 }
 
 /** On or off. Turning on a question whose owner isn't an officer any more makes this officer its owner */

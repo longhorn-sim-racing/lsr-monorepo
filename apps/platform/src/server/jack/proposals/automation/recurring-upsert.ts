@@ -12,6 +12,7 @@ import {
   roomProblem,
   setRecurringQuestionOnTx,
   snapshotOf,
+  TAKES_OVER,
   updateRecurringQuestionTx,
   type RecurringSnapshot,
   type RecurringWriteResult,
@@ -26,7 +27,8 @@ import type { ProposalDiffRow, ProposalKind } from "../types"
  * recurring.upsert (design §4.3, automation): set up a recurring question, or change one: its title,
  * question, room, schedule (at most daily), who answers (Jack or Stand) and whether it's on. The card
  * shows the estimated monthly cost. A new question starts off unless the proposal turns it on, and runs
- * as the officer it was proposed for. Applying goes through the same service as the Recurring questions
+ * as the officer it was proposed for; so does one whose question, room or answerer a proposal changes
+ * (the card shows "Asked as" then). Applying goes through the same service as the Recurring questions
  * page; a question that changed since makes it stale.
  */
 
@@ -75,6 +77,12 @@ function fail(result: Extract<RecurringWriteResult, { ok: false }>): never {
   throw new StaleProposalError(result.error)
 }
 
+/** Who a new question, or a change to what one asks, runs as: the officer it was proposed for while they're still one, else whoever applied it */
+async function ownerFor(ctx: { officer: { userId: string }; auditMetadata: { proposedFor: string | null } }): Promise<string> {
+  const proposedFor = ctx.auditMetadata.proposedFor
+  return proposedFor && (await officerIdSet([proposedFor])).has(proposedFor) ? proposedFor : ctx.officer.userId
+}
+
 export const recurringUpsertKind: ProposalKind<RecurringUpsertProposal> = {
   kind: "recurring.upsert",
   tool: "propose_recurring",
@@ -86,7 +94,7 @@ export const recurringUpsertKind: ProposalKind<RecurringUpsertProposal> = {
 
   async prepare(p, ctx) {
     if (p.id) {
-      const question = await prisma.recurringQuestion.findUnique({ where: { id: p.id }, include: { scheduledJob: true } })
+      const question = await prisma.recurringQuestion.findUnique({ where: { id: p.id }, include: { scheduledJob: true, createdBy: { select: { displayName: true } } } })
       if (!question) throw new ProposalInputError(`There's no recurring question with id ${p.id}. Find ids in RecurringQuestion with run_sql.`)
       const before = snapshotOf(question)
       const after: RecurringSnapshot = {
@@ -116,6 +124,10 @@ export const recurringUpsertKind: ProposalKind<RecurringUpsertProposal> = {
         .map(([field, label, format]) => ({ field, label, before: show(field, before[field]), after: show(field, after[field]), format }))
       if (rooms) diff.splice(2, 0, { field: "roomId", label: "Room", before: rooms[0], after: rooms[1], format: "text" })
       if (!diff.length) throw new ProposalInputError(`Nothing would change: “${question.title}” already looks like that.`)
+      // Changing what it asks, its room or who answers makes the officer it's for its owner (the service does it on apply)
+      if (TAKES_OVER.some((field) => before[field as keyof RecurringSnapshot] !== after[field as keyof RecurringSnapshot]) && ctx.officer.userId !== question.createdById) {
+        diff.push({ field: "createdById", label: "Asked as", before: question.createdBy?.displayName ?? "a former officer", after: ctx.officer.userId ? ctx.officer.displayName : "the officer who applies it", format: "value" })
+      }
       const schedule = scheduleFromCron(after.schedule)
       const estimate = schedule ? await estimateOne({ jobKey: recurringJobKey(question.id), persona: after.persona as RecurringPersona, schedule }) : null
       return {
@@ -174,10 +186,8 @@ export const recurringUpsertKind: ProposalKind<RecurringUpsertProposal> = {
 
   async apply(p, ctx) {
     const actor = { userId: ctx.officer.userId, auditMetadata: ctx.auditMetadata }
+    const owner = await ownerFor(ctx)
     if (!p.id) {
-      // It runs as the officer it was proposed for, while they're still an officer
-      const proposedFor = ctx.auditMetadata.proposedFor
-      const owner = proposedFor && (await officerIdSet([proposedFor])).has(proposedFor) ? proposedFor : ctx.officer.userId
       const result = await prisma.$transaction((tx) =>
         createRecurringQuestionTx(tx, { title: p.title, prompt: p.prompt, schedule: p.schedule, persona: p.persona ?? "jack", roomId: p.roomId ?? ctx.roomId }, actor, { createdById: owner, enabled: p.on ?? false }),
       )
@@ -198,7 +208,8 @@ export const recurringUpsertKind: ProposalKind<RecurringUpsertProposal> = {
       (["title", "prompt", "schedule", "persona", "roomId"] as const).filter((key) => p[key] !== undefined).map((key) => [key, p[key]]),
     )
     const result = await prisma.$transaction(async (tx) => {
-      const updated = await updateRecurringQuestionTx(tx, p.id!, changes, actor, { expected })
+      // A change to what it asks, its room or who answers makes `owner` its owner (the service decides)
+      const updated = await updateRecurringQuestionTx(tx, p.id!, changes, actor, { expected, owner })
       if (!updated.ok || p.on === undefined) return updated
       const switched = await setRecurringQuestionOnTx(tx, p.id!, p.on, actor)
       return switched.ok ? { ...switched, changed: [...updated.changed, ...switched.changed] } : switched

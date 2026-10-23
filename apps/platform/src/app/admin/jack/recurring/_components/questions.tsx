@@ -87,7 +87,7 @@ export function NewQuestionButton({ rooms }: { rooms: RoomChoice[] }) {
 }
 
 /** The questions, each with its switch, menu (edit, ask now, delete) and last runs */
-export function QuestionList({ questions, rooms, highlight }: { questions: QuestionView[]; rooms: RoomChoice[]; highlight: string | null }) {
+export function QuestionList({ questions, rooms, highlight, viewerId }: { questions: QuestionView[]; rooms: RoomChoice[]; highlight: string | null; viewerId: string | null }) {
   const router = useRouter()
   const [editing, setEditing] = useState<QuestionView | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -211,7 +211,7 @@ export function QuestionList({ questions, rooms, highlight }: { questions: Quest
           )
         })}
       </ul>
-      {editing ? <QuestionDialog rooms={rooms} question={editing} onClose={() => setEditing(null)} /> : null}
+      {editing ? <QuestionDialog rooms={rooms} question={editing} othersQuestion={editing.owner?.id !== viewerId} onClose={() => setEditing(null)} /> : null}
     </>
   )
 }
@@ -233,8 +233,8 @@ function initialForm(question?: QuestionView, rooms: RoomChoice[] = []): Recurri
   }
 }
 
-/** Set up a question, or change one */
-function QuestionDialog({ rooms, question, onClose }: { rooms: RoomChoice[]; question?: QuestionView; onClose: () => void }) {
+/** Set up a question, or change one (`othersQuestion`: it's asked as someone else, so changing what it asks takes it over) */
+function QuestionDialog({ rooms, question, othersQuestion = false, onClose }: { rooms: RoomChoice[]; question?: QuestionView; othersQuestion?: boolean; onClose: () => void }) {
   const router = useRouter()
   const [form, setForm] = useState<RecurringFormInput>(() => initialForm(question, rooms))
   const [saving, setSaving] = useState(false)
@@ -247,15 +247,18 @@ function QuestionDialog({ rooms, question, onClose }: { rooms: RoomChoice[]; que
   async function save() {
     setSaving(true)
     setError(null)
-    let result: { ok: true } | { ok: false; error: string }
+    let result: { ok: true; tookOver?: boolean } | { ok: false; error: string }
     try {
-      result = question ? await updateRecurringQuestionAction(question.id, form) : await createRecurringQuestionAction(form)
+      if (question) {
+        const updated = await updateRecurringQuestionAction(question.id, form)
+        result = updated.ok ? { ok: true, tookOver: updated.data.tookOver } : updated
+      } else result = await createRecurringQuestionAction(form)
     } catch (thrown) {
       result = { ok: false, error: unexpectedError(thrown, "Couldn't save it") }
     }
     setSaving(false)
     if (!result.ok) return setError(result.error)
-    toast.success(question ? "Saved" : form.on ? "Set up and on" : "Set up (off): turn it on when it's ready")
+    toast.success(question ? (result.tookOver ? "Saved: it's yours now, and it's asked as you" : "Saved") : form.on ? "Set up and on" : "Set up (off): turn it on when it's ready")
     onClose()
     router.refresh()
   }
@@ -280,6 +283,11 @@ function QuestionDialog({ rooms, question, onClose }: { rooms: RoomChoice[]; que
         {error ? (
           <Notice tone="danger" className="py-2">
             {error}
+          </Notice>
+        ) : null}
+        {question && othersQuestion ? (
+          <Notice tone="info" className="py-2">
+            It&apos;s asked as {question.owner?.name ?? "a former officer"}. Changing the question, the room or who answers makes you its owner: it&apos;s asked as you from then on.
           </Notice>
         ) : null}
         <FieldGrid>

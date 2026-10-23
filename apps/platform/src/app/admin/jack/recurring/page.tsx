@@ -137,7 +137,7 @@ export default async function RecurringQuestionsPage({ searchParams }: { searchP
 
       <Panel className="mb-4">
         <PanelHeader title="Questions" description="Each is asked in its room as the officer who set it up, answered with no web search and without saving knowledge. Pick “Last runs” to see each answer and what it cost." />
-        <QuestionList questions={views} rooms={rooms} highlight={highlight ?? null} />
+        <QuestionList questions={views} rooms={rooms} highlight={highlight ?? null} viewerId={session.user?.id ?? null} />
       </Panel>
 
       <Panel id="digest" className="scroll-mt-4">

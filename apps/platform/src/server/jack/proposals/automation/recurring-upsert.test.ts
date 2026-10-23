@@ -145,11 +145,27 @@ describe("proposing a change", () => {
     const before = { title: "Weekly signups", prompt: "Old?", roomId: "room-here", persona: "jack", schedule: "0 9 * * 1", enabled: false }
     const result = await recurringUpsertKind.apply(recurringUpsertSchema.parse({ id: "q-1", prompt: "New?", on: true }), applyCtx(before))
     expect(db.$transaction).toHaveBeenCalledTimes(1)
-    expect(service.updateRecurringQuestionTx).toHaveBeenCalledWith(db, "q-1", { prompt: "New?" }, expect.objectContaining({ userId: "dylan" }), { expected: before })
+    expect(service.updateRecurringQuestionTx).toHaveBeenCalledWith(db, "q-1", { prompt: "New?" }, expect.objectContaining({ userId: "dylan" }), { expected: before, owner: "gray" })
     expect(service.setRecurringQuestionOnTx).toHaveBeenCalledWith(db, "q-1", true, expect.objectContaining({ userId: "dylan" }))
     expect(result.summary).toBe("Changed the recurring question “Weekly signups”.")
 
     service.updateRecurringQuestionTx.mockResolvedValue({ ok: false, reason: "changed", error: "It changed." })
     await expect(recurringUpsertKind.apply(recurringUpsertSchema.parse({ id: "q-1", prompt: "New?" }), applyCtx(before))).rejects.toBeInstanceOf(StaleProposalError)
+  })
+
+  it("hands a change to what it asks to the officer it was proposed for, or to whoever applied it once they aren't one", async () => {
+    const before = { title: "Weekly signups", prompt: "Old?", roomId: "room-here", persona: "jack", schedule: "0 9 * * 1", enabled: false }
+    db.user.findMany.mockResolvedValue([])
+    await recurringUpsertKind.apply(recurringUpsertSchema.parse({ id: "q-1", prompt: "New?" }), applyCtx(before))
+    expect(service.updateRecurringQuestionTx.mock.calls[0][4]).toEqual({ expected: before, owner: "dylan" })
+  })
+
+  it("shows on the card that changing someone else's question makes it the asker's", async () => {
+    db.recurringQuestion.findUnique.mockResolvedValue(question({ createdById: "dylan", createdBy: { displayName: "Dylan" } }))
+    const prepared = await recurringUpsertKind.prepare(recurringUpsertSchema.parse({ id: "q-1", prompt: "How many, by team?" }), ctx)
+    expect(prepared.view.diff.at(-1)).toEqual({ field: "createdById", label: "Asked as", before: "Dylan", after: "Gray", format: "value" })
+    // Not for a new schedule or title: those don't change what it asks
+    const rescheduled = await recurringUpsertKind.prepare(recurringUpsertSchema.parse({ id: "q-1", schedule: { every: "day", time: "08:00" } }), ctx)
+    expect(rescheduled.view.diff.map((row) => row.label)).toEqual(["When"])
   })
 })

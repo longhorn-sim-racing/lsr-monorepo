@@ -125,6 +125,39 @@ describe("changing one", () => {
     db.recurringQuestion.findUnique.mockResolvedValue(null)
     expect(await updateRecurringQuestionTx(db as never, "q-1", { title: "x" }, actor)).toMatchObject({ ok: false, reason: "not_found" })
   })
+
+  it("makes an officer who changes what someone else's question asks its owner, so it's asked as, and credited to, them", async () => {
+    const result = await updateRecurringQuestionTx(db as never, "q-1", { prompt: "How many new members, by team?" }, { userId: "officer-2" })
+    expect(result).toMatchObject({ ok: true, changed: ["prompt", "createdById"] })
+    expect(db.recurringQuestion.update.mock.calls[0][0].data).toEqual({ prompt: "How many new members, by team?", createdBy: { connect: { id: "officer-2" } } })
+    const entry = audit.createAuditLog.mock.calls[0][0]
+    expect(entry).toMatchObject({ actorUserId: "officer-2", summary: "Changed the recurring question “Weekly signups” (question) and took it over", metadata: { changedFields: ["prompt", "createdById"] } })
+    expect(entry.before).toMatchObject({ prompt: "How many people signed up last week?", createdById: "officer-1" })
+    expect(entry.after).toMatchObject({ createdById: "officer-2" })
+
+    // Its room, or who answers, the same
+    for (const change of [{ roomId: "room-2" }, { persona: "stand" }]) {
+      expect(await updateRecurringQuestionTx(db as never, "q-1", change, { userId: "officer-2" })).toMatchObject({ ok: true, changed: [Object.keys(change)[0], "createdById"] })
+      expect(db.recurringQuestion.update.mock.lastCall![0].data.createdBy).toEqual({ connect: { id: "officer-2" } })
+    }
+  })
+
+  it("leaves the owner when only the title or schedule changes, and when the owner changes it", async () => {
+    expect(await updateRecurringQuestionTx(db as never, "q-1", { title: "Signups", schedule: { every: "day", time: "08:00" } }, { userId: "officer-2" })).toMatchObject({ ok: true, changed: ["title", "schedule"] })
+    expect(db.recurringQuestion.update.mock.calls[0][0].data).toEqual({ title: "Signups" })
+    expect(await updateRecurringQuestionTx(db as never, "q-1", { prompt: "Reworded?" }, actor)).toMatchObject({ ok: true, changed: ["prompt"] })
+    expect(db.recurringQuestion.update.mock.calls[1][0].data).toEqual({ prompt: "Reworded?" })
+    expect(audit.createAuditLog.mock.calls.map(([entry]) => entry.summary).join(" ")).not.toMatch(/took it over/)
+  })
+
+  it("hands it to the officer a proposal was for, when someone else applies the change", async () => {
+    await updateRecurringQuestionTx(db as never, "q-1", { prompt: "Reworded?" }, { userId: "officer-2" }, { owner: "officer-3" })
+    expect(db.recurringQuestion.update.mock.calls[0][0].data.createdBy).toEqual({ connect: { id: "officer-3" } })
+    expect(audit.createAuditLog.mock.calls[0][0].summary).toMatch(/and handed it to the officer who asked for the change$/)
+    // The officer it was for already owns it: nothing changes hands
+    await updateRecurringQuestionTx(db as never, "q-1", { prompt: "Reworded again?" }, { userId: "officer-2" }, { owner: "officer-1" })
+    expect(db.recurringQuestion.update.mock.calls[1][0].data).toEqual({ prompt: "Reworded again?" })
+  })
 })
 
 describe("switching", () => {

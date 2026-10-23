@@ -80,6 +80,13 @@ describe("recurring questions", () => {
     expect(cache.revalidatePath).toHaveBeenCalledWith("/admin/jack/recurring")
   })
 
+  it("changes one as the officer saving it, and says when that made it theirs", async () => {
+    expect(await updateRecurringQuestionAction("q-1", form())).toEqual({ ok: true, data: { tookOver: false } })
+    expect(service.updateRecurringQuestion).toHaveBeenCalledWith("q-1", expect.objectContaining({ prompt: "How many signed up?" }), { userId: "officer-1" })
+    service.updateRecurringQuestion.mockResolvedValue({ ok: true, question: { id: "q-1" }, changed: ["prompt", "createdById"] })
+    expect(await updateRecurringQuestionAction("q-1", form())).toEqual({ ok: true, data: { tookOver: true } })
+  })
+
   it("passes the service's refusals back to the form", async () => {
     service.updateRecurringQuestion.mockResolvedValue({ ok: false, reason: "room", error: "That room is archived." })
     expect(await updateRecurringQuestionAction("q-1", form())).toEqual({ ok: false, error: "That room is archived." })
