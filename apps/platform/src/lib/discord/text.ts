@@ -87,6 +87,8 @@ export function linksIn(text: string): string[] {
 export function tidy(text: string): string {
   return text
     .replace(/[ \t]+/g, " ")
+    // "Monday !" where a mention came out before the "!"
+    .replace(/ +([!?.,;:])(?=\s|$)/g, "$1")
     .replace(/ +\n/g, "\n")
     .replace(/\n +/g, "\n")
     .replace(/\n{3,}/g, "\n\n")

@@ -114,6 +114,13 @@ type AuditExtras = { auditMetadata?: Record<string, unknown> }
 
 const snapshot = (rule: Pick<DiscordRule, "kind" | "channelId" | "config" | "enabled">) => ({ kind: rule.kind, channelId: rule.channelId, config: rule.config, enabled: rule.enabled })
 
+/** The rule's channel by name, for audit summaries */
+async function channelNames(rule: Pick<DiscordRule, "channelId">): Promise<{ channels: Map<string, string> }> {
+  if (!rule.channelId) return { channels: new Map() }
+  const rows = await prisma.discordChannel.findMany({ where: { id: { in: [rule.channelId] } }, select: { id: true, name: true } })
+  return { channels: new Map(rows.map((c) => [c.id, c.name])) }
+}
+
 async function audit(actor: RuleActor, actionType: string, rule: DiscordRule, summary: string, extra: { before?: unknown; after?: unknown; metadata?: Record<string, unknown> } = {}) {
   await createAuditLog({
     actorUserId: actor.userId,
@@ -184,7 +191,7 @@ export async function setRuleEnabled(id: string, enabled: boolean, actor: RuleAc
   if (enabled && !readRuleConfig(current.kind, current.config)) return { ok: false, error: "Its settings can't be read. Edit the rule first." }
   const rule = await prisma.discordRule.update({ where: { id }, data: { enabled, updatedById: actor.userId, ...(enabled ? { cutoffAt: now } : {}) } })
   if (!enabled) await cancelPosts({ ruleId: id }, "The rule was switched off.", { release: true })
-  await audit(actor, enabled ? "ENABLE" : "DISABLE", rule, `${enabled ? "Switched on" : "Paused"} the Discord rule “${describeRule(rule)}”`, { before: { enabled: current.enabled }, after: { enabled }, metadata: auditMetadata })
+  await audit(actor, enabled ? "ENABLE" : "DISABLE", rule, `${enabled ? "Switched on" : "Paused"} the Discord rule “${describeRule(rule, await channelNames(rule))}”`, { before: { enabled: current.enabled }, after: { enabled }, metadata: auditMetadata })
   return { ok: true, rule, changed: true }
 }
 
@@ -194,6 +201,6 @@ export async function deleteRule(id: string, actor: RuleActor): Promise<RuleResu
   if (!current) return { ok: false, error: "That rule no longer exists.", reason: "not_found" }
   await cancelPosts({ ruleId: id }, "The rule was deleted.", { release: false })
   await prisma.discordRule.delete({ where: { id } })
-  await audit(actor, "DELETE", current, `Deleted the Discord rule “${describeRule(current)}”`, { before: snapshot(current) })
+  await audit(actor, "DELETE", current, `Deleted the Discord rule “${describeRule(current, await channelNames(current))}”`, { before: snapshot(current) })
   return { ok: true, rule: current }
 }

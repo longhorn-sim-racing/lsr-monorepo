@@ -126,12 +126,13 @@ export const discordRuleKind: ProposalKind<DiscordRuleProposal> = {
     const input = { kind: saved.data.kind, channelId: saved.data.channelId, config: saved.data.config }
     const actor = { userId: ctx.officer.userId }
     const links = [{ title: "Announcements", url: ANNOUNCEMENTS_PAGE }]
+    const names = { channels: new Map((await postingChannels()).map((c) => [c.id, c.name])) }
 
     if (!saved.data.ruleId) {
       const created = await createRule(input, actor, { enabled: saved.data.enabled, auditMetadata: ctx.auditMetadata })
       if (!created.ok) throw new Error(created.error)
       refreshAnnouncements()
-      return { summary: `Set up the Discord rule “${describeRule(created.rule)}”${saved.data.enabled ? ", switched on" : ", switched off"}.`, links, created: [{ type: "DISCORD_RULE", id: created.rule.id }] }
+      return { summary: `Set up the Discord rule “${describeRule(created.rule, names)}”${saved.data.enabled ? ", switched on" : ", switched off"}.`, links, created: [{ type: "DISCORD_RULE", id: created.rule.id }] }
     }
 
     const updated = await updateRule(saved.data.ruleId, input, actor, { expectedUpdatedAt: saved.data.updatedAt ? new Date(saved.data.updatedAt) : undefined, auditMetadata: ctx.auditMetadata })
@@ -139,11 +140,12 @@ export const discordRuleKind: ProposalKind<DiscordRuleProposal> = {
       if (updated.reason) throw new StaleProposalError(updated.reason === "not_found" ? "The rule was deleted." : "Someone changed the rule since this was proposed.")
       throw new Error(updated.error)
     }
-    if (updated.rule.enabled !== saved.data.enabled) {
+    const switching = updated.rule.enabled !== saved.data.enabled
+    if (switching) {
       const switched = await setRuleEnabled(updated.rule.id, saved.data.enabled, actor, { auditMetadata: ctx.auditMetadata })
       if (!switched.ok) throw new Error(`Saved the settings, but couldn't switch it ${saved.data.enabled ? "on" : "off"}: ${switched.error}`)
     }
     refreshAnnouncements()
-    return { summary: `Changed the Discord rule “${describeRule(updated.rule)}”${updated.rule.enabled !== saved.data.enabled ? ` and switched it ${saved.data.enabled ? "on" : "off"}` : ""}.`, links }
+    return { summary: `Changed the Discord rule “${describeRule(updated.rule, names)}”${switching ? ` and switched it ${saved.data.enabled ? "on" : "off"}` : ""}.`, links }
   },
 }
