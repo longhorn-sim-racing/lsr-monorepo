@@ -6,11 +6,13 @@ import { Badge, Button, DetailList, Notice, useConfirm } from "@/components/admi
 import type { DiffHunkLine } from "@/lib/jack/line-diff"
 import type { JackProposalDisplay } from "@/lib/jack/parts"
 import {
+  isCardImagePath,
   latestProposalState,
   PROPOSAL_STATUS,
   proposalApiUrl,
   type JackProposalDetail,
   type JackProposalDiffRow,
+  type JackProposalImage,
   type JackProposalRow,
 } from "@/lib/jack/proposals"
 import type { JackProposalState, JackProposalStatusKey } from "@/lib/jack/types"
@@ -137,6 +139,7 @@ function FullChange({ detail }: { detail: JackProposalDetail }) {
       {long.map((row) => (
         <LineDiff key={row.field} row={row} />
       ))}
+      {detail.images && detail.images.length > 0 && <ImageStrip images={detail.images} />}
       {detail.preview && <MarkdownPreview preview={detail.preview} />}
       {detail.people.length > 0 && (
         <div className="flex flex-col gap-1">
@@ -161,6 +164,25 @@ function FullChange({ detail }: { detail: JackProposalDetail }) {
         </ul>
       )}
     </>
+  )
+}
+
+/** What the proposal posts or adds, in order (slides of an Instagram post), from this site's officer-only image routes only */
+function ImageStrip({ images }: { images: JackProposalImage[] }) {
+  const shown = images.filter((image) => isCardImagePath(image.url))
+  if (!shown.length) return null
+  return (
+    <ol className="flex gap-2 overflow-x-auto pb-1" aria-label="What it posts">
+      {shown.map((image, i) => (
+        <li key={`${image.url}-${i}`} className="flex w-24 shrink-0 flex-col gap-1">
+          <a href={image.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-[4px] border bg-[#0B0B0B]" title="Open the image">
+            {/* eslint-disable-next-line @next/next/no-img-element -- an officer-only route; next/image can't pass the session */}
+            <img src={image.url} alt={image.alt} loading="lazy" className="h-28 w-full object-contain" />
+          </a>
+          {image.label && <span className="truncate text-xs text-admin-subtle">{image.label}</span>}
+        </li>
+      ))}
+    </ol>
   )
 }
 
@@ -364,6 +386,10 @@ function RowPicker({
           <li key={row.id} className="border-b border-admin-row last:border-b-0">
             <label className={cn("flex items-start gap-2.5 px-2.5 py-1.5", editable && "cursor-pointer hover:bg-admin-surface")}>
               <input type="checkbox" className="mt-0.5 size-3.5 shrink-0 accent-primary" checked={chosen.has(row.id)} disabled={!editable} onChange={() => toggle(row.id)} />
+              {row.thumbUrl && isCardImagePath(row.thumbUrl) && (
+                // eslint-disable-next-line @next/next/no-img-element -- an officer-only route; next/image can't pass the session
+                <img src={row.thumbUrl} alt="" loading="lazy" className="size-10 shrink-0 rounded-[3px] border bg-[#0B0B0B] object-contain" />
+              )}
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="break-words">{row.label}</span>
                 {row.detail && <span className="break-words text-xs text-admin-subtle">{row.detail}</span>}
