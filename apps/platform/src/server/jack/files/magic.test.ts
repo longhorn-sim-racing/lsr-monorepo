@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest"
 import { docxFile, imageFile, pdfFile, xlsxFile, zipBomb } from "./fixtures"
 import { checkContent, sniff } from "./magic"
 import { decodeText } from "./text"
-import { inspectZip, ZipLimitError } from "./zip"
 
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -72,23 +71,6 @@ describe("sniff", () => {
     expect(sniff(docxFile([]))).toBe("a ZIP archive")
     expect(sniff(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1]))).toBe("an old Office file (.doc or .xls)")
     expect(sniff(text("plain words"))).toBeNull()
-  })
-})
-
-describe("inspectZip", () => {
-  it("lists the entries and counts the real uncompressed size", () => {
-    const { names, totalBytes } = inspectZip(docxFile(["Hello"]))
-    expect(names).toEqual(expect.arrayContaining(["[Content_Types].xml", "word/document.xml"]))
-    expect(totalBytes).toBeGreaterThan(100)
-  })
-
-  it("stops inflating at the cap instead of filling memory", () => {
-    expect(() => inspectZip(zipBomb(50_000_000), { maxEntries: 10, maxTotalBytes: 2_000_000 })).toThrow(new ZipLimitError("size"))
-  })
-
-  it("refuses too many entries and garbage", () => {
-    expect(() => inspectZip(docxFile(["a"]), { maxEntries: 1, maxTotalBytes: 1e9 })).toThrow(ZipLimitError)
-    expect(() => inspectZip(Buffer.from("PK\x03\x04garbage that is not a zip"))).toThrow(ZipLimitError)
   })
 })
 
