@@ -51,8 +51,17 @@ describe("the pipeline rules", () => {
   it("the admin page's rule only drops the viewer's own reviews, and counts everyone", () => {
     const { rows: visible, hidden } = applyPipelineRules(rows, { hideOfficerApplicants: false, viewerId: "officer-dylan" })
     expect(hidden).toEqual([])
-    expect(visible.find((r) => r.id === "5")!.reviews).toEqual([])
+    expect(visible.find((r) => r.id === "5")).toMatchObject({ reviews: [], own: true })
     expect(visible.find((r) => r.id === "2")!.reviews).toHaveLength(2)
+    expect(visible.filter((r) => r.own).map((r) => r.id)).toEqual(["5"])
+  })
+
+  it("doesn't count the viewer's own application as unreviewed or waiting, since its reviews are hidden", () => {
+    const mine = [row("7", "media", "SUBMITTED", { userId: "me", submittedAt: day(1) }, [review("gray", 5)]), row("8", "media", "SUBMITTED", { submittedAt: day(9) })]
+    const summary = summarizePipeline(applyPipelineRules(mine, { hideOfficerApplicants: false, viewerId: "me" }).rows)
+    const media = summary.teams.find((t) => t.team === "media")!
+    expect(media).toMatchObject({ total: 2, unreviewed: 1, reviews: 0, oldestUnreviewedAt: day(9) })
+    expect(summary.unreviewed).toBe(1)
   })
 })
 
@@ -123,13 +132,17 @@ describe("loadPipelineRows", () => {
 
 describe("getPipelinePanel", () => {
   it("counts every applicant for the admin page, without the viewer's own reviews, with reviewer names", async () => {
+    const application = (id: string, userId: string, submittedAt: Date) => ({ id, userId, fullName: id, gradYear: null, major: null, submittedAt, autoSubmitted: false, user: { roles: [] } })
     db.applicationTrack.findMany.mockResolvedValue([
-      { id: "t1", track: "media", status: "IN_REVIEW", decidedAt: null, application: { id: "a1", userId: "me", fullName: "Me", gradYear: null, major: null, submittedAt: day(5), autoSubmitted: false, user: { roles: [{ role: { key: "officer" } }] } }, reviews: [review("gray", 5)] },
-      { id: "t2", track: "media", status: "SUBMITTED", decidedAt: null, application: { id: "a2", userId: "u2", fullName: "Sam", gradYear: null, major: null, submittedAt: day(6), autoSubmitted: false, user: { roles: [] } }, reviews: [review("alex", 3)] },
+      // The viewer's own application, reviewed by Gray: neither its review nor "unreviewed" shows
+      { id: "t1", track: "media", status: "IN_REVIEW", decidedAt: null, application: { ...application("a1", "me", day(5)), user: { roles: [{ role: { key: "officer" } }] } }, reviews: [review("gray", 5)] },
+      { id: "t2", track: "media", status: "SUBMITTED", decidedAt: null, application: application("a2", "u2", day(6)), reviews: [review("alex", 3)] },
+      { id: "t3", track: "media", status: "SUBMITTED", decidedAt: null, application: application("a3", "u3", day(8)), reviews: [] },
     ])
     const panel = await getPipelinePanel("cycle-1", "me", day(20))
-    expect(panel).toMatchObject({ total: 2, unreviewed: 1, averageScore: 3, ownApplication: true, reviewers: [{ name: "Alex", reviews: 1 }] })
-    expect(panel.byStatus).toMatchObject({ SUBMITTED: 1, IN_REVIEW: 1 })
-    expect(panel.teams.find((t) => t.team === "media")).toMatchObject({ total: 2, unreviewed: 1, longestWaitDays: 15 })
+    expect(panel).toMatchObject({ total: 3, unreviewed: 1, averageScore: 3, ownApplication: true, reviewers: [{ name: "Alex", reviews: 1 }] })
+    expect(panel.byStatus).toMatchObject({ SUBMITTED: 2, IN_REVIEW: 1 })
+    // The longest wait is a3's 12 days: the viewer's own (15 days) isn't counted
+    expect(panel.teams.find((t) => t.team === "media")).toMatchObject({ total: 3, unreviewed: 1, longestWaitDays: 12 })
   })
 })

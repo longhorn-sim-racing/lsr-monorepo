@@ -15,7 +15,7 @@ export function PipelinePanel({ data, teamHref }: { data: PipelinePanelData; tea
     <Panel className="mb-4">
       <PanelHeader
         title="Pipeline"
-        description={`Team applications in this round by status. "No review yet" counts the ones nobody has reviewed or decided.${data.ownApplication ? " Reviews of your own application are left out." : ""}`}
+        description={`Team applications in this round by status. "No review yet" counts the ones nobody has reviewed or decided.${data.ownApplication ? " Your own application isn't counted there, and its reviews are left out." : ""}`}
       />
       <Table minWidth={760} className="rounded-none border-0">
         <THead>

@@ -12,7 +12,8 @@ import { TRACK_STATUS_ORDER } from "@/lib/recruiting/labels"
  * - Jack's (design §3.2, the same as the jack_readonly policies): rooms are shared by every officer,
  *   so applications from anyone who holds the officer or admin role lose their teams, statuses,
  *   reviews and scores entirely. Only that they applied (name, date) is left.
- * - The admin page's: an officer never sees reviews of their own application (viewerId).
+ * - The admin page's: an officer never sees reviews of their own application (viewerId), so it
+ *   isn't counted as unreviewed or as waiting either, whether or not it has reviews.
  */
 
 export const OFFICER_ROLES = ["officer", "admin"]
@@ -43,6 +44,8 @@ export type PipelineRow = {
     eid?: string | null
   }
   reviews: PipelineReview[]
+  /** The viewer's own application under the page's rule: its reviews are left out, so it isn't counted as unreviewed either */
+  own?: boolean
 }
 
 /**
@@ -93,7 +96,7 @@ export type PipelineRules = {
 
 export type HiddenApplicant = { applicationId: string; fullName: string | null; submittedAt: Date | null }
 
-/** The rows the rules let through (reviews of the viewer's own application removed), and the applicants hidden by Jack's rule */
+/** The rows the rules let through (the viewer's own application marked `own`, without its reviews), and the applicants hidden by Jack's rule */
 export function applyPipelineRules(rows: PipelineRow[], rules: PipelineRules): { rows: PipelineRow[]; hidden: HiddenApplicant[] } {
   const visible: PipelineRow[] = []
   const hidden = new Map<string, HiddenApplicant>()
@@ -102,7 +105,7 @@ export function applyPipelineRules(rows: PipelineRow[], rules: PipelineRules): {
       hidden.set(row.application.id, { applicationId: row.application.id, fullName: row.application.fullName, submittedAt: row.application.submittedAt })
       continue
     }
-    visible.push(rules.viewerId && row.application.userId === rules.viewerId ? { ...row, reviews: [] } : row)
+    visible.push(rules.viewerId && row.application.userId === rules.viewerId ? { ...row, reviews: [], own: true } : row)
   }
   return { rows: visible, hidden: [...hidden.values()] }
 }
@@ -123,6 +126,7 @@ export type TeamPipeline = {
   interviewRequired: boolean
   total: number
   byStatus: Record<TrackStatus, number>
+  /** Not counting the viewer's own application (its reviews are hidden, so it can't be told) */
   unreviewed: number
   /** Team applications with at least one review */
   reviewed: number
@@ -185,7 +189,7 @@ export function summarizePipeline(rows: PipelineRow[]): PipelineSummary {
     team.total += 1
     team.byStatus[row.status] += 1
     if (row.reviews.length) team.reviewed += 1
-    if (isUnreviewed(row)) {
+    if (!row.own && isUnreviewed(row)) {
       team.unreviewed += 1
       const at = row.application.submittedAt
       if (at && (!team.oldestUnreviewedAt || at < team.oldestUnreviewedAt)) team.oldestUnreviewedAt = at
@@ -226,7 +230,7 @@ export type PipelinePanelData = {
   unreviewed: number
   averageScore: number | null
   reviewers: { name: string; reviews: number }[]
-  /** The officer looking applied in this round: their own application's reviews are left out */
+  /** The officer looking applied in this round: their own application's reviews are left out, and it isn't counted as unreviewed */
   ownApplication: boolean
 }
 
