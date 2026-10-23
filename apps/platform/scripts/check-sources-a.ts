@@ -6,7 +6,7 @@
  * - a dispute marks its charge, balance transactions set a charge's fee, net and payout, and the
  *   Payments panel's reads (stripeSnapshot, withPayments, openDisputesFor) run as SQL;
  * - delivery events are stored once per svix-id, and statuses, bounce lists and a recipient's mail are
- *   worked out from them;
+ *   worked out from them; the Delivery tab's SQL counts match the same worked out email by email;
  * - a site traffic snapshot replaces a day's rows together, skips stored days, and the reads add up;
  * - jack_readonly can read StripeCharge (default privileges) and EmailEvent keeps its RLS policy.
  *
@@ -132,6 +132,16 @@ async function main() {
     check("the bounce list has the address, its reason, and that a later email arrived", mine?.reason === "Permanent: No such user" && mine.deliveredSince === true, JSON.stringify(mine));
     const to = await delivery.emailsTo(recipient.toUpperCase(), new Date(now - 3_600_000));
     check("a recipient's mail, newest first, whatever the address's case", to.map((e) => e.resendId).join() === [resendIds[1], resendIds[0]].join(), JSON.stringify(to.map((e) => e.resendId)));
+    // The Delivery tab's SQL counts against the same thing worked out email by email (every row in the window, not just these)
+    const countSince = new Date(now - 30 * 86_400_000);
+    const sqlCounts = await delivery.deliveryCounts(countSince);
+    const ids = await prisma.emailEvent.findMany({ where: { occurredAt: { gte: countSince } }, distinct: ["resendId"], select: { resendId: true } });
+    const byEmail = [...(await delivery.deliveryFor(ids.map((row) => row.resendId))).values()];
+    const jsCounts = Object.fromEntries(Object.keys(sqlCounts.byStatus).map((status) => [status, byEmail.filter((d) => d.status === status).length]));
+    check("deliveryCounts (SQL) matches each email's status worked out in code", sqlCounts.emails === byEmail.length && JSON.stringify(sqlCounts.byStatus) === JSON.stringify(jsCounts), JSON.stringify({ sql: sqlCounts, js: jsCounts }));
+    check("deliveryCounts counts the bounced test email", sqlCounts.byStatus.bounced >= 1 && sqlCounts.byStatus.delivered >= 1);
+    const allBounced = await delivery.bouncedRecipients(new Date(now - 3_600_000), 5_000);
+    check("bouncedRecipientCount matches the bounce list's total", (await delivery.bouncedRecipientCount(new Date(now - 3_600_000))) === allBounced.total, String(allBounced.total));
 
     // Site traffic: a 1999 window, so no real (or fake) snapshot is touched
     let pathRows = 3;
