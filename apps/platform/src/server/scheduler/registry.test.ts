@@ -12,6 +12,7 @@ const fakeJob = (kind: string): JobKind => ({
 
 afterEach(() => {
   vi.doUnmock("./jobs/groundwork")
+  vi.doUnmock("./jobs/proposals")
   vi.doUnmock("./jobs/sources-a")
   vi.doUnmock("./jobs/discord-read")
   vi.resetModules()
@@ -31,6 +32,7 @@ describe("the job registry", () => {
   it("joins the tracks' jobs in track order and finds them by kind", async () => {
     vi.doMock("./jobs/discord-read", () => ({ JOBS: [fakeJob("discord.sync")] }))
     vi.doMock("./jobs/groundwork", () => ({ JOBS: [fakeJob("housekeeping.prune")] }))
+    vi.doMock("./jobs/proposals", () => ({ JOBS: [] })) // the real sweep; left out of the order check
     const { JOB_KINDS, findJobKind } = await import("./registry")
     expect(JOB_KINDS.map((j) => j.kind)).toEqual(["housekeeping.prune", "discord.sync"])
     expect(findJobKind("discord.sync")?.label).toBe("discord.sync")
