@@ -6,12 +6,9 @@ import type { EvalSeeder } from "./types";
 const seeder = (name: string): EvalSeeder => ({ name, run: async () => "done" });
 
 describe("the eval seeder slots", () => {
-  it("have one slot per track, joined with their tracks", () => {
+  it("have one slot per track, each seeder tagged with its slot's track", () => {
     expect(Object.keys(SEED_SLOTS).sort()).toEqual([...SLOT_TRACKS].sort());
-    // Every seeder of every slot, once, tagged with the track whose slot holds it, under a unique name
-    expect(EVAL_SEEDERS).toHaveLength(Object.values(SEED_SLOTS).flat().length);
-    for (const s of EVAL_SEEDERS) expect((SEED_SLOTS[s.track] as readonly EvalSeeder[]).find((own) => own.name === s.name)?.run).toBe(s.run);
-    expect(new Set(EVAL_SEEDERS.map((s) => s.name)).size).toBe(EVAL_SEEDERS.length);
+    expect(EVAL_SEEDERS).toEqual(SLOT_TRACKS.flatMap((track) => SEED_SLOTS[track].map((seeder) => ({ ...seeder, track }))));
   });
 
   it("join in track order, each tagged with its track", () => {

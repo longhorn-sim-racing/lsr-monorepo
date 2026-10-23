@@ -3,7 +3,7 @@ import { z } from "zod"
 import { deckPageUrl, JACK_DECK_SIZE_KEYS, JACK_DECK_SIZES, MAX_DECK_SLIDES, type JackDeckContent } from "@/lib/jack/decks"
 import type { JackDeckDisplay } from "@/lib/jack/parts"
 import { getSiteUrl } from "@/lib/site-url"
-import { findGalleryAssets, orientation, SITE_ASSETS } from "@/server/jack/decks/assets"
+import { findGalleryAssets, orientation, roomPhotoAssets, SITE_ASSETS } from "@/server/jack/decks/assets"
 import { DESIGN_GUIDE } from "@/server/jack/decks/design-guide"
 import { applyEdits, applyOrder, applyWrites, newSlideId, type Applied } from "@/server/jack/decks/edits"
 import { isScreenshotPath, SCREENSHOT_DEVICES, screenshotSite } from "@/server/jack/decks/renderer"
@@ -68,7 +68,7 @@ async function checkSlides(deck: DeckView, ids: string[], signal?: AbortSignal):
     const slow = new Promise<null>((resolve) => {
       timer = setTimeout(() => resolve(null), CHECK_WAIT_MS)
     })
-    const renders = Promise.all(targets.map(({ slide }) => ensureRender({ size: deck.size, css: deck.content.css, html: slide.html })))
+    const renders = Promise.all(targets.map(({ slide }) => ensureRender({ size: deck.size, css: deck.content.css, html: slide.html, roomId: deck.roomId })))
     renders.catch(() => {})
     const results = await Promise.race([renders, slow]).finally(() => clearTimeout(timer))
     if (signal?.aborted) return ""
@@ -120,15 +120,16 @@ export const deckAssetsInput = z.object({
 export const deckAssetsTool: JackTool<z.infer<typeof deckAssetsInput>> = {
   name: "deck_assets",
   description:
-    "The images slides can use: the site's photos and livery renders, the LSR and sponsor logos (each with what it shows), and the club's gallery photos on Cloudinary (searchable by album and description). Use only URLs from here, exactly as given.",
+    "The images slides can use: photos officers posted in this room, the site's photos and livery renders, the LSR and sponsor logos (each with what it shows), and the club's gallery photos on Cloudinary (searchable by album and description). Use only URLs from here, exactly as given.",
   input: deckAssetsInput,
   design: true,
-  async run(input) {
-    const gallery = await findGalleryAssets({ query: input.query, album: input.album, limit: 30 })
+  async run(input, ctx) {
+    const [gallery, room] = await Promise.all([findGalleryAssets({ query: input.query, album: input.album, limit: 30 }), roomPhotoAssets(ctx.roomId)])
     const line = (a: { url: string; about: string; width: number; height: number }) =>
       `${a.url} | ${a.width && a.height ? `${a.width}×${a.height} ${orientation(a.width, a.height)}` : "size unknown"} | ${a.about}`
     const site = input.query || input.album ? [] : SITE_ASSETS
     const text = [
+      room.length ? `Photos officers posted in this room (they load only in this room's decks):\n${room.map(line).join("\n")}` : null,
       site.length ? `Site photos, renders and logos (relative URLs load from the club site):\n${site.map(line).join("\n")}` : null,
       gallery.assets.length
         ? `Gallery photos${input.query || input.album ? " matching the search" : " (newest albums first)"}:\n${gallery.assets.map(line).join("\n")}`
@@ -396,7 +397,7 @@ export const deckRenderTool: JackTool<z.infer<typeof deckRenderInput>> = {
     if (bad) return fail(`The deck has ${all.length} slides; there's no slide ${bad}.`, "Slide not found")
     const targets = input.slides?.length ? all.filter(({ n }) => input.slides!.includes(n)) : all.slice(0, MAX_RENDER_SLIDES)
 
-    const rendered = await Promise.all(targets.map(({ slide }) => ensureRender({ size: deck.size, css: deck.content.css, html: slide.html }, { withView: true, signal: ctx.signal })))
+    const rendered = await Promise.all(targets.map(({ slide }) => ensureRender({ size: deck.size, css: deck.content.css, html: slide.html, roomId: deck.roomId }, { withView: true, signal: ctx.signal })))
     const images: JackModelImage[] = []
     const lines: string[] = []
     rendered.forEach((result, i) => {

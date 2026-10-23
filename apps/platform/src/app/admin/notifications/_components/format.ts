@@ -4,8 +4,10 @@ import type { Tone } from "@/components/admin/kit"
 import { DEFAULT_TIMEZONE, zoneLabel } from "@/lib/dates"
 import type { getRecentNotifications } from "../actions"
 
-/** A notification as the admin lists load it, with its member */
-export type NotificationRow = Awaited<ReturnType<typeof getRecentNotifications>>[number]
+type RecentNotification = Awaited<ReturnType<typeof getRecentNotifications>>[number]
+
+/** A notification as the admin lists load it, with its member; Activity's rows also carry the email's delivery */
+export type NotificationRow = Omit<RecentNotification, "delivery"> & { delivery?: RecentNotification["delivery"] }
 
 /** "Oct 12, 7:30 PM CT": admin times are always Central */
 export function centralTime(value: Date | string, pattern = "MMM d, h:mm a") {
@@ -29,7 +31,7 @@ export const STATUS: Record<NotificationStatus, { label: string; tone: Tone }> =
 export const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`
 
 /** The page's tabs, in order. The open one is kept in the URL as ?tab= */
-export const NOTIFICATION_TABS = ["activity", "scheduled", "compose", "settings", "cleanup"] as const
+export const NOTIFICATION_TABS = ["activity", "scheduled", "delivery", "compose", "settings", "cleanup"] as const
 export type NotificationTab = (typeof NOTIFICATION_TABS)[number]
 
 /** Rows with the same message and send time belong to one scheduled send (one row per member and channel) */

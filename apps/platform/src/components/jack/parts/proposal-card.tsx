@@ -15,6 +15,7 @@ import {
 } from "@/lib/jack/proposals"
 import type { JackProposalState, JackProposalStatusKey } from "@/lib/jack/types"
 import { cn } from "@/lib/utils"
+import { MarkdownPreview } from "./markdown-preview"
 import { PartLink } from "./part-link"
 import { useProposalRoom } from "./proposal-context"
 
@@ -136,6 +137,7 @@ function FullChange({ detail }: { detail: JackProposalDetail }) {
       {long.map((row) => (
         <LineDiff key={row.field} row={row} />
       ))}
+      {detail.preview && <MarkdownPreview preview={detail.preview} />}
       {detail.people.length > 0 && (
         <div className="flex flex-col gap-1">
           <span className="text-xs text-admin-subtle">Who it affects</span>

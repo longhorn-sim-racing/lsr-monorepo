@@ -4,7 +4,10 @@ import { requireOfficerPage } from "@/server/auth/guards"
 import { getAdminPayments, type PaymentFilters } from "@/server/queries/payments"
 import { Button, PageHeader } from "@/components/admin/kit"
 import { PaymentsConsole } from "@/components/admin/payments-console"
+import { SafeSlot } from "@/components/admin/safe-slot"
 import { isPaymentKind, isPaymentStatus } from "@/lib/payments"
+import { openDisputesFor } from "@/server/connectors/stripe/read"
+import { StripePanel } from "./_components/stripe-panel"
 
 export const dynamic = "force-dynamic"
 
@@ -32,6 +35,11 @@ export default async function AdminPaymentsPage({ searchParams }: { searchParams
   }
 
   const data = await getAdminPayments(filters)
+  // Open disputes on this page's payments, from the Stripe sync (empty until it runs)
+  const disputes = await openDisputesFor(data.payments.map((p) => p.providerRef)).catch((error: unknown) => {
+    console.error("[payments] Couldn't read Stripe disputes:", error)
+    return new Map()
+  })
 
   return (
     <>
@@ -47,7 +55,8 @@ export default async function AdminPaymentsPage({ searchParams }: { searchParams
           </Button>
         }
       />
-      <PaymentsConsole filters={filters} {...data} />
+      {filters.page === 1 && <SafeSlot id="stripe" where="payments" render={StripePanel} />}
+      <PaymentsConsole filters={filters} {...data} disputes={Object.fromEntries(disputes)} />
     </>
   )
 }

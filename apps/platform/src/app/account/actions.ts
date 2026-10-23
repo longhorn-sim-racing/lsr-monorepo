@@ -63,7 +63,11 @@ export async function retireAccount() {
 export async function deleteAccount() {
   const user = await requireUser();
 
-  await prisma.user.delete({ where: { id: user.id } });
+  // Jack's room messages keep who posted them as a label (name, title, major, handle): it goes with the account
+  await prisma.$transaction([
+    prisma.jackMessage.updateMany({ where: { authorUserId: user.id }, data: { authorLabel: null } }),
+    prisma.user.delete({ where: { id: user.id } }),
+  ]);
 
   redirect('/?account=deleted');
 }
