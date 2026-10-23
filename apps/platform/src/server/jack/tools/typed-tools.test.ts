@@ -577,9 +577,10 @@ describe("club_members: the roster and the newest members", () => {
   const member = (i: number, pad = 0) => ({ name: `Member ${i}`, email: `m${i}@utexas.edu`, joined: "2026-02-14", ...(pad ? { note: "x".repeat(pad) } : {}) })
 
   it("leaves the newest list out when the whole club fits, and says why", () => {
-    const body = JSON.parse(membersForModel({}, { roster: { rows: [member(1), member(2)], definitions: "defs", kind: "members" }, wholeClub: true, newest, signups }))
+    const body = JSON.parse(membersForModel({}, { roster: { rows: [member(1), { ...member(2), eid: "ab123" }], definitions: "defs", kind: "members" }, wholeClub: true, newest, signups }))
     expect(body.roster).toHaveLength(2)
     expect(body.newest).toBe("left out: the roster has everyone, oldest first")
+    expect(body.rosterCounts).toEqual({ people: 2, withEmail: 2, withEid: 1 })
   })
 
   it("puts the newest members first when the roster is cut short (its newest rows are the ones cut)", () => {

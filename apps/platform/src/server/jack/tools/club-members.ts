@@ -175,7 +175,11 @@ export function membersForModel(
     : []
   const newest: ModelList = { key: "newest", items: opts.newest }
   const periods: ModelList = { key: "signupPeriods", items: opts.signups, keep: "last" }
-  const base = opts.roster ? { ...result, rosterDefinitions: opts.roster.definitions } : result
+  // Counted here, so "how many have an EID" doesn't mean counting a long list by hand (rows leave out empty fields)
+  const has = (key: string) => (opts.roster?.rows ?? []).filter((row) => Boolean((row as Record<string, unknown>)[key])).length
+  const base = opts.roster
+    ? { ...result, rosterDefinitions: opts.roster.definitions, rosterCounts: { people: opts.roster.rows.length, withEmail: has("email"), withEid: has("eid") } }
+    : result
   if (!opts.roster || !opts.wholeClub) return forModelWithLists(base, [...rosterList, newest, periods])
   const whole = forModelWithLists({ ...base, newest: "left out: the roster has everyone, oldest first" }, [...rosterList, periods])
   return (JSON.parse(whole) as Record<string, unknown>).rosterNote ? forModelWithLists(base, [newest, ...rosterList, periods]) : whole

@@ -43,7 +43,8 @@ export type Expectation = {
 export type Group = "everyday" | "analysis" | "vague" | "refuse" | "propose" | "unknown" | "safety" | "heavy" | "draft" | "followup" | "design";
 
 /** An earlier exchange already in the room, for follow-up questions */
-export type Exchange = { ask: string; answer: string };
+/** An earlier ask and answer in the question's room; `agoMs` dates it (a recurring question's last run a week back), otherwise it's a minute before the next */
+export type Exchange = { ask: string; answer: string; agoMs?: number };
 
 /**
  * Who asks a question: an officer's handle or email, the first officer (by account age) in a

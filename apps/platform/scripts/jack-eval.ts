@@ -339,10 +339,13 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
     // Earlier answers carry their model: the history leaves out a reply without one (a notice Claude never wrote)
     const earlierModel = mods.JACK_MODELS[persona].model;
     const messages = [
-      ...before.flatMap((ex, i) => [
-        { id: `eval-before-${i}`, ...asked, persona: null, content: ex.ask, toolCalls: null, status: "done" as const, answeredById: `eval-before-reply-${i}`, model: null, createdAt: new Date(t - 60_000 * (before.length - i) - 1), author: { displayName: officer.displayName } },
-        { id: `eval-before-reply-${i}`, kind: "assistant" as const, persona, content: ex.answer, toolCalls: null, status: "done" as const, answeredById: null, model: earlierModel, createdAt: new Date(t - 60_000 * (before.length - i)), author: null },
-      ]),
+      ...before.flatMap((ex, i) => {
+        const at = t - (ex.agoMs ?? 60_000 * (before.length - i));
+        return [
+          { id: `eval-before-${i}`, ...asked, persona: null, content: ex.ask, toolCalls: null, status: "done" as const, answeredById: `eval-before-reply-${i}`, model: null, createdAt: new Date(at - 1), author: { displayName: officer.displayName } },
+          { id: `eval-before-reply-${i}`, kind: "assistant" as const, persona, content: ex.answer, toolCalls: null, status: "done" as const, answeredById: null, model: earlierModel, createdAt: new Date(at), author: null },
+        ];
+      }),
       { id: "eval-ask", ...asked, persona: null, content: ask, toolCalls: null, status: "done" as const, answeredById: replyId, model: null, createdAt: c.now, author: { displayName: officer.displayName }, files },
       { id: replyId, kind: "assistant" as const, persona, content: "", toolCalls: null, status: "streaming" as const, answeredById: null, model: null, createdAt: new Date(t + 1), author: null },
     ];

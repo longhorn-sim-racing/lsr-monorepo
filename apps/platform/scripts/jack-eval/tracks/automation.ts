@@ -128,7 +128,8 @@ export const QUESTIONS: Question[] = [
     group: "everyday",
     scheduled: true,
     ask: ({ officer }) => askText(WEEKLY_ACCOUNTS, officer.displayName),
-    before: async ({ officer }) => [{ ask: askText(WEEKLY_ACCOUNTS, officer.displayName), answer: "9 new accounts were made in the last 7 days." }],
+    // Last week's run, a week back, as the job would have posted it
+    before: async ({ officer }) => [{ ask: askText(WEEKLY_ACCOUNTS, officer.displayName), answer: "9 new accounts were made in the last 7 days.", agoMs: 7 * 86_400_000 }],
     expect: "Answers the recurring question with the count from the data, briefly, and how it compares with last week's 9 when that helps; no web search, nothing saved, nothing proposed.",
     guard: [expectNoProposal(), expectUnchanged("knowledge entries", ({ prisma }) => prisma.knowledgeEntry.count())],
     truth: async (ctx) => {
