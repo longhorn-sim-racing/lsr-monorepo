@@ -6,7 +6,7 @@ const clients = vi.hoisted(() => ({ drive: vi.fn(), sharepoint: vi.fn(), teams: 
 const stores = vi.hoisted(() => ({ current: null as unknown }))
 
 vi.mock("@/server/connectors/state", () => state)
-vi.mock("@/server/connectors/google-drive/connector", () => ({ DRIVE_CONNECTOR_ID: "google-drive", DRIVE_SOURCE: "drive", googleDriveConnector: { client: clients.drive } }))
+vi.mock("@/server/connectors/google-drive/connector", async (importOriginal) => ({ ...(await importOriginal<object>()), googleDriveConnector: { client: clients.drive } }))
 vi.mock("@/server/connectors/sharepoint/connector", () => ({ SHAREPOINT_CONNECTOR_ID: "sharepoint", SHAREPOINT_SOURCE: "sharepoint", sharePointConnector: { client: clients.sharepoint } }))
 vi.mock("@/server/connectors/teams/connector", () => ({ TEAMS_CONNECTOR_ID: "teams", teamsConnector: { client: clients.teams } }))
 vi.mock("@/server/connectors/documents/store", () => ({ prismaDocumentStore: () => stores.current }))

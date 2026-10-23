@@ -17,6 +17,9 @@ import type { DriveCursor } from "./sync"
 export const DRIVE_CONNECTOR_ID = "google-drive"
 export const DRIVE_SOURCE = "drive"
 
+/** The start of the error stored when the shared folder is gone; the digest check looks for it */
+export const DRIVE_ROOT_MISSING = "Google Drive: the shared folder is gone or no longer shared"
+
 /** Set in env: GOOGLE_DRIVE_SA_KEY_ID is optional (it only becomes the JWT's kid) */
 export const DRIVE_ENV = ["GOOGLE_DRIVE_SA_EMAIL", "GOOGLE_DRIVE_SA_PRIVATE_KEY", "GOOGLE_DRIVE_ROOT_FOLDER_ID"]
 

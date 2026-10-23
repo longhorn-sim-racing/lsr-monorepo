@@ -20,7 +20,7 @@ vi.mock("@/server/db", () => ({ prisma: db }))
 
 import { search, sourcesFor } from "./search"
 import { SEARCH_READERS, SEARCH_SOURCES } from "./registry"
-import { documentsSource } from "./sources/documents"
+import { DOCUMENTS_OFF, documentsSource } from "./sources/documents"
 import { knowledgeAgeDays, knowledgeSource } from "./sources/knowledge"
 import { JACK_ANSWER_LABEL, roomsSource } from "./sources/rooms"
 import { siteSource } from "./sources/site"
@@ -196,11 +196,28 @@ describe("the documents source", () => {
   })
 
   it("won't read a deleted document or one with no text", async () => {
+    db.connectorState.findUnique.mockResolvedValue({ enabled: true })
     const base = { id: "d1", name: "Budget.xlsx", path: "/", source: "sharepoint", webUrl: "https://x.sharepoint.com/a", mimeType: "x", modifiedAt: new Date() }
     db.externalDocument.findUnique.mockResolvedValueOnce({ ...base, text: null, textStatus: "ok", deletedAt: new Date() })
     expect(await documentsSource.readers[0].read("d1", {})).toEqual({ ok: false, error: "Budget.xlsx was removed from SharePoint, so its text is gone." })
     db.externalDocument.findUnique.mockResolvedValueOnce({ ...base, text: null, textStatus: "too_large", deletedAt: null })
     expect(await documentsSource.readers[0].read("d1", {})).toEqual({ ok: false, error: expect.stringContaining("too large") })
+    db.externalDocument.findUnique.mockResolvedValueOnce({ ...base, text: null, textStatus: "restricted", deletedAt: null })
+    expect(await documentsSource.readers[0].read("d1", {})).toEqual({ ok: false, error: expect.stringContaining("turned off downloads") })
+  })
+
+  it("searches and reads only sources whose connector is switched on (documents track)", async () => {
+    // Drive on, SharePoint off
+    db.connectorState.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => ({ enabled: where.id === "google-drive" }))
+    expect(await documentsSource.unavailable!()).toBeNull()
+    await documentsSource.search({ query: "budget", limit: 5, includeJackReplies: false })
+    expect(sqlText()).toContain("e.source = ANY(")
+    expect(sqlValues()).toContainEqual(["drive"])
+    db.externalDocument.findUnique.mockResolvedValueOnce({ id: "d1", name: "Budget.xlsx", path: "/", source: "sharepoint", webUrl: "https://x.sharepoint.com/a", mimeType: "x", modifiedAt: new Date(), text: "secret plans", textStatus: "ok", deletedAt: null })
+    expect(await documentsSource.readers[0].read("d1", {})).toEqual({ ok: false, error: "SharePoint isn't connected, so its documents can't be read." })
+    // Both off: the source says so, and search skips it
+    db.connectorState.findUnique.mockResolvedValue({ enabled: false })
+    expect(await documentsSource.unavailable!()).toBe(DOCUMENTS_OFF)
   })
 })
 

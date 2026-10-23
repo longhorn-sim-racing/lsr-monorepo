@@ -1,7 +1,7 @@
 import type { JobContext, JobResult } from "@/server/scheduler/types"
 import { prismaDocumentStore } from "../documents/store"
 import { readConnectorState, recordConnectorError, recordConnectorSync } from "../state"
-import { DRIVE_CONNECTOR_ID, DRIVE_SOURCE, googleDriveConnector } from "./connector"
+import { DRIVE_CONNECTOR_ID, DRIVE_ROOT_MISSING, DRIVE_SOURCE, googleDriveConnector } from "./connector"
 import { syncDrive, type DriveCursor, type DriveSyncResult } from "./sync"
 
 /**
@@ -11,8 +11,7 @@ import { syncDrive, type DriveCursor, type DriveSyncResult } from "./sync"
  * `documents.drive-folder` flags it).
  */
 
-/** The start of the error stored when the shared folder is gone; the digest check looks for it */
-export const DRIVE_ROOT_MISSING = "Google Drive: the shared folder is gone or no longer shared"
+export { DRIVE_ROOT_MISSING }
 
 /** Time kept back at the end of a run: the last file's read (up to 25 s for a big PDF) and the cursor's save */
 const FINISH_MARGIN_MS = 45_000
