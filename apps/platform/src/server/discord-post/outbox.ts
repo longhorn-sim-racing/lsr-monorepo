@@ -308,7 +308,10 @@ export async function sendDuePosts(writer: DiscordWriter, ctx: { now: Date; dead
       continue
     }
     if (!(await claimPost(post.id, ctx.now))) continue
-    const outcome = await deliverClaimed({ ...post, status: "SENDING", claimedAt: ctx.now }, writer, deps)
+    // The row as claimed, not as read above: a rules run may have refreshed a reminder's text in between
+    // (it only changes SCHEDULED rows, so nothing changes it after the claim)
+    const claimed = await prisma.discordPost.findUniqueOrThrow({ where: { id: post.id } })
+    const outcome = await deliverClaimed(claimed, writer, deps)
     if (outcome.status === "SENT") {
       run.sent++
       const url = postUrl({ channelId: post.channelId, discordMessageId: outcome.messageId })
