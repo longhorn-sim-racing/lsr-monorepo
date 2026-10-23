@@ -5,6 +5,7 @@ import type { ConnectorEnv } from "../types"
 import { discordClient, type DiscordClient, type DiscordClientOptions } from "./client"
 import type { DiscordApp } from "./oauth"
 import { APP_FLAG } from "./types"
+import { botRoleCheck } from "./write"
 
 /**
  * The `discord` connector (design §12.1): the club server's bot, for the activity sync and live search,
@@ -61,7 +62,10 @@ export const discordConnector = defineConnector<DiscordClient>({
     const off = [!intents.messageContent && "Message Content", !intents.guildMembers && "Server Members"].filter(Boolean)
     const read = `Read ${guild.name}: ${guild.approximate_member_count ?? "?"} members, ${channels.length} channels`
     if (off.length) return { ok: false, summary: `${read}, but the ${off.join(" and ")} ${off.length === 1 ? "intent is" : "intents are"} off (Developer Portal → Bot → Privileged Gateway Intents)` }
-    return { ok: true, summary: `${read}; Message Content and Server Members intents on` }
+    // discord-post: the bot's role must sit below the admin roles and hold no Administrator (design §12.1)
+    const roleProblem = await botRoleCheck(client, signal)
+    if (roleProblem) return { ok: false, summary: `${read}; intents on, but ${roleProblem.charAt(0).toLowerCase()}${roleProblem.slice(1)}` }
+    return { ok: true, summary: `${read}; Message Content and Server Members intents on; the bot's role sits below the admin roles` }
   },
   async details() {
     const [synced, linked] = await Promise.all([
