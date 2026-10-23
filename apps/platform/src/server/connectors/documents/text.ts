@@ -1,3 +1,4 @@
+import { INVISIBLE } from "@/lib/jack/invisible"
 import type { JackFileKindKey } from "@/lib/jack/parts"
 import { capText, EXTRACT_LIMITS, extractText, type ExtractLimits, type TextStatus } from "@/server/jack/files/extract"
 import { checkContent } from "@/server/jack/files/magic"
@@ -189,12 +190,6 @@ function decodeXml(text: string): string {
     return ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" } as Record<string, string>)[name.toLowerCase()] ?? whole
   })
 }
-
-/*
- * Characters that change how a name reads without being visible: controls, and the bidirectional
- * overrides that make "budget‮fdp.exe" show as "budgetexe.pdf"
- */
-const INVISIBLE = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿]/g
 
 /** A name or folder from Drive or SharePoint as officers and Jack see it: no invisible characters, one line, at most 300 characters */
 export function cleanDocumentName(name: string): string {

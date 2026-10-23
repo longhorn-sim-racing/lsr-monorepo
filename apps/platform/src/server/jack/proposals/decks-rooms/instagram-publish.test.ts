@@ -98,6 +98,20 @@ describe("instagram.publish: proposing", () => {
     expect(second.view.diff[0].after).toBe("Something else entirely")
   })
 
+  it("refuses alt text or a caption with characters the card can't show (tag characters spell hidden text), but keeps a flag emoji", async () => {
+    const refused = (p: Record<string, unknown>) => instagramPublishKind.prepare(payload({ type: "post", slides: [1], ...p }), ctx)
+    await expect(refused({ altText: "podium\u{e0061}\u{e0062}" })).rejects.toThrow(
+      new ProposalInputError("The alt text has 2 characters that don't show on screen (U+E0061, U+E0062). Write it again without them: every character that's posted has to show where it's approved."),
+    )
+    await expect(refused({ altText: "The podium​" })).rejects.toThrow(/^The alt text has a character that doesn't show on screen \(U\+200B\)/)
+    await expect(refused({ caption: "GM 2!\u{e006a}\u{e006f}" })).rejects.toThrow(/^The caption has 2 characters that don't show on screen/)
+    await expect(refused({ caption: "Bidi ‮evil" })).rejects.toThrow(/U\+202E/)
+
+    const england = "\u{1f3f4}\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}"
+    const prepared = await refused({ caption: `Come on ${england} 🏎️\n\n#LSR`, altText: "Three drivers on the podium" })
+    expect(prepared.view.preview?.blocks[0]).toEqual({ t: "p", c: [{ t: "text", v: `Come on ${england} 🏎️` }] })
+  })
+
   it("refuses input Jack can fix: the wrong count for the type, a story caption, alt text on a carousel, caption limits, missing slides", async () => {
     const refused = (p: Record<string, unknown>) => instagramPublishKind.prepare(payload(p), ctx)
     await expect(refused({ type: "post" })).rejects.toThrow(new ProposalInputError('A post is one slide; this picks 3. Use type "carousel" for 2-20 slides, or pick one slide.'))
