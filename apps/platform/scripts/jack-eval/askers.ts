@@ -32,6 +32,11 @@ export async function resolveAsker(prisma: EvalContext["prisma"], spec: AskerSpe
   return prisma.user.findFirst({ where: { ...OFFICER, ...match }, select: SELECT });
 }
 
+/** The run's officer when --as isn't given: the first officer or admin, by account age */
+export function firstOfficer(prisma: EvalContext["prisma"]): Promise<Asker | null> {
+  return prisma.user.findFirst({ where: OFFICER, orderBy: { createdAt: "asc" }, select: SELECT });
+}
+
 /**
  * The same question asked by each of `askers` (two or more, each with a short label for the id, like
  * "media"): ids `<id>@<label>`, the same `pair`. The pair judge compares their answers: the same facts,

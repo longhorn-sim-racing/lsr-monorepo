@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { describeAsker, paired, resolveAsker } from "./askers";
+import { describeAsker, firstOfficer, paired, resolveAsker } from "./askers";
 import type { EvalContext, Question } from "./shared";
 
 const DYLAN = { id: "u-dylan", displayName: "Dylan", handle: "dylan" };
@@ -34,6 +34,14 @@ describe("resolveAsker", () => {
     expect(await resolveAsker(prisma, async () => null)).toBeNull();
     expect(findFirst).toHaveBeenCalledTimes(1);
     expect(await resolveAsker(fakeUsers(null).prisma, "nobody")).toBeNull();
+  });
+});
+
+describe("firstOfficer", () => {
+  it("takes the oldest officer or admin account that isn't deleted", async () => {
+    const { prisma, findFirst } = fakeUsers();
+    expect(await firstOfficer(prisma)).toEqual(DYLAN);
+    expect(findFirst).toHaveBeenLastCalledWith({ where: OFFICER_ONLY, orderBy: { createdAt: "asc" }, select: { id: true, displayName: true, handle: true } });
   });
 });
 

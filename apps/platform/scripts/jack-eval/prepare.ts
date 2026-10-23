@@ -6,8 +6,9 @@
  *
  * 1. Applies the app's migrations to it (`prisma migrate deploy`): on a fresh copy of production, that's
  *    the jack-2 ones. They're additive, and the scheduler's pg_cron setup skips itself on a copy.
- * 2. Runs every track's fake seeder (scripts/jack-eval/seed/<track>.ts) against it, with JACK_FAKES=all,
- *    so connector syncs read the fake services (start them with `pnpm jack:fakes` when a seeder needs them).
+ * 2. Runs every track's fake seeder (scripts/jack-eval/seed/<track>.ts) against it, with JACK_FAKES=all
+ *    whatever the environment says, so connector syncs read the fake services (start them with
+ *    `pnpm jack:fakes` when a seeder needs them).
  *
  * Options: --db=<name>, --track=<track> (one track's seeders), --skip-migrate, --skip-seed.
  *
@@ -24,6 +25,10 @@ import { APP_DIR, loadAppEnv } from "./env";
 
 loadAppEnv();
 (process.env as Record<string, string | undefined>).NODE_ENV ??= "production";
+// Fakes only, whatever the shell or .env.local says: a narrower JACK_FAKES would have the other seeders
+// sync from the live services with real keys, into the eval copy
+const ENV_FAKES = process.env.JACK_FAKES;
+process.env.JACK_FAKES = "all";
 
 const args = process.argv.slice(2);
 const arg = (name: string) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -64,12 +69,15 @@ async function main() {
   // Everything loaded from here on (the Prisma client, the connectors) sees the eval copy and the fakes
   process.env.DATABASE_URL = target.url;
   process.env.DIRECT_URL = target.url;
-  process.env.JACK_FAKES ??= "all";
   const [{ prisma }, { EVAL_SEEDERS }] = await Promise.all([import("../../src/server/db"), import("./seed")]);
   const seeders = EVAL_SEEDERS.filter((s) => !TRACK || s.track === (TRACK as SlotTrack));
-  console.log(`\n  Seeding fake data (JACK_FAKES=${process.env.JACK_FAKES}): ${seeders.length ? `${seeders.length} seeder${seeders.length === 1 ? "" : "s"}` : "no track has a seeder yet"}\n`);
+  if (ENV_FAKES !== undefined && ENV_FAKES !== "all") console.log(`\n  JACK_FAKES was "${ENV_FAKES}" in the environment; seeding always uses all the fakes.`);
+  console.log(`\n  Seeding fake data (JACK_FAKES=all): ${seeders.length ? `${seeders.length} seeder${seeders.length === 1 ? "" : "s"}` : "no track has a seeder yet"}\n`);
   let failed = 0;
   try {
+    // The client really is on the eval copy (nothing loaded it before the URL changed)
+    const [{ name }] = await prisma.$queryRaw<{ name: string }[]>`SELECT current_database() AS name`;
+    if (name !== where.database) throw new Error(`Refusing to seed: the database connection is on "${name}", not "${where.database}".`);
     for (const seeder of seeders) {
       const t0 = Date.now();
       try {

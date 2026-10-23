@@ -21,7 +21,7 @@
  *   --regrade             grade the saved answers again after a grader fix: text checks rerun, and the judge
  *                         looks again at answers it failed or never graded (no model calls for the answers themselves)
  *   --concurrency=<n>     questions in flight at once (default 5)
- *   --as=<email|handle>   the officer asking (default the first officer or admin); a question's own `as` wins
+ *   --as=<handle|email>   the officer or admin asking (default the first officer or admin); a question's own `as` wins
  *   --db=<name>           run on another eval copy on the same local server (lsr_eval…): both URLs' database is swapped
  *   --verbose             print every answer, and what each question's cleanup removed
  *   --allow-remote=<host>[/<project>]  run on a remote copy of the data (never production); a Supabase pooler URL needs the project ref too
@@ -40,32 +40,34 @@
  * What it writes to the database it runs on: every question runs in a room of its own (id jack-eval-…),
  * and after it everything made there is undone (proposals and what they led to, knowledge entries, room
  * files, recurring questions, meetings, decks, DRAFT events and Jack's audit entries; jack-eval/cleanup.ts),
- * then the room is deleted. A killed run's rooms are cleaned up by the next one. On a local database only,
+ * then the room is deleted. A killed run's rooms are cleaned up by the next one, and writes that landed
+ * after their room was gone (knowledge versions, action items, audit entries naming it) are swept up
+ * before and after each run. Officers' room lists leave eval rooms out. On a local database only,
  * questions can plant what they ask about first (one fake LSC application for the injection question),
  * which is left in place for later runs.
  */
+// First: the env files and --db, before any module below can read DATABASE_URL
+import "./jack-eval/setup-env";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import type { JackRoomPersonaKey } from "../src/lib/jack/types";
+import { redactSecrets } from "../src/lib/redact";
 import { SLOT_TRACKS } from "../src/lib/slots";
-import { checkEvalDatabase, evalCopyUrl, withDatabaseName } from "../src/server/jack/eval-support";
-import { describeAsker, resolveAsker, type Asker } from "./jack-eval/askers";
+import { checkEvalDatabase } from "../src/server/jack/eval-support";
+import { describeAsker, firstOfficer, resolveAsker, type Asker } from "./jack-eval/askers";
 import { BEHAVIOR } from "./jack-eval/behavior";
 import { guardsOf, missingRequirements } from "./jack-eval/checks";
-import { cleanUpEvalRooms, describeCleanup, evalRoomId, leftoverEvalRooms, runRooms, runTag, type CleanupOptions } from "./jack-eval/cleanup";
+import { cleanUpEvalRooms, describeCleanup, evalRoomId, leftoverEvalRooms, orphanedEvalRooms, runRooms, runTag, type CleanupOptions } from "./jack-eval/cleanup";
 import { decksIn, DESIGN } from "./jack-eval/design";
-import { APP_DIR, loadAppEnv } from "./jack-eval/env";
+import { APP_DIR } from "./jack-eval/env";
 import { EVERYDAY } from "./jack-eval/everyday";
 import { JudgeDeclined, judgeAnswer, judgeCostUsd, judgePair, judgeSystem, judgeTools, type JudgeGrade, type PairGrade, type ToolTrace } from "./jack-eval/judge";
 import { loadLsc, type Answer, type EvalContext, type Exchange, type Group, type GuardCheck, type GuardContext, type Question } from "./jack-eval/shared";
 import { questionSet } from "./jack-eval/tracks";
 
 const REPO_DIR = resolve(APP_DIR, "..", "..");
-loadAppEnv();
-// Quiet Prisma's query log
-(process.env as Record<string, string | undefined>).NODE_ENV ??= "production";
 
 const args = process.argv.slice(2);
 const arg = (name: string) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -81,7 +83,6 @@ const FILTER = arg("filter");
 const GROUP = arg("group");
 const TRACK = arg("track");
 const AS = arg("as");
-const DB = arg("db");
 const ALLOW_REMOTE = arg("allow-remote");
 const VARIANT = arg("variant") ?? "baseline";
 const CONCURRENCY = Math.max(1, Number(arg("concurrency") ?? 5) || 5);
@@ -94,17 +95,7 @@ const STALE_ROOM_MS = 60 * 60_000;
 const PILOT_IDS = ["lsc-paid", "analysis-august-cohort", "vague-most-active", "refuse-refund", "safety-injected-text"];
 const OUT_DIR = resolve(REPO_DIR, ".claude", "hillclimb");
 
-// --db: the eval copy on the same local server, for both connections
-if (DB) {
-  const copy = evalCopyUrl(process.env.DATABASE_URL, DB);
-  if (!copy.ok) {
-    console.error(copy.error);
-    process.exit(1);
-  }
-  process.env.DATABASE_URL = copy.url;
-  process.env.DIRECT_URL = copy.url;
-  if (process.env.JACK_DATABASE_URL) process.env.JACK_DATABASE_URL = withDatabaseName(process.env.JACK_DATABASE_URL, DB) ?? process.env.JACK_DATABASE_URL;
-}
+// --db was applied by ./jack-eval/setup-env, before anything loaded
 const database = checkEvalDatabase({ DATABASE_URL: process.env.DATABASE_URL, JACK_DATABASE_URL: process.env.JACK_DATABASE_URL }, ALLOW_REMOTE);
 if (!database.ok) {
   console.error(database.error);
@@ -752,6 +743,7 @@ function selected(q: Question): boolean {
 async function main() {
   const { prisma } = await import("../src/server/db");
   if (!database.ok) return; // narrowed above; for TypeScript
+  await confirmDatabases(prisma, database.database);
   const mods = await loadModules();
 
   const officer = await findOfficer(prisma);
@@ -789,9 +781,11 @@ async function main() {
   console.log(`  asking as: ${officer.displayName} (unless a question names someone)   variant: ${VARIANT}   in flight: ${CONCURRENCY}`);
   console.log(`  ${questions.length} questions x ${personas.map((p) => mods.JACK_MODELS[p].model).join(", ")}\n`);
 
-  // A killed run's rooms (and anything made in them) first, so it can't change these answers
+  // A killed run's rooms (and anything made in them) first, so it can't change these answers; then
+  // writes that landed after their room was cleaned up
   const swept = describeCleanup(await cleanUpEvalRooms(prisma, await leftoverEvalRooms(prisma, new Date(startedAt.getTime() - STALE_ROOM_MS)), cleanup));
   if (swept) console.log(`  cleaned up after an earlier run: ${swept}\n`);
+  await sweepOrphans(prisma, cleanup);
 
   // What questions plant, once, before the right answers are worked out (local databases only)
   const planted = new Set<string>();
@@ -855,13 +849,15 @@ async function main() {
     await pool(tasks.filter((t) => !drafts(t.q)), CONCURRENCY, record);
     for (const task of tasks.filter((t) => drafts(t.q))) await record(task);
   } finally {
-    // Rooms whose own cleanup failed, then what the questions planted and asked to have removed
+    // Rooms whose own cleanup failed, writes that landed after their room's cleanup (a tool still
+    // running when a question timed out), then what the questions planted and asked to have removed
     try {
       const left = describeCleanup(await cleanUpEvalRooms(prisma, await runRooms(prisma, c.run), cleanup));
       if (left) console.log(`  cleaned up this run's leftover rooms: ${left}`);
     } catch (error) {
       console.error("  couldn't clean up this run's rooms:", error);
     }
+    await sweepOrphans(prisma, cleanup);
     for (const q of plants.filter((p) => p.unplant && planted.has(p.id))) {
       await q.unplant!({ prisma, now, lsc: c.lsc }).catch((error) => console.error(`  couldn't remove what ${q.id} planted:`, error));
     }
@@ -893,6 +889,16 @@ async function pool<T>(items: T[], size: number, work: (item: T) => Promise<void
   );
 }
 
+/** Cleans up writes that landed after their eval room's cleanup (cleanup.ts, orphanedEvalRooms); a failure is reported, not thrown */
+async function sweepOrphans(prisma: EvalContext["prisma"], cleanup: CleanupOptions) {
+  try {
+    const swept = describeCleanup(await cleanUpEvalRooms(prisma, await orphanedEvalRooms(prisma), cleanup));
+    if (swept) console.log(`  cleaned up writes that outlived their eval room: ${swept}\n`);
+  } catch (error) {
+    console.error(`  couldn't look for writes that outlived their eval room: ${error instanceof Error ? error.message.split("\n").filter(Boolean).at(-1) : String(error)}\n`);
+  }
+}
+
 /** How the cleanup deletes room files' stored objects: through the file store, once it can delete */
 async function cleanupOptions(): Promise<CleanupOptions> {
   const { jackFileStore } = await import("../src/server/jack/decks/storage");
@@ -900,21 +906,53 @@ async function cleanupOptions(): Promise<CleanupOptions> {
   return typeof store.delete === "function" ? { deleteObject: (path) => store.delete!(path) } : {};
 }
 
-/** The officer the eval asks as: --as, or the first officer or admin */
-async function findOfficer(prisma: EvalContext["prisma"]) {
-  const who = AS?.toLowerCase();
-  const user = who
-    ? await prisma.user.findFirst({ where: who.includes("@") ? { email: who } : { OR: [{ handle: who }, { id: AS }] }, select: { id: true, displayName: true, handle: true } })
-    : await prisma.user.findFirst({
-        where: { roles: { some: { role: { key: { in: ["admin", "officer"] } } } } },
-        orderBy: { createdAt: "asc" },
-        select: { id: true, displayName: true, handle: true },
-      });
+/** The officer the eval asks as: --as (an officer or admin, found the way a question's `as` is), or the first officer or admin */
+async function findOfficer(prisma: EvalContext["prisma"]): Promise<Asker> {
+  const user = AS ? await resolveAsker(prisma, AS) : await firstOfficer(prisma);
   if (!user) {
-    console.error(AS ? `No user "${AS}".` : "No officer or admin in this database. Use --as=<email|handle>, or `pnpm set-role` someone first.");
+    console.error(
+      AS
+        ? `No officer or admin "${AS}" (--as takes the handle, email or id of an officer or admin whose account isn't deleted).`
+        : "No officer or admin in this database. Use --as=<email|handle>, or `pnpm set-role` someone first."
+    );
     process.exit(1);
   }
   return user;
+}
+
+/** The database a client is really connected to */
+async function connectedTo(client: EvalContext["prisma"]): Promise<string> {
+  const [row] = await client.$queryRaw<{ name: string }[]>`SELECT current_database() AS name`;
+  return row?.name ?? "(unknown)";
+}
+
+/**
+ * Exits unless the connections are on the database checked above: a module that read DATABASE_URL
+ * before --db changed it would put rooms and cleanups somewhere else, and Jack's SQL would read other
+ * data than the checks. Jack's own connection is checked only when the models are asked
+ */
+async function confirmDatabases(prisma: EvalContext["prisma"], named: string) {
+  const app = await connectedTo(prisma);
+  if (named !== "(default)" && app !== named) {
+    console.error(`Refusing to run: the app's database connection is on "${app}", not "${named}". A module read DATABASE_URL before --db changed it (see scripts/jack-eval/setup-env.ts).`);
+    process.exit(1);
+  }
+  if (REGRADE) return;
+  const { getJackSqlClient } = await import("../src/server/jack/sql-client");
+  const jack = getJackSqlClient();
+  if (!jack) return; // checkEvalDatabase needs JACK_DATABASE_URL, so this doesn't happen
+  let jackDb: string;
+  try {
+    jackDb = await connectedTo(jack);
+  } catch (error) {
+    const why = error instanceof Error ? error.message.split("\n").filter(Boolean).at(-1) : String(error);
+    console.log(`  note: Jack's read-only connection failed (${redactSecrets(why ?? "")}); questions that use run_sql will fail.\n`);
+    return;
+  }
+  if (jackDb !== app) {
+    console.error(`Refusing to run: Jack's read-only connection is on "${jackDb}", but the app's is on "${app}". Jack would read other data than the checks.`);
+    process.exit(1);
+  }
 }
 
 /**
