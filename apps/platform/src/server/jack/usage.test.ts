@@ -25,6 +25,7 @@ import {
   usageMonth,
   type ReplyCostRow,
 } from "./usage"
+import { REPLY_TRIGGERS } from "./reply-triggers"
 
 const NOW = new Date("2026-10-22T17:00:00Z")
 
@@ -129,7 +130,7 @@ describe("by officer and automation", () => {
     ])
   })
 
-  it("asks for the message that started each reply: a scheduled note first, else the newest it answered", async () => {
+  it("asks for the message that started each reply (from the list the reply loop answers): a scheduled note first, else the newest it answered", async () => {
     db.jackUsage.groupBy.mockResolvedValue([{ job: "name_room", persona: "stand", _sum: { costUsd: 0.002 }, _count: { _all: 2 } }])
     const month = monthFromKey("2026-10")!
     const spenders = await spendBySource(month)
@@ -140,6 +141,7 @@ describe("by officer and automation", () => {
       orderBy: [{ scheduled: "desc" }, { createdAt: "desc" }, { id: "desc" }],
       take: 1,
     })
+    expect(args.select.answers.where.OR).toBe(REPLY_TRIGGERS)
     expect(spenders).toEqual([{ key: "side:name_room", label: "Naming rooms (Stand)", kind: "side_job", calls: 2, costUsd: 0.002 }])
   })
 })
@@ -166,6 +168,7 @@ describe("feedback", () => {
     expect(down[1]).toMatchObject({ note: null, question: null, roomTitle: null })
     expect(down[1].reply).toHaveLength(280)
     expect(down[1].reply.endsWith("…")).toBe(true)
+    expect(db.jackFeedback.findMany.mock.calls[0][0].select.message.select.answers.where.OR).toBe(REPLY_TRIGGERS)
   })
 })
 

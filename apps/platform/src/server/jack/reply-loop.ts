@@ -13,6 +13,7 @@ import { anthropicJackClient, REPLY_LIMITS, runModelReply, type JackModelClient,
 import { JACK_MODELS } from "./models"
 import { buildSystemPrompt } from "./prompt"
 import { releaseRoomLock, renewRoomLock, tryAcquireRoomLock } from "./room-lock"
+import { REPLY_TRIGGERS } from "./reply-triggers"
 import { getMonthSpend } from "./spend"
 import { nameRoom, STAND_TIMEOUT_MS } from "./stand"
 import { JACK_TOOLS } from "./tools"
@@ -93,15 +94,11 @@ function deadline(ms: number, reason: string) {
 }
 
 /**
- * What a reply answers: officer messages that expect an answer (in a mention-mode room, only the ones
- * that mention Jack, design §10), notes asking Jack to keep going on a deck (#177), and notes a
- * scheduled run posted (`scheduled`, a recurring question)
+ * Messages waiting for a reply: the kinds a reply answers (REPLY_TRIGGERS) that none has yet. None wait in
+ * an archived room, so no answer starts there (design §10)
  */
-const ANSWERABLE = [{ kind: "user" as const, expectsAnswer: true }, { kind: "system" as const, continues: true }, { kind: "system" as const, scheduled: true }]
-
-/** Messages waiting for a reply. None wait in an archived room, so no answer starts there (design §10) */
 function waitingIn(roomId: string) {
-  return { roomId, answeredById: null, room: { archivedAt: null }, OR: ANSWERABLE }
+  return { roomId, answeredById: null, room: { archivedAt: null }, OR: REPLY_TRIGGERS }
 }
 
 /**
@@ -143,7 +140,8 @@ async function hasUnanswered(roomId: string) {
 /**
  * Mention mode (design §10): officer messages that didn't mention Jack and no reply has taken yet, up to
  * `last` (the newest message a reply answers). The reply takes them as context, so its turn holds the
- * conversation the mention came out of; ones posted after `last` wait for the next mention.
+ * conversation the mention came out of; ones posted after `last` wait for the next mention. All of them
+ * are marked answered, but the history sends only the newest (history.ts, ASIDE_LIMITS).
  */
 async function waitingAsides(roomId: string, last: JackMessageRow): Promise<string[]> {
   const asides = await prisma.jackMessage.findMany({
@@ -477,7 +475,7 @@ async function leaveContinueNote(roomId: string, persona: JackRoomPersonaKey, wa
   const room = await prisma.jackRoom.findUnique({ where: { id: roomId }, select: { archivedAt: true } })
   if (!room || room.archivedAt) return
   const recent = await prisma.jackMessage.findMany({
-    where: { roomId, OR: ANSWERABLE },
+    where: { roomId, OR: REPLY_TRIGGERS },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: MAX_AUTO_CONTINUES + 1,
     select: { kind: true, continues: true },

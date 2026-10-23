@@ -5,6 +5,7 @@ import type { JackPersonaKey } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
 import { roundUsd } from "./cost"
 import { EVAL_ROOM_PREFIX } from "./eval-support"
+import { REPLY_TRIGGERS } from "./reply-triggers"
 import { jackMonthlyBudgetUsd } from "./spend"
 
 /**
@@ -113,12 +114,6 @@ export async function monthlyCosts(months: UsageMonth[]): Promise<MonthCost[]> {
 // by officer and automation
 // ---------------------------------------------------------------------------
 
-/**
- * The messages that start a reply, as the reply loop answers them: officer messages that expect an answer,
- * a deck's continue notes (answered as the officer who asked) and scheduled notes (a recurring question)
- */
-const TRIGGERS: Prisma.JackMessageWhereInput[] = [{ kind: "user", expectsAnswer: true }, { kind: "system", continues: true }, { kind: "system", scheduled: true }]
-
 /** The JackUsage job Stand's room naming saves (stand.ts) */
 const NAME_ROOM_JOB = "name_room"
 
@@ -172,7 +167,7 @@ export async function spendBySource(month: UsageMonth): Promise<Spender[]> {
       select: {
         costUsd: true,
         answers: {
-          where: { OR: TRIGGERS },
+          where: { OR: REPLY_TRIGGERS },
           orderBy: [{ scheduled: "desc" }, { createdAt: "desc" }, { id: "desc" }],
           take: 1,
           select: { authorUserId: true, scheduled: true, author: { select: { displayName: true } } },
@@ -237,7 +232,7 @@ export async function feedbackForMonth(month: UsageMonth, limit = 50): Promise<{
             roomId: true,
             content: true,
             room: { select: { title: true } },
-            answers: { where: { OR: TRIGGERS }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1, select: { content: true } },
+            answers: { where: { OR: REPLY_TRIGGERS }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1, select: { content: true } },
           },
         },
       },
