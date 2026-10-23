@@ -16,13 +16,14 @@ const dayTime = (at: Date) => formatInTimeZone(at, TZ, "EEE, MMM d, h:mm a 'CT'"
 
 const judged = (facts: string, extra: Partial<Expectation> = {}): Expectation => ({ expected: facts, check: () => null, judgeOnly: true, facts, ...extra });
 
-/** Streams with their sample counts, newest first */
+/** Streams, newest first. `counted`: viewers were counted live (avgViewers is set from the first sample and kept after samples are pruned, as queries/twitch.ts reads it) */
 async function streams({ prisma }: EvalContext, since?: Date) {
-  return prisma.twitchStream.findMany({
+  const rows = await prisma.twitchStream.findMany({
     where: since ? { startedAt: { gte: since } } : undefined,
     orderBy: { startedAt: "desc" },
-    select: { id: true, title: true, startedAt: true, endedAt: true, peakViewers: true, avgViewers: true, vodViews: true, _count: { select: { samples: true } } },
+    select: { id: true, title: true, startedAt: true, endedAt: true, peakViewers: true, avgViewers: true, vodViews: true },
   });
+  return rows.map((row) => ({ ...row, counted: row.avgViewers !== null }));
 }
 
 /** The words of a title an answer would repeat ("Round 4", "Monza"), for a loose check */
@@ -47,7 +48,7 @@ export const QUESTIONS: Question[] = [
       const last = (await streams(ctx)).find((s) => s.endedAt);
       if (!last) return null;
       const facts = `The last ended stream: "${last.title}", ${dayTime(last.startedAt)}.`;
-      if (!last._count.samples) {
+      if (!last.counted) {
         return judged(`${facts} Its viewers weren't counted (it was added from its VOD), so there's no peak or average; it has ${last.vodViews ?? 0} VOD views.`, {
           check: ({ text }) => (/not (been )?(counted|sampled|recorded|tracked)|no viewer (counts|numbers|data)|weren't counted|wasn't counted/i.test(text) ? null : "doesn't say its viewers weren't counted"),
           judgeOnly: false,
@@ -72,7 +73,7 @@ export const QUESTIONS: Question[] = [
     truth: async (ctx) => {
       const recent = await streams(ctx, new Date(ctx.now.getTime() - 30 * DAY));
       if (!recent.length) return null;
-      const best = recent.filter((s) => s._count.samples).sort((a, b) => b.peakViewers - a.peakViewers)[0];
+      const best = recent.filter((s) => s.counted).sort((a, b) => b.peakViewers - a.peakViewers)[0];
       const words = best ? titleWords(best.title) : [];
       return {
         expected: `${recent.length} streams${best ? `; the highest peak was "${best.title}" (${best.peakViewers})` : ""}`,

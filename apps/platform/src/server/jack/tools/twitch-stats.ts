@@ -31,17 +31,21 @@ type Input = z.infer<typeof input>
 
 const DATA_NOTES = [
   "Viewers are concurrent viewers counted once a minute while live (Twitch's cached count), not unique viewers.",
-  "A stream with sampled: false was added from its VOD after the fact: its viewers weren't counted, which doesn't mean nobody watched.",
+  "A stream with sampled: false had no viewers counted (usually one added from its VOD after the fact), which doesn't mean nobody watched.",
+  "Minute-by-minute counts are kept for 180 days; a stream's peak and average stay after that.",
   "VOD views keep rising after a stream; vodViews is the count at the last daily snapshot.",
 ]
 
 const hours = (minutes: number) => `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`
 
+/** When it ended: a time, "live now", or, for an open stream nothing has updated lately, when it was last seen */
+const endedText = (s: StreamSummary) => (s.endedAt ? ct(s.endedAt) : s.live ? "live now" : `not live now; its end wasn't recorded (last seen live ${s.lastSeenAt ? ct(s.lastSeenAt) : "at its start"})`)
+
 function streamForModel(s: StreamSummary) {
   return {
     id: s.id,
     started: ct(s.startedAt),
-    ended: s.endedAt ? ct(s.endedAt) : "live now",
+    ended: endedText(s),
     length: hours(s.minutes),
     title: s.title || "(title not read yet)",
     game: s.gameName,
@@ -59,7 +63,7 @@ const streamsTable = (streams: StreamSummary[], caption?: string) =>
     [
       { header: "Started", value: (s) => ctShort(s.startedAt) },
       { header: "Title", value: (s) => s.title || "—" },
-      { header: "Length", value: (s) => (s.endedAt ? hours(s.minutes) : `${hours(s.minutes)} (live)`) },
+      { header: "Length", value: (s) => (s.live ? `${hours(s.minutes)} (live)` : hours(s.minutes)) },
       { header: "Peak", value: (s) => s.peakViewers ?? "—" },
       { header: "Average", value: (s) => s.avgViewers ?? "—" },
       { header: "VOD views", value: (s) => s.vodViews ?? "—" },
@@ -116,11 +120,19 @@ export const twitchStatsTool: JackTool<Input> = {
         return { isError: !!args.streamId, forModel: args.streamId ? `No stream with id ${args.streamId}. Use view streams to find one.` : JSON.stringify({ connection, note: "No streams are stored yet." }), label: "Looked at a Twitch stream (none found)", displays: [] }
       }
       const viewers = stream.sampled ? await streamViewers(stream.id) : []
-      const displays: JackToolDisplay[] = viewers.length
-        ? [{ kind: "chart", chart: { type: "line", title: `Viewers: ${stream.title || "stream"} (${ctShort(stream.startedAt)})`, xKey: "time", series: [{ key: "viewers", label: "Viewers" }], rows: viewers.map((v) => ({ time: formatInTimeZone(v.at, CLUB_TZ, "h:mm a"), viewers: v.viewers })), yLabel: "Viewers" } }]
-        : [{ kind: "note", text: "This stream's viewers weren't counted (it was added from its VOD)." }]
+      // Counted, but no samples left: they were pruned after 180 days (the peak and average stay)
+      const note = stream.sampled
+        ? viewers.length
+          ? null
+          : "This stream's minute-by-minute counts were deleted after 180 days; its peak and average are kept."
+        : stream.live
+          ? "No viewer count yet: viewers are counted once a minute while live."
+          : "This stream's viewers weren't counted (usually one added from its VOD)."
+      const displays: JackToolDisplay[] = note
+        ? [{ kind: "note", text: note }]
+        : [{ kind: "chart", chart: { type: "line", title: `Viewers: ${stream.title || "stream"} (${ctShort(stream.startedAt)})`, xKey: "time", series: [{ key: "viewers", label: "Viewers" }], rows: viewers.map((v) => ({ time: formatInTimeZone(v.at, CLUB_TZ, "h:mm a"), viewers: v.viewers })), yLabel: "Viewers" } }]
       return {
-        forModel: forModelWithLists({ connection, stream: streamForModel(stream), dataNotes: DATA_NOTES }, [{ key: "viewersByMinute", items: viewers.map((v) => ({ at: ct(v.at), viewers: v.viewers })), keep: "first" }]),
+        forModel: forModelWithLists({ connection, stream: streamForModel(stream), ...(note ? { note } : {}), dataNotes: DATA_NOTES }, [{ key: "viewersByMinute", items: viewers.map((v) => ({ at: ct(v.at), viewers: v.viewers })), keep: "first" }]),
         label: `Looked at a Twitch stream (${ctShort(stream.startedAt)})`,
         displays,
       }

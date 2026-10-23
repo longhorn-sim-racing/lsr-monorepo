@@ -31,6 +31,8 @@ const stream = (overrides: Partial<StreamSummary> = {}): StreamSummary => ({
   gameName: "Assetto Corsa Competizione",
   startedAt: new Date("2026-10-20T00:00:00Z"),
   endedAt: new Date("2026-10-20T02:30:00Z"),
+  live: false,
+  lastSeenAt: null,
   minutes: 150,
   sampled: true,
   peakViewers: 61,
@@ -81,7 +83,7 @@ describe("sourceStatus", () => {
 describe("twitch_stats", () => {
   it("leads with live now, the last stream, the last 30 days and followers", async () => {
     twitchQueries.twitchOverview.mockResolvedValue({
-      live: { ...stream({ id: "live-1", endedAt: null, minutes: 30, startedAt: new Date(NOW - 30 * 60_000) }), viewersNow: 23, lastSampleAt: new Date(NOW - 60_000) },
+      live: { ...stream({ id: "live-1", endedAt: null, live: true, lastSeenAt: new Date(NOW - 60_000), minutes: 30, startedAt: new Date(NOW - 30 * 60_000) }), viewersNow: 23, lastSampleAt: new Date(NOW - 60_000) },
       lastStream: stream(),
       last30: { streams: 6, hours: 11.5, peakViewers: 88, avgViewers: 37.2 },
       followers: { latest: { date: new Date("2026-10-22T00:00:00Z"), followers: 412 }, change7: 4, change30: 19 },
@@ -112,6 +114,14 @@ describe("twitch_stats", () => {
     expect(result.displays?.[0]).toMatchObject({ kind: "table", columns: ["Started", "Title", "Length", "Peak", "Average", "VOD views"] })
   })
 
+  it("doesn't call an open stream nothing has updated lately live", async () => {
+    const lastSeen = new Date("2026-10-20T01:00:00Z")
+    twitchQueries.listStreams.mockResolvedValue([stream({ id: "stale", endedAt: null, live: false, lastSeenAt: lastSeen, minutes: 60 })])
+    const result = await twitchStatsTool.run(twitchStatsTool.input.parse({ view: "streams" }), ctx)
+    expect((model(result.forModel).streams as unknown[])[0]).toMatchObject({ id: "stale", ended: "not live now; its end wasn't recorded (last seen live Mon 2026-10-19 20:00 CT)", length: "1h 00m" })
+    expect(JSON.stringify(result.displays)).not.toContain("(live)")
+  })
+
   it("refuses a backwards range", async () => {
     const result = await twitchStatsTool.run(twitchStatsTool.input.parse({ view: "streams", from: "2026-10-22", to: "2026-10-01" }), ctx)
     expect(result).toMatchObject({ isError: true, forModel: "The range starts (2026-10-22) after it ends (2026-10-01)." })
@@ -126,6 +136,14 @@ describe("twitch_stats", () => {
 
     twitchQueries.findStream.mockResolvedValueOnce(stream({ sampled: false }))
     expect((await twitchStatsTool.run(twitchStatsTool.input.parse({ view: "stream", streamId: "old" }), ctx)).displays).toEqual([{ kind: "note", text: expect.stringContaining("weren't counted") }])
+
+    // Counted, but its samples were pruned after 180 days: the peak and average stay, and it doesn't say "not counted"
+    twitchQueries.findStream.mockResolvedValueOnce(stream({ startedAt: new Date("2026-03-01T00:00:00Z") }))
+    twitchQueries.streamViewers.mockResolvedValueOnce([])
+    const pruned = await twitchStatsTool.run(twitchStatsTool.input.parse({ view: "stream", streamId: "40952121001" }), ctx)
+    expect(pruned.displays).toEqual([{ kind: "note", text: expect.stringContaining("deleted after 180 days") }])
+    expect(model(pruned.forModel).stream).toMatchObject({ sampled: true, peakViewers: 61, avgViewers: 42.5 })
+    expect(pruned.forModel).not.toMatch(/weren't counted/)
 
     twitchQueries.findStream.mockResolvedValueOnce(null)
     expect(await twitchStatsTool.run(twitchStatsTool.input.parse({ view: "stream", streamId: "nope" }), ctx)).toMatchObject({ isError: true })

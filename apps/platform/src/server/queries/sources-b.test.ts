@@ -1,12 +1,17 @@
 import { describe, expect, it, vi } from "vitest"
 
-const db = vi.hoisted(() => ({ twitchViewerSample: { findMany: vi.fn() } }))
+const db = vi.hoisted(() => ({
+  twitchViewerSample: { findMany: vi.fn(), findFirst: vi.fn() },
+  twitchStream: { findFirst: vi.fn(), findMany: vi.fn() },
+  twitchChannelDaily: { findMany: vi.fn() },
+}))
 vi.mock("@/server/db", () => ({ prisma: db }))
 
 import { sumDays, type AccountDay } from "./instagram-insights"
-import { changeOver, streamViewers, toStreamSummary } from "./twitch"
+import { changeOver, streamViewers, toStreamSummary, twitchOverview } from "./twitch"
 
 const NOW = new Date("2026-10-22T23:30:00Z")
+const MINUTE = 60_000
 const row = (overrides: Partial<Parameters<typeof toStreamSummary>[0]> = {}) => ({
   id: "1",
   title: "Practice",
@@ -17,21 +22,55 @@ const row = (overrides: Partial<Parameters<typeof toStreamSummary>[0]> = {}) => 
   avgViewers: 21.234,
   vodId: "335921000",
   vodViews: 50,
-  _count: { samples: 90 },
   ...overrides,
 })
 
 describe("stream summaries", () => {
   it("give the length, rounded average and VOD link", () => {
-    expect(toStreamSummary(row(), NOW)).toMatchObject({ minutes: 95, sampled: true, peakViewers: 30, avgViewers: 21.2, vodUrl: "https://www.twitch.tv/videos/335921000" })
+    expect(toStreamSummary(row(), NOW)).toMatchObject({ minutes: 95, live: false, lastSeenAt: null, sampled: true, peakViewers: 30, avgViewers: 21.2, vodUrl: "https://www.twitch.tv/videos/335921000" })
   })
 
   it("count a live stream's length so far", () => {
-    expect(toStreamSummary(row({ endedAt: null }), NOW).minutes).toBe(150)
+    expect(toStreamSummary(row({ endedAt: null }), NOW, new Date(NOW.getTime() - MINUTE))).toMatchObject({ live: true, minutes: 150 })
   })
 
   it("have no viewer numbers for a stream without samples (added from its VOD), rather than zero", () => {
-    expect(toStreamSummary(row({ peakViewers: 0, avgViewers: null, _count: { samples: 0 } }), NOW)).toMatchObject({ sampled: false, peakViewers: null, avgViewers: null })
+    expect(toStreamSummary(row({ peakViewers: 0, avgViewers: null }), NOW)).toMatchObject({ sampled: false, peakViewers: null, avgViewers: null })
+  })
+
+  it("keep a stream's peak and average once its samples are pruned (180 days): counted is the stream's own average, not its samples", () => {
+    // Nothing here reads samples: a pruned stream has none left, and it still reads as counted
+    expect(toStreamSummary(row({ startedAt: new Date("2026-03-01T21:00:00Z"), endedAt: new Date("2026-03-01T22:35:00Z"), avgViewers: 21.2 }), NOW)).toMatchObject({ sampled: true, peakViewers: 30, avgViewers: 21.2 })
+  })
+
+  it("don't call an open stream live once nothing has seen it for 15 minutes, and count its length to when it was last seen", () => {
+    const lastSeen = new Date(NOW.getTime() - 20 * MINUTE)
+    expect(toStreamSummary(row({ endedAt: null }), NOW, lastSeen)).toMatchObject({ live: false, lastSeenAt: lastSeen, minutes: 130 })
+    // Just opened by stream.online, no sample yet: live from its start
+    expect(toStreamSummary(row({ endedAt: null, startedAt: new Date(NOW.getTime() - 5 * MINUTE), avgViewers: null }), NOW)).toMatchObject({ live: true, sampled: false, minutes: 5 })
+  })
+})
+
+describe("the Twitch overview", () => {
+  it("reports an open stream nothing has updated lately as the last stream, not as live", async () => {
+    const stale = row({ id: "stale", startedAt: new Date("2026-10-21T19:00:00Z"), endedAt: null })
+    const ended = row({ id: "ended", startedAt: new Date("2026-10-20T19:00:00Z"), endedAt: new Date("2026-10-20T21:00:00Z") })
+    db.twitchStream.findFirst.mockImplementation(async ({ where }: { where: { endedAt: unknown } }) => (where.endedAt === null ? stale : ended))
+    db.twitchStream.findMany.mockResolvedValue([stale, ended])
+    db.twitchViewerSample.findFirst.mockResolvedValue({ at: new Date("2026-10-21T20:00:00Z"), viewers: 9 })
+    db.twitchChannelDaily.findMany.mockResolvedValue([])
+    const overview = await twitchOverview(NOW)
+    expect(overview.live).toBeNull()
+    expect(overview.lastStream).toMatchObject({ id: "stale", live: false, minutes: 60 })
+  })
+
+  it("reports a stream sampled a minute ago as live, with its viewers", async () => {
+    const open = row({ id: "open", startedAt: new Date(NOW.getTime() - 90 * MINUTE), endedAt: null })
+    db.twitchStream.findFirst.mockImplementation(async ({ where }: { where: { endedAt: unknown } }) => (where.endedAt === null ? open : null))
+    db.twitchStream.findMany.mockResolvedValue([open])
+    db.twitchViewerSample.findFirst.mockResolvedValue({ at: new Date(NOW.getTime() - MINUTE), viewers: 17 })
+    db.twitchChannelDaily.findMany.mockResolvedValue([])
+    expect(await twitchOverview(NOW)).toMatchObject({ live: { id: "open", live: true, viewersNow: 17 }, lastStream: null })
   })
 })
 

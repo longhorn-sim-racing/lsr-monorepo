@@ -15,17 +15,15 @@ async function StreamsCard() {
     key: stream.id,
     href: "/admin/streams",
     primary: stream.title || "Title not read yet",
-    secondary: [centralDateTime(stream.startedAt), stream.endedAt ? streamLength(stream.minutes) : null].filter(Boolean).join(" · "),
-    meta: stream.endedAt ? (
-      stream.sampled ? (
-        <span>
-          Peak {formatCount(stream.peakViewers)} · avg {formatCount(stream.avgViewers)}
-        </span>
-      ) : (
-        <span>{stream.vodViews !== null ? `${formatCount(stream.vodViews)} VOD views` : "Viewers not counted"}</span>
-      )
+    secondary: [centralDateTime(stream.startedAt), stream.live ? null : streamLength(stream.minutes)].filter(Boolean).join(" · "),
+    meta: stream.live ? (
+      <Badge tone="success">Live · {formatCount(overview.live?.id === stream.id ? overview.live.viewersNow : null)} watching</Badge>
+    ) : stream.sampled ? (
+      <span>
+        Peak {formatCount(stream.peakViewers)} · avg {formatCount(stream.avgViewers)}
+      </span>
     ) : (
-      <Badge tone="success">Live · {formatCount(overview.live?.viewersNow ?? null)} watching</Badge>
+      <span>{stream.vodViews !== null ? `${formatCount(stream.vodViews)} VOD views` : "Viewers not counted"}</span>
     ),
   }))
   const followers = overview.followers.latest
