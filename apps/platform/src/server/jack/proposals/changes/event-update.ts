@@ -24,8 +24,9 @@ import { fromLocal, LOCAL_TIME, listed, plural, revalidate, safeLink, when } fro
  * the event's link (slug), photo and visibility aren't changed by proposal: Jack never changes prices,
  * and the rest stay with the event's page.
  *
- * `before` holds the touched columns as they were (staleness: it's stale when any of them changed) and
- * the new values the card showed, which is exactly what applying writes.
+ * `before` holds the touched columns as they were (staleness: it's stale when any of them changed), the
+ * new values the card showed, which is exactly what applying writes, and how many people the card said
+ * move off the waitlist (stale when applying would now move more: they're each emailed).
  */
 
 const STATUSES = ["PUBLISHED", "SCHEDULED", "DRAFT", "CANCELLED", "POSTPONED", "COMPLETED"] as const
@@ -219,14 +220,21 @@ const savedBefore = z.object({
   next: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
   /** status PUBLISHED: the publish time is when it's applied */
   publishNow: z.boolean().optional(),
+  /** How many the card said move off the waitlist (left out: none) */
+  promoted: z.number().int().min(0).optional(),
 })
-type SavedBefore = { current: Values; next: Values; publishNow?: boolean }
+type SavedBefore = { current: Values; next: Values; publishNow?: boolean; promoted?: number }
 
 function parseBefore(value: unknown): SavedBefore | null {
   const parsed = savedBefore.safeParse(value)
   if (!parsed.success) return null
   const known = (record: Record<string, Value>) => Object.fromEntries(Object.entries(record).filter(([key]) => (COLUMNS as readonly string[]).includes(key))) as Values
-  return { current: known(parsed.data.current), next: known(parsed.data.next), ...(parsed.data.publishNow ? { publishNow: true } : {}) }
+  return {
+    current: known(parsed.data.current),
+    next: known(parsed.data.next),
+    ...(parsed.data.publishNow ? { publishNow: true } : {}),
+    ...(parsed.data.promoted ? { promoted: parsed.data.promoted } : {}),
+  }
 }
 
 export async function loadEvent(eventId: string): Promise<EventRow | null> {
@@ -475,7 +483,7 @@ function proposalTitle(event: EventRow, next: Values): string {
   return `Change ${name}: ${rest}${and}`
 }
 
-function consequences(event: EventRow, merged: Merged, next: Values, counts: { registered: number; waitlisted: number }, now: Date): string[] {
+function consequences(event: EventRow, merged: Merged, next: Values, counts: { registered: number; waitlisted: number }, promoted: number, now: Date): string[] {
   const zone = event.timezone || DEFAULT_TIMEZONE
   const lines: string[] = []
   const status = next.status as ProposedStatus | undefined
@@ -487,7 +495,6 @@ function consequences(event: EventRow, merged: Merged, next: Values, counts: { r
   if ((next.startsAtUtc !== undefined || next.endsAtUtc !== undefined) && counts.registered) {
     lines.push(`${plural(counts.registered, "person is", "people are")} registered; they aren't messaged about the new time automatically.`)
   }
-  const promoted = expectedPromotions(merged, event, next, counts)
   if (promoted) lines.push(`It moves ${plural(promoted, "person", "people")} off the waitlist into the event, and they're notified.`)
   if (next.registrationMax !== undefined && merged.registrationMax !== null && counts.registered > merged.registrationMax) {
     lines.push(`${plural(counts.registered, "person is", "people are")} already registered, more than the new capacity; nobody is removed.`)
@@ -522,6 +529,7 @@ export const eventUpdateKind: ProposalKind<EventUpdate> = {
     if (next.status !== undefined && current.publishedAt === undefined) current.publishedAt = columnValue(event, "publishedAt")
     const counts = await registrationCounts(event.id)
     const merged = merge(event, next)
+    const promoted = expectedPromotions(merged, event, next, counts)
     const names = { venue: refs.venue?.name, series: refs.series?.name }
 
     const diff: ProposalDiffRow[] = columns.map((column) => ({
@@ -533,9 +541,9 @@ export const eventUpdateKind: ProposalKind<EventUpdate> = {
     }))
     const publicAfter = isEventPublic({ status: merged.status, publishedAt: publishNow ? now : merged.publishedAt, visibility: event.visibility }, now)
     const statusOnly = columns.every((column) => GROUP[column] === "status")
-    const summary = [...(statusOnly ? [] : ["Applying it saves the changes below."]), ...consequences(event, merged, next, counts, now)].join(" ") || "Applying it saves the change below."
+    const summary = [...(statusOnly ? [] : ["Applying it saves the changes below."]), ...consequences(event, merged, next, counts, promoted, now)].join(" ") || "Applying it saves the change below."
     return {
-      before: { current, next, ...(publishNow ? { publishNow: true } : {}) } satisfies SavedBefore,
+      before: { current, next, ...(publishNow ? { publishNow: true } : {}), ...(promoted ? { promoted } : {}) } satisfies SavedBefore,
       targetId: event.id,
       view: { title: proposalTitle(event, next), summary, diff, links: eventLinks(event, publicAfter || isEventPublic(event, now)) },
     }
@@ -551,7 +559,15 @@ export const eventUpdateKind: ProposalKind<EventUpdate> = {
       if (now !== was) return `The event's ${NOUN[column]} changed since this was proposed (it's now ${display(column, now, event, {}) ?? "not set"}).`
     }
     const problem = eventProblem(event, saved.next)
-    return problem ? `With this change the event no longer passes the event form's checks: ${problem}` : null
+    if (problem) return `With this change the event no longer passes the event form's checks: ${problem}`
+    // Applying promotes and emails whoever is waitlisted then: never more people than the card said. The
+    // event as it is now, since the waitlist and auto-promotion may have changed even where the touched columns didn't
+    const moves = expectedPromotions(merge(event, saved.next), event, saved.next, await registrationCounts(event.id))
+    const said = saved.promoted ?? 0
+    if (moves > said) {
+      return `Applying it now would move ${plural(moves, "person", "people")} off the waitlist into the event and notify them, ${said ? `not the ${said} the card says` : "which the card doesn't say"}.`
+    }
+    return null
   },
 
   async apply(p, ctx) {
