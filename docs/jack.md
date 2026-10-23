@@ -362,7 +362,7 @@ Details: [`jack-2/tracks/discord-post.md`](./jack-2/tracks/discord-post.md) and 
 
 ### Recurring questions
 
-A question Jack (or Stand) is asked on a schedule in a room, answered as its owner: the officer who set it up, or the one who last changed its question, room or who answers (a change takes it over, so a run is never credited to someone who didn't write it) (`src/server/automation/recurring/`).
+A question Jack (or Stand) is asked on a schedule in a room, answered as its owner: the officer who set it up, or the one who last changed its title, question, room or who answers (a change takes it over, so a run is never credited to someone who didn't write it) (`src/server/automation/recurring/`).
 - Set up on **Admin → Recurring questions** (`/admin/jack/recurring`) or through a `recurring.upsert` proposal. At most daily, Central Time. Off until someone turns it on.
 - Each run: it pauses itself (with a room note) if its room is archived or its owner isn't an officer any more; skips (with a note once a month) if automations are over their cap; otherwise posts the question as a scheduled note and runs the room. The reply has no web tools, saves no knowledge, and sees only the question and its last answer.
 - When the room is busy with another answer, the run tries again 3 minutes later, for up to 45 minutes.
