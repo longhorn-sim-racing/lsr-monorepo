@@ -1,8 +1,8 @@
 /**
  * LOCAL ONLY: checks Jack's proposal framework (#188, src/server/jack/proposals/service.ts) against the
  * real local Postgres, where the unit tests use a fake: the claim (several officers clicking Apply at
- * once, exactly one wins), superseding in a transaction, lazy expiry, discard, the saved view and the
- * room notes. A test kind changes an in-memory value, so no club data is touched; nothing is broadcast.
+ * once, exactly one wins), superseding in a transaction, lazy expiry, discard, an archived room (both
+ * refused, the claim's room filter), the saved view and the room notes. A test kind changes an in-memory value, so no club data is touched; nothing is broadcast.
  *
  *   pnpm --filter @lsr/platform exec tsx scripts/check-jack-proposals.ts
  *
@@ -48,6 +48,7 @@ function check(name: string, ok: boolean, detail = "") {
 async function main() {
   const { prisma } = await import("../src/server/db")
   const service = await import("../src/server/jack/proposals/service")
+  const { PROPOSAL_ROOM_ARCHIVED } = await import("../src/lib/jack/proposals")
   type Kind = import("../src/server/jack/proposals/types").AnyProposalKind
 
   const officer = await prisma.user.findFirst({ where: { roles: { some: { role: { key: { in: ["admin", "officer"] } } } } }, orderBy: { createdAt: "asc" } })
@@ -133,6 +134,26 @@ async function main() {
     check("discarding works once", discarded.ok && !again.ok, JSON.stringify({ discarded: discarded.ok, again }))
     const detail = await service.getProposalDetail(second.proposal.proposalId, officer.id, deps)
     check("the card's detail names who applied it", detail?.decidedBy === officer.displayName && detail.status === "APPLIED", JSON.stringify(detail?.decidedBy))
+
+    // An archived room: its proposals are neither applied nor discarded until it's unarchived
+    const held = await propose("b", "three")
+    await prisma.jackRoom.update({ where: { id: room.id }, data: { archivedAt: new Date() } })
+    const heldApply = await service.applyProposal(held.proposal.proposalId, me, {}, deps)
+    const heldDiscard = await service.discardProposal(held.proposal.proposalId, me, deps)
+    const heldRow = await prisma.jackProposal.findUnique({ where: { id: held.proposal.proposalId } })
+    check(
+      "in an archived room, Apply and Discard are refused and nothing changes",
+      !heldApply.ok && heldApply.error === PROPOSAL_ROOM_ARCHIVED && !heldDiscard.ok && heldDiscard.error === PROPOSAL_ROOM_ARCHIVED && heldRow?.status === "PENDING" && values.get("b") === "changed elsewhere",
+      JSON.stringify({ heldApply, heldDiscard, status: heldRow?.status }),
+    )
+    // The claims' room filter, as Postgres runs it (an archive landing between the check and the claim)
+    const claim = { id: held.proposal.proposalId, status: "PENDING" as const, room: { archivedAt: null } }
+    const whileArchived = await prisma.jackProposal.updateMany({ where: claim, data: { claimedAt: null } })
+    await prisma.jackRoom.update({ where: { id: room.id }, data: { archivedAt: null } })
+    const afterUnarchive = await prisma.jackProposal.updateMany({ where: claim, data: { claimedAt: null } })
+    check("the claim's filter skips a proposal whose room is archived", whileArchived.count === 0 && afterUnarchive.count === 1, JSON.stringify({ whileArchived, afterUnarchive }))
+    const resumed = await service.applyProposal(held.proposal.proposalId, me, {}, deps)
+    check("once the room is unarchived it applies", resumed.ok && values.get("b") === "three", JSON.stringify(resumed))
 
     const notes = await prisma.jackMessage.findMany({ where: { roomId: room.id, kind: "system" }, orderBy: { createdAt: "asc" }, select: { content: true } })
     const texts = notes.map((n) => n.content)

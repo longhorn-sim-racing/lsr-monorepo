@@ -18,6 +18,8 @@ export type ProposalListItem = {
   id: string
   roomId: string
   roomTitle: string | null
+  /** Its room is archived: a pending one can't be applied or discarded until an officer unarchives the room */
+  roomArchived: boolean
   messageId: string | null
   kind: string
   title: string
@@ -64,7 +66,7 @@ export async function listProposals({ status, kind, page }: ProposalListFilters,
     expiresAt: true,
     proposedForId: true,
     decidedById: true,
-    room: { select: { title: true } },
+    room: { select: { title: true, archivedAt: true } },
   } satisfies Prisma.JackProposalSelect
 
   const [total, grouped, expired, kindRows] = await Promise.all([
@@ -103,6 +105,7 @@ export async function listProposals({ status, kind, page }: ProposalListFilters,
         id: row.id,
         roomId: row.roomId,
         roomTitle: row.room.title,
+        roomArchived: row.room.archivedAt !== null,
         messageId: row.messageId,
         kind: row.kind,
         title: row.title,

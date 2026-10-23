@@ -92,12 +92,16 @@ export default async function JackProposalsPage({ searchParams }: { searchParams
                       <div className="flex flex-col items-start gap-1">
                         <Badge tone={tone}>{label}</Badge>
                         {item.result && item.status !== "PENDING" && <span className="line-clamp-2 break-words text-xs text-admin-subtle">{item.result}</span>}
+                        {item.status === "PENDING" && item.roomArchived && <span className="break-words text-xs text-admin-subtle">On hold: unarchive its room to apply or discard it.</span>}
                       </div>
                     </TD>
                     <TD className="max-w-[200px] align-top">
-                      <Link href={roomMessageUrl(item.roomId, item.messageId)} className="line-clamp-2 break-words text-muted-foreground hover:text-foreground hover:underline">
-                        {jackRoomTitle({ title: item.roomTitle })}
-                      </Link>
+                      <div className="flex flex-col items-start gap-1">
+                        <Link href={roomMessageUrl(item.roomId, item.messageId)} className="line-clamp-2 break-words text-muted-foreground hover:text-foreground hover:underline">
+                          {jackRoomTitle({ title: item.roomTitle })}
+                        </Link>
+                        {item.roomArchived && <Badge>Archived</Badge>}
+                      </div>
                     </TD>
                     <TD className="whitespace-nowrap align-top text-muted-foreground">
                       <div className="flex flex-col">
