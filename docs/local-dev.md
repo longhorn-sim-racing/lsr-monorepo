@@ -35,7 +35,8 @@ This pulls and starts Docker containers for PostgreSQL, Supabase Auth, Studio, a
 When it finishes, it prints connection details including:
 - **API URL** (e.g., `http://127.0.0.1:54321`)
 - **DB URL** (e.g., `postgresql://postgres:postgres@127.0.0.1:54322/postgres`)
-- **anon key** (it also prints a service_role key; the app doesn't use it)
+- **anon key**
+- **service_role key** (`SERVICE_ROLE_KEY`): only Jack uses it, server side, to stream replies to rooms (see [Jack locally](#jack-locally))
 
 You can retrieve these at any time with:
 
@@ -76,9 +77,7 @@ DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 DIRECT_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 ```
 
-For other env vars (Cloudinary, Shopify, Stripe, Resend), ask the team lead. These are optional for most local development. Stripe uses test-mode keys locally; see [payments.md](./payments.md).
-
-**Jack's files (deck renders, room uploads)** are kept in `apps/platform/.jack-renders/` on disk locally, even when `SUPABASE_SERVICE_ROLE_KEY` is set: local Supabase Storage is only used with `JACK_FILE_STORE=supabase`, which needs the `jack` bucket created first (`pnpm --filter @lsr/platform exec tsx scripts/jack-storage-setup.ts`) and, on stacks made by an older Supabase CLI, an index fix. See [jack-2/tracks/files.md](./jack-2/tracks/files.md).
+For other env vars (Cloudinary, Shopify, Stripe, Resend), ask the team lead. These are optional for most local development. Stripe uses test-mode keys locally; see [payments.md](./payments.md). Jack's env vars are in [Jack locally](#jack-locally).
 
 > **Never put production database credentials in your local env files.** Production credentials live only in Vercel.
 
@@ -153,6 +152,99 @@ Run these from the repo root using `pnpm --filter @lsr/platform <script>`, or fr
 | `db:deploy` | Apply pending migrations (production) |
 | `db:reset` | Reset the database and re-seed |
 | `set-role <email\|handle\|userId> <role>` | Assign a role to a user |
+| `test` | Unit tests (Vitest) |
+| `jack:fakes` | Run the local fakes of Jack's outside services ([below](#the-fakes-server)) |
+| `jack:tick` | Run due scheduled jobs once; `--job <key>` runs one now ([below](#scheduled-jobs)) |
+| `jack:eval` | Jack's eval; add `--db=lsr_eval`, or it runs on `DATABASE_URL`'s database ([docs/jack.md](./jack.md#the-eval)) |
+| `jack:eval:prepare` | Migrate and seed the eval copy ([below](#the-eval-copy)) |
+| `jack:scheduler-setup` | Print the scheduler's pg_cron and Vault SQL (a production setup step; `--local` for a local dev server). It also creates the switched-off job rows in `DATABASE_URL`'s database; `--no-db` skips that |
+
+## Jack locally
+
+Jack is the officer chat agent ([jack.md](./jack.md)). Everything about him runs locally against local Supabase and local fakes of the outside services. Nothing here needs a production key, and only `ANTHROPIC_API_KEY` costs money.
+
+### Env vars
+
+Put these in `apps/platform/.env.local`. All are optional; the app runs without them. [jack.md](./jack.md#environment-variables) explains each one.
+
+| Variable | Locally |
+|---|---|
+| `SUPABASE_SERVICE_ROLE_KEY` | Recommended: replies stream into the room with it. `SERVICE_ROLE_KEY` from `npx supabase status -o env`. Without it, reload the room to see a reply |
+| `JACK_DATABASE_URL` | Needed for `run_sql`, `describe_schema` and the eval. `scripts/jack-local-sql-role.ts` prints it ([below](#the-read-only-sql-role)) |
+| `ANTHROPIC_API_KEY` | Only for real answers (paid). Without it Jack answers "isn't connected yet". `try-jack-proposal.ts`, `try-jack-changes.ts` and `try-jack-web.ts` use a scripted fake Claude, `try-jack-tools.ts` calls no model, and `jack:eval --dry-run` uses a fake model. `try-jack-deck.ts` asks the real Claude (paid; `--deck=<id> --exports` is free) |
+| `JACK_MONTHLY_BUDGET_USD`, `JACK_AUTOMATION_BUDGET_USD` | Optional (defaults 50 and 10) |
+| `JACK_WEB_TOOLS` | Leave unset unless you're testing web search and fetch (paid) |
+| `JACK_FILE_STORE` | Leave unset: local files go to `.jack-renders/` ([below](#files)) |
+| `JACK_CHROME_PATH` | Only if slides won't render because Chrome or Edge isn't found |
+| `JACK_FAKES`, `JACK_FAKES_URL` | Local only: point outside services at the fakes ([below](#the-fakes-server)) |
+| `RESEND_BASE_URL` | Local only: `http://127.0.0.1:3999/resend` sends the app's email to the Resend fake |
+| `SCHEDULER_SIGNING_SECRET` | Only for `jack:tick --http`: any random hex, e.g. `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` (the dev server reads the same `.env.local`) |
+| Outside services (`DISCORD_*`, `TWITCH_*`, `STRIPE_READONLY_KEY`, `GOOGLE_*`, `MS_*`, ...) | Not needed. To try a service, use the fake's own made-up values from its area doc ("Trying it locally" in [jack-2/tracks/](./jack-2/tracks/)) |
+| `LSR_EVAL_DATABASE_URL` | Only for `scripts/check-results-service.ts`, to use a copy other than `lsr_eval` |
+
+A service whose env vars are set and that `JACK_FAKES` doesn't cover talks to the real service. Use the fakes' made-up values, not real keys, unless you mean to call the real thing; production keys never go in local env files.
+
+### The read-only SQL role
+
+Jack's SQL tools run as `jack_readonly`, a role the migrations create without a login. To use it locally:
+
+```bash
+cd apps/platform
+pnpm exec tsx scripts/jack-local-sql-role.ts
+```
+
+It gives the role a fresh random password (local databases only) and prints the `JACK_DATABASE_URL` line to add to `.env.local`. A role belongs to the whole local Postgres server, which every worktree (and the `lsr_eval` copy) shares, so the new password replaces the old one for everyone using it. If another worktree already has a `JACK_DATABASE_URL` line, copy that instead of running the script. If you do run it again, update every `.env.local` that has the old line, or `run_sql`, `describe_schema`, `jack:eval` and `try-jack-tools.ts` can't log in there. `pnpm exec tsx scripts/check-jack-sql-role.ts` then checks what the role can and can't read.
+
+### The fakes server
+
+Every outside service (Discord, Twitch, Stripe, Resend, site traffic, Instagram, Cloudinary, Google Drive, Microsoft Graph, Teams webhooks, Claude Files) has an HTTP fake that answers with made-up data on the real API's paths.
+
+```bash
+cd apps/platform
+pnpm jack:fakes                 # all of them on http://127.0.0.1:3999 (GET / lists them)
+pnpm jack:fakes --port 4000     # another port; then JACK_FAKES_URL=http://127.0.0.1:4000
+```
+
+Then set `JACK_FAKES=all` (or a list like `discord,twitch`) in `.env.local` and restart the dev server. That moves Jack's connector clients (the ones built on `serviceBaseUrl()`), not the app's own email: set `RESEND_BASE_URL=http://127.0.0.1:3999/resend` too, or a real `RESEND_API_KEY` sends real mail. Checkout Stripe (`STRIPE_SECRET_KEY`) and the browser's Cloudinary uploads aren't faked. The fakes must run on this machine over plain http, and they're never used on Vercel production, whatever the env says. Each fake has test hooks under `/<service>/_fake/…` (go live on Twitch, emit a webhook, fail a call); its area doc lists them.
+
+Connectors ship switched off. To try one, switch it on at **System → Connections** as an admin, run its smoke test against the fake, and switch it off again when you're done if other people or worktrees share your database.
+
+### Scheduled jobs
+
+There's no pg_cron schedule locally. Run jobs by hand:
+
+```bash
+cd apps/platform
+pnpm jack:tick                       # every job that's switched on and due
+pnpm jack:tick --job discord.sync    # one job now, switched on or not
+pnpm jack:tick --http                # a signed tick to the dev server, as pg_cron would send it
+```
+
+Prefer `--job`: a switched-on job runs from every worktree that ticks the same database. Job keys are on **System → Scheduled jobs**. `jack:tick` refuses anything but a local database. `pnpm jack:scheduler-setup --local` prints SQL that has local pg_cron tick your dev server, but every worktree shares that schedule, so `jack:tick` is usually the better choice.
+
+### Files
+
+Deck renders and room uploads are kept in `apps/platform/.jack-renders/` on disk locally (gitignored), even when `SUPABASE_SERVICE_ROLE_KEY` is set. Room uploads go through a local stand-in route. Local Supabase Storage is only used with `JACK_FILE_STORE=supabase`, which needs the `jack` bucket created first (`pnpm --filter @lsr/platform exec tsx scripts/jack-storage-setup.ts`) and, on stacks made by an older Supabase CLI, an index fix. See [jack-2/tracks/files.md](./jack-2/tracks/files.md).
+
+### The eval copy
+
+Jack's eval runs on `lsr_eval`, a copy of production restored into a database of that name on the local Supabase server. It holds real member data: never commit it or anything made from it (results go to `.claude/hillclimb/`, which is gitignored). Ask the tech lead for a copy.
+
+```bash
+cd apps/platform
+pnpm jack:fakes                                  # in its own terminal: the seeders sync from the fakes
+pnpm jack:eval:prepare                           # apply migrations to lsr_eval and seed every area's fake data
+pnpm jack:eval:prepare --db=lsr_eval_test        # another copy (its name must start with lsr_eval)
+pnpm jack:eval --db=lsr_eval --dry-run           # every question a fake model can answer (design and a few others are skipped), no API key
+```
+
+`prepare` refuses anything but a local server and always uses the fakes (`JACK_FAKES=all`), whatever your env says. For a throwaway copy, `CREATE DATABASE lsr_eval_test TEMPLATE lsr_eval;` in psql, and drop it after.
+
+### Checks and tries
+
+- `scripts/check-*.ts` check what lives in the database (locks, triggers, row level security, the syncs) against the local database, and delete what they write. [jack.md](./jack.md#tests-and-checks) lists them.
+- `scripts/try-jack-proposal.ts`, `try-jack-changes.ts` and `try-jack-web.ts` put proposals and web parts in a room with a scripted fake Claude; `try-jack-tools.ts` runs every tool once and calls no model; `try-discord.ts` and `try-discord-post.ts` fill in Discord data from its fake. `try-jack-deck.ts` is the exception: it asks the real Claude (paid; `--deck=<id> --exports` is free).
+- Each area doc in [jack-2/tracks/](./jack-2/tracks/) has a "Trying it locally" section.
 
 ## Troubleshooting
 
