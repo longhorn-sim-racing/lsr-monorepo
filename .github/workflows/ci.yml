@@ -1,10 +1,11 @@
 name: CI
 
 on:
+  # jack-2 collects the Jack 2.0 PRs before they merge to main as one release
   push:
-    branches: [main]
+    branches: [main, jack-2]
   pull_request:
-    branches: [main]
+    branches: [main, jack-2]
     # ready_for_review runs CI when a draft is marked ready; drafts themselves are skipped below.
     types: [opened, synchronize, reopened, ready_for_review]
 
