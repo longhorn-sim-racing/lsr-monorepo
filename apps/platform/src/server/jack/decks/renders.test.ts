@@ -18,6 +18,7 @@ vi.mock("./renderer", () => ({
 import { renderKey } from "./document"
 import { renderSlide } from "./renderer"
 import { ensureRender, getRenderFile, resolveJackAsset } from "./renders"
+import { memoryStore } from "./memory-store"
 import { fileStore, setJackFileStore } from "./storage"
 
 const source = { size: "slides" as const, css: "", html: '<section class="slide dark">Hi</section>' }
@@ -66,7 +67,7 @@ describe("renders that may come out better next time", () => {
   })
 
   it("still come back when the store can't be written to", async () => {
-    setJackFileStore({ kind: "blob", get: async () => null, put: async () => { throw new Error("Blob auth failed") }, signedUrl: async () => null })
+    setJackFileStore({ ...memoryStore("blob"), put: async () => { throw new Error("Blob auth failed") } })
     vi.spyOn(console, "error").mockImplementation(() => {})
     const result = await ensureRender({ ...source, html: "<section>Store down</section>" }, { withView: true })
     expect(result.view?.toString()).toBe("view")
