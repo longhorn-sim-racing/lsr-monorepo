@@ -8,32 +8,32 @@
 //   lists the paths it touched in `revalidate`; the caller passes them to revalidatePaths()
 //   (src/server/cache/revalidate-public.ts), so the admin page and a proposal refresh the same pages.
 
-import { Prisma, type AttendanceReportingMode, type EventStatus } from "@prisma/client"
-import { prisma } from "@/server/db"
-import { createAuditLog } from "@/server/audit/log"
-import { publicPaths } from "@/server/cache/revalidate-public"
-import { reconcileEventWaitlist } from "@/server/services/registration.service"
-import { updateAttendanceConfig } from "@/server/services/attendance.service"
-import { withActorMetadata, type ServiceActor } from "@/server/services/actor"
-import type { parseEventForm, parseRegistrationConfigForm } from "@/schemas/event.schema"
+import { Prisma, type AttendanceReportingMode, type EventStatus } from "@prisma/client";
+import { prisma } from "@/server/db";
+import { createAuditLog } from "@/server/audit/log";
+import { publicPaths } from "@/server/cache/revalidate-public";
+import { reconcileEventWaitlist } from "@/server/services/registration.service";
+import { updateAttendanceConfig } from "@/server/services/attendance.service";
+import { withActorMetadata, type ServiceActor } from "@/server/services/actor";
+import type { parseEventForm, parseRegistrationConfigForm } from "@/schemas/event.schema";
 
 /** The event form's fields as Event columns, as parseEventForm returns them */
-export type EventDetails = Extract<ReturnType<typeof parseEventForm>, { ok: true }>["data"]
+export type EventDetails = Extract<ReturnType<typeof parseEventForm>, { ok: true }>["data"];
 
 /** The registration settings card's fields, as parseRegistrationConfigForm returns them */
-export type EventRegistrationSettings = Extract<ReturnType<typeof parseRegistrationConfigForm>, { ok: true }>["data"]
+export type EventRegistrationSettings = Extract<ReturnType<typeof parseRegistrationConfigForm>, { ok: true }>["data"];
 
 /** A status to set with the details (the event form's publish buttons) */
-export type EventPublication = { status: EventStatus; publishedAt: Date | null }
+export type EventPublication = { status: EventStatus; publishedAt: Date | null };
 
-export const SLUG_TAKEN = "Another event already uses that URL slug. Pick a different one."
+export const SLUG_TAKEN = "Another event already uses that URL slug. Pick a different one.";
 
 export function isSlugTaken(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
-const ADMIN_EVENTS = "/admin/events"
-const manageEventPath = (eventId: string) => `/admin/events/${eventId}/manage`
+const ADMIN_EVENTS = "/admin/events";
+const manageEventPath = (eventId: string) => `/admin/events/${eventId}/manage`;
 
 /**
  * Capacity raised (or made unlimited) or the fee removed: spots may have opened for people on the
@@ -44,24 +44,24 @@ function waitlistNeedsRefill(
   registrationMax: number | null | undefined,
   registrationFeeCents: number | null | undefined,
 ) {
-  if (!before) return false
+  if (!before) return false;
   const capacityRaised =
     registrationMax !== undefined &&
     before.registrationMax != null &&
-    (registrationMax === null || registrationMax > before.registrationMax)
-  const madeFree = (before.registrationFeeCents ?? 0) > 0 && registrationFeeCents === null
-  return capacityRaised || madeFree
+    (registrationMax === null || registrationMax > before.registrationMax);
+  const madeFree = (before.registrationFeeCents ?? 0) > 0 && registrationFeeCents === null;
+  return capacityRaised || madeFree;
 }
 
 export type UpdateEventDetailsResult =
   | {
-      ok: true
-      event: { id: string; slug: string; seriesId: string | null; title: string }
+      ok: true;
+      event: { id: string; slug: string; seriesId: string | null; title: string };
       /** People moved off the waitlist because capacity went up or the fee was removed (already notified) */
-      promotedUserIds: string[]
-      revalidate: string[]
+      promotedUserIds: string[];
+      revalidate: string[];
     }
-  | { ok: false; error: string }
+  | { ok: false; error: string };
 
 /**
  * Saves an event's details, as the admin event form does. Fields left out of `details` stay as they
@@ -73,11 +73,11 @@ export async function updateEventDetails(
   input: { eventId: string; details: Partial<EventDetails>; publish?: EventPublication | null },
   actor: ServiceActor,
 ): Promise<UpdateEventDetailsResult> {
-  const { eventId, details, publish } = input
+  const { eventId, details, publish } = input;
   const before = await prisma.event.findUnique({
     where: { id: eventId },
     select: { registrationMax: true, registrationFeeCents: true },
-  })
+  });
 
   const eventUpdateData: Prisma.EventUpdateInput = {
     ...details,
@@ -85,23 +85,23 @@ export async function updateEventDetails(
     ...(details.attendanceEnabled ? { attendanceReportingMode: "CHECKIN_REQUIRED" as const } : {}),
     // A draft keeps its publish date, as before
     ...(publish ? { status: publish.status, ...(publish.status === "DRAFT" ? {} : { publishedAt: publish.publishedAt }) } : {}),
-  }
+  };
 
-  let updated
+  let updated;
   try {
     updated = await prisma.event.update({
       where: { id: eventId },
       data: eventUpdateData,
       select: { slug: true, seriesId: true, title: true },
-    })
+    });
   } catch (error) {
-    if (isSlugTaken(error)) return { ok: false, error: SLUG_TAKEN }
-    throw error
+    if (isSlugTaken(error)) return { ok: false, error: SLUG_TAKEN };
+    throw error;
   }
 
   const promotedUserIds = waitlistNeedsRefill(before, details.registrationMax, details.registrationFeeCents)
     ? await reconcileEventWaitlist(eventId)
-    : []
+    : [];
 
   await createAuditLog({
     actorUserId: actor.userId,
@@ -111,7 +111,7 @@ export async function updateEventDetails(
     summary: `Updated event details for ${updated.title}`,
     after: eventUpdateData,
     metadata: withActorMetadata(actor),
-  })
+  });
 
   return {
     ok: true,
@@ -123,27 +123,27 @@ export async function updateEventDetails(
       publicPaths.event(updated.slug),
       ...(updated.seriesId ? [publicPaths.series] : []),
     ],
-  }
+  };
 }
 
-export type UpdateEventStatusResult = { ok: true; event: { id: string; slug: string }; revalidate: string[] }
+export type UpdateEventStatusResult = { ok: true; event: { id: string; slug: string }; revalidate: string[] };
 
 /** Sets an event's status (the admin status override). `publishedAt` absent leaves the publish date as it is. */
 export async function updateEventStatus(
   input: { eventId: string; status: EventStatus; publishedAt?: Date },
   actor: ServiceActor,
 ): Promise<UpdateEventStatusResult> {
-  const { eventId, status, publishedAt } = input
+  const { eventId, status, publishedAt } = input;
   const data: { status: EventStatus; publishedAt?: Date } = {
     status,
     publishedAt,
-  }
+  };
 
   const updated = await prisma.event.update({
     where: { id: eventId },
     data,
     select: { slug: true },
-  })
+  });
 
   await createAuditLog({
     actorUserId: actor.userId,
@@ -153,22 +153,22 @@ export async function updateEventStatus(
     summary: `Updated event status to ${status}`,
     after: data,
     metadata: withActorMetadata(actor),
-  })
+  });
 
   return {
     ok: true,
     event: { id: eventId, slug: updated.slug },
     revalidate: [ADMIN_EVENTS, publicPaths.events, publicPaths.event(updated.slug)],
-  }
+  };
 }
 
 export type UpdateEventRegistrationResult = {
-  ok: true
-  event: { id: string; slug: string }
+  ok: true;
+  event: { id: string; slug: string };
   /** People moved off the waitlist (already notified) */
-  promotedUserIds: string[]
-  revalidate: string[]
-}
+  promotedUserIds: string[];
+  revalidate: string[];
+};
 
 /**
  * Saves an event's registration settings (the manage page's registration card). Fields left out stay
@@ -179,23 +179,23 @@ export async function updateEventRegistration(
   input: { eventId: string; settings: Partial<EventRegistrationSettings> },
   actor: ServiceActor,
 ): Promise<UpdateEventRegistrationResult> {
-  const { eventId, settings } = input
+  const { eventId, settings } = input;
   const event = await prisma.event.findUnique({
     where: { id: eventId },
     select: { registrationMax: true, waitlistAutoPromote: true, registrationFeeCents: true },
-  })
+  });
 
   const updated = await prisma.event.update({
     where: { id: eventId },
     data: settings,
     select: { slug: true },
-  })
+  });
 
-  const autoPromoteSwitchedOn = event != null && !event.waitlistAutoPromote && settings.waitlistAutoPromote === true
+  const autoPromoteSwitchedOn = event != null && !event.waitlistAutoPromote && settings.waitlistAutoPromote === true;
   const promotedUserIds =
     autoPromoteSwitchedOn || waitlistNeedsRefill(event, settings.registrationMax, settings.registrationFeeCents)
       ? await reconcileEventWaitlist(eventId)
-      : []
+      : [];
 
   await createAuditLog({
     actorUserId: actor.userId,
@@ -208,21 +208,21 @@ export async function updateEventRegistration(
       promotedUserIds,
     }),
     after: settings,
-  })
+  });
 
   return {
     ok: true,
     event: { id: eventId, slug: updated.slug },
     promotedUserIds,
     revalidate: [manageEventPath(eventId), publicPaths.events, publicPaths.event(updated.slug)],
-  }
+  };
 }
 
 export type UpdateEventAttendanceResult = {
-  ok: true
-  event: { id: string; slug: string; attendanceReportingMode: AttendanceReportingMode }
-  revalidate: string[]
-}
+  ok: true;
+  event: { id: string; slug: string; attendanceReportingMode: AttendanceReportingMode };
+  revalidate: string[];
+};
 
 /**
  * Saves an event's check-in settings (the manage page's check-in card). Turning check-in on means people
@@ -232,17 +232,17 @@ export async function updateEventAttendance(
   input: { eventId: string; attendanceEnabled: boolean; attendanceOpensAt: Date | null; attendanceClosesAt: Date | null },
   actor: ServiceActor,
 ): Promise<UpdateEventAttendanceResult> {
-  const { eventId, attendanceEnabled, attendanceOpensAt, attendanceClosesAt } = input
+  const { eventId, attendanceEnabled, attendanceOpensAt, attendanceClosesAt } = input;
   const updated = await updateAttendanceConfig(
     eventId,
     { attendanceEnabled, attendanceOpensAt, attendanceClosesAt },
     actor.userId,
     withActorMetadata(actor),
-  )
+  );
 
   return {
     ok: true,
     event: { id: eventId, slug: updated.slug, attendanceReportingMode: updated.attendanceReportingMode },
     revalidate: [manageEventPath(eventId)],
-  }
+  };
 }

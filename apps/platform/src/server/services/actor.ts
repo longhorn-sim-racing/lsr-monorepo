@@ -7,9 +7,9 @@
  * Services never check permissions themselves: the caller has already done that.
  */
 export type ServiceActor = {
-  userId: string
-  auditMetadata?: Record<string, unknown>
-}
+  userId: string;
+  auditMetadata?: Record<string, unknown>;
+};
 
 /**
  * The audit entry's metadata with the actor's extra fields added. The service's own fields win on a
@@ -17,6 +17,6 @@ export type ServiceActor = {
  * write the same entries they always have.
  */
 export function withActorMetadata(actor: ServiceActor, metadata?: Record<string, unknown>): Record<string, unknown> | undefined {
-  if (!actor.auditMetadata) return metadata
-  return { ...actor.auditMetadata, ...metadata }
+  if (!actor.auditMetadata) return metadata;
+  return { ...actor.auditMetadata, ...metadata };
 }
