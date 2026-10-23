@@ -21,7 +21,7 @@ export async function uploadResult(formData: FormData) {
 
   revalidatePaths(result.revalidate);
 
-  // Only what the page needs: the row holds the whole file and the uploader's account
+  // Only what the page needs (the row holds the whole file)
   return { ok: true as const, data: { id: result.upload.id, status: result.upload.status } };
 }
 
