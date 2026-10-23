@@ -54,7 +54,18 @@ export function messageAuthor(kind: RoomMessageKind, author: string | null, pers
  * carries weight D in the index (titles elsewhere get A), so it's weighted like other sources' body
  * text to merge fairly.
  */
-export async function searchRoomMessages({ query, limit, kinds }: { query: string; limit: number; kinds: RoomMessageKind[] }): Promise<RoomMessageHit[]> {
+export async function searchRoomMessages({
+  query,
+  limit,
+  kinds,
+  includeArchived = true,
+}: {
+  query: string
+  limit: number
+  kinds: RoomMessageKind[]
+  /** Messages in archived rooms too (the rooms list leaves them out until archived rooms can be opened) */
+  includeArchived?: boolean
+}): Promise<RoomMessageHit[]> {
   if (!kinds.length) return []
   const rows = await prisma.$queryRaw<RoomRow[]>(Prisma.sql`
     WITH ${queryCte(query)},
@@ -68,6 +79,7 @@ export async function searchRoomMessages({ query, limit, kinds }: { query: strin
       JOIN "JackRoom" r ON r.id = m."roomId"
       LEFT JOIN "User" u ON u.id = m."authorUserId"
       WHERE d.source = 'room_message' AND d.search @@ q.query AND m.kind::text IN (${Prisma.join(kinds)})
+        ${includeArchived ? Prisma.empty : Prisma.sql`AND r."archivedAt" IS NULL`}
       ORDER BY rank DESC, m."createdAt" DESC
       LIMIT ${limit}
     )

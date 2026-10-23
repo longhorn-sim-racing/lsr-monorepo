@@ -218,6 +218,45 @@ export function summarizePipeline(rows: PipelineRow[]): PipelineSummary {
   }
 }
 
+/** What the pipeline panel on /admin/recruiting shows. Plain JSON */
+export type PipelinePanelData = {
+  teams: (Pick<TeamPipeline, "team" | "label" | "interviewRequired" | "total" | "byStatus" | "unreviewed" | "averageScore"> & { longestWaitDays: number | null })[]
+  total: number
+  byStatus: Record<TrackStatus, number>
+  unreviewed: number
+  averageScore: number | null
+  reviewers: { name: string; reviews: number }[]
+  /** The officer looking applied in this round: their own application's reviews are left out */
+  ownApplication: boolean
+}
+
+/** The admin page's pipeline: the page's rule (the viewer's own reviews left out), every applicant counted */
+export async function getPipelinePanel(cycleId: string, viewerId: string, now = new Date()): Promise<PipelinePanelData> {
+  const loaded = await loadPipelineRows(cycleId)
+  const summary = summarizePipeline(applyPipelineRules(loaded, { hideOfficerApplicants: false, viewerId }).rows)
+  const names = await reviewerNames(summary.reviewers.map((r) => r.reviewerId))
+  const byStatus = emptyStatuses()
+  for (const team of summary.teams) for (const status of TRACK_STATUS_ORDER) byStatus[status] += team.byStatus[status]
+  return {
+    teams: summary.teams.map((team) => ({
+      team: team.team,
+      label: team.label,
+      interviewRequired: team.interviewRequired,
+      total: team.total,
+      byStatus: team.byStatus,
+      unreviewed: team.unreviewed,
+      averageScore: team.averageScore,
+      longestWaitDays: team.oldestUnreviewedAt ? Math.floor((now.getTime() - team.oldestUnreviewedAt.getTime()) / 86_400_000) : null,
+    })),
+    total: summary.teamApplications,
+    byStatus,
+    unreviewed: summary.unreviewed,
+    averageScore: summary.averageScore,
+    reviewers: summary.reviewers.map((r) => ({ name: (r.reviewerId && names.get(r.reviewerId)?.displayName) || "Former officer", reviews: r.reviews })),
+    ownApplication: loaded.some((row) => row.application.userId === viewerId),
+  }
+}
+
 /** Reviewers' names, by id, for the reviewer load ("Former officer" for a deleted account) */
 export async function reviewerNames(ids: (string | null)[]): Promise<Map<string, { displayName: string; handle: string }>> {
   const wanted = [...new Set(ids.filter((id): id is string => Boolean(id)))]

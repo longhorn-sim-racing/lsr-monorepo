@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound, unstable_rethrow } from "next/navigation";
 import { Metadata } from "next";
-import { ArrowLeft, ArrowRight, Car, Check, Flag, Globe, Pencil, Trophy } from "lucide-react";
+import { ArrowLeft, ArrowRight, Car, Check, Flag, Globe, Pencil, Timer, Trophy } from "lucide-react";
 import { siInstagram, siTwitch, siYoutube } from "simple-icons/icons";
 import { Button } from "@/components/ui/button";
 import { BrandIcon } from "@/components/brand-icon";
@@ -91,7 +91,7 @@ export default async function DriverProfilePage({ params }: { params: Promise<{ 
   }
   if (!profile) return notFound();
 
-  const { user, driver, seasons, races, cars, events } = profile;
+  const { user, driver, seasons, races, cars, events, bestLaps, form } = profile;
   const isMe = viewerId === user.id;
   const myEvents = isMe
     ? (
@@ -361,6 +361,68 @@ export default async function DriverProfilePage({ params }: { params: Promise<{ 
                 </li>
               ))}
             </ul>
+          </section>
+        )}
+
+        {/* Form and best laps (public sessions only) */}
+        {(form || bestLaps.length > 0) && (
+          <section className={`grid gap-12 ${form && bestLaps.length > 0 ? "lg:grid-cols-2" : ""}`}>
+            {form && (
+              <div>
+                <SectionHeading kicker="Last races, oldest first">
+                  Recent <span className="text-lsr-orange">form</span>
+                </SectionHeading>
+                <ol className="grid grid-cols-5 gap-1.5 sm:gap-2">
+                  {form.races.map((race, i) => (
+                    <li key={i} title={`${race.title}, ${race.date}`} className="relative border border-white/10 bg-white/[0.02] px-1 py-3 text-center">
+                      {race.position === 1 && !race.dsq && <div className="absolute top-0 left-0 h-1 w-full bg-lsr-orange" />}
+                      <span className={`block font-display font-black italic text-2xl md:text-3xl leading-none ${race.dsq ? "text-red-300" : race.position === 1 ? "text-lsr-orange" : race.position <= 3 ? "text-white" : "text-white/60"}`}>
+                        {race.dsq ? "DSQ" : `P${race.position}`}
+                      </span>
+                      <span className="mt-1 block font-sans text-[10px] font-bold text-white/40">of {race.field}</span>
+                    </li>
+                  ))}
+                </ol>
+                <p className="mt-4 font-sans text-sm text-white/60">
+                  Average finish P{form.averageFinish.toFixed(1)}
+                  {form.gained !== null && ` · ${form.gained >= 0 ? `${form.gained} ${form.gained === 1 ? "place" : "places"} gained` : `${-form.gained} ${form.gained === -1 ? "place" : "places"} lost`} from qualifying`}
+                </p>
+              </div>
+            )}
+            {bestLaps.length > 0 && (
+              <div>
+                <SectionHeading kicker="Fastest lap at each track">
+                  Best <span className="text-lsr-orange">laps</span>
+                </SectionHeading>
+                <ul className="space-y-2">
+                  {bestLaps.map((best) => {
+                    const body = (
+                      <>
+                        <Timer className="h-5 w-5 shrink-0 text-lsr-orange" aria-hidden />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-sans font-bold text-sm uppercase tracking-tight text-white">{best.event?.title ?? best.track}</span>
+                          <span className="block truncate font-sans text-xs text-white/50">
+                            {best.track} · {best.session} · {best.date}
+                          </span>
+                        </span>
+                        <span className="shrink-0 font-mono text-sm text-white">{best.lap}</span>
+                      </>
+                    );
+                    return (
+                      <li key={best.track}>
+                        {best.event ? (
+                          <Link href={`/events/${best.event.slug}`} className="flex items-center gap-4 border border-white/10 bg-white/[0.02] px-4 py-3 transition-colors hover:border-lsr-orange/50">
+                            {body}
+                          </Link>
+                        ) : (
+                          <div className="flex items-center gap-4 border border-white/10 bg-white/[0.02] px-4 py-3">{body}</div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
           </section>
         )}
 

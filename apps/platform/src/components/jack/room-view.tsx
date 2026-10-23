@@ -61,6 +61,8 @@ type RoomViewProps = {
   messageActions?: (message: JackMessageView) => ReactNode
   /** Draws a message's attachments in place of the default (its `files` as tiles, when it has any) */
   renderAttachments?: (message: JackMessageView) => ReactNode
+  /** A message to open the room at (?m=, from search): shown highlighted in the middle instead of the end */
+  anchorId?: string
 }
 
 /** Options for the room's composer (#188); each one left out keeps today's behavior */
@@ -94,6 +96,7 @@ export function JackRoomView({
   composer = {},
   messageActions,
   renderAttachments,
+  anchorId,
 }: RoomViewProps) {
   const title = jackRoomTitle(room)
   // Bumped when this officer sends, so the list jumps to the end even if they'd scrolled up
@@ -128,7 +131,7 @@ export function JackRoomView({
             <PresenceStack present={present} />
           </div>
         </header>
-        <MessageList messages={messages} followSignal={sentCount} messageActions={messageActions} renderAttachments={renderAttachments} />
+        <MessageList messages={messages} followSignal={sentCount} anchorId={anchorId} messageActions={messageActions} renderAttachments={renderAttachments} />
         <AnswerStatus messages={messages} />
         {stall && !composer.readOnly ? <ContinueBar stall={stall} name={stalledName(stall, messages, room.persona)} onContinue={onContinue} /> : null}
         {composer.readOnly ? (
@@ -345,10 +348,26 @@ const FOLLOW_PX = 80
 
 type MessageExtras = Pick<RoomViewProps, "messageActions" | "renderAttachments">
 
-function MessageList({ messages, followSignal, messageActions, renderAttachments }: { messages: JackMessageView[]; followSignal: number } & MessageExtras) {
+function MessageList({
+  messages,
+  followSignal,
+  anchorId,
+  messageActions,
+  renderAttachments,
+}: { messages: JackMessageView[]; followSignal: number; anchorId?: string } & MessageExtras) {
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
-  const following = useRef(true)
+  // Opened at a message: stay there instead of following the end
+  const following = useRef(!anchorId)
+
+  // Show the message the room was opened at in the middle, once
+  useEffect(() => {
+    if (!anchorId) return
+    const row = content.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchorId)}"]`)
+    if (!row) return
+    row.scrollIntoView({ block: "center" })
+    row.focus({ preventScroll: true })
+  }, [anchorId])
 
   // Whenever the conversation grows (text streaming in, a part, a chart loading), keep the end in view,
   // but only for a reader who's at (or near) the bottom
@@ -385,7 +404,7 @@ function MessageList({ messages, followSignal, messageActions, renderAttachments
         {messages.length ? (
           <ol className="flex flex-col gap-4">
             {messages.map((message) => (
-              <MessageRow key={message.id} message={message} messageActions={messageActions} renderAttachments={renderAttachments} />
+              <MessageRow key={message.id} message={message} anchored={message.id === anchorId} messageActions={messageActions} renderAttachments={renderAttachments} />
             ))}
           </ol>
         ) : (
@@ -403,10 +422,13 @@ function MessageList({ messages, followSignal, messageActions, renderAttachments
  * One message. Memoized: the reducer keeps a message's object as it is until that message changes, so
  * while a reply streams only its row re-renders, not every table and chart above it.
  */
-const MessageRow = memo(function MessageRow({ message, messageActions, renderAttachments }: { message: JackMessageView } & MessageExtras) {
+const MessageRow = memo(function MessageRow({ message, anchored = false, messageActions, renderAttachments }: { message: JackMessageView; anchored?: boolean } & MessageExtras) {
+  // The message the room was opened at: highlighted, and able to take focus
+  const highlight = anchored ? "-mx-2 rounded-md bg-admin-selected px-2 py-1.5 outline-none ring-1 ring-primary/40" : undefined
+  const tabIndex = anchored ? -1 : undefined
   if (message.author.kind === "system")
     return (
-      <li className="flex items-center gap-2.5 text-xs text-admin-subtle">
+      <li data-message-id={message.id} tabIndex={tabIndex} className={cn("flex items-center gap-2.5 text-xs text-admin-subtle", highlight)}>
         <span aria-hidden className="h-px flex-1 bg-admin-row" />
         <span>
           {message.content} · {timeOfDay.format(new Date(message.createdAt))}
@@ -419,7 +441,7 @@ const MessageRow = memo(function MessageRow({ message, messageActions, renderAtt
   const attachments = renderAttachments ? renderAttachments(message) : message.files?.length ? <FilesView files={message.files} /> : null
   const actions = messageActions?.(message) ?? null
   return (
-    <li className="flex gap-3">
+    <li data-message-id={message.id} tabIndex={tabIndex} className={cn("flex gap-3", highlight)}>
       {message.author.kind === "assistant" ? (
         <PersonaAvatar persona={message.author.persona} />
       ) : (

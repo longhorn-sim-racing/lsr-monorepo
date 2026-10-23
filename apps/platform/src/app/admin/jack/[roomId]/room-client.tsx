@@ -13,9 +13,11 @@ type JackRoomClientProps = {
   rooms: JackRoomSummary[]
   me: JackPresence
   spend: JackSpend | null
+  /** A message to open the room at (?m=), already checked to be in the snapshot */
+  anchorId?: string
 }
 
-export function JackRoomClient({ initial, rooms, me, spend }: JackRoomClientProps) {
+export function JackRoomClient({ initial, rooms, me, spend, anchorId }: JackRoomClientProps) {
   const room = useJackRoom({
     roomId: initial.room.id,
     me,
@@ -76,6 +78,7 @@ export function JackRoomClient({ initial, rooms, me, spend }: JackRoomClientProp
       onSwitchPersona={switchPersona}
       onRename={rename}
       onContinue={continueRoom}
+      anchorId={anchorId}
     />
   )
 }

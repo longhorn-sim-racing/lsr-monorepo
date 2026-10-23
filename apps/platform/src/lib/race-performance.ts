@@ -488,3 +488,83 @@ export function headToHead(data: RaceData, aKey: string, bKey: string): HeadToHe
   out.averageLapGapMs = gaps.length ? Math.round(gaps.reduce((x, y) => x + y, 0) / gaps.length) : null
   return out
 }
+
+export type FormRow = {
+  driver: PerfDriver
+  /** Their last few races, oldest first */
+  races: Pick<TrendRow, "event" | "track" | "date" | "position" | "field" | "gained" | "dsq">[]
+  averageFinish: number | null
+  /** Positions gained over those races that had a qualifying session; null when none did */
+  gained: number | null
+}
+
+/**
+ * Recent form: for each driver in the latest `activeSessions` races, their last `races` race finishes
+ * (oldest first) and the average; best average first
+ */
+export function recentForm(data: RaceData, { races = 5, activeSessions = 10 }: { races?: number; activeSessions?: number } = {}): FormRow[] {
+  const latest = data.sessions
+    .filter((s) => s.type === "RACE")
+    .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
+    .slice(0, activeSessions)
+  const active = new Set(latest.map((s) => s.id))
+  const drivers = new Map<string, PerfDriver>()
+  for (const r of data.results) if (active.has(r.sessionId)) drivers.set(r.driver.key, r.driver)
+  return [...drivers.values()]
+    .map((driver) => {
+      const recent = driverTrend(data, driver.key).slice(-races)
+      const gains = recent.flatMap((r) => (r.gained === null ? [] : [r.gained]))
+      return {
+        driver,
+        races: recent.map(({ event, track, date, position, field, gained, dsq }) => ({ event, track, date, position, field, gained, dsq })),
+        averageFinish: average(recent.map((r) => r.position)),
+        gained: gains.length ? gains.reduce((a, b) => a + b, 0) : null,
+      }
+    })
+    .sort((a, b) => (a.averageFinish ?? 99) - (b.averageFinish ?? 99) || a.driver.name.localeCompare(b.driver.name))
+}
+
+export type TrackRecord = { track: string; bestLapMs: number; driver: PerfDriver; drivers: number }
+
+/** The fastest lap at each track in `data` and who set it, with how many drivers set a time there */
+export function trackRecords(data: RaceData, sessionTypes: string[] = ["RACE", "QUALIFYING", "PRACTICE"]): TrackRecord[] {
+  const records = new Map<string, TrackRecord>()
+  for (const row of lapsByTrack(data, sessionTypes)) {
+    const record = records.get(row.track)
+    if (!record) records.set(row.track, { track: row.track, bestLapMs: row.bestLapMs, driver: row.driver, drivers: 1 })
+    else record.drivers += 1
+  }
+  return [...records.values()].sort((a, b) => a.track.localeCompare(b.track))
+}
+
+export type PersonalBest = {
+  track: string
+  bestLapMs: number
+  sessionType: string
+  event: { title: string; slug: string; startsAt: Date } | null
+  date: Date
+}
+
+/** One driver's best lap at each track, and the session it came from; most recent first */
+export function personalBests(data: RaceData, key: string): PersonalBest[] {
+  const best = bestLapBySession(data)
+  const sessions = new Map(data.sessions.map((s) => [s.id, s]))
+  const byTrack = new Map<string, PersonalBest>()
+  for (const r of data.results) {
+    if (r.driver.key !== key) continue
+    const lap = best.get(groupKey(r.sessionId, r.participantId))
+    const session = sessions.get(r.sessionId)
+    if (lap === undefined || !session) continue
+    const current = byTrack.get(session.track)
+    if (!current || lap < current.bestLapMs) {
+      byTrack.set(session.track, {
+        track: session.track,
+        bestLapMs: lap,
+        sessionType: session.type,
+        event: session.event ? { title: session.event.title, slug: session.event.slug, startsAt: session.event.startsAt } : null,
+        date: session.startedAt,
+      })
+    }
+  }
+  return [...byTrack.values()].sort((a, b) => b.date.getTime() - a.date.getTime())
+}

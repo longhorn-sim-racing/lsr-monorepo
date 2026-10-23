@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Badge, Button, EmptyState, Input, PageHeader, Panel, PanelHeader } from "@/components/admin/kit"
 import { cn } from "@/lib/utils"
 import type { JackSpend } from "@/lib/jack/spend"
@@ -26,9 +26,11 @@ type RoomListProps = {
   spend: JackSpend | null
   /** Resolves with an error to show, or null once the room is open */
   onCreate: (title: string) => Promise<string | null>
+  /** The search box and its results, drawn above the rooms */
+  search?: ReactNode
 }
 
-export function JackRoomList({ rooms, spend, onCreate }: RoomListProps) {
+export function JackRoomList({ rooms, spend, onCreate, search }: RoomListProps) {
   return (
     <div className="mx-auto max-w-4xl">
       <PageHeader
@@ -37,6 +39,7 @@ export function JackRoomList({ rooms, spend, onCreate }: RoomListProps) {
         actions={spend ? <SpendMeter spend={spend} className="text-[13px]" /> : null}
       />
       <NewRoomForm onCreate={onCreate} />
+      {search}
       <Panel>
         <PanelHeader title="Rooms" description="Newest activity first" />
         {rooms.length ? (
