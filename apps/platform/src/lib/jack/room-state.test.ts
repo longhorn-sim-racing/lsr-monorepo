@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { JackToolPart } from "./parts"
 import { initRoomState, roomReducer, stallCandidate, stallQuietMs, STALL_QUIET_MS, STUCK_QUIET_MS, type RoomAction, type RoomState } from "./room-state"
 import { ROOM_LOCK_STALE_MS } from "./timing"
-import type { JackMessageView, JackRoomView } from "./types"
+import type { JackMessageView, JackProposalResult, JackProposalStatusKey, JackRoomView } from "./types"
 
 const officerMessage = (id: string, createdAt: string, content = "How many LSC applications?", answered = true): JackMessageView => ({
   id,
@@ -409,6 +409,11 @@ describe("stallCandidate", () => {
     expect(stallCandidate([])).toBeNull()
   })
 
+  it("ignores an officer message that expects no answer (a mention-mode room, no mention)", () => {
+    const aside: JackMessageView = { ...waitingMessage("m2", "2026-10-12T20:00:09.000Z"), expectsAnswer: false }
+    expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" }), aside])).toBeNull()
+  })
+
   it("is stuck while a reply is streaming, which only counts after the room lock would be stale", () => {
     expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply()])).toBe("stuck")
     expect(stallQuietMs("stuck")).toBe(STUCK_QUIET_MS)
@@ -440,6 +445,49 @@ describe("answered officer messages", () => {
     const state = run(missed, snapshot([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done", content: "Hi" })]))
 
     expect(state.messages.find((m) => m.id === "m1")?.answered).toBe(true)
+  })
+})
+
+describe("proposal statuses", () => {
+  const update = (id: string, status: JackProposalStatusKey, result?: JackProposalResult, roomId = "room-1"): RoomAction => ({
+    type: "proposal.updated",
+    roomId,
+    proposal: result ? { id, status, result } : { id, status },
+  })
+  const applied: JackProposalResult = { summary: "Changed GM 2's start time to 7 PM", links: [{ title: "GM 2", url: "/admin/events/e1/manage" }] }
+
+  it("starts empty, or from a snapshot's statuses", () => {
+    expect(start().proposals).toEqual({})
+    expect(initRoomState({ room: room(), messages: [], proposals: { p1: { status: "PENDING" } } }).proposals).toEqual({ p1: { status: "PENDING" } })
+  })
+
+  it("follows a proposal through its statuses, keeping the result", () => {
+    const state = run(start(), update("p1", "PENDING"), update("p1", "APPLYING"), update("p1", "APPLIED", applied))
+    expect(state.proposals.p1).toEqual({ status: "APPLIED", result: applied })
+  })
+
+  it("never takes a proposal back to an earlier stage", () => {
+    const state = run(start(), update("p1", "APPLIED", applied), update("p1", "APPLYING"), update("p1", "PENDING"))
+    expect(state.proposals.p1).toEqual({ status: "APPLIED", result: applied })
+    expect(run(start(), update("p2", "APPLYING"), update("p2", "PENDING")).proposals.p2.status).toBe("APPLYING")
+  })
+
+  it("ignores another room's proposals, and an update that changes nothing", () => {
+    const state = run(start(), update("p1", "STALE"))
+    expect(run(state, update("p9", "APPLIED", applied, "room-2"))).toBe(state)
+    expect(run(state, update("p1", "STALE"))).toBe(state)
+  })
+
+  it("takes statuses from a snapshot unless they're behind, and leaves messages alone", () => {
+    const live = run(start([officerMessage("m1", "2026-10-12T20:00:00.000Z")]), update("p1", "APPLIED", applied))
+    const state = run(live, { type: "snapshot", room: room(), messages: [officerMessage("m1", "2026-10-12T20:00:00.000Z")], proposals: { p1: { status: "PENDING" }, p2: { status: "DISCARDED" } } })
+    expect(state.proposals).toEqual({ p1: { status: "APPLIED", result: applied }, p2: { status: "DISCARDED" } })
+    expect(state.messages).toBe(live.messages)
+  })
+
+  it("keeps what it knows through other events and snapshots without statuses", () => {
+    const state = run(start(), update("p1", "FAILED", { summary: "Couldn't apply: the event was deleted" }), created(reply()), delta(1, "Hi"), snapshot([]))
+    expect(state.proposals.p1.status).toBe("FAILED")
   })
 })
 

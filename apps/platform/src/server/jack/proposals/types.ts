@@ -1,4 +1,5 @@
 import type { z } from "zod"
+import type { JackProposalLink, JackProposalResult } from "@/lib/jack/types"
 
 /**
  * Proposed changes (#188, design §4). Jack proposes; an officer presses Apply. A `propose_*` tool
@@ -47,7 +48,7 @@ export type ProposalRow = {
 export type ProposalPerson = { name: string; detail?: string }
 
 /** A link on the card or in the result. Site paths ("/admin/events/…") or outside URLs, which show their host */
-export type ProposalLink = { title: string; url: string }
+export type ProposalLink = JackProposalLink
 
 /** What the card shows, built on the server by `prepare()` */
 export type ProposalView = {
@@ -63,19 +64,12 @@ export type ProposalView = {
   rows?: ProposalRow[]
 }
 
-/** What applying did: saved on JackProposal.result and posted in the room note ("Dylan applied: …") */
-export type ProposalResult = {
-  /** One line, e.g. "Changed GM 2's start time to 7 PM" */
-  summary: string
-  /** Where to see the change, e.g. the event's admin page */
-  links?: ProposalLink[]
-  /** What it created, by AuditLog entityType and id */
-  created?: { type: string; id: string }[]
-  /** List kinds: the row ids actually applied */
-  appliedRows?: string[]
-  /** e.g. { sent: 40, skipped: 2 } */
-  counts?: Record<string, number>
-}
+/**
+ * What applying did: saved on JackProposal.result, posted in the room note ("Dylan applied: …") and sent
+ * with the proposal.updated room event. Defined with the room types, since the page reads it too:
+ * { summary, links?, created?, appliedRows?, counts? }
+ */
+export type ProposalResult = JackProposalResult
 
 /** Where a proposal is being made and for whom: what `prepare()` gets */
 export type ProposalContext = {

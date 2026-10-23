@@ -102,7 +102,7 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
 
   const resync = useCallback(async () => {
     const result = await loadSnapshot(roomId).catch(() => null)
-    if (result?.ok) dispatch({ type: "snapshot", room: result.data.room, messages: result.data.messages })
+    if (result?.ok) dispatch({ type: "snapshot", room: result.data.room, messages: result.data.messages, proposals: result.data.proposals })
     else dispatch({ type: "resync_failed" })
   }, [roomId, loadSnapshot])
 
@@ -114,7 +114,8 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
     let rejoinTimer: ReturnType<typeof setTimeout> | null = null
     const onEvent = ({ payload }: { payload: JackRoomEvent }) => {
       dispatch(payload)
-      setLastEventAt(Date.now())
+      // A proposal's status says nothing about the replies, so it doesn't count toward the stall and quiet timers
+      if (payload.type !== JACK_EVENT.proposal) setLastEventAt(Date.now())
       if (payload.type === JACK_EVENT.done) {
         if (afterDone.current) clearTimeout(afterDone.current)
         afterDone.current = setTimeout(() => void resync(), AFTER_DONE_RESYNC_MS)
@@ -135,6 +136,7 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
         .on("broadcast", { event: JACK_EVENT.done }, onEvent)
         .on("broadcast", { event: JACK_EVENT.tool }, onEvent)
         .on("broadcast", { event: JACK_EVENT.room }, onEvent)
+        .on("broadcast", { event: JACK_EVENT.proposal }, onEvent)
         .on("presence", { event: "sync" }, () => setPresent(presentOfficers(ch.presenceState<JackPresence>())))
         .subscribe((status) => {
           if (closed) return
@@ -273,7 +275,7 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
     return result
   }, [roomId, resume])
 
-  return { room: state.room, messages: state.messages, present, connection, stall, send, switchPersona, renameRoom, continueRoom }
+  return { room: state.room, messages: state.messages, proposals: state.proposals, present, connection, stall, send, switchPersona, renameRoom, continueRoom }
 }
 
 /** One entry per officer, however many tabs they have open. A tab from before #183 tracks no picture */
