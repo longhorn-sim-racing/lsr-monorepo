@@ -8,6 +8,7 @@ import { discordAuthorizeUrl, DISCORD_ISSUER, exchangeDiscordCode, fetchDiscordA
 import { isSnowflake } from "@/server/connectors/discord/snowflake"
 import { lockPurgedListTx, prismaDiscordStore, PURGED_SETTING, readPurged } from "@/server/connectors/discord/store"
 import { daysBetween, rebuildDailyStats } from "@/server/connectors/discord/sync"
+import { queueRoleTakeBack, takeBackAfterUnlink } from "@/server/discord-post/role-takeback"
 
 /**
  * Members linking their Discord account (design §12.1 "Linking accounts"), and an admin purging a
@@ -128,16 +129,23 @@ export async function linkDiscordAccount(userId: string, account: { id: string; 
   }
 }
 
-/** Removes a member's link (from their profile, or before deleting their account). Returns whether there was one */
+/**
+ * Removes a member's link (from their profile, or before deleting their account). Returns whether there
+ * was one. Role sync only sees linked members, so the roles it gave the account are taken back: queued
+ * with the unlink, then tried right away (it never fails the unlink; what's left goes in the next role
+ * sync run)
+ */
 export async function unlinkDiscord(userId: string): Promise<boolean> {
-  return prisma.$transaction(async (tx) => {
+  const unlinked = await prisma.$transaction(async (tx) => {
     const user = await tx.user.findUnique({ where: { id: userId }, select: { discordUserId: true } })
     await tx.discordMember.updateMany({ where: { userId }, data: { userId: null } })
     await tx.discordMessage.updateMany({ where: { userId }, data: { userId: null } })
-    if (!user?.discordUserId) return false
+    if (!user?.discordUserId) return null
     await tx.user.update({ where: { id: userId }, data: { discordUserId: null, discordUsername: null, discordLinkedAt: null } })
-    return true
+    return { discordUserId: user.discordUserId, queued: await queueRoleTakeBack(user.discordUserId, tx) }
   })
+  if (unlinked?.queued) await takeBackAfterUnlink(unlinked.discordUserId, userId)
+  return Boolean(unlinked)
 }
 
 /** `reference` is the purge's audit entry id: random, so the audit log never says whose data it was */

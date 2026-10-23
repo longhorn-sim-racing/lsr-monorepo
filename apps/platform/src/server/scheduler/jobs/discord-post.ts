@@ -85,7 +85,7 @@ export const discordRoleSyncJob: JobKind = {
   kind: "discord.role-sync",
   label: "Discord role sync",
   description:
-    "Gives linked members the Discord roles their role sync rules say, and takes them away when they stop qualifying. Plain roles only (no moderation permissions, below the bot's own role); purged members never; at most 25 changes a run, each in the audit log. Runs after the member sync.",
+    "Gives linked members the Discord roles their role sync rules say, and takes them away when they stop qualifying. First takes them back from accounts unlinked while Discord couldn't be reached (an unlink, an account deletion or a purge takes them back right away otherwise). Plain roles only (no moderation permissions, below the bot's own role); purged members never; at most 25 changes a run, each in the audit log. Runs after the member sync.",
   defaultSchedule: "27 * * * *",
   budgetMs: 60_000,
   async run(ctx) {
@@ -93,8 +93,8 @@ export const discordRoleSyncJob: JobKind = {
     if (!posting) return SKIPPED
     const run = await runRoleSync(posting, { now: new Date(), log: ctx.log, signal: ctx.signal }).catch(failed)
     if (!run.rules && !run.refused && !run.skipped) return { summary: "No role sync rules switched on" }
-    const parts = [`${run.added} added`, `${run.removed} removed`, run.waiting && `${run.waiting} waiting for the next run`, run.refused && `${plural(run.refused, "rule")} refused`, run.skipped && `${plural(run.skipped, "rule")} skipped`].filter(Boolean)
-    return { summary: `Role sync over ${plural(run.rules, "rule")}: ${parts.join(", ")}`, counts: { added: run.added, removed: run.removed, waiting: run.waiting, refused: run.refused } }
+    const parts = [`${run.added} added`, `${run.removed} removed`, run.takenBack && `${run.takenBack} taken back from unlinked accounts`, run.waiting && `${run.waiting} waiting for the next run`, run.refused && `${plural(run.refused, "rule")} refused`, run.skipped && `${plural(run.skipped, "rule")} skipped`].filter(Boolean)
+    return { summary: `Role sync over ${plural(run.rules, "rule")}: ${parts.join(", ")}`, counts: { added: run.added, removed: run.removed, takenBack: run.takenBack, waiting: run.waiting, refused: run.refused } }
   },
 }
 

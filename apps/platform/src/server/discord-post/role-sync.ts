@@ -6,6 +6,7 @@ import { prismaDiscordStore } from "@/server/connectors/discord/store"
 import { botStanding, roleSyncRefusal, type DiscordRole, type DiscordWriter, type RoleSafety } from "@/server/connectors/discord/write"
 import { DEFAULT_LEAGUE, resolveLeagueSeason } from "@/server/jack/tools/seasons"
 import { listSeasonEntrants } from "@/server/services/league-entry.service"
+import { queueRoleTakeBack, runQueuedTakeBacks } from "./role-takeback"
 
 /**
  * Role sync (design §12.1): linked members (User.discordUserId) get a Discord role while they meet a
@@ -17,6 +18,9 @@ import { listSeasonEntrants } from "@/server/services/league-entry.service"
  *   then on).
  * - Only linked members, never anyone on the purged list, and only members the member sync has seen in
  *   the server (DiscordMember.roles is what they hold now).
+ * - An account that leaves (unlinked, its site account deleted, or purged) can't be seen here any more, so
+ *   its roles are taken back when it goes (role-takeback.ts); each run first takes back what an unlink
+ *   left queued, and a role given to someone who unlinked while the run was going is taken back at once.
  * - At most MAX_ROLE_CHANGES_PER_RUN changes a run; the rest wait for the next.
  * - Every change is audited (entityType DISCORD_ROLE, the member as target, the system as actor).
  * - One rule per role. Rules are managed on Community → Discord (admins).
@@ -91,11 +95,35 @@ export async function readRoleSafety(client: DiscordClient, writer: DiscordWrite
   return { roles: live.roles, botTop: live.botTop, guildId: writer.guildId, everyonePermissions: everyone?.permissions ?? null, channels }
 }
 
-export type RoleSyncRun = { rules: number; added: number; removed: number; refused: number; skipped: number; waiting: number }
+/** Whether the member is still linked to that Discord account (an unlink or a purge clears it) */
+async function stillLinked(member: LinkedMember): Promise<boolean> {
+  return (await prisma.user.count({ where: { id: member.userId, discordUserId: member.discordUserId } })) > 0
+}
+
+/** Takes back a role just given to someone who unlinked meanwhile; when Discord won't, it's queued for the next run (never for a purged account: logged instead) */
+async function undoAdd(writer: DiscordWriter, member: LinkedMember, role: DiscordRole, ctx: { log: (line: string) => void; signal?: AbortSignal }) {
+  try {
+    await writer.removeRole(member.discordUserId, role.id, REASON, ctx.signal)
+    ctx.log(`@${role.name}: a member unlinked while the run was going; the role it had just given them is taken back.`)
+  } catch (error) {
+    if (error instanceof DiscordApiError && error.code === DISCORD_ERROR.unknownMember) return
+    const why = error instanceof Error ? error.message : String(error)
+    if (await queueRoleTakeBack(member.discordUserId)) ctx.log(`@${role.name}: a member unlinked while the run was going, and taking back the role it had just given them failed (${why}); the next run does it.`)
+    else ctx.log(`@${role.name}: a member's Discord data was deleted while the run was going, and taking back the role it had just given them failed (${why}); remove it from them in Discord.`)
+  }
+}
+
+/** `takenBack`: roles taken back from accounts an unlink left queued */
+export type RoleSyncRun = { rules: number; added: number; removed: number; takenBack: number; refused: number; skipped: number; waiting: number }
 
 /** One role sync run over the switched-on rules */
 export async function runRoleSync({ client, writer }: { client: DiscordClient; writer: DiscordWriter }, ctx: { now: Date; log: (line: string) => void; signal?: AbortSignal }): Promise<RoleSyncRun> {
-  const run: RoleSyncRun = { rules: 0, added: 0, removed: 0, refused: 0, skipped: 0, waiting: 0 }
+  const run: RoleSyncRun = { rules: 0, added: 0, removed: 0, takenBack: 0, refused: 0, skipped: 0, waiting: 0 }
+  // First, accounts unlinked while Discord couldn't be reached: nothing below can see them any more
+  const queued = await runQueuedTakeBacks(writer, { maxChanges: MAX_ROLE_CHANGES_PER_RUN, signal: ctx.signal, log: ctx.log })
+  run.takenBack = queued.removed
+  run.waiting += queued.waiting
+  let changes = queued.removed
   const rules = await prisma.discordRoleRule.findMany({ where: { enabled: true }, orderBy: { roleId: "asc" } })
   if (!rules.length) return run
   const live = await readRoleSafety(client, writer, ctx.signal)
@@ -103,7 +131,6 @@ export async function runRoleSync({ client, writer }: { client: DiscordClient; w
   const members = await linkedMembers()
   const inServer = await prisma.discordMember.findMany({ where: { id: { in: members.map((m) => m.discordUserId) }, leftAt: null }, select: { id: true, roles: true } })
   const current = new Map(inServer.map((m) => [m.id, [...m.roles]]))
-  let changes = 0
 
   for (const rule of rules) {
     if (ctx.signal?.aborted) break
@@ -152,6 +179,13 @@ export async function runRoleSync({ client, writer }: { client: DiscordClient; w
         throw error
       }
       changes++
+      if (should && !(await stillLinked(member))) {
+        // They unlinked (or were purged) after this run read who's linked, and the take-back that went with
+        // it may have read their roles before this add: take it back now, or queue it for the next run
+        await undoAdd(writer, member, role, ctx)
+        current.delete(member.discordUserId)
+        continue
+      }
       const next = should ? [...holds, role.id].sort() : holds.filter((r) => r !== role.id)
       current.set(member.discordUserId, next)
       await prisma.discordMember.updateMany({ where: { id: member.discordUserId }, data: { roles: next } })
