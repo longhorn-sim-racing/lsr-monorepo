@@ -138,7 +138,7 @@ export function RoleSyncPanel({ view, conditions, isAdmin }: { view: RoleSyncVie
                   </div>
                   <p className="text-xs text-muted-foreground">
                     For {rule.conditionLabel.toLowerCase()}: {rule.qualifying === null ? "can't tell who right now" : `${rule.qualifying} qualify`}, {rule.holders} hold it
-                    {rule.others > 0 && `, and ${rule.others} who ${rule.others === 1 ? "isn't" : "aren't"} linked (given in Discord; role sync leaves them alone)`}
+                    {rule.others > 0 && `, and ${rule.others} who ${rule.others === 1 ? "isn't" : "aren't"} linked (role sync leaves members who never linked alone)`}
                   </p>
                   {rule.refusal && <p className="text-xs text-tone-danger-foreground">{rule.refusal}</p>}
                 </div>

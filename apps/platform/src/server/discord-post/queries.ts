@@ -249,7 +249,7 @@ export type RoleRuleView = {
   qualifying: number | null
   /** Linked members who hold the role, as of the last member sync */
   holders: number
-  /** Members in the server who hold it but aren't linked (given in Discord; role sync leaves them alone) */
+  /** Members in the server who hold it but aren't linked (role sync leaves members who never linked alone) */
   others: number
 }
 
