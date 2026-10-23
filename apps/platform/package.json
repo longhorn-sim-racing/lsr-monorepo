@@ -19,7 +19,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:reset": "prisma migrate reset --force",
     "set-role": "tsx scripts/set-role.ts",
-    "sponsor-packet": "tsx scripts/sponsor-packet.ts"
+    "sponsor-packet": "tsx scripts/sponsor-packet.ts",
+    "jack:fakes": "tsx scripts/jack-fakes.ts"
   },
   "prisma": {
     "seed": "node prisma/seed.cjs"
