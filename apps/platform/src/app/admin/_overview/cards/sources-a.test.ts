@@ -36,6 +36,22 @@ describe("the site traffic card", () => {
     expect(html).toContain('href="/apply"')
   })
 
+  it("links only paths on this site; any other page key is plain text", async () => {
+    const keys = ["//evil.example/login", "/\\evil.example", "/\n/evil.example", "/\t/evil.example", "https://evil.example/", "(unknown)"]
+    mocks.trafficWeek.mockResolvedValue({
+      from: "2026-10-15",
+      to: "2026-10-21",
+      current: { days: 7, pageviews: 70, visitorDays: 28, visitorsPerDay: 4 },
+      previous: undefined,
+      topPages: [{ key: "/events/gm-2", pageviews: 20, visitorDays: 10, days: 7 }, ...keys.map((key) => ({ key, pageviews: 5, visitorDays: 5, days: 7 }))],
+    })
+    const html = renderToStaticMarkup((await card.Card()) as ReactElement)
+    expect(html).toContain('href="/events/gm-2"')
+    expect(html.match(/href=/g)).toHaveLength(1)
+    expect(html).toContain("//evil.example/login")
+    expect(html).not.toContain("href=\"//")
+  })
+
   it("shows nothing until a snapshot exists", async () => {
     mocks.trafficWeek.mockResolvedValue(null)
     expect(await card.Card()).toBeNull()

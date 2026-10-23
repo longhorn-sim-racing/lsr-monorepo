@@ -9,6 +9,14 @@ import type { OverviewCard } from "./types"
 /** "Oct 15" for a UTC day */
 const utcDay = (day: string) => formatInTimeZone(new Date(`${day}T00:00:00.000Z`), "UTC", "MMM d")
 
+/**
+ * A page path that's safe to link: one leading slash not followed by another or a backslash (`//host`
+ * and `/\host` go to another site), and no whitespace or backslash anywhere (browsers drop tabs and
+ * newlines from a link, so "/<newline>/host" would become "//host"). Vercel's requestPath comes from
+ * outside, so anything else shows as text
+ */
+const SITE_PATH = /^\/(?![/\\])[^\s\\]*$/
+
 function Change({ current, previous }: { current: number; previous: number | undefined }) {
   const change = previous === undefined ? null : percentChange(current, previous)
   if (change === null) return <span className="text-xs text-admin-subtle">No week before to compare</span>
@@ -54,7 +62,7 @@ async function SiteTrafficCard() {
         <ul className="flex flex-col">
           {week.topPages.map((page) => (
             <li key={page.key} className="flex items-center gap-3 border-b border-admin-row px-4 py-2 text-[13px] last:border-b-0">
-              {page.key.startsWith("/") ? (
+              {SITE_PATH.test(page.key) ? (
                 <a href={page.key} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 truncate font-medium hover:underline">
                   {page.key}
                 </a>
