@@ -10,7 +10,7 @@ import type { JackProposalState } from "@/lib/jack/types"
  */
 export type ProposalRoom = {
   states: Record<string, JackProposalState>
-  /** Resolves with an error to show, or null once applied. `selectedRows`: list kinds only */
+  /** Resolves with an error to show, or null once applied. `selectedRows`: proposals with rows only */
   apply: (id: string, selectedRows?: string[]) => Promise<string | null>
   /** Resolves with an error to show, or null once discarded */
   discard: (id: string) => Promise<string | null>

@@ -4,8 +4,9 @@ import { getProposalDetail } from "@/server/jack/proposals/service"
 
 /**
  * One of Jack's proposals in full, for its card in the room (#188, design §4.1): the diff (long text as
- * a line diff), people, links, rows for list kinds, the live status and result, and whether the viewer
- * may apply it. Officers only. A pending proposal past its expiry is marked stale on the way.
+ * a line diff), people, links, the rows to pick from, the live status and result, and whether the viewer
+ * may apply it. Officers only. Only reads: a pending proposal past its expiry comes back stale, and the
+ * sweep writes that down.
  */
 
 export const dynamic = "force-dynamic"

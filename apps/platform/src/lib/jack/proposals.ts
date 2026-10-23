@@ -43,7 +43,7 @@ export type JackProposalDetail = {
   diff: JackProposalDiffRow[]
   people: { name: string; detail?: string }[]
   links: JackProposalLink[]
-  /** List kinds only: the rows to pick from */
+  /** The rows to pick from, when it has any: exactly the ones Apply checks picks against */
   rows: JackProposalRow[] | null
   permission: "officer" | "admin"
   /** Applying it can't be taken back: the card asks first */

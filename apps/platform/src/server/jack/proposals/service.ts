@@ -12,7 +12,7 @@ import { broadcastRoomEvent, type RoomBroadcaster } from "../broadcast"
 import { FORMER_OFFICER, jackMessageInclude, toMessageView } from "../messages"
 import { ProposalInputError, StaleProposalError } from "./errors"
 import { findProposalKind } from "./registry"
-import type { AnyProposalKind, ProposalAuditMetadata, ProposalDiffRow, ProposalPermission, ProposalView } from "./types"
+import type { AnyProposalKind, ProposalAuditMetadata, ProposalDiffRow, ProposalPermission, ProposalRow, ProposalView } from "./types"
 
 /**
  * Proposed changes (#188, design §4.1): Jack proposes, an officer applies.
@@ -20,13 +20,15 @@ import type { AnyProposalKind, ProposalAuditMetadata, ProposalDiffRow, ProposalP
  * - createProposal: a propose_* tool's input, validated by its kind, described on the server by the
  *   kind's prepare() and saved PENDING. A newer proposal for the same kind and target in the room
  *   supersedes the older pending ones.
- * - applyProposal: the applying officer's roles are checked against the kind, then the proposal is
- *   claimed (PENDING to APPLYING in one conditional UPDATE, so of two officers clicking at once only
- *   one gets it), then, outside any transaction, re-validated, its file checked, checkStale() run and
- *   apply() called. It ends APPLIED, FAILED or STALE, with an audit entry for APPLIED and FAILED.
+ * - applyProposal: the applying officer's roles are checked against the proposal's permission, then
+ *   it's claimed (PENDING to APPLYING in one conditional UPDATE, so of two officers clicking at once
+ *   only one gets it), then, outside any transaction, re-validated (parsed before the claim, since the
+ *   permission and rows can depend on the payload), its file checked, checkStale() run and apply()
+ *   called. It ends APPLIED, FAILED or STALE, with an audit entry for APPLIED and FAILED.
  * - discardProposal: PENDING to DISCARDED.
- * - Expiry is lazy: a PENDING proposal past expiresAt reads as STALE, and is set so when touched (or
- *   by the sweep job, sweepProposals, which also fails applies that stopped partway).
+ * - Expiry is lazy: a PENDING proposal past expiresAt reads as STALE, and is set so when someone applies
+ *   or discards it, or by the sweep job (sweepProposals, which also fails applies that stopped partway).
+ *   Reading it (the card's route) never writes.
  *
  * Every final status posts a room note, and every change broadcasts proposal.updated, so the room's
  * cards follow along and Jack's history carries the outcome ("(Room note: Dylan applied: …)").
@@ -176,9 +178,10 @@ export function proposalDisplay(id: string, kind: AnyProposalKind, view: Proposa
 /* Applying and discarding */
 
 /**
- * Applies a proposal as `officer` (design §4.1 step 3). The kind's permission is checked against this
- * officer's roles, whoever it was proposed for. `selectedRows` (list kinds) picks the rows to apply;
- * left out, every row applies.
+ * Applies a proposal as `officer` (design §4.1 step 3). The proposal's permission (the kind's, or
+ * stricter for this payload) is checked against this officer's roles, whoever it was proposed for.
+ * `selectedRows` picks the rows to apply, for a proposal with rows (pickableRows); left out, every row
+ * applies.
  */
 export async function applyProposal(
   id: string,
@@ -190,20 +193,24 @@ export async function applyProposal(
   if (!row) return { ok: false, error: "That proposal doesn't exist anymore." }
   const kind = deps.findKind(row.kind)
   if (!kind) return { ok: false, error: "This version of the site can't apply this kind of proposal.", proposal: stateWithId(row, deps.now()) }
+  // Validated again now (it was when proposed); a payload that no longer passes fails once claimed, below
+  const payload = kind.schema.safeParse(row.payload)
 
   const roles = await rolesOf(officer.id)
-  if (!mayApply(kind.permission, roles)) return { ok: false, error: kind.permission === "admin" ? "Only admins can apply this kind of change." : "Only officers can apply proposals." }
+  const permission = permissionOf(kind, payload)
+  if (!mayApply(permission, roles)) return { ok: false, error: permission === "admin" ? "Only admins can apply this kind of change." : "Only officers can apply proposals." }
 
   if (isExpired(row, deps.now())) return expiredDecision(await expireProposal(row, deps), deps)
   if (row.status !== "PENDING") return { ok: false, error: alreadyDecided(row), proposal: stateWithId(row, deps.now()) }
 
   let selection: string[] | undefined
-  if (kind.list && selectedRows !== undefined) {
-    const payload = kind.schema.safeParse(row.payload)
-    const known = payload.success ? new Set(kind.list.rows(payload.data).map((r) => r.id)) : null
+  if (selectedRows !== undefined) {
+    const rows = pickableRows(kind, row, payload)
+    if (!rows) return { ok: false, error: "This proposal has no rows to pick from. Reload the room and try again." }
+    const known = new Set(rows.map((r) => r.id))
     selection = [...new Set(selectedRows)]
     if (!selection.length) return { ok: false, error: "Pick at least one row to apply." }
-    if (known && selection.some((rowId) => !known.has(rowId))) return { ok: false, error: "Some of the picked rows aren't in this proposal. Reload the room and try again." }
+    if (selection.some((rowId) => !known.has(rowId))) return { ok: false, error: "Some of the picked rows aren't in this proposal. Reload the room and try again." }
   }
 
   // The claim: only one Apply gets past this, and only while the proposal is pending and unexpired
@@ -225,7 +232,6 @@ export async function applyProposal(
   const finish = (status: "APPLIED" | "FAILED" | "STALE", result: JackProposalResult) => finishApply(claimed, officer, status, result, audit, deps)
 
   // Outside any transaction from here: the proposal is claimed, so nothing else will touch it
-  const payload = kind.schema.safeParse(row.payload)
   if (!payload.success) return finish("FAILED", { summary: `It no longer passes its checks (${issuesText(payload.error)}).` })
 
   try {
@@ -332,25 +338,23 @@ export async function roomProposalStates(roomId: string, deps: Pick<ProposalDeps
 
 /**
  * The full proposal for its card and the officer route: the saved view with long text as a line diff,
- * names, and whether `viewerId` may apply it. Expires it first when it's due (lazy expiry). Null when
- * there's no such proposal.
+ * names, and whether `viewerId` may apply it. Only reads: a pending proposal past its expiry reads as
+ * STALE here, and the sweep (or an apply or discard) writes it down with its note, so opening an old
+ * room doesn't post a pile of late notes. Null when there's no such proposal.
  */
 export async function getProposalDetail(id: string, viewerId: string, deps: ProposalDeps = defaultProposalDeps): Promise<JackProposalDetail | null> {
-  let row = await prisma.jackProposal.findUnique({ where: { id } })
+  const row = await prisma.jackProposal.findUnique({ where: { id } })
   if (!row) return null
-  if (isExpired(row, deps.now())) row = (await expireProposal(row, deps)).row ?? row
 
   const kind = deps.findKind(row.kind)
   const view = savedView(row)
-  const names = await namesOf([row.proposedForId, row.decidedById])
-  const roles = kind && row.status === "PENDING" ? await rolesOf(viewerId) : []
   const state = stateOf(row, deps.now())
-
-  let rows: JackProposalRow[] | null = view.rows ?? null
-  if (!rows && kind?.list) {
-    const payload = kind.schema.safeParse(row.payload)
-    rows = payload.success ? kind.list.rows(payload.data) : null
-  }
+  const payload = kind ? kind.schema.safeParse(row.payload) : null
+  const permission: ProposalPermission = kind && payload ? permissionOf(kind, payload) : "admin"
+  const names = await namesOf([row.proposedForId, row.decidedById])
+  const roles = kind && state.status === "PENDING" ? await rolesOf(viewerId) : []
+  // The same rows Apply checks picks against, so the card only offers checkboxes Apply honours
+  const rows: JackProposalRow[] | null = kind && payload ? pickableRows(kind, row, payload) : (view.rows ?? null)
 
   return {
     id: row.id,
@@ -372,9 +376,9 @@ export async function getProposalDetail(id: string, viewerId: string, deps: Prop
     people: view.people ?? [],
     links: view.links ?? [],
     rows,
-    permission: kind?.permission ?? "admin",
+    permission,
     destructive: kind?.destructive ?? false,
-    canApply: Boolean(kind) && state.status === "PENDING" && mayApply(kind!.permission, roles),
+    canApply: Boolean(kind) && state.status === "PENDING" && mayApply(permission, roles),
     known: Boolean(kind),
   }
 }
@@ -504,6 +508,36 @@ async function postNote(roomId: string, content: string, authorUserId: string | 
 
 export function mayApply(permission: ProposalPermission, roles: string[]): boolean {
   return permission === "admin" ? roles.includes("admin") : roles.includes("admin") || roles.includes("officer")
+}
+
+type ParsedPayload = ReturnType<AnyProposalKind["schema"]["safeParse"]>
+
+/**
+ * Who may apply this proposal: the kind's permission, or stricter when its permissionFor() says so for
+ * this payload (an import into an admin-only target). Never looser than the kind's own; a payload that
+ * no longer parses gets the kind's own (it fails once claimed anyway), and a permissionFor() that
+ * throws means admin
+ */
+function permissionOf(kind: AnyProposalKind, payload: ParsedPayload): ProposalPermission {
+  if (kind.permission === "admin" || !kind.permissionFor || !payload.success) return kind.permission
+  try {
+    return kind.permissionFor(payload.data) === "admin" ? "admin" : kind.permission
+  } catch (error) {
+    console.error(`[jack] permissionFor of proposal kind ${kind.kind} threw; only admins can apply it:`, error)
+    return "admin"
+  }
+}
+
+/**
+ * The rows an officer picks from, or null for a proposal without rows: the ones prepare() saved in the
+ * view (what the card showed, built on the server: an import's file rows, a notification's audience),
+ * else the kind's list.rows() over the payload. Apply checks picks against these and the card gets the
+ * same ones, so every checkbox offered is honoured
+ */
+function pickableRows(kind: AnyProposalKind, row: Pick<JackProposal, "title" | "summary" | "view">, payload: ParsedPayload): ProposalRow[] | null {
+  const saved = savedView(row).rows
+  if (saved) return saved
+  return kind.list && payload.success ? kind.list.rows(payload.data) : null
 }
 
 /** The officer's roles as the database has them now (not as their session last saw them) */

@@ -48,8 +48,8 @@ export type ProposalDiffRow = {
 }
 
 /**
- * One row of a list kind (check-ins, imports, notification audiences). The card gives each a checkbox,
- * so an officer can apply some rows and not others
+ * One row of a proposal with rows (check-ins, imports, notification audiences). The card gives each a
+ * checkbox, so an officer can apply some rows and not others
  */
 export type ProposalRow = {
   /** Stable within the proposal: `selectedRows` lists these ids */
@@ -78,7 +78,12 @@ export type ProposalView = {
   diff: ProposalDiffRow[]
   people?: ProposalPerson[]
   links?: ProposalLink[]
-  /** List kinds only: the rows to pick from, with the same ids as `list.rows()` */
+  /**
+   * The rows to pick from, for kinds whose rows `prepare()` builds on the server (an import's file rows,
+   * a notification's audience, names matched to members). Saved with the proposal: Apply checks the
+   * officer's picks against these and passes them as `selectedRows`. A kind can give its rows here
+   * alone, without `list`; when it has both, these win
+   */
   rows?: ProposalRow[]
 }
 
@@ -105,7 +110,7 @@ export type ProposalApplyContext = {
   officer: { userId: string; displayName: string }
   proposalId: string
   roomId: string
-  /** List kinds: the row ids the officer left checked; undefined means every row */
+  /** Proposals with rows (`view.rows` or `list.rows`): the row ids the officer left checked; undefined means every row */
   selectedRows?: string[]
   /**
    * Derived from the proposal id ("proposal:<id>"), the same on every try. Pass it to outside services
@@ -167,9 +172,18 @@ export type ProposalKind<P> = {
   /** AuditLog entityType of what it changes, e.g. "Event" */
   targetType?: string
   permission: ProposalPermission
+  /**
+   * When some payloads need more than `permission` (an import into an admin-only target): the
+   * permission for this payload. Checked before the claim and for the card's Apply button; it can only
+   * make `permission` stricter, and one that throws means admin
+   */
+  permissionFor?(p: P): ProposalPermission
   /** Applying it can't be taken back (it sends, posts or deletes): the card asks the officer to confirm first */
   destructive?: boolean
-  /** List kinds: the payload's rows, so the card can offer per-row checkboxes (partial approval) */
+  /**
+   * For kinds whose rows come from the payload alone: rebuilds them, so the card can offer per-row
+   * checkboxes (partial approval). Kinds that build rows on the server give them in `view.rows` instead
+   */
   list?: { rows(p: P): ProposalRow[] }
   prepare(p: P, ctx: ProposalContext): Promise<ProposalPrepared>
   checkStale(p: P, before: unknown): Promise<string | null>
@@ -216,7 +230,10 @@ export type ImportTarget<R> = {
   target: string
   /** e.g. "LSC applications" */
   label: string
-  /** Who may apply an import into it, when that's stricter than the import.rows kind's own permission (the stricter one applies) */
+  /**
+   * Who may apply an import into it, when that's stricter than the import.rows kind's own permission
+   * (the stricter one applies: import.rows returns it from its `permissionFor`)
+   */
   permission?: ProposalPermission
   columns: ImportColumn[]
   /** Checks one row and resolves what it refers to (a member by email, say). Reads only; runs at propose time and again at apply */

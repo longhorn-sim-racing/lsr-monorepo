@@ -201,6 +201,33 @@ const listKind: AnyProposalKind = {
   },
 }
 
+/* Rows built on the server when proposing (like notification.send's audience): only the saved view has them */
+const members = new Map<string, string[]>()
+const audienceSchema = z.object({ group: z.string() })
+const audienceKind: AnyProposalKind = {
+  ...thingKind("test.audience"),
+  schema: audienceSchema,
+  async prepare(p: { group: string }) {
+    const people = members.get(p.group) ?? []
+    return { before: null, view: { title: `Message ${p.group}`, summary: "Sends them a message.", diff: [], rows: people.map((name) => ({ id: `m-${name}`, label: name, status: "matched" as const })) } }
+  },
+  async checkStale() {
+    return null
+  },
+  async apply(_p: unknown, ctx: ProposalApplyContext) {
+    applied.push(ctx)
+    return { summary: `Sent to ${ctx.selectedRows?.length ?? "everyone"}.` }
+  },
+}
+
+/* Officers can apply it, except for payloads that need an admin */
+const gatedKind = thingKind("test.gated", {
+  permissionFor: (p: Thing) => {
+    if (p.value === "boom") throw new Error("no such target")
+    return p.value === "secret" ? "admin" : "officer"
+  },
+})
+
 const fileSchema = z.object({ fileId: z.string() })
 const fileKind: AnyProposalKind = {
   ...thingKind("test.file"),
@@ -221,6 +248,8 @@ const KINDS: Record<string, AnyProposalKind> = {
   "test.admin": thingKind("test.admin", { permission: "admin" }),
   "test.list": listKind,
   "test.file": fileKind,
+  "test.audience": audienceKind,
+  "test.gated": gatedKind,
 }
 
 const events: { roomId: string; event: JackRoomEvent }[] = []
@@ -266,6 +295,8 @@ beforeEach(() => {
   things.clear()
   things.set("t1", "old")
   things.set("t2", "old")
+  members.clear()
+  members.set("drivers", ["Ada", "Ben", "Cy"])
   applied.length = 0
   applyImpl = async () => {}
   events.length = 0
@@ -468,6 +499,41 @@ describe("applyProposal", () => {
     expect(applied[0].selectedRows).toEqual(["r0", "r2"])
   })
 
+  it("applies the picked rows of a kind whose rows were built on the server (view.rows, no list)", async () => {
+    const { proposal } = await propose("test.audience", { group: "drivers" })
+    // The rows exist only in the saved view: the group changing since doesn't change what can be picked
+    members.set("drivers", ["Dee"])
+    expect(await applyProposal(proposal.proposalId, gray, { selectedRows: ["m-Dee"] }, deps)).toMatchObject({ ok: false, error: expect.stringMatching(/aren't in this proposal/) })
+    expect(row(proposal.proposalId).status).toBe("PENDING")
+
+    const decision = await applyProposal(proposal.proposalId, gray, { selectedRows: ["m-Ada", "m-Cy"] }, deps)
+    expect(decision).toMatchObject({ ok: true, proposal: { result: { summary: "Sent to 2.", appliedRows: ["m-Ada", "m-Cy"] } } })
+    expect(applied[0].selectedRows).toEqual(["m-Ada", "m-Cy"])
+  })
+
+  it("refuses picked rows for a proposal without rows", async () => {
+    const { proposal } = await propose()
+    expect(await applyProposal(proposal.proposalId, gray, { selectedRows: ["r0"] }, deps)).toEqual({ ok: false, error: "This proposal has no rows to pick from. Reload the room and try again." })
+    expect(row(proposal.proposalId).status).toBe("PENDING")
+    expect(applied).toHaveLength(0)
+  })
+
+  it("checks a stricter permission for some payloads before claiming, so an admin can still apply it", async () => {
+    const { proposal } = await propose("test.gated", { thingId: "t1", value: "secret" })
+    expect(await applyProposal(proposal.proposalId, gray, {}, deps)).toEqual({ ok: false, error: "Only admins can apply this kind of change." })
+    expect(row(proposal.proposalId).status).toBe("PENDING")
+    expect(applied).toHaveLength(0)
+    expect(await applyProposal(proposal.proposalId, admin, {}, deps)).toMatchObject({ ok: true })
+
+    const { proposal: plain } = await propose("test.gated", { thingId: "t2", value: "open" })
+    expect(await applyProposal(plain.proposalId, gray, {}, deps)).toMatchObject({ ok: true })
+
+    // A permissionFor that throws means admin
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const { proposal: broken } = await propose("test.gated", { thingId: "t1", value: "boom" })
+    expect(await applyProposal(broken.proposalId, gray, {}, deps)).toEqual({ ok: false, error: "Only admins can apply this kind of change." })
+  })
+
   it("goes stale when the file it was built from changed", async () => {
     store.files.set("f1", { sha256: "sha-1", status: "READY" })
     const kept = await propose("test.file", { fileId: "f1" })
@@ -529,12 +595,40 @@ describe("reading proposals", () => {
     expect(await getProposalDetail("missing", gray.id, deps)).toBeNull()
   })
 
-  it("reads an expired pending proposal as stale everywhere, and writes it down when one is opened", async () => {
+  it("gives the card the rows Apply honours: saved ones, list.rows() ones, or none", async () => {
+    const audience = await propose("test.audience", { group: "drivers" })
+    members.set("drivers", [])
+    expect((await getProposalDetail(audience.proposal.proposalId, gray.id, deps))?.rows).toEqual([
+      { id: "m-Ada", label: "Ada", status: "matched" },
+      { id: "m-Ben", label: "Ben", status: "matched" },
+      { id: "m-Cy", label: "Cy", status: "matched" },
+    ])
+
+    // A list kind whose saved view has no rows (an older proposal) falls back to list.rows()
+    const list = await propose("test.list", { names: ["Ada"] })
+    delete (row(list.proposal.proposalId).view as { rows?: unknown }).rows
+    expect((await getProposalDetail(list.proposal.proposalId, gray.id, deps))?.rows).toEqual([{ id: "r0", label: "Ada" }])
+  })
+
+  it("says who may apply a payload that needs an admin", async () => {
+    const { proposal } = await propose("test.gated", { thingId: "t1", value: "secret" })
+    expect(await getProposalDetail(proposal.proposalId, gray.id, deps)).toMatchObject({ permission: "admin", canApply: false })
+    expect(await getProposalDetail(proposal.proposalId, admin.id, deps)).toMatchObject({ permission: "admin", canApply: true })
+    const { proposal: open } = await propose("test.gated", { thingId: "t2", value: "open" })
+    expect(await getProposalDetail(open.proposalId, gray.id, deps)).toMatchObject({ permission: "officer", canApply: true })
+  })
+
+  it("reads an expired pending proposal as stale everywhere without writing (the sweep or an apply does)", async () => {
     const { proposal } = await propose()
     store.clock += PROPOSAL_TTL_MS
+    events.length = 0
     expect(await roomProposalStates(ROOM, deps)).toEqual({ [proposal.proposalId]: expect.objectContaining({ status: "STALE", result: { summary: "Nobody applied it within 14 days." } }) })
+    expect(await getProposalDetail(proposal.proposalId, gray.id, deps)).toMatchObject({ status: "STALE", result: { summary: "Nobody applied it within 14 days." }, canApply: false })
     expect(row(proposal.proposalId).status).toBe("PENDING")
-    expect((await getProposalDetail(proposal.proposalId, gray.id, deps))?.status).toBe("STALE")
+    expect(notes()).toEqual([])
+    expect(events).toEqual([])
+
+    expect(await sweepProposals({}, deps)).toEqual({ failed: 0, expired: 1 })
     expect(row(proposal.proposalId).status).toBe("STALE")
     expect(notes()).toEqual(["Stale: Change t1. Nobody applied it within 14 days."])
   })

@@ -26,7 +26,7 @@ const day = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", mont
  * loads the whole proposal from the officer route (the diff, with long text as a line diff, people,
  * links, rows) and follows its live status from the room (snapshots and proposal.updated events), so the
  * reply's saved tool calls never change. In a room it offers Apply (confirming first when the kind can't
- * be taken back) and Discard; list kinds get a checkbox per row. After, it shows the outcome.
+ * be taken back) and Discard; a proposal with rows gets a checkbox per row. After, it shows the outcome.
  */
 export function ProposalCard({ display }: { display: JackProposalDisplay }) {
   const room = useProposalRoom()
