@@ -13,7 +13,7 @@ vi.mock("@/server/db", () => ({
 }))
 vi.mock("./registry", () => ({ findJobKind: (kind: string) => kinds.get(kind) }))
 
-import { acceptHandoff, dispatchDueJobs, parseHandoffRequest, runHandoff, runOneJob, CLAIM_WINDOW_MS, LOCK_MS, ORPHANED_RUN_ERROR } from "./dispatcher"
+import { acceptHandoff, dispatchDueJobs, parseHandoffRequest, runHandoff, runOneJob, CLAIM_WINDOW_MS, LOCK_MS, MAX_JOB_BUDGET_MS, ORPHANED_RUN_ERROR } from "./dispatcher"
 
 const SECRET = "s".repeat(64)
 const START = Date.parse("2026-10-22T18:00:30Z")
@@ -129,10 +129,46 @@ describe("dispatchDueJobs", () => {
     expect(late.deferred).toEqual(["big"])
     expect(store.jobs.find((j) => j.key === "big")).toMatchObject({ lockedUntil: null, nextRunAt: dueAt })
 
-    // Past the claim window nothing new is claimed
-    const tooLate = await dispatchDueJobs({ startedAt: START, clock: () => START + CLAIM_WINDOW_MS })
+    // Past the claim window nothing new is claimed: not a hand-off (which skips the budget check, and whose
+    // POST could be cut off when this function ends), and not a job whose budget would still fit
+    kind("tiny", run, { budgetMs: 1_000 })
+    store.addJob({ kind: "long", key: "long again", nextRunAt: dueAt })
+    store.addJob({ kind: "tiny", nextRunAt: dueAt })
+    run.mockClear()
+    fetch.mockClear()
+    const tooLate = await dispatchDueJobs({ startedAt: START, clock: () => START + CLAIM_WINDOW_MS, fetch, baseUrl: "https://example.org" })
     expect(tooLate.started).toEqual([])
-    expect(tooLate.deferred).toEqual(["big"])
+    expect(tooLate.deferred).toEqual(["big", "long again", "tiny"])
+    expect(fetch).not.toHaveBeenCalled()
+    expect(run).not.toHaveBeenCalled()
+    for (const key of ["long again", "tiny"]) expect(store.jobs.find((j) => j.key === key)).toMatchObject({ lockedUntil: null, nextRunAt: dueAt })
+  })
+
+  it("leaves a job due and unlocked, with no run row, when its claim fails part way (a dropped connection)", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    const run = vi.fn<JobKind["run"]>(ok())
+    kind("k", run)
+    for (const call of ["scheduledJobRun.updateMany", "scheduledJobRun.create"] as const) {
+      store = createFakeDb()
+      fake.store = store
+      const job = store.addJob({ kind: "k", nextRunAt: dueAt })
+      const orphan = store.addRun({ jobId: job.id, startedAt: new Date(START - 600_000) })
+      store.failNext(call, new Error("Timed out fetching a new connection from the connection pool"))
+
+      const failed = await dispatchDueJobs({ startedAt: START, clock: () => START })
+
+      // Left for the next tick, and it really is: the lock and the next run were rolled back with the rest
+      expect(failed).toMatchObject({ started: [], deferred: ["k"] })
+      expect(job).toMatchObject({ nextRunAt: dueAt, lockedUntil: null, lastRunAt: null })
+      expect(store.runs).toEqual([orphan])
+      expect(orphan.status).toBe("running")
+
+      const next = await dispatchDueJobs({ startedAt: START + 60_000, clock: () => START + 60_000 })
+      expect(next.started).toEqual([{ key: "k", status: "ok" }])
+      expect(store.runs.map((r) => r.status)).toEqual(["error", "ok"])
+    }
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("Couldn't claim k"), expect.any(Error))
   })
 
   it("caps a job's deadline at the end of the function", async () => {
@@ -363,6 +399,16 @@ describe("hand-offs", () => {
     const result = await dispatchDueJobs({ startedAt: START, clock: () => START, handoff: "inline", fetch })
     expect(result.started).toEqual([{ key: "long", status: "ok" }])
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("runs a hand-off kind with the largest budget in place too, its deadline capped at the end of the function", async () => {
+    const run = vi.fn<JobKind["run"]>(ok("Asked the question"))
+    kind("long", run, { handoff: true, budgetMs: MAX_JOB_BUDGET_MS })
+    store.addJob({ kind: "long", nextRunAt: dueAt })
+    // pnpm jack:tick records the dispatch before it looks for due jobs, so the claim comes a little after the start
+    const result = await dispatchDueJobs({ startedAt: START, clock: () => START + 40, handoff: "inline" })
+    expect(result).toMatchObject({ started: [{ key: "long", status: "ok" }], deferred: [] })
+    expect(run.mock.calls[0][0].deadline).toBe(START + MAX_JOB_BUDGET_MS)
   })
 
   it("takes a hand-off over exactly once, runs it with the route's own deadline, and lets go after", async () => {

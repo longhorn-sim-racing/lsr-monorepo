@@ -83,7 +83,7 @@ export type DispatchResult = {
   started: { key: string; status: RunStatus | "handed_off" }[]
   /** Kinds this code doesn't know: left alone */
   unknown: string[]
-  /** Left for the next tick: claiming had stopped, or the job's budget didn't fit the time left */
+  /** Left for the next tick: claiming had stopped, the job's budget didn't fit the time left, or its claim failed (and was rolled back) */
   deferred: string[]
   /** Claimed by another tick first */
   lost: string[]
@@ -117,7 +117,8 @@ function errorText(error: unknown): string {
 
 /**
  * Claims a due job for one run: a conditional update that only one caller can win. Sets its next run
- * (from now) and its lock, marks runs a dead function left "running" as failed, and opens the run row.
+ * (from now) and its lock, marks runs a dead function left "running" as failed, and opens the run row,
+ * all in one transaction: a claim that fails part way leaves the job as it was, due and unlocked.
  * Null when another tick got it first, or it stopped being due. `force` claims it due or not and on or
  * off (still never while another claim holds it).
  */
@@ -133,12 +134,14 @@ export async function claimJob(job: Pick<ScheduledJob, "id" | "schedule">, nowMs
   }
   const lockedUntil = new Date(nowMs + LOCK_MS)
   const where: Prisma.ScheduledJobWhereInput = force ? { id: job.id, OR: [{ lockedUntil: null }, { lockedUntil: { lt: at } }] } : { id: job.id, ...dueWhere(at) }
-  const { count } = await prisma.scheduledJob.updateMany({ where, data: { lockedUntil, nextRunAt } })
-  if (count === 0) return null
-  // The lock had run out, so a run still marked running lost its function
-  await prisma.scheduledJobRun.updateMany({ where: { jobId: job.id, status: RUN_RUNNING }, data: { status: "error", error: ORPHANED_RUN_ERROR, finishedAt: at } })
-  const run = await prisma.scheduledJobRun.create({ data: { jobId: job.id, status: RUN_RUNNING, startedAt: at }, select: { id: true } })
-  return { runId: run.id, lockedUntil, startedAt: at, scheduleError }
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.scheduledJob.updateMany({ where, data: { lockedUntil, nextRunAt } })
+    if (count === 0) return null
+    // The lock had run out, so a run still marked running lost its function
+    await tx.scheduledJobRun.updateMany({ where: { jobId: job.id, status: RUN_RUNNING }, data: { status: "error", error: ORPHANED_RUN_ERROR, finishedAt: at } })
+    const run = await tx.scheduledJobRun.create({ data: { jobId: job.id, status: RUN_RUNNING, startedAt: at }, select: { id: true } })
+    return { runId: run.id, lockedUntil, startedAt: at, scheduleError }
+  })
 }
 
 /** Records how a run went and, unless it may still be running, lets go of the job. Only touches the job while this claim still holds it */
@@ -306,7 +309,9 @@ export async function dispatchDueJobs(options: DispatchOptions = {}): Promise<Di
       const { job, kind } = item
       const now = clock()
       const handoff = !!kind.handoff && options.handoff !== "inline"
-      const fits = handoff || now + kind.budgetMs <= startedAt + FUNCTION_MAX_MS - END_MARGIN_MS
+      // A hand-off kind always fits: posted, it gets its own function; run inline (pnpm jack:tick), runJob
+      // caps its deadline at the end of this one. The claim window still stops it being claimed late
+      const fits = !!kind.handoff || now + kind.budgetMs <= startedAt + FUNCTION_MAX_MS - END_MARGIN_MS
       if (now - startedAt >= CLAIM_WINDOW_MS || !fits) {
         result.deferred.push(job.key)
         continue

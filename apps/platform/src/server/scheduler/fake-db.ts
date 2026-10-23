@@ -1,7 +1,9 @@
 /**
  * An in-memory stand-in for the two scheduler tables, for the dispatcher's tests. It understands just the
  * filters the dispatcher uses (equality, null, lt/lte, OR) and applies each updateMany atomically, as
- * Postgres does for one UPDATE … WHERE: two claims for the same job can't both match.
+ * Postgres does for one UPDATE … WHERE: two claims for the same job can't both match. `$transaction`
+ * undoes its writes when its callback throws, and `failNext` makes one call throw, as a dropped
+ * connection would.
  */
 
 type Row = Record<string, unknown>
@@ -29,6 +31,9 @@ export type FakeRun = {
   summary: string | null
   error: string | null
 }
+
+/** Calls failNext() can make throw */
+export type FakeCall = "scheduledJob.updateMany" | "scheduledJobRun.create" | "scheduledJobRun.update" | "scheduledJobRun.updateMany"
 
 const value = (v: unknown) => (v instanceof Date ? v.getTime() : v)
 
@@ -59,9 +64,24 @@ const tick = () => Promise.resolve()
 export function createFakeDb() {
   const jobs: FakeJob[] = []
   const runs: FakeRun[] = []
+  const failures = new Map<FakeCall, Error>()
   let nextId = 1
 
-  const db = {
+  const fail = (call: FakeCall) => {
+    const error = failures.get(call)
+    if (!error) return
+    failures.delete(call)
+    throw error
+  }
+
+  /** Inside a transaction: how to put back the fields `data` is about to overwrite */
+  const remember = (undo: (() => void)[] | undefined, row: object, data: object) => {
+    const before = Object.fromEntries(Object.keys(data).map((key) => [key, (row as Row)[key]]))
+    undo?.push(() => Object.assign(row, before))
+  }
+
+  /** The tables' calls; inside a transaction each write also records how to undo it */
+  const client = (undo?: (() => void)[]) => ({
     scheduledJob: {
       findMany: async ({ where, orderBy, take, select }: { where?: Row; orderBy?: Record<string, "asc" | "desc">; take?: number; select?: Record<string, boolean> } = {}) => {
         await tick()
@@ -80,29 +100,41 @@ export function createFakeDb() {
       },
       updateMany: async ({ where, data }: { where: Row; data: Partial<FakeJob> }) => {
         await tick()
+        fail("scheduledJob.updateMany")
         const hit = jobs.filter((job) => matches(job, where))
-        for (const job of hit) Object.assign(job, data)
+        for (const job of hit) {
+          remember(undo, job, data)
+          Object.assign(job, data)
+        }
         return { count: hit.length }
       },
     },
     scheduledJobRun: {
       create: async ({ data, select }: { data: Partial<FakeRun>; select?: Record<string, boolean> }) => {
         await tick()
+        fail("scheduledJobRun.create")
         const run: FakeRun = { id: `run-${nextId++}`, jobId: "", startedAt: new Date(), finishedAt: null, status: "running", summary: null, error: null, ...data } as FakeRun
         runs.push(run)
+        undo?.push(() => void runs.splice(runs.indexOf(run), 1))
         return pick(run, select)
       },
       update: async ({ where, data }: { where: { id: string }; data: Partial<FakeRun> }) => {
         await tick()
+        fail("scheduledJobRun.update")
         const run = runs.find((row) => row.id === where.id)
         if (!run) throw new Error(`No run ${where.id}`)
+        remember(undo, run, data)
         Object.assign(run, data)
         return { ...run }
       },
       updateMany: async ({ where, data }: { where: Row; data: Partial<FakeRun> }) => {
         await tick()
+        fail("scheduledJobRun.updateMany")
         const hit = runs.filter((run) => matches(run, where))
-        for (const run of hit) Object.assign(run, data)
+        for (const run of hit) {
+          remember(undo, run, data)
+          Object.assign(run, data)
+        }
         return { count: hit.length }
       },
       findFirst: async ({ where, select }: { where: Row; select?: Record<string, boolean> }) => {
@@ -111,6 +143,25 @@ export function createFakeDb() {
         return run ? pick(run, select) : null
       },
     },
+  })
+
+  const db = {
+    ...client(),
+    /** An interactive transaction: when `fn` throws, its writes are undone and the error passes on. No isolation from other callers (each updateMany is still atomic) */
+    $transaction: async <T>(fn: (tx: ReturnType<typeof client>) => Promise<T>): Promise<T> => {
+      const undo: (() => void)[] = []
+      try {
+        return await fn(client(undo))
+      } catch (error) {
+        for (const step of undo.reverse()) step()
+        throw error
+      }
+    },
+  }
+
+  /** Makes the next such call throw `error` (once) */
+  function failNext(call: FakeCall, error: Error) {
+    failures.set(call, error)
   }
 
   function addJob(job: Partial<FakeJob> & Pick<FakeJob, "kind">): FakeJob {
@@ -137,5 +188,5 @@ export function createFakeDb() {
     return row
   }
 
-  return { db, jobs, runs, addJob, addRun }
+  return { db, jobs, runs, addJob, addRun, failNext }
 }
