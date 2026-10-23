@@ -93,6 +93,14 @@ export function sameFirstName(a: string, b: string): boolean {
 
 const isInitial = (token: string) => token.length === 1
 
+/** A member's name words, worked out once per member: a list of names is matched against every member */
+const memberTokens = new WeakMap<NameCandidate, string[]>()
+function tokensOf(member: NameCandidate): string[] {
+  let tokens = memberTokens.get(member)
+  if (!tokens) memberTokens.set(member, (tokens = nameTokens(member.displayName)))
+  return tokens
+}
+
 /** How well `query` names `member`: 4 handle or email, 3 the same name, 2.5 first and last name, 2 an initial with a name, 1 a lone name, 0 not them */
 export function scoreName(query: string, member: NameCandidate): number {
   const raw = query.trim()
@@ -102,7 +110,7 @@ export function scoreName(query: string, member: NameCandidate): number {
   if (raw.startsWith("@")) return 0
 
   const q = nameTokens(raw)
-  const m = nameTokens(member.displayName)
+  const m = tokensOf(member)
   if (!q.length || !m.length) return 0
   if (q.join(" ") === m.join(" ") || (q.length === m.length && [...q].sort().join(" ") === [...m].sort().join(" "))) return 3
   const [qFirst, qLast] = [q[0], q[q.length - 1]]
