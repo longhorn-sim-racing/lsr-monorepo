@@ -21,14 +21,14 @@ Every outside service goes through the same shape, so Jack's tools, the sync job
   - `connectorStatus(id)`.
   - `listConnections()`: the page's rows.
   - `runConnectorSmoke(connector)`: a 25 s timeout that aborts the test's signal, a redacted summary of at most 300 characters, and it never throws.
-- `base-url.ts`: `serviceBaseUrl()` and the `JACK_FAKES` switch.
+- `base-url.ts`: `serviceBaseUrl()`, `serviceFetch()` (for SDKs that take only a host) and the `JACK_FAKES` switch.
 - `fakes/`: the fake framework (below).
 - `example/`: the template service (a fake, a client, a connector and its test). It's never registered as a connector, so it doesn't show on the page.
 
 ### Adding a connector
 1. **Use the seeded id.** G1 seeded a `ConnectorState` row, switched off, for each planned connector: `discord`, `twitch`, `stripe`, `resend`, `site-traffic`, `instagram-insights`, `instagram-publish`, `google-drive`, `sharepoint`, `teams`. A new id gets its row (still off) on its first write.
-2. **Write the client** with plain `fetch` (or the SDK) against `serviceBaseUrl("<service>", "<real base URL>")`.
-   - Put a timeout on every call.
+2. **Write the client** with plain `fetch` (or the SDK) against `serviceBaseUrl("<service>", "<real base URL>")`. An SDK that takes only a host gets `serviceFetch()` instead (see "SDK notes" below).
+   - Put a timeout on every call, and keep it when the caller passes a signal (`AbortSignal.any()`, as `example/client.ts` does).
    - Errors carry the status and path, never the key.
    - If the client already has its own override env var, pass it as the real URL: `serviceBaseUrl("instagram", process.env.INSTAGRAM_GRAPH_URL || "https://graph.instagram.com")`.
 3. **Wrap it in `defineConnector({ id, label, requiredEnv, missingSettings?, createClient, smoke?, details? })`.**
@@ -49,7 +49,7 @@ Every outside service goes through the same shape, so Jack's tools, the sync job
 - **Paths:** each fake is mounted under its id and uses the real API's paths. With fakes on, `serviceBaseUrl("discord", "https://discord.com/api/v10")` is `http://127.0.0.1:3999/discord/api/v10`, and the fake's route is `/api/v10/...`.
 - **The server:** `pnpm jack:fakes` (from `apps/platform`) runs every registered fake on one loopback port. `--port 4000` picks another.
   - `GET /` lists the mounted fakes and their routes; `GET /_health` answers `{ ok: true }`.
-  - It logs one line per request (method, path, status, time), never headers or bodies.
+  - It logs one line per request (method, path, status, time). It never logs the query string, headers or bodies, and it masks any path segment that looks like a key. A client in fake mode still sends its real key, and some services put it in the query (`?access_token=`, `?key=`) or a webhook link's path.
 - **Writing a fake:** it goes in `connectors/<service>/fake/handlers.ts` as a `FakeService` (`fakes/types.ts`).
   - `id` is the name `JACK_FAKES` uses and the mount path (lowercase letters, digits and dashes).
   - `create()` returns the routes, `{ method, path, handle(request, { params, path, baseUrl }) }`, with standard `Request` and `Response`. State lives inside `create()`, so every server start and every test mount begins fresh.
@@ -72,12 +72,24 @@ Every outside service goes through the same shape, so Jack's tools, the sync job
   ```
 
   - It stubs `fetch` with `vi.stubGlobal`, and sets `JACK_FAKES` and `JACK_FAKES_URL` with `vi.stubEnv` (the Vitest config unstubs env after each test).
-  - A fetch to any other origin rejects, so a test never reaches the network.
+  - A fetch to any other origin rejects, so a test never reaches the network. So does a request whose signal is already aborted, as with the real `fetch`.
   - `fakes.requests` logs each call (method, service, path, headers, body). `fakes.restore()` puts the previous fetch back.
 - **SDK notes for later tracks:**
-  - The Anthropic SDK takes `baseURL`.
-  - Resend reads `RESEND_BASE_URL` when it's imported (`research/resend.md`).
-  - Stripe needs `host`, `port` and `protocol` (`research/stripe.md` §7). Under `mountFakes` it also needs `httpClient: Stripe.createFetchHttpClient()`, since its default Node client doesn't use `fetch`.
+  - **Anthropic** takes `baseURL`, so pass it `serviceBaseUrl()`.
+  - **Stripe** takes only `host`, `port` and `protocol` (`research/stripe.md` §7). It drops any path, so `serviceBaseUrl()` can't reach a fake mounted at `/stripe`. Give it the fakes server's host and `serviceFetch("stripe")`, which adds the `/stripe` mount to each request. Use the fetch client always (it works on Vercel), since Stripe's default Node client doesn't go through `fetch` and `mountFakes` can't answer it:
+
+    ```ts
+    const fakes = fakesEnabledFor("stripe") ? new URL(fakesOrigin()) : null
+    const stripe = new Stripe(key, {
+      ...(fakes && { host: fakes.hostname, port: Number(fakes.port || 80), protocol: "http" as const }),
+      httpClient: Stripe.createFetchHttpClient(serviceFetch("stripe")),
+    })
+    ```
+
+    `fakes/testing.test.ts` runs exactly this against a fake `GET /v1/balance`.
+  - **Resend** reads `RESEND_BASE_URL` once, when the module loads, so `JACK_FAKES` can't switch it (`research/resend.md`).
+    - Locally, put `RESEND_BASE_URL=http://127.0.0.1:3999/resend` in `.env.local` next to `JACK_FAKES`.
+    - In a test, set it before anything imports `resend`, and mount the fakes at the same origin: `vi.hoisted(() => { process.env.RESEND_BASE_URL = "http://127.0.0.1:3999/resend" })` at the top of the file, then `mountFakes([resendFake])`. Each test file loads its own copy of the SDK, but within a file the first value sticks. `vi.resetModules()` doesn't reload packages from `node_modules`, so stubbing the env later and importing again doesn't work.
   - Build SDK clients after mounting, because some capture `fetch` when they're constructed.
 
 ### The Connections page (`/admin/connections`, System)
