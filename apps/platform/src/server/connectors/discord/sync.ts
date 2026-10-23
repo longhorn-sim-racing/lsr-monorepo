@@ -234,7 +234,8 @@ async function rescanChannel(ctx: SyncContext, target: StoredChannel, windowStar
     }
   }
   const upTo = done ? startedAt : reached
-  const gone = (await ctx.store.liveMessageIds(target.id, from, upTo)).filter((id) => !seen.has(id))
+  // Cut short, only ids up to the last one read: a message made in that same millisecond may not have been read yet
+  const gone = (await ctx.store.liveMessageIds(target.id, from, upTo)).filter((id) => !seen.has(id) && (done || compareSnowflakes(id, cursor) <= 0))
   const deleted = await ctx.store.markDeleted(gone, clock(ctx))
   await ctx.store.saveCursor(target.id, { rescanFrom: done ? null : reached })
   return { added, updated, deleted, done }
@@ -272,7 +273,8 @@ export async function rescan(ctx: SyncContext): Promise<RescanResult> {
   }
   const recentlyArchived = new Set(archived.map((t) => t.id))
   const targets = [
-    ...[...synced.values()].filter((c) => MESSAGE_CHANNEL_TYPES.includes(c.type)),
+    // A channel the sync hasn't read yet is left to it: its first read reaches back further than this window
+    ...[...synced.values()].filter((c) => MESSAGE_CHANNEL_TYPES.includes(c.type) && c.lastMessageId),
     ...channels.filter((c) => c.parentId && synced.has(c.parentId) && (recentlyArchived.has(c.id) || (c.lastSyncedAt && c.lastSyncedAt >= windowStart))),
   ]
 

@@ -405,7 +405,9 @@ export const discordFake: FakeService = {
           const list = body.channelId ? server.messages.get(body.channelId) : undefined
           if (!list) return error(404, 10003, "Unknown Channel")
           const author = (body.authorId && member(body.authorId)?.user) || server.members.find((m) => !m.user.bot)!.user
-          const at = Date.now() + ++clock
+          // Now, never ahead of the clock (as Discord stamps them); the increment keeps ids made in one millisecond apart
+          const at = Date.now()
+          clock++
           const message: DiscordMessage = {
             id: fakeSnowflake(at, clock),
             channel_id: body.channelId!,
@@ -449,7 +451,9 @@ export const discordFake: FakeService = {
         path: "/_fake/members",
         async handle(request) {
           const body = (await request.json().catch(() => ({}))) as { username?: string }
-          const at = Date.now() + ++clock
+          // Now, never ahead of the clock (as Discord stamps them); the increment keeps ids made in one millisecond apart
+          const at = Date.now()
+          clock++
           const joined: DiscordMember = { user: { id: fakeSnowflake(at, clock), username: body.username ?? `new.member${clock}`, global_name: null }, nick: null, roles: [], joined_at: iso(at) }
           server.members.push(joined)
           server.members.sort((a, b) => byId(a.user, b.user))

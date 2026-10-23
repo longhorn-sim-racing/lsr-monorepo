@@ -228,6 +228,16 @@ describe("rescan", () => {
     expect(memory.messages.get(row.id)?.poll?.answers.map((a) => a.votes)).toEqual(FAKE_POLLS.gmNight.counts)
   })
 
+  it("leaves a channel the sync hasn't read yet to the sync, so its first read still reaches back the whole backfill", async () => {
+    const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.general] })
+    await refreshChannels(ctx)
+    expect(await rescan(ctx)).toMatchObject({ channels: 0, added: 0 })
+    expect(memory.channels.get(FAKE_CHANNELS.general)?.lastMessageId).toBeNull()
+    await syncMessages(ctx, { backfillDays: 30 })
+    const oldest = Math.min(...[...memory.messages.values()].map((m) => m.createdAt.getTime()))
+    expect(oldest).toBeLessThan(Date.now() - 20 * DAY)
+  })
+
   it("picks up threads archived in the window under their channel", async () => {
     const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.setups] })
     await syncMessages(ctx)
@@ -242,7 +252,9 @@ describe("rescan", () => {
     // More than one page of recent messages
     for (let i = 0; i < 120; i++) await hook(fakes, "POST", "messages", { channelId: FAKE_CHANNELS.general, content: `message ${i}` })
     await syncMessages(ctx)
-    const window = (await ctx.store.liveMessageIds(FAKE_CHANNELS.general, new Date(Date.now() - 7 * DAY), new Date())).sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1))
+    // The fake stamps each posted message a millisecond apart, a little ahead of the clock
+    const window = (await ctx.store.liveMessageIds(FAKE_CHANNELS.general, new Date(Date.now() - 7 * DAY), new Date(Date.now() + DAY))).sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1))
+    expect(window.length).toBeGreaterThan(120)
     const [early, late] = [window[0], window[window.length - 1]]
     await hook(fakes, "DELETE", `messages/${FAKE_CHANNELS.general}/${early}`)
     await hook(fakes, "DELETE", `messages/${FAKE_CHANNELS.general}/${late}`)
