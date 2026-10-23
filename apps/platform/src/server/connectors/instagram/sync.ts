@@ -40,7 +40,14 @@ export function explainInstagramError(error: unknown): Error {
 }
 
 /** Once a day: today's follower count, and the last 3 days' account totals */
-export async function runInstagramAccountSnapshot({ client, now = new Date(), signal }: RunOptions): Promise<JobResult> {
+export async function runInstagramAccountSnapshot(options: RunOptions): Promise<JobResult> {
+  const result = await snapshotInstagramAccount(options)
+  await recordConnectorSync(INSTAGRAM_INSIGHTS_ID)
+  return result
+}
+
+/** The account snapshot's work, without recording a sync on the connector (the local DB check calls it alone) */
+export async function snapshotInstagramAccount({ client, now = new Date(), signal }: RunOptions): Promise<JobResult> {
   const profile = await client.profile(signal)
   const igUserId = client.userId ?? profile.userId
   const today = chicagoDay(now)
@@ -56,7 +63,6 @@ export async function runInstagramAccountSnapshot({ client, now = new Date(), si
     await prisma.instagramAccountDaily.update({ where: { date: day }, data: totals })
     filled.push(day)
   }
-  await recordConnectorSync(INSTAGRAM_INSIGHTS_ID)
   const range = filled.length ? `${dayLabel(filled[filled.length - 1])}–${dayLabel(filled[0])}` : "none yet: a day's numbers come in the day after its first snapshot"
   return { summary: `@${profile.username}: ${plural(profile.followers, "follower")}; account numbers for ${plural(filled.length, "day")} (${range})`, counts: { followers: profile.followers, days: filled.length } }
 }
@@ -78,8 +84,14 @@ export async function postsDueForInsights(now: Date, limit = POSTS_PER_RUN): Pro
 }
 
 /** Every hour: the numbers of the posts that are due. A post Instagram has no numbers for (deleted, or too few viewers) is marked read and skipped; a dead token or a missing permission stops the run */
-export async function runInstagramPostInsights({ client, now = new Date(), signal, log }: RunOptions): Promise<JobResult> {
-  const posts = await postsDueForInsights(now)
+export async function runInstagramPostInsights(options: RunOptions): Promise<JobResult> {
+  const result = await readPostInsights(await postsDueForInsights(options.now ?? new Date()), options)
+  await recordConnectorSync(INSTAGRAM_INSIGHTS_ID)
+  return result
+}
+
+/** Reads and stores the numbers of these posts, without recording a sync on the connector (the local DB check calls it on its own post) */
+export async function readPostInsights(posts: { id: string }[], { client, now = new Date(), signal, log }: RunOptions): Promise<JobResult> {
   let updated = 0
   let missing = 0
   for (const post of posts) {
@@ -99,7 +111,6 @@ export async function runInstagramPostInsights({ client, now = new Date(), signa
       missing++
     }
   }
-  await recordConnectorSync(INSTAGRAM_INSIGHTS_ID)
   return {
     summary: posts.length ? `Read the numbers of ${plural(updated, "post")}${missing ? `; Instagram had no numbers for ${plural(missing, "post")} (deleted, or too few viewers)` : ""}` : "No posts due",
     counts: { updated, missing },
