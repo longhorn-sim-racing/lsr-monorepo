@@ -91,8 +91,6 @@ export type DiscordStore = {
   markLeft(ids: string[], at: Date): Promise<number>
   /** DiscordGuildDaily for a day: members now, and joins and leaves that day */
   writeGuildDay(day: Date, dayStart: Date, dayEnd: Date): Promise<{ memberCount: number; joinedCount: number; leftCount: number }>
-  /** Discord user id → site user id, for linked accounts */
-  linkedAccounts(): Promise<Map<string, string>>
   /** Members whose Discord data was purged (never collected again) */
   purgedAuthors(): Promise<PurgedList>
 }
@@ -348,11 +346,6 @@ export const prismaDiscordStore: DiscordStore = {
     ])
     await prisma.discordGuildDaily.upsert({ where: { date: day }, update: { memberCount, joinedCount, leftCount }, create: { date: day, memberCount, joinedCount, leftCount } })
     return { memberCount, joinedCount, leftCount }
-  },
-
-  async linkedAccounts() {
-    const users = await prisma.user.findMany({ where: { discordUserId: { not: null } }, select: { id: true, discordUserId: true } })
-    return new Map(users.map((u) => [u.discordUserId!, u.id]))
   },
 
   async purgedAuthors() {

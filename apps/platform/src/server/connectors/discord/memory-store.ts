@@ -170,9 +170,6 @@ export function memoryDiscordStore(seed: { channels?: Partial<StoredChannel>[]; 
       guildDays.set(day.getTime(), counts)
       return counts
     },
-    async linkedAccounts() {
-      return new Map(linked)
-    },
     async purgedAuthors(): Promise<PurgedList> {
       const ids = new Set(purged)
       return { has: (discordUserId) => ids.has(discordUserId), size: ids.size }
