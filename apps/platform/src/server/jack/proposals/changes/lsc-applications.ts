@@ -53,21 +53,30 @@ export function isUt(school: string): boolean {
   return !school.trim() || /^(ut|ut austin|utexas|university of texas( at austin)?|the university of texas( at austin)?)$/i.test(school.trim())
 }
 
-/** Seasons by what a row says (slug or name), looked up once per import's worth of rows */
+/**
+ * Seasons by what a row says (slug or name), looked up once per import's worth of rows. Old entries are
+ * dropped, and so is a lookup that failed: the next row asks the database again
+ */
 const seasonCache = new Map<string, { at: number; season: Promise<Season | null> }>()
 const SEASON_CACHE_MS = 30_000
 
 function seasonFor(text: string): Promise<Season | null> {
   const key = text.trim().toLowerCase()
+  const now = Date.now()
+  for (const [cached, entry] of seasonCache) if (now - entry.at >= SEASON_CACHE_MS) seasonCache.delete(cached)
   const hit = seasonCache.get(key)
-  if (hit && Date.now() - hit.at < SEASON_CACHE_MS) return hit.season
+  if (hit) return hit.season
   const season = (async () => {
     const league = await prisma.league.findUnique({ where: { slug: DEFAULT_LEAGUE }, select: { id: true } })
     if (!league) return null
     if (!key) return getOpenLeagueSeason(league.id)
     return prisma.season.findFirst({ where: { leagueId: league.id, OR: [{ slug: { equals: key, mode: "insensitive" } }, { name: { equals: text.trim(), mode: "insensitive" } }] } })
   })()
-  seasonCache.set(key, { at: Date.now(), season })
+  const entry = { at: now, season }
+  seasonCache.set(key, entry)
+  season.catch(() => {
+    if (seasonCache.get(key) === entry) seasonCache.delete(key)
+  })
   return season
 }
 

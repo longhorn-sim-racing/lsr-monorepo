@@ -79,6 +79,23 @@ describe("the LSC applications target: validateRow", () => {
     expect(other.ok && other.detail).toContain("· Texas A&M")
   })
 
+  it("looks a season up again after a lookup that failed, or after a while", async () => {
+    const S4 = { id: "s4", name: "LSC Season 4", slug: "lsc-s4" }
+    db.season.findFirst.mockRejectedValueOnce(new Error("connection reset")).mockResolvedValue(S4)
+    await expect(lscApplicationTarget.validateRow(row({ season: "lsc-s4" }))).rejects.toThrow("connection reset")
+    expect(await lscApplicationTarget.validateRow(row({ season: "lsc-s4" }))).toMatchObject({ ok: true, key: "u-ana:s4" })
+    expect(await lscApplicationTarget.validateRow(row({ season: "LSC-S4 " }))).toMatchObject({ ok: true, key: "u-ana:s4" })
+    expect(db.season.findFirst).toHaveBeenCalledTimes(2)
+    vi.useFakeTimers({ toFake: ["Date"] })
+    try {
+      vi.setSystemTime(Date.now() + 31_000)
+      await lscApplicationTarget.validateRow(row({ season: "lsc-s4" }))
+      expect(db.season.findFirst).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("says why a row can't go in", async () => {
     const error = async (cells: Partial<ImportCells>) => {
       const check = await lscApplicationTarget.validateRow(row(cells))
