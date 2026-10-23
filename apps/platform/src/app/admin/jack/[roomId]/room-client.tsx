@@ -35,6 +35,9 @@ type JackRoomClientProps = {
 /** An archived room starts no runs; its page doesn't ask (the room offers no "continue" there either) */
 const archivedResume = async (): Promise<ActionResult> => ({ ok: false, error: "This room is archived." })
 
+/** An archived room is read-only, so its proposal cards say so instead of applying or discarding (applyProposal itself doesn't check yet: G4) */
+const archivedProposalAction = async (): Promise<string | null> => "This room is archived. Unarchive it to apply or discard."
+
 /** Two sets of ratings say the same thing, so a snapshot doesn't redraw every rating for nothing */
 const sameFeedback = (a: Record<string, JackFeedbackSummary>, b: Record<string, JackFeedbackSummary>) => JSON.stringify(a) === JSON.stringify(b)
 
@@ -150,7 +153,10 @@ export function JackRoomClient({ initial, rooms, me, spend, anchorId, gap, feedb
     [settle]
   )
 
-  const proposals = useMemo<ProposalRoom>(() => ({ states: room.proposals, apply, discard }), [room.proposals, apply, discard])
+  const proposals = useMemo<ProposalRoom>(
+    () => (archived ? { states: room.proposals, apply: archivedProposalAction, discard: archivedProposalAction } : { states: room.proposals, apply, discard }),
+    [room.proposals, archived, apply, discard]
+  )
 
   /** A setting changed here shows at once (the new settings, then its note); the broadcast copies then change nothing */
   async function changeSetting(work: () => Promise<ActionResult<{ room: JackRoomSettings; message?: JackMessageView | null }>>, what: string) {
