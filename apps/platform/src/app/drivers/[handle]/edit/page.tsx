@@ -16,6 +16,8 @@ import { initials } from '../../names';
 import { EidField } from './eid-field';
 import { inputClass, labelClass } from './form-styles';
 import { DEPARTMENTS, WORKING_ON_MAX } from '@/schemas/officer-profile.schema';
+import { discordLinkingAvailable } from '@/server/services/discord-link.service';
+import { DiscordLink, isLinkOutcome } from './discord-link';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,8 +46,10 @@ function Step({ n, title, children }: { n: string; title: string; children: Reac
 
 export default async function EditDriverPage({
   params,
-}: { params: Promise<{ handle: string }> }) {
+  searchParams,
+}: { params: Promise<{ handle: string }>; searchParams: Promise<{ discord?: string | string[] }> }) {
   const { handle } = await params;
+  const { discord } = await searchParams;
 
   const pageUser = await prisma.user.findUnique({ where: { handle } });
   if (!pageUser || pageUser.status === 'deleted') return notFound();
@@ -61,6 +65,8 @@ export default async function EditDriverPage({
 
   const socials = (pageUser.socials as Record<string, string> | null) ?? {};
   const isOfficer = roles.includes('officer') || roles.includes('admin');
+  const discordAvailable = await discordLinkingAvailable();
+  const discordOutcome = isLinkOutcome(discord) ? discord : null;
 
   return (
     <div className="bg-lsr-charcoal text-white min-h-screen">
@@ -120,6 +126,7 @@ export default async function EditDriverPage({
 
             <Step n="2" title="Private">
               <EidField initialEid={pageUser.eid} />
+              {(discordAvailable || pageUser.discordUserId || discordOutcome) && <DiscordLink user={pageUser} available={discordAvailable} outcome={discordOutcome} />}
             </Step>
 
             <form action={updateProfile} className="space-y-4">

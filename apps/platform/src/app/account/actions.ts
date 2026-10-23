@@ -2,6 +2,7 @@
 
 import { prisma } from '@/server/db';
 import { requireUser } from '@/server/auth/guards';
+import { unlinkDiscord } from '@/server/services/discord-link.service';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
@@ -63,6 +64,8 @@ export async function retireAccount() {
 export async function deleteAccount() {
   const user = await requireUser();
 
+  // The Discord link goes with the account, and so does every Discord row that pointed at it
+  await unlinkDiscord(user.id);
   await prisma.user.delete({ where: { id: user.id } });
 
   redirect('/?account=deleted');
