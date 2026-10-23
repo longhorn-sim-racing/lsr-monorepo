@@ -13,16 +13,16 @@ import { clubMembersTool } from "./club-members"
 
 const officers = [
   {
-    displayName: "Diane Chagoya",
-    handle: "diane-chagoya",
-    officerTitle: "Media Lead",
+    displayName: "Test Officer",
+    handle: "test-officer",
+    officerTitle: "Example Lead",
     department: "media",
     isBoard: true,
     workingOn: "Photos, video and the brand",
-    major: "Radio-Television-Film",
-    gradYear: 2027,
-    email: "diane@example.com",
-    eid: "dc123",
+    major: "Example Major",
+    gradYear: 2030,
+    email: "test-officer@example.com",
+    eid: "zz000",
     roles: [{ role: { key: "officer" } }],
   },
   {
@@ -59,17 +59,17 @@ describe("club_members officers", () => {
     const body = JSON.parse(result.forModel)
     expect(body.roster).toEqual([
       {
-        name: "Diane Chagoya",
-        handle: "diane-chagoya",
-        title: "Media Lead",
+        name: "Test Officer",
+        handle: "test-officer",
+        title: "Example Lead",
         department: "Media",
         board: true,
         workingOn: "Photos, video and the brand",
-        major: "Radio-Television-Film",
-        gradYear: 2027,
+        major: "Example Major",
+        gradYear: 2030,
         roles: ["officer"],
-        email: "diane@example.com",
-        eid: "dc123",
+        email: "test-officer@example.com",
+        eid: "zz000",
       },
       // Empty fields are left out, as in the member roster
       { name: "New Officer", handle: "new-officer", roles: ["officer"], email: "new@example.com" },
@@ -79,7 +79,7 @@ describe("club_members officers", () => {
       kind: "table",
       columns: ["Officer", "Title", "Department", "Works on", "Roles", "Email"],
       rows: [
-        ["Diane Chagoya", "Media Lead", "Media · board", "Photos, video and the brand", "officer", "diane@example.com"],
+        ["Test Officer", "Example Lead", "Media · board", "Photos, video and the brand", "officer", "test-officer@example.com"],
         ["New Officer", null, null, null, "officer", "new@example.com"],
       ],
     })

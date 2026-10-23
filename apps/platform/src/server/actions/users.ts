@@ -78,6 +78,10 @@ export async function updateUser(userId: string, payload: UpdateUserPayload): Pr
     if (!profile.success) {
         return { ok: false, error: profile.error.issues[0]?.message ?? "Check the officer profile." };
     }
+    // The officer profile belongs to officers: anyone else (including someone losing the role) has none,
+    // whatever the form sent (its section is only hidden for them)
+    const isOfficerAfter = payload.roleKeys.some((k) => ["admin", "officer"].includes(k));
+    const officerProfile = isOfficerAfter ? profile.data : { department: null, isBoard: false, workingOn: null };
 
     // Check handle uniqueness if changed
     if (trimmedHandle !== targetUser.handle) {
@@ -98,7 +102,7 @@ export async function updateUser(userId: string, payload: UpdateUserPayload): Pr
             major: payload.major || null,
             socials: payload.socials ?? undefined,
             officerTitle: payload.officerTitle || null,
-            ...profile.data,
+            ...officerProfile,
         },
     });
 
@@ -220,7 +224,7 @@ export async function updateUser(userId: string, payload: UpdateUserPayload): Pr
             major: payload.major,
             socials: payload.socials,
             officerTitle: payload.officerTitle,
-            ...profile.data,
+            ...officerProfile,
             roles: afterRoles,
             membership: afterMembership,
         },

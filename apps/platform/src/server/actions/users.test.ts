@@ -21,14 +21,14 @@ vi.mock("@/server/services/membership.service", () => ({ syncManualMembershipEnt
 import { updateUser, type UpdateUserPayload } from "./users"
 
 const payload = (overrides: Partial<UpdateUserPayload> = {}): UpdateUserPayload => ({
-  displayName: "Diane Chagoya",
-  handle: "diane-chagoya",
+  displayName: "Test Officer",
+  handle: "test-officer",
   bio: null,
   iRating: null,
-  gradYear: 2027,
-  major: "Radio-Television-Film",
+  gradYear: 2030,
+  major: "Example Major",
   socials: null,
-  officerTitle: "Media Lead",
+  officerTitle: "Example Lead",
   department: "media",
   isBoard: true,
   workingOn: "Photos, video and the brand",
@@ -42,12 +42,12 @@ beforeEach(() => {
   vi.clearAllMocks()
   db.user.findUnique.mockResolvedValue({
     id: "user-1",
-    displayName: "Diane Chagoya",
-    handle: "diane-chagoya",
+    displayName: "Test Officer",
+    handle: "test-officer",
     department: null,
     isBoard: false,
     workingOn: null,
-    officerTitle: "Media Lead",
+    officerTitle: "Example Lead",
     roles: [{ role: { key: "officer" } }],
     memberships: [],
   })
@@ -73,6 +73,29 @@ describe("updateUser: the officer profile", () => {
 
   it("stores blanks as none", async () => {
     await updateUser("user-1", payload({ department: null, isBoard: false, workingOn: "  " }))
+    expect(db.user.update.mock.calls[0][0].data).toMatchObject({ department: null, isBoard: false, workingOn: null })
+  })
+
+  it("keeps the profile to officers: anyone else gets none, whatever the form sent", async () => {
+    // A member, or an officer losing the role
+    await updateUser("user-1", payload({ roleKeys: [] }))
+    expect(db.user.update.mock.calls[0][0].data).toMatchObject({ department: null, isBoard: false, workingOn: null })
+    expect(audit.createAuditLog.mock.calls[0][0].after).toMatchObject({ department: null, isBoard: false, workingOn: null })
+  })
+
+  it("refuses a non-admin officer changing another officer's profile, and saves nothing", async () => {
+    db.userRole.count.mockResolvedValue(0)
+    expect(await updateUser("user-1", payload({ workingOn: "Something else" }))).toEqual({ ok: false, error: "Only admins can edit officer and admin accounts." })
+    expect(db.user.update).not.toHaveBeenCalled()
+    expect(db.userRole.deleteMany).not.toHaveBeenCalled()
+    expect(audit.createAuditLog).not.toHaveBeenCalled()
+  })
+
+  it("lets a non-admin officer edit a member, without giving them a profile", async () => {
+    db.userRole.count.mockResolvedValue(0)
+    db.user.findUnique.mockResolvedValueOnce({ id: "user-2", displayName: "Test Member", handle: "test-member", roles: [], memberships: [] })
+    db.role.findMany.mockResolvedValueOnce([])
+    expect(await updateUser("user-2", payload({ displayName: "Test Member", handle: "test-member", roleKeys: [], department: "media", isBoard: true }))).toEqual({ ok: true })
     expect(db.user.update.mock.calls[0][0].data).toMatchObject({ department: null, isBoard: false, workingOn: null })
   })
 })
