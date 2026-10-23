@@ -67,6 +67,8 @@ type RoomViewProps = {
 export type JackComposerOptions = {
   /** Drawn beside the Send button (an attach button, chips for files waiting to go) */
   addons?: ReactNode
+  /** Drawn above the message box (G5: the chips for files waiting to go, which need the composer's full width) */
+  attachments?: ReactNode
   /** Runs on paste into the message box (files pasted in); call preventDefault to keep the paste out of the text */
   onPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void
   /** Runs when something is dropped on the composer (files dragged in); the composer only accepts drops when this is set */
@@ -526,7 +528,7 @@ function ContinueBar({ stall, name, onContinue }: { stall: "unanswered" | "stuck
 }
 
 function Composer({ persona, onSend, options }: { persona: JackRoomPersonaKey; onSend: RoomViewProps["onSend"]; options: JackComposerOptions }) {
-  const { addons, onPaste, onDrop, canSendEmpty = false, placeholder } = options
+  const { addons, attachments, onPaste, onDrop, canSendEmpty = false, placeholder } = options
   const [content, setContent] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
@@ -564,6 +566,7 @@ function Composer({ persona, onSend, options }: { persona: JackRoomPersonaKey; o
       onDragOver={onDrop ? (e) => e.preventDefault() : undefined}
       onDrop={onDrop}
     >
+      {attachments}
       <label htmlFor="jack-message" className="sr-only">
         Message the room
       </label>
