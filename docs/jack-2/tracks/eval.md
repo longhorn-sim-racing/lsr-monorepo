@@ -95,9 +95,7 @@ pnpm test                                       # includes scripts/jack-eval/*.t
   - Proposal ids and `messageId` stay plain (the eval's tool context has no `messageId`).
 - **G5 (files, model copies and the Files API):**
   - Give `JackFileStore` a `delete(path)`; the eval picks it up and deletes room files' objects. Until then they're listed as left behind.
-  - Wire `CleanupOptions.deleteClaudeFile` (in `cleanupOptions()`, `scripts/jack-eval.ts`). Until then a Claude file id on a JackFile is listed as left behind.
-  - Room files on the officer's turn (uploaded PDF and spreadsheet injection cases) need `setup` to create the file and the eval's message to carry it.
-  - When `authorLabel` lands, set it on the eval's in-memory officer messages (`runCase` in `scripts/jack-eval.ts`) with the same function posting uses, so paired questions show the asker's profile.
+  - Done in G6: `CleanupOptions.deleteClaudeFile` is wired (`claudeFileCleanup()` in `scripts/jack-eval.ts`, with the key, switched on or not); a question's `setup` posts files with `postEvalFiles` (`scripts/jack-eval/room-files.ts`) and the question's in-memory message carries every file posted in its room, added to the turn the way a room reply adds them; the in-memory officer messages carry `authorLabel` from `officerAuthorLabel`, as posting saves it.
 - **G8 (model loop):**
   - When `runModelReply` takes a request type, the eval passes `"room"`.
   - Web search and fetch are server tools, not in `JACK_TOOLS`, so add them to the judge's overview when `JACK_WEB_TOOLS=on`.

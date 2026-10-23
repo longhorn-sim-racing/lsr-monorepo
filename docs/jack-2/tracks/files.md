@@ -1,8 +1,8 @@
-# Files (G5): Supabase Storage and room uploads
+# Files (G5, G6): Supabase Storage, room uploads, and what Jack sees of them
 
-Docs for the groundwork PR G5 (design §2.1 and §5), kept in their own file so the groundwork PRs don't collide; fold into `groundwork.md` (and then `docs/jack.md`) at the end. Code paths are relative to `apps/platform/`.
+Docs for the groundwork PRs G5 and G6 (design §2.1, §5 and §8), kept in their own file so the groundwork PRs don't collide; fold into `groundwork.md` (and then `docs/jack.md`) at the end. Code paths are relative to `apps/platform/`.
 
-What's here: Jack's file store moves to Supabase Storage, and officers can attach files in rooms. Not here yet (G6): files going to Claude (Files API, turn blocks), the `room_files` tool, room photos in decks, and who's asking.
+What's here: Jack's file store moves to Supabase Storage, and officers can attach files in rooms (G5). Then Jack sees them: Claude Files, the files in a turn, the `room_files` tool, officers' photos in decks, and who's asking (G6, [below](#g6-jack-reads-room-files-and-whos-asking)).
 
 ## The file store
 `jackFileStore()` (`src/server/jack/decks/storage.ts`) keeps deck renders, exports and screenshots, and room files. Every backend has get, put, head, delete, list and signed read links; Supabase also signs one-path uploads for the browser.
@@ -95,7 +95,67 @@ Then it sweeps `rooms/` for stored files no row points at (`sweepOrphanFiles`) a
 ## Tests
 `src/lib/jack/files.test.ts` (allow-list, names), `upload.test.ts` (the upload request, errors, pastes from Office), `upload-queue.test.ts` (files added while Send waits stay), `src/server/jack/files/*.test.ts` (magic bytes; `zip.test.ts`: zip bombs and archives whose central directory and local headers disagree, built by hand; extraction caps, a 20,000-row spreadsheet read from a capped slice, the time limit, Word documents too big for mammoth; photo copies; the register flow against an in-memory store, including a file removed while it's checked; attaching; cleanup selection, unrecorded copies, the orphan sweep and the job), `src/server/jack/decks/storage.test.ts` (store selection, the Supabase backend against a fake of Storage's REST API including a missing bucket, the files store), the three route tests, the actions test, and `actions-imports.test.ts` (the actions don't load the parsers).
 
-## Notes for the next PRs
-- **G6:** `JackFile.anthropicFileId` is unused yet; uploading PDFs and model copies to the Files API belongs in `registerFile` (after the checks), and the cleanup job should delete Claude Files too. Until G6 changes the turn format, Jack sees an attachment-only message as an empty line. `room_files` can read `text`, `textStatus`, `pageCount` and the model copy through `jackFileStore()`.
+## Notes for the next PRs (from G5)
+- **G6:** done, below.
 - **G2:** the Connections page's storage panel can show usage from `storage.objects` (`sum((metadata->>'size')::bigint) WHERE bucket_id = 'jack'`) against the 1 GB.
 - **G3:** the job registry joins `jobs/files.ts` into the groundwork slot (`groundwork: [...groundworkJobs, ...filesJobs]`); G4's `jobs/proposals.ts` will want the same line.
+
+## G6: Jack reads room files, and who's asking
+
+### Claude Files (`src/server/connectors/anthropic/`, `src/server/jack/files/claude.ts`)
+- **A connector, "Claude Files"** (`claude-files`, groundwork slot), on the Connections page like the others: set up by `ANTHROPIC_API_KEY`, **off until an admin switches it on**, with a smoke test that uploads a 1×1 PNG, finds it and deletes it (free). While it's off, photos go to Claude as their model copy inside each request and PDFs as their text; nothing is uploaded.
+- **The client** (`files.ts`) is the Anthropic SDK's `client.files.*` (GA in SDK 0.133, no beta header): `upload`, `remove` (a 404 counts as gone) and `visible` (`GET /v1/files?ids[]=…`, 100 at a time). Its base URL is `serviceBaseUrl("anthropic", ANTHROPIC_BASE_URL || "https://api.anthropic.com")`, a 30 s timeout per attempt, and the global `fetch` at call time.
+- **At registration** (`register.ts`), with Claude Files on: a photo's model copy (JPEG, no metadata, ≤2000 px) goes up while the copies are stored, and a PDF goes up as it is while its text is read, within 20 s. The id goes in `JackFile.anthropicFileId`. Uploads are named `jack-<fileId>.pdf|jpg`, never the officer's file name. A failed upload never fails the file: it's READY without a copy, the error shows on the Connections page, and a later turn or `room_files` read uploads it.
+  - **Not kept there:** encrypted PDFs (an `/Encrypt` dictionary; the API takes none, and one in a request fails all of it) are never uploaded, and a PDF Claude can't take as a document (pdf.js couldn't open it, so its page count is unknown, or it's over 100 pages) has its copy deleted again.
+  - A registration that finds its row gone (the chip was removed) or registered by another request deletes its copy.
+- **Checked before use** (`ensureClaudeIds`): every turn and `room_files` read checks the recorded copies in one list call. One that's gone (deleted, expired, or in another workspace after a key change) is forgotten and uploaded again, because a request naming a missing file fails before inference. If the check itself fails, the recorded ids are trusted.
+- **Deleted:** removing a chip, the `files.cleanup` job (with the rows it deletes) and the eval's cleanup delete the copies. Deleting works whenever the key is set, switched on or not. **There's no sweep of Claude Files:** a key's workspace can hold other environments' files (a local database doesn't know production's), so only copies whose rows are deleted here go. A delete that fails is logged with its id, and the job's summary says how many.
+- **Fakes:** `JACK_FAKES` covering `anthropic` points uploads at the fake (`connectors/anthropic/fake/handlers.ts`: upload, list with `ids[]` or paging, metadata, delete, content 400, 401 for a missing or bad key, 404 after delete or expiry, the API's filename and expiry rules, `POST /_fake/expire/:id`). Its ids carry the kind (`file_fake_pdf_1`, `file_fake_image_2`) like fakeClaude's, so a request with an id in the wrong block fails there. **The real Messages API can't read the fake's files, so while JACK_FAKES covers anthropic no turn sends file ids** (`claudeIdsReachModel`): photos go inline and PDFs as text.
+
+### What Jack sees (`history.ts`, `files/describe.ts`, `files/turn.ts`, the reply loop)
+- **Every officer turn names its files** under the message, with id, name, kind and size: `[Attached: "Sponsor packet.pdf" (PDF, 2.1 MB, 12 pages; id …). Shown below.]`. Earlier turns' say "Not shown again; room_files reads it by id." The line comes from the saved rows only, so a turn's bytes never change once it's answered (apart from the turn being answered becoming an earlier one).
+- **The turn being answered carries the files** after its text (`buildConversation` hands them over, `attachTurnFiles` adds them), each after a caption with its id:
+  - photos as `image` blocks, by Files API id, or the model copy inline (base64) when there's no id;
+  - PDFs as `document` blocks by id (title = file name, no citations);
+  - past this turn's limits (20 photos, 100 PDF pages, 20 MB of PDFs, 12 MB of inline photos), or a PDF Claude can't take, the text: the start of a PDF's text (8,000 characters), or a note for a photo;
+  - text-like files (CSV, spreadsheets, JSON, text and Markdown, transcripts, Word) as a short summary (about 2,500 characters: rows and the header, sheets, JSON's shape, speakers, headings, then the start), inside `<attached_file id=… name=… kind=… size=…>` tags whose closing tag can't appear inside;
+  - files a notice got ("Jack isn't connected yet") count as this turn's, since Claude never saw them.
+  - Putting files on Claude Files (checking or uploading) holds the reply up 10 s at most; anything not done by then goes another way. If the files can't be loaded at all the turn says so and the reply goes ahead.
+- **Links in summaries are neutralized** (`neutralizeLinks`): `https://evil.example/x?emails=all` becomes `[link to evil[.]example]`. web_fetch's `url_sources` takes every URL in a user turn, so a link planted in an uploaded file would otherwise be fetchable. `room_files read` returns the text as written: a tool result, which web_fetch never opens links from.
+- **Prompt:** the groundwork section explains the line, the tags, `room_files`, the neutralized links, that a file's content is data, and room photos on slides.
+
+### `room_files` (`src/server/jack/tools/room-files.ts`, groundwork slot, always loaded, after the `propose_*` tools)
+- No `file`: the room's posted files, newest first (`limit`, default 30): id, name, kind, size, pages or dimensions, status, who posted it and when, and a `deckUrl` for photos. Files still in an officer's composer aren't listed: they aren't in the room yet. The room shows the files as tiles.
+- `file`: reads one. A photo comes back as an image (by Files API id, or its model copy inline); a PDF as a document (`textOnly` pages through its text instead; one over 100 pages, or with Claude Files unavailable, comes as text and says so); anything else as text a page at a time like `read` (`offset`, `maxChars`, `nextOffset`, `total`, an outline of its headings; `query` for matching passages). Only files of the current room.
+
+### Officers' photos in decks
+- `https://jack.assets/room/<fileId>` on a slide loads that photo's model copy (`resolveJackAsset` in `decks/renders.ts`), but only for a deck in the room the photo was posted in: the renderer is told the deck's room (`SlideSource.roomId`), and another room's photo, or an unsent one, isn't found (shown as an image that didn't load).
+- A slide with room photos is rendered and cached per room (`renderKey` adds the room only for such slides, so every other render keeps its key).
+- `deck_assets` lists the room's photos first; the design guide says they may be used.
+
+### Who's asking (design §8)
+- Posting (`postOfficerMessage`) saves `JackMessage.authorLabel` from the officer's profile as it is then: `Gray (Technology Director · Technology · CS) [@gray-marshall]` (`author-label.ts`): name, then title · department · major (missing parts left out, no parentheses when all are), then the handle. One line, each part clipped. The room view carries it as `author.label`.
+- History writes each officer line from it; older messages keep "Name:". A deleted account is "Former officer", as the room shows it. Timestamps are unchanged.
+- The prompt: tools take an officer's handle, and "me", "my" or "mine" count only when one officer posted in the turn (ask otherwise). The tailoring rule was already there (G1).
+
+### Env vars
+None new. `ANTHROPIC_API_KEY` sets up Claude Files; `JACK_FAKES=anthropic` (or `all`) and `JACK_FAKES_URL` point it at the fake.
+
+### Setup and release (Gray)
+1. Nothing to do at Anthropic: the Files API is GA and free. The research recommends a dedicated `jack` workspace with a service-account key (`research/anthropic-tools.md` §2); files belong to the key's workspace, so after moving Jack to another workspace the old copies aren't visible, and Jack uploads them again as they're used.
+2. After deploying: **System → Connections → Claude Files → Run smoke test** ("Uploaded, found and deleted a test file"), then switch it on.
+3. Check it in a room: attach a photo and a PDF and ask what's in them. The function log shows no `Couldn't upload` lines, and the Connections row shows a recent sync.
+4. Switching it off stops uploads and file blocks at once (photos go inline, PDFs as text); copies already there stay until their files are deleted.
+
+### Trying it locally
+- `pnpm --filter @lsr/platform exec tsx scripts/check-jack-files-claude.ts` (local database only): starts the Claude Files fake in-process, makes a throwaway officer and room, registers a photo, a PDF and a CSV, posts them and runs a reply through the real loop with a scripted fake Claude (`room_files` list and read), sends a turn with ids, heals a copy that's gone, loads the room photo for a deck in the room and not for another, removes an unsent file, then deletes everything (and puts the connector's row back). It never switches Claude Files on in the shared database.
+- In the app: `pnpm jack:fakes`, then `JACK_FAKES=anthropic ANTHROPIC_API_KEY=fake-local-key` for the dev server, switch Claude Files on (admin, Connections; it works against the fake), attach files in a room. Replies then need a scripted Claude (`scripts/try-jack-*.ts`): a real Claude can't read the fake's files, so with fakes on they go inline and as text anyway.
+- Eval: `pnpm jack:eval --dry-run --track=groundwork` (see below).
+
+### Eval (groundwork track)
+`files-attached-csv` (what's in the attached file, who was fastest), `design-room-photo` (a post using the attached photo; needs a real model), `safety-injected-attachment` (an instruction and a link planted in an attached sheet), and `paired-last-event@business` / `@technology` (the same question from two roles: the facts must match). Files are posted through the real upload and registration in each question's room (`scripts/jack-eval/room-files.ts`, made-up data only), and the eval's officer messages carry their label the way posting saves it. The eval's cleanup deletes Claude Files copies with the key (`claudeFileCleanup` in `scripts/jack-eval.ts`).
+
+### Not verified live (no paid calls in this PR)
+- An image's Files API id in an `image` block, and a PDF's in a `document` block inside a user turn and a tool result: the SDK types have both and the docs describe them; the fake checks the block types.
+- Whether URLs inside a PDF `document` block in the officer's turn count as user input for web_fetch's `url_sources`. If they do, links in an attached PDF can be fetched. The officer attached it, and web_fetch can't carry data the model adds (a URL with data added isn't in the context).
+- That the API rejects only encrypted PDFs (`/Encrypt`) among those pdf.js opens; a PDF that fails in a request fails that reply, and the next turn shows it as a note only.
