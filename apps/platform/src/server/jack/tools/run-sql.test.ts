@@ -18,6 +18,7 @@ import {
   shapeSqlResult,
   SQL_TABLE_DISPLAY_ROWS,
   sqlIdentifiers,
+  sqlNames,
   timeKinds,
   wrapSql,
 } from "./run-sql"
@@ -82,6 +83,12 @@ describe("prepareSql", () => {
       ["SELECT database_to_xmlschema(true, false, '')", "database_to_xmlschema"],
       ["SELECT cursor_to_xml('c', 1, true, false, '')", "cursor_to_xml"],
       ["SELECT * FROM ts_stat('select 1')", "ts_stat"],
+      // ts_rewrite runs the SELECT in its second argument, past every name check
+      [
+        "SELECT ts_rewrite('a'::tsquery, 'SELECT ''a''::tsquery, quote_literal(left(content,200))::tsquery FROM net._http_response')::text",
+        "ts_rewrite",
+      ],
+      ['SELECT "TS_REWRITE"(\'a\'::tsquery, \'select 1\')', "ts_rewrite"],
       ["SELECT lo_get(1)", "lo_get"],
       ["SELECT loread(1, 10)", "loread"],
       ["SELECT * FROM dblink_exec('x')", "dblink_exec"],
@@ -117,11 +124,13 @@ describe("prepareSql", () => {
       if (!result.ok) {
         expect(result.error, sql).toContain("off-limits")
         expect(result.error, sql).toContain(name)
+        // The rename hint is only for an alias named like one of the schemas
+        expect(result.error, sql).not.toContain("rename it")
       }
     }
   })
 
-  it("turns away pg_net, pg_cron, Vault and the scheduler schema, qualified or not", () => {
+  it("turns away the pg_net, pg_cron, Vault and scheduler schemas, and pg_net's names anywhere", () => {
     const blocked: [string, string][] = [
       // pg_net: outbound HTTP, its queue and its stored responses (readable by every role)
       ["SELECT net.http_get('https://example.com') AS id", "net"],
@@ -130,6 +139,7 @@ describe("prepareSql", () => {
       ['SELECT "net"."http_get"(\'https://example.com\') AS id', "net"],
       ["SELECT NET . HTTP_GET('https://example.com') AS id", "net"],
       ["SELECT net/* gap */.http_get('https://example.com') AS id", "net"],
+      ["SELECT net -- gap\n.http_get('https://example.com') AS id", "net"],
       ["SELECT http_get('https://example.com') AS id", "http_get"],
       ["SELECT http_post('https://example.com', '{}'::jsonb) AS id", "http_post"],
       ["SELECT http_delete('https://example.com') AS id", "http_delete"],
@@ -160,11 +170,30 @@ describe("prepareSql", () => {
     }
   })
 
-  it("refuses an alias named like one of those schemas, and says to rename it", () => {
-    const result = prepareSql('SELECT sum("amountCents") AS net FROM "Payment"')
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toContain("If net is only an alias you chose, rename it.")
-    expect(prepareSql('SELECT sum("amountCents") AS net_cents FROM "Payment"').ok).toBe(true)
+  it("allows aliases named like those schemas until one qualifies a column, then says to rename it", () => {
+    for (const sql of [
+      'SELECT sum("amountCents") AS net FROM "Payment"',
+      'SELECT sum("amountCents") AS "Net" FROM "Payment"',
+      'SELECT count(*) AS cron, 1 AS vault FROM "ScheduledJob" scheduler',
+      'SELECT net FROM (SELECT sum("amountCents") AS net FROM "Payment") t',
+    ]) {
+      expect(prepareSql(sql).ok, sql).toBe(true)
+    }
+    const qualified = prepareSql('SELECT scheduler."key" FROM "ScheduledJob" scheduler')
+    expect(qualified.ok).toBe(false)
+    if (!qualified.ok) expect(qualified.error).toContain("If scheduler is a table alias you chose, rename it.")
+    // pg_net's own names stay refused anywhere, alias or not
+    expect(prepareSql('SELECT 1 AS http_get FROM "Event"').ok).toBe(false)
+    expect(prepareSql('SELECT 1 AS "_http_response"').ok).toBe(false)
+    expect(sqlNames('SELECT "net" /* c */ . x, net FROM t -- d\r.y')).toEqual([
+      { name: "select", qualifies: false },
+      { name: "net", qualifies: true },
+      { name: "x", qualifies: false },
+      { name: "net", qualifies: false },
+      { name: "from", qualifies: false },
+      { name: "t", qualifies: true },
+      { name: "y", qualifies: false },
+    ])
   })
 
   it("doesn't mistake the club's scheduler tables, longer names or strings for those schemas", () => {
