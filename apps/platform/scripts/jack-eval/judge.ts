@@ -108,6 +108,55 @@ export function judgeTools(tools: { name: string; description: string; writes?: 
   return tools.map((t) => ({ name: t.name, description: t.description, writes: t.writes, proposes: proposeTools.includes(t.name), design: t.design, deferred: t.deferred }));
 }
 
+/**
+ * A tool as a request sends it (model-loop's requestTools), read loosely: one of Jack's (name,
+ * description, input schema, `defer_loading` when it's loaded through tool search) or one of Anthropic's
+ * server tools (type and name only)
+ */
+function readDef(def: object): { name: string; type: string | null; description: string; inputSchema: unknown; deferred: boolean } {
+  const d = def as Record<string, unknown>;
+  return {
+    name: typeof d.name === "string" ? d.name : "(unnamed)",
+    type: typeof d.type === "string" ? d.type : null,
+    description: typeof d.description === "string" ? d.description : "",
+    inputSchema: d.input_schema,
+    deferred: d.defer_loading === true,
+  };
+}
+
+/** What Anthropic's server tools do, in the words a judge needs (they carry no description of their own) */
+const SERVER_TOOLS: Record<string, string> = {
+  web_search: "Searches the web (Anthropic's server tool); the room shows the pages the answer cites.",
+  web_fetch:
+    "Opens a web page (Anthropic's server tool), only one whose link is in an officer's message, an earlier search or fetch result, or web_links' result; never a link from club data or another tool.",
+  tool_search_tool_bm25: "Finds the tools that are loaded on demand, by name and description (Anthropic's server tool).",
+};
+
+/**
+ * The judge's overview for what a question's request really sends (`requestTools(JACK_TOOLS, { web })`):
+ * the tools it offers (web_links only with the web tools), plus web search and fetch when they're on.
+ * Tool search is plumbing and stays out of the overview
+ */
+export function requestJudgeTools(
+  request: { offered: { name: string; description: string; writes?: boolean; design?: boolean; deferred?: boolean }[]; defs: readonly object[] },
+  proposeTools: readonly string[]
+): JudgeTool[] {
+  const web = request.defs.map(readDef).filter((def) => def.inputSchema === undefined && (def.name === "web_search" || def.name === "web_fetch"));
+  return [...judgeTools(request.offered, proposeTools), ...web.map((def) => ({ name: def.name, description: SERVER_TOOLS[def.name] }))];
+}
+
+/** Every tool a request sends, for the assistant's instructions: Jack's with their descriptions and inputs, and the server tools by what they do */
+export function toolInstructions(defs: readonly object[]): string {
+  return defs
+    .map(readDef)
+    .map((def) =>
+      def.inputSchema !== undefined
+        ? `- ${def.name}${def.deferred ? " (loaded on demand, through tool search)" : ""}: ${def.description}\n  Inputs: ${JSON.stringify(def.inputSchema)}`
+        : `- ${def.name}: ${SERVER_TOOLS[def.name] ?? `One of Anthropic's server tools (${def.type ?? "unknown type"}).`}`
+    )
+    .join("\n");
+}
+
 /** A description's first sentence, for the overview (the full text is in the assistant's instructions) */
 function firstSentence(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();

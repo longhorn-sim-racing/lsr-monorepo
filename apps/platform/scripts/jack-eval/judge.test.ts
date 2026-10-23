@@ -1,6 +1,9 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it, vi } from "vitest";
-import { judgeAnswer, judgePair, judgeSystem, judgeTools, pairPrompt, type PairGrade } from "./judge";
+import { z } from "zod";
+import { requestTools } from "../../src/server/jack/model-loop";
+import type { AnyJackTool } from "../../src/server/jack/tools/types";
+import { judgeAnswer, judgePair, judgeSystem, judgeTools, pairPrompt, requestJudgeTools, toolInstructions, type PairGrade } from "./judge";
 
 const tools = judgeTools(
   [
@@ -34,6 +37,41 @@ describe("judgeSystem", () => {
 
   it("tells the judge a proposal isn't a change", () => {
     expect(judgeSystem(tools)).toContain("nothing changes until an officer reviews it and presses Apply");
+  });
+});
+
+describe("the tools a question's request sends (requestTools), for the judge", () => {
+  const tool = (name: string, extra: Partial<AnyJackTool> = {}): AnyJackTool => ({ name, description: `${name} does things.`, input: z.object({ q: z.string() }), run: async () => ({ forModel: "", label: "" }), ...extra });
+  const jackTools = [tool("search"), tool("stripe_overview", { deferred: true }), tool("propose_change"), tool("web_links", { web: true, deferred: true })];
+
+  it("without the web tools: no web_links, web search or fetch, and tool search only in the instructions", () => {
+    const request = requestTools(jackTools, { web: false });
+    expect(requestJudgeTools(request, ["propose_change"]).map((t) => [t.name, Boolean(t.proposes), Boolean(t.deferred)])).toEqual([
+      ["search", false, false],
+      ["stripe_overview", false, true],
+      ["propose_change", true, false],
+    ]);
+    const instructions = toolInstructions(request.defs);
+    expect(instructions).toContain('- search: search does things.\n  Inputs: {"type":"object"');
+    expect(instructions).toContain("- stripe_overview (loaded on demand, through tool search): stripe_overview does things.");
+    expect(instructions).toContain("- tool_search_tool_bm25: Finds the tools that are loaded on demand");
+    expect(instructions).not.toMatch(/web_links|web_search|web_fetch/);
+  });
+
+  it("with them (JACK_WEB_TOOLS=on, room replies): web_links, and web search and fetch described for the judge", () => {
+    const request = requestTools(jackTools, { web: true });
+    const overview = requestJudgeTools(request, ["propose_change"]);
+    expect(overview.map((t) => t.name)).toEqual(["search", "stripe_overview", "propose_change", "web_links", "web_search", "web_fetch"]);
+    const system = judgeSystem(overview);
+    expect(system).toContain("- web_search: Searches the web (Anthropic's server tool);");
+    expect(system).toContain("- web_fetch: Opens a web page (Anthropic's server tool), only one whose link is in an officer's message");
+    // Tool search is plumbing: it isn't in the overview
+    expect(system).not.toContain("tool_search_tool_bm25");
+    expect(toolInstructions(request.defs)).toMatch(/- web_search: Searches the web[\s\S]*- web_fetch: Opens a web page/);
+  });
+
+  it("names a server tool it doesn't know by its type", () => {
+    expect(toolInstructions([{ name: "code_execution", type: "code_execution_20250825" }])).toBe("- code_execution: One of Anthropic's server tools (code_execution_20250825).");
   });
 });
 

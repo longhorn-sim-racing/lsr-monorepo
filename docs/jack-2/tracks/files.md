@@ -97,5 +97,5 @@ Then it sweeps `rooms/` for stored files no row points at (`sweepOrphanFiles`) a
 
 ## Notes for the next PRs
 - **G6:** `JackFile.anthropicFileId` is unused yet; uploading PDFs and model copies to the Files API belongs in `registerFile` (after the checks), and the cleanup job should delete Claude Files too. Until G6 changes the turn format, Jack sees an attachment-only message as an empty line. `room_files` can read `text`, `textStatus`, `pageCount` and the model copy through `jackFileStore()`.
-- **G2:** the Connections page's storage panel can show usage from `storage.objects` (`sum((metadata->>'size')::bigint) WHERE bucket_id = 'jack'`) against the 1 GB.
+- **G2 (done in PR I):** the Connections page's storage panel shows the store in use, the bucket's usage from `storage.objects` against the 1 GB, and room files by status (`src/server/jack/files/usage.ts`; groundwork.md, "The Connections page"). The eval's cleanup deletes room files' objects (and their photo copies) through the store's `delete`.
 - **G3:** the job registry joins `jobs/files.ts` into the groundwork slot (`groundwork: [...groundworkJobs, ...filesJobs]`); G4's `jobs/proposals.ts` will want the same line.
