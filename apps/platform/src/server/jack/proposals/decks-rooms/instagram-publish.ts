@@ -4,7 +4,7 @@ import type { MdPreviewBlock, MdPreviewInline } from "@/lib/jack/markdown-previe
 import { instagramPublishConnector } from "@/server/connectors/instagram/publish-connector"
 import { getDeck } from "@/server/jack/decks/service"
 import { captionCounts, captionProblem } from "@/server/jack/publish/caption"
-import { CAROUSEL_MAX, CAROUSEL_MIN, fitNote, MEDIA_TYPE, PUBLISH_HISTORY, TYPE_LABEL, type PublishType } from "@/lib/jack/publish"
+import { CAROUSEL_MAX, CAROUSEL_MIN, fitNote, MEDIA_TYPE, PUBLISH_HISTORY, publishTargetId, TYPE_LABEL, type PublishType } from "@/lib/jack/publish"
 import { describePublish, publishDeps, PublishRefused, SHAPE, startInstagramPublish } from "@/server/jack/publish/instagram"
 import { pickSlides, slidesById, slidesLabel, slideThumbUrl } from "@/server/jack/publish/slides"
 import { ProposalInputError, StaleProposalError } from "../errors"
@@ -95,7 +95,8 @@ export const instagramPublishKind: ProposalKind<InstagramPublishPayload> = {
     ]
     return {
       before: { deckId: deck.id, version: deck.version, slideIds: slides.map((s) => s.id) },
-      targetId: deck.id,
+      // The post itself: a revised caption replaces this card, another type or other slides don't
+      targetId: publishTargetId(deck.id, type, slides.map((s) => s.id)),
       view: {
         title: publishTitle(type, deck.title, slidesLabel(slides)),
         summary: sentences.join(" "),

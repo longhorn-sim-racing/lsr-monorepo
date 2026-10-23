@@ -15,6 +15,8 @@ export const DR_SEED = {
   album: "evalseed-dr-album-graphics",
   albumTitle: "Eval graphics",
   albumSlug: "eval-graphics",
+  /** The graphic's slide ids, in order */
+  slides: ["evalgm2s1", "evalgm2s2", "evalgm2s3"],
 } as const;
 
 const SLIDES = [

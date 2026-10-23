@@ -42,7 +42,7 @@ describe("instagram.publish: proposing", () => {
   it("describes a carousel on the server: the slides as pictures, the caption, the quota, and a confirm", async () => {
     const prepared = await instagramPublishKind.prepare(payload({ type: "carousel", caption: "GM 2 recap!\n\nThanks @lsr_media #LSR" }), ctx)
     expect(prepared.before).toEqual({ deckId: DECK_ID, version: 3, slideIds: ["slide-a", "slide-b", "slide-c"] })
-    expect(prepared.targetId).toBe(DECK_ID)
+    expect(prepared.targetId).toBe(`${DECK_ID}:carousel:slide-a,slide-b,slide-c`)
     expect(prepared.view.title).toBe("Post “GM 2 recap” (slides 1-3) as an Instagram carousel")
     expect(prepared.view.summary).toBe(
       "Applying it posts slides 1-3 of “GM 2 recap” (version 3) as a carousel on the club's Instagram, right away and in public. It can't be taken down from here (delete it in the Instagram app). Caption: 35 characters, 1 hashtag, tagging @lsr_media. It isn't marked as made with AI. Instagram's API posts in the last 24 hours: 2 of 50.",
@@ -84,6 +84,15 @@ describe("instagram.publish: proposing", () => {
     await expect(refused({ type: "carousel", caption: Array.from({ length: 31 }, (_, i) => `#t${i}`).join(" ") })).rejects.toThrow(/at most 30 hashtags/)
     await expect(refused({ type: "post", slides: [7] })).rejects.toThrow("“GM 2 recap” (version 3) has 3 slides; there's no slide 7.")
     await expect(refused({ type: "post", slides: [1], version: 8 })).rejects.toThrow(`Deck ${DECK_ID} has no version 8.`)
+  })
+
+  it("targets the post itself (type and slides), so a revised caption replaces a card but another story of the deck doesn't", async () => {
+    const story = (n: number) => instagramPublishKind.prepare(payload({ type: "story", slides: [n] }), ctx)
+    expect((await story(1)).targetId).toBe(`${DECK_ID}:story:slide-a`)
+    expect((await story(2)).targetId).toBe(`${DECK_ID}:story:slide-b`)
+    const post = (caption: string) => instagramPublishKind.prepare(payload({ type: "post", slides: [1], caption }), ctx)
+    expect((await post("One")).targetId).toBe((await post("Two")).targetId)
+    expect((await post("One")).targetId).not.toBe((await story(1)).targetId)
   })
 
   it("keeps titles short", () => {

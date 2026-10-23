@@ -127,11 +127,17 @@ Object.assign(db, {
 })
 
 const audit = vi.hoisted(() => ({ createAuditLog: vi.fn() }))
+// instagram.publish runs for real below; its deck comes from here, and publishing is switched off
+const decks = vi.hoisted(() => ({ getDeck: vi.fn() }))
 vi.mock("@/server/db", () => ({ prisma: db }))
 vi.mock("@/server/audit/log", () => audit)
 vi.mock("./registry", () => ({ findProposalKind: () => undefined, PROPOSAL_KINDS: [] }))
+vi.mock("@/server/jack/decks/service", async (original) => ({ ...(await original<typeof import("@/server/jack/decks/service")>()), getDeck: decks.getDeck }))
+vi.mock("@/server/jack/decks/renders", () => ({ getRenderFile: vi.fn() }))
+vi.mock("@/server/connectors/instagram/publish-connector", () => ({ instagramPublishConnector: { client: async () => null } }))
 
 import { buildHistory, type HistoryRow } from "../history"
+import { instagramPublishKind } from "./decks-rooms/instagram-publish"
 import { ProposalInputError, StaleProposalError } from "./errors"
 import { APPLYING_TIMEOUT_MS, applyProposal, createProposal, discardProposal, getProposalDetail, PROPOSAL_TTL_MS, roomProposalStates, sweepProposals, type ProposalDeps } from "./service"
 import type { AnyProposalKind, ProposalApplyContext } from "./types"
@@ -285,6 +291,7 @@ const KINDS: Record<string, AnyProposalKind> = {
   "test.file": fileKind,
   "test.audience": audienceKind,
   "test.gated": gatedKind,
+  "instagram.publish": instagramPublishKind as AnyProposalKind,
 }
 
 const events: { roomId: string; event: JackRoomEvent }[] = []
@@ -392,6 +399,21 @@ describe("createProposal", () => {
     for (const untouched of [otherTarget, otherRoom, otherKind]) expect(row(untouched.proposal.proposalId).status).toBe("PENDING")
     expect(notes().at(-1)).toBe("Superseded: Change t1. Jack proposed a newer version.")
     expect(proposalEvents()).toEqual([expect.objectContaining({ id: first.proposal.proposalId, status: "SUPERSEDED" })])
+  })
+
+  it("keeps separate Instagram posts of one deck pending: two stories, a carousel; only a revised caption replaces a card", async () => {
+    const DECK = "11111111-1111-4111-8111-111111111111"
+    decks.getDeck.mockResolvedValue({ id: DECK, title: "GM 2 recap", size: "post", version: 3, roomId: ROOM, createdById: null, createdAt: new Date(), updatedAt: new Date(), content: { css: "", slides: ["a", "b", "c"].map((id) => ({ id: `slide-${id}`, html: `<section>${id}</section>` })) } })
+    const story1 = await propose("instagram.publish", { deck: DECK, type: "story", slides: [1] })
+    const story2 = await propose("instagram.publish", { deck: DECK, type: "story", slides: [2] })
+    const carousel = await propose("instagram.publish", { deck: DECK, type: "carousel", caption: "GM 2 recap!" })
+    for (const made of [story2, carousel]) expect(made.superseded).toEqual([])
+    for (const made of [story1, story2, carousel]) expect(row(made.proposal.proposalId).status).toBe("PENDING")
+
+    const revised = await propose("instagram.publish", { deck: DECK, type: "carousel", caption: "GM 2 recap! Thanks for coming." })
+    expect(revised.superseded).toEqual([carousel.proposal.proposalId])
+    expect(row(carousel.proposal.proposalId).status).toBe("SUPERSEDED")
+    for (const made of [story1, story2]) expect(row(made.proposal.proposalId).status).toBe("PENDING")
   })
 
   it("never supersedes one an officer is applying", async () => {

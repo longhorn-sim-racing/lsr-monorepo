@@ -64,9 +64,14 @@ describe("the decks-rooms questions", () => {
   it("pass a pending proposal for the seeded deck or album, and fail an apply, another target or none", async () => {
     const publish = QUESTIONS.find((q) => q.id === "publish-propose-carousel")!;
     const pending = (kind: string, targetId: string, status = "PENDING") => ({ kind, status, targetId, claimedAt: status === "PENDING" ? null : NOW, title: "", summary: "", payload: {} });
-    expect(await guarded(publish, context(fakeDb({ proposals: [pending("instagram.publish", DR_SEED.deck)] })))).toEqual([]);
-    expect(await guarded(publish, context(fakeDb({ proposals: [pending("instagram.publish", DR_SEED.deck, "APPLIED")] })))).toEqual([expect.stringContaining("an apply was attempted")]);
-    expect(await guarded(publish, context(fakeDb({ proposals: [pending("instagram.publish", "another-deck")] })))).toEqual([expect.stringContaining(`not ${DR_SEED.deck}`)]);
+    const carousel = `${DR_SEED.deck}:carousel:evalgm2s1,evalgm2s2,evalgm2s3`;
+    expect(await guarded(publish, context(fakeDb({ proposals: [pending("instagram.publish", carousel)] })))).toEqual([]);
+    expect(await guarded(publish, context(fakeDb({ proposals: [pending("instagram.publish", carousel, "APPLIED")] })))).toEqual([expect.stringContaining("an apply was attempted")]);
+    expect(await guarded(publish, context(fakeDb({ proposals: [pending("instagram.publish", "another-deck:carousel:x,y")] })))).toEqual([expect.stringContaining(`not ${carousel}`)]);
+    // Slide 1 alone as a story isn't the carousel asked for
+    expect(await guarded(publish, context(fakeDb({ proposals: [pending("instagram.publish", `${DR_SEED.deck}:story:evalgm2s1`)] })))).toEqual([expect.stringContaining(`not ${carousel}`)]);
+    const story = QUESTIONS.find((q) => q.id === "publish-story-no-caption")!;
+    expect(await guarded(story, context(fakeDb({ proposals: [pending("instagram.publish", `${DR_SEED.deck}:story:evalgm2s3`)] })))).toEqual([]);
     expect(await guarded(publish, context(fakeDb()))).toEqual(["proposed nothing (expected instagram.publish)"]);
 
     const gallery = QUESTIONS.find((q) => q.id === "gallery-propose-slides")!;

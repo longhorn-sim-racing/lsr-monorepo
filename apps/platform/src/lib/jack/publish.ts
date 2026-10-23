@@ -57,9 +57,23 @@ export function isPublishStatus(value: string): value is PublishStatus {
   return Object.hasOwn(PUBLISH_STATUS, value)
 }
 
+/**
+ * What an instagram.publish proposal is for (JackProposal.targetId): the deck, the type and the slides.
+ * A newer proposal for the same post (a revised caption) replaces an older pending one; two stories of
+ * one deck, or a carousel and a story from it, are separate posts and both stay
+ */
+export function publishTargetId(deckId: string, type: PublishType, slideIds: string[]): string {
+  return `${deckId}:${type}:${slideIds.join(",")}`
+}
+
+/** A post sent from a deck lately (on its way, or sent in the last day), for the deck page's dialog */
+export type DeckRecentPost = { id: string; mediaType: PublishMediaType; version: number | null; slides: number; status: PublishStatus; createdAt: string; permalink: string | null }
+
 /** What the deck page's Publish and Add to gallery dialogs know, from the server (nothing in it is a secret) */
 export type DeckPublishOptions = {
   instagram: { ready: boolean; problem: string | null; account: string | null }
+  /** This deck's posts on their way or sent in the last day, newest first */
+  recent: DeckRecentPost[]
   /** The newest caption Jack drafted in the deck's room, to start from */
   captionDraft: string | null
   /** How the slides go on each Instagram shape, or null when they fill it */
