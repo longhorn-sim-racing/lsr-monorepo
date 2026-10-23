@@ -159,7 +159,7 @@ export type ModelReplyResult = {
  * and the thinking blocks stay valid from call to call.
  *
  * Web search and fetch (server tools) run inside a call. Each becomes a part with a web_sources display,
- * filled in with the pages the reply cites as the citations arrive.
+ * filled in with the pages the reply cites as the citations stream in (citations_delta).
  */
 export async function runModelReply(options: ModelReplyOptions): Promise<ModelReplyResult> {
   const { client, config, system, onText } = options
@@ -178,6 +178,9 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
   let text = ""
   const parts: JackToolPart[] = []
   let partChain: Promise<void> = Promise.resolve()
+  // Web searches and fetches in this reply, in the order they started, and the pages its text cites
+  const webCalls = new Map<string, WebCall>()
+  const cited = new Map<string, string | null>()
   let toolCalls = 0
   let wrapUp = false
   let jsonRetries = 0
@@ -218,19 +221,19 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
       options.onPart(part, snapshot).catch((error) => console.error(`[jack] Couldn't save tool part ${part.id}:`, error))
     )
   }
+  /** Ends a part that's still running as an error; a web call without its result is dropped too, so it isn't shown as running again */
+  const closePart = (part: JackToolPart, label: string) => {
+    if (!webCalls.get(part.id)?.found) webCalls.delete(part.id)
+    upsertPart({ ...part, status: "error", label, error: label, at: Math.min(part.at, text.length) })
+  }
   const closeOpenParts = (label: string) => {
-    for (const part of parts) {
-      if (part.status === "running") upsertPart({ ...part, status: "error", label, error: label, at: Math.min(part.at, text.length) })
-    }
+    for (const part of parts) if (part.status === "running") closePart(part, label)
   }
   const result = async (status: "done" | "error", outcome: ReplyOutcome): Promise<ModelReplyResult> => {
     await partChain
     return { text, parts, status, outcome, usage, toolCalls, design, wrappedUp: wrapUp }
   }
 
-  // Web searches and fetches in this reply, in the order they started, and the pages its text cites
-  const webCalls = new Map<string, WebCall>()
-  const cited = new Map<string, string | null>()
   /** Brings the web calls' parts up to date: new ones placed at the text so far, changed ones sent again */
   const refreshWebParts = () => {
     for (const [id, fields] of webPartFields(webCalls.values(), cited)) {
@@ -304,6 +307,13 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
           else if (event.delta.type === "input_json_delta") {
             const input = webInputs.get(event.index)
             if (input) input.json += event.delta.partial_json
+          } else if (event.delta.type === "citations_delta") {
+            // A cited page shows under its search as soon as the text citing it streams
+            const citation = event.delta.citation
+            if (citation.type === "web_search_result_location" && !cited.has(citation.url)) {
+              cited.set(citation.url, citation.title ?? null)
+              refreshWebParts()
+            }
           }
         } else if (event.type === "content_block_stop") {
           const input = webInputs.get(event.index)
@@ -348,9 +358,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
     // A web call still running in a turn that also called Jack's tools finishes in the next call
     const pending = new Set(pendingServerCalls(echo))
     for (const part of parts) {
-      if (part.status === "running" && !toolUses.some((use) => use.id === part.id) && !pending.has(part.id)) {
-        upsertPart({ ...part, status: "error", label: "Didn't run", error: "Didn't run" })
-      }
+      if (part.status === "running" && !toolUses.some((use) => use.id === part.id) && !pending.has(part.id)) closePart(part, "Didn't run")
     }
 
     if (message.stop_reason === "refusal") {

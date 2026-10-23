@@ -235,12 +235,14 @@ describe("web search and fetch", () => {
         { title: "FIA esports", url: FIA.url, host: "fia.com" },
       ],
     })
-    // Running as soon as the call starts, the query once its input has streamed, done with the result
-    expect(parts.filter((p) => p.id === "srvtoolu_s1").map((p) => [p.status, p.label])).toEqual([
-      ["running", "Searching the web"],
-      ["running", "Searching the web"],
-      ["done", "Searched the web (3 results)"],
-      ["done", "Searched the web (3 results, 2 cited)"],
+    // Running as soon as the call starts, the query once its input has streamed, done with the result,
+    // then each cited page as the text citing it streams
+    expect(parts.filter((p) => p.id === "srvtoolu_s1").map((p) => [p.status, p.label, sourcesOf(p)?.queries.length ?? 0])).toEqual([
+      ["running", "Searching the web", 0],
+      ["running", "Searching the web", 1],
+      ["done", "Searched the web (3 results)", 1],
+      ["done", "Searched the web (3 results, 1 cited)", 1],
+      ["done", "Searched the web (3 results, 2 cited)", 1],
     ])
     expect(fake.calls).toHaveLength(1)
     // A search costs $0.01 on top of its tokens
@@ -434,6 +436,22 @@ describe("web search and fetch", () => {
       "tool_use",
     ])
     expect(echoed[0]).toEqual({ type: "text", text: "The blog says" })
+  })
+
+  it("closes a search in a call that came through garbled, and keeps it closed when the call is asked again", async () => {
+    const [started] = fakeWebSearch("half", [], { id: "srvtoolu_garbled" })
+    const { run } = setup([
+      { blocks: [started], tools: [{ name: "count_rows", input: { table: "x" } }], error: new Error("Unable to parse tool parameter JSON") },
+      { blocks: fakeWebSearch("again", [IRACING]), text: "Found it." },
+    ])
+
+    const result = await run()
+
+    expect(result.outcome).toBe("answered")
+    const events = parts.filter((p) => p.id === "srvtoolu_garbled").map((p) => p.status)
+    expect(events.at(-1)).toBe("error")
+    expect(events.slice(events.indexOf("error"))).toEqual(["error"])
+    expect(result.parts.filter((p) => p.name === "web_search").map((p) => p.status)).toEqual(["error", "done"])
   })
 
   it("counts the searches a call reported before it failed", async () => {
