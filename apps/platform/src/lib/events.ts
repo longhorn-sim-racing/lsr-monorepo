@@ -64,6 +64,23 @@ export function isEventPublic(
   return true; // PUBLISHED, CANCELLED, POSTPONED (and legacy states) are public
 }
 
+/** How far back "results missing" looks, so old seasons don't sit there forever */
+export const RESULTS_LOOKBACK_DAYS = 90;
+
+/**
+ * Ended racing events with no ingested results: in a series that has a season, published (or
+ * auto-published) and past their end time or a legacy COMPLETED, in the last RESULTS_LOOKBACK_DAYS, with
+ * no INGESTED upload. The Overview's "Results missing" panel and the digest's check both use it.
+ */
+export function missingResultsWhere(now = new Date()): Prisma.EventWhereInput {
+  return {
+    endsAtUtc: { lt: now, gte: new Date(now.getTime() - RESULTS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000) },
+    OR: [{ status: { in: [EventStatus.PUBLISHED, EventStatus.COMPLETED] } }, { status: EventStatus.SCHEDULED, publishedAt: { lte: now } }],
+    series: { seasons: { some: {} } },
+    rawResultUploads: { none: { status: "INGESTED" } },
+  };
+}
+
 export function isEventLive(event: {
   status: EventStatus;
   startsAtUtc: Date;
