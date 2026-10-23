@@ -1,7 +1,6 @@
 import { Fragment } from "react"
 import { ImageIcon } from "lucide-react"
 import type { JackProposalPreview, MdPreviewBlock, MdPreviewInline, MdPreviewListItem } from "@/lib/jack/markdown-preview"
-import { cn } from "@/lib/utils"
 import { PartLink } from "./part-link"
 
 /**
@@ -105,7 +104,7 @@ function ListItem({ item }: { item: MdPreviewListItem }) {
   // A tight list item is one paragraph: draw its text inline, as the site does
   const tight = item.c.length === 1 && item.c[0].t === "p"
   return (
-    <li className={cn(item.checked !== undefined && "list-none")}>
+    <li className={item.checked !== undefined ? "list-none" : undefined}>
       {item.checked !== undefined && <input type="checkbox" checked={item.checked} disabled readOnly className="mr-1.5 align-middle" aria-label={item.checked ? "Done" : "Not done"} />}
       {tight && item.c[0].t === "p" ? <Inlines nodes={item.c[0].c} /> : <Blocks blocks={item.c} />}
     </li>

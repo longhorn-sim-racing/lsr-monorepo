@@ -95,11 +95,18 @@ export function mdxProblems(text: string, tree: MdNode = parseMarkdown(text)): M
 export function mdxError(text: string, what = "The post's text", tree?: MdNode): string | null {
   const problems = mdxProblems(text, tree)
   if (!problems.length) return null
-  const shown = problems
+  // One mention per line, naming each thing it has
+  const lines = new Map<number, { what: Set<string>; excerpt: string }>()
+  for (const p of problems) {
+    const line = lines.get(p.line) ?? { what: new Set<string>(), excerpt: p.excerpt }
+    line.what.add(p.what === "import" || p.what === "export" ? `a starting "${p.what}"` : `"${p.what}"`)
+    lines.set(p.line, line)
+  }
+  const shown = [...lines.entries()]
     .slice(0, 3)
-    .map((p) => `line ${p.line} has ${p.what === "import" || p.what === "export" ? `a line starting with "${p.what}"` : `"${p.what}"`} (${p.excerpt})`)
+    .map(([n, line]) => `line ${n} has ${[...line.what].join(" and ")} (${line.excerpt})`)
     .join("; ")
-  const more = problems.length > 3 ? ` and ${problems.length - 3} more` : ""
+  const more = lines.size > 3 ? ` and ${lines.size - 3} more lines` : ""
   return `${what} must be plain Markdown: the site shows it with MDX, where "<" starts a component, "{" and "}" run code, and a line starting with import or export is code. Here ${shown}${more}. Use Markdown instead (**bold**, [text](https://…), - lists), leave out HTML and braces, and put any of these characters inside \`code\` if they must show.`
 }
 
