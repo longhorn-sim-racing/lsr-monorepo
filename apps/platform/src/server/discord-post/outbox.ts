@@ -146,7 +146,7 @@ async function markSent(id: string, messageId: string, at: Date): Promise<SendOu
   return { status: "SENT", messageId }
 }
 
-async function markFailed(id: string, error: string): Promise<SendOutcome> {
+async function markFailed(id: string, error: string): Promise<Extract<SendOutcome, { status: "FAILED" }>> {
   const text = stored(error)
   await prisma.discordPost.updateMany({ where: { id, status: "SENDING" }, data: { status: "FAILED", error: text } })
   return { status: "FAILED", error: text }
