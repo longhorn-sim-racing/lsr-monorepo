@@ -176,7 +176,7 @@ Each outside service is a connector (`src/server/connectors/`). Its sync jobs an
 | Source | Connector | Tools | Kept current by | Where officers see it |
 |---|---|---|---|---|
 | Discord | `discord` | `search`, `read`, `discord_activity`, `discord_polls` | `discord.sync` (10 min), `discord.rescan` and `discord.members` (hourly), `discord.prune` (daily). Metadata only: no message text is stored | Community → Discord, Overview |
-| Twitch | `twitch` | `twitch_stats` | EventSub webhook (`/api/webhooks/twitch`), `twitch.live` (every minute), `twitch.daily`, `twitch.token-check` | Content → Streams, Overview |
+| Twitch | `twitch` | `twitch_stats` | EventSub webhook (`/api/webhooks/twitch`), `twitch.live` (every minute), `twitch.daily`, `twitch.token-check` | Content → Streams (where an admin connects the club's Twitch account), Overview |
 | Instagram insights | `instagram-insights` | `instagram_insights` | `instagram.account-daily`, `instagram.post-insights` (hourly) | Content → Instagram (Insights) |
 | Stripe | `stripe` | `stripe_overview` | `stripe.sync` (daily), plus payout and dispute events on `/api/stripe/webhook` | Money → Payments (Stripe panel) |
 | Email delivery | `resend` | `email_delivery` | Resend's webhook (`/api/webhooks/resend`); `email-events.prune` keeps 12 months | System → Notifications (Delivery), Recruiting → Emails |
@@ -246,7 +246,7 @@ Jack proposes; an officer applies (`src/server/jack/proposals/`).
 
 The `proposals.sweep` job (every 10 minutes) marks expired proposals stale and applies that died partway as failed. Turn it on first: without it, a dead apply stays APPLYING.
 
-**Jack → Proposals** (`/admin/jack/proposals`) lists every proposal and its status, pending first, linking each to the reply that proposed it.
+**Admin → Proposals** in the sidebar (`/admin/jack/proposals`) lists every proposal and its status, pending first, linking each to the reply that proposed it.
 
 | Kind | Tool | What applying does |
 |---|---|---|
@@ -352,7 +352,7 @@ The bot posts only through an outbox (`src/server/discord-post/`): every message
 
 - **Posting channels** are a list admins pick (SystemSetting `discord_posting`).
 - **Standing rules** (`DiscordRule`; job `discord.rules`, every 5 minutes): event reminders, new events, results posted, standings updates, Twitch live, and the event mirror (Discord scheduled events, job `discord.event-mirror`). Fixed templates only, public events only, never an event's meeting link, and only for what happens after the rule was switched on. Admins create, edit and switch on rules; any officer can pause one.
-- **Role sync** (job `discord.role-sync`, hourly): gives linked members a Discord role while they meet a condition (officers, badges, entered in the open LSC season). Roles with moderation powers are refused. Every change is audited.
+- **Role sync** (job `discord.role-sync`, hourly): gives linked members a Discord role while they meet a condition (officers, badges, entered in the open LSC season). Roles with moderation powers are refused. Admins add, switch and delete role rules; officers see them. Every change is audited.
 - **Community → Announcements** (`/admin/announcements`): rules, scheduled, sent and failed posts, a form for officers to post directly, proposals waiting for approval, posting channels, and the server privacy note to post.
 - **Community → Discord** (`/admin/discord`): activity totals, channel opt-ins (admins), polls, role sync, mirrored events with interested counts, and deletion requests.
 
@@ -363,7 +363,7 @@ Details: [`jack-2/tracks/discord-post.md`](./jack-2/tracks/discord-post.md) and 
 ### Recurring questions
 
 A question Jack (or Stand) is asked on a schedule in a room, answered as the officer who set it up (`src/server/automation/recurring/`).
-- Set up on **Jack → Recurring questions** (`/admin/jack/recurring`) or through a `recurring.upsert` proposal. At most daily, Central Time. Off until someone turns it on.
+- Set up on **Admin → Recurring questions** (`/admin/jack/recurring`) or through a `recurring.upsert` proposal. At most daily, Central Time. Off until someone turns it on.
 - Each run: it pauses itself (with a room note) if its room is archived or its owner isn't an officer any more; skips (with a note once a month) if automations are over their cap; otherwise posts the question as a scheduled note and runs the room. The reply has no web tools, saves no knowledge, and sees only the question and its last answer.
 - When the room is busy with another answer, the run tries again 3 minutes later, for up to 45 minutes.
 - Each question has its own scheduled job (`recurring:<id>`, kind `recurring.question`). The page shows its last runs, its estimated monthly cost and this month's cost.
@@ -442,7 +442,7 @@ When the month's total reaches `JACK_MONTHLY_BUDGET_USD` (default $50), Jack sto
 
 **The automation cap:** replies to scheduled notes (recurring questions and the digest's summary) may spend at most `JACK_AUTOMATION_BUDGET_USD` (default $10) of that each month (`src/server/automation/cap.ts`). Past it, recurring questions skip and the digest goes out without Jack's summary until the 1st; officers' questions still get the rest of the budget.
 
-**Jack → Usage** (`/admin/jack/usage`): this month's spend against the cap, the automations' share against theirs, cost by month and persona for the last twelve months, cost by officer and automation, recent thumbs-down with their notes, and the common questions of the month.
+**Admin → Usage** (`/admin/jack/usage`): this month's spend against the cap, the automations' share against theirs, cost by month and persona for the last twelve months, cost by officer and automation, recent thumbs-down with their notes, and the common questions of the month.
 
 ## Environment variables
 
@@ -453,7 +453,7 @@ All server-only (never `NEXT_PUBLIC_`; Cloudinary's cloud name is the one public
 | Variable | Notes |
 |---|---|
 | `ANTHROPIC_API_KEY` | The Claude API key. Without it Jack answers "isn't connected yet". Also sets up Claude Files. |
-| `JACK_DATABASE_URL` | The connection string for `jack_readonly`, the read-only Postgres role that `run_sql` and `describe_schema` run as (see [Jack's own SQL](#jacks-own-sql)). Locally `scripts/jack-local-sql-role.ts` sets the role up and prints it. |
+| `JACK_DATABASE_URL` | The connection string for `jack_readonly`, the read-only Postgres role that `run_sql` and `describe_schema` run as (see [Jack's own SQL](#jacks-own-sql)). Locally `scripts/jack-local-sql-role.ts` sets the role up and prints it; it resets the password for every worktree, so copy another worktree's line if one has it. |
 | `JACK_MONTHLY_BUDGET_USD` | Spend cap per calendar month, in dollars. Default 50. |
 | `JACK_AUTOMATION_BUDGET_USD` | What automations may spend of it per month. Default 10. |
 | `JACK_WEB_TOOLS` | `on` gives room replies web search and fetch. The Anthropic Console must allow both first. |
@@ -481,22 +481,23 @@ All server-only (never `NEXT_PUBLIC_`; Cloudinary's cloud name is the one public
 
 Tokens that aren't env vars live in `SystemSetting` rows, which Jack's SQL role can't read: `instagram` (the feed's read token, which also serves insights), `instagram_publish`, `twitch` (the app token and the club account's grant), plus `discord_posting` (the posting channels) and `discord_purged` (the do-not-collect list, as keyed hashes).
 
-**Local only:** `JACK_FAKES`, `JACK_FAKES_URL` and `RESEND_BASE_URL` point clients at the local fakes ([`local-dev.md`](./local-dev.md), "Jack locally"). Fakes are never used on Vercel production, whatever the env says.
+**Local only:** `JACK_FAKES` and `JACK_FAKES_URL` point Jack's connector clients at the local fakes, and `RESEND_BASE_URL` does the same for the app's own email, which `JACK_FAKES` doesn't move ([`local-dev.md`](./local-dev.md), "Jack locally"). Checkout Stripe isn't faked. Fakes are never used on Vercel production, whatever the env says.
 
 ## Production setup
 
-These steps set Jack up from nothing; the first release of 2.0 follows its runbook, [`jack-2/release.md`](./jack-2/release.md).
+These steps set Jack up from nothing. The first release of 2.0 follows its own runbook, `docs/jack-2/release.md` (added in #225).
 
 1. **Anthropic Console.** Create an API key for the club's workspace, and set the workspace's monthly spend limit a little above `JACK_MONTHLY_BUDGET_USD`.
-2. **The read-only role.** The migration creates `jack_readonly` without a login. Make a long random password that's URL-safe, since it goes into a connection string as is: base64url, e.g. `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` (letters, digits, `-` and `_` only; never in git). In the Supabase SQL editor:
+2. **Extensions, then migrations.** Enable pg_cron (Integrations → Cron) and pg_net (Database → Extensions) in the Supabase dashboard first. Then the migrations are applied: the Database Migrate workflow runs them on the push to `main` ([deployment.md](./deployment.md#database-migrations)). They create `jack_readonly`, `scheduler.tick()` and the 2.0 tables.
+3. **The read-only role.** The migration creates `jack_readonly` without a login. Make a long random password that's URL-safe, since it goes into a connection string as is: base64url, e.g. `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` (letters, digits, `-` and `_` only; never in git). In the Supabase SQL editor:
    `ALTER ROLE jack_readonly LOGIN PASSWORD '…';`
    Then build `JACK_DATABASE_URL` from the transaction pooler string with the username `jack_readonly.<project-ref>` and `?pgbouncer=true`.
-3. **No secrets in database settings.** Any role can read them, so check (names only) that nothing secret is set at the database or role level: `SELECT split_part(s, '=', 1) FROM pg_db_role_setting, unnest(setconfig) AS s;`. `run_sql` refuses these reads by name, but that's defense in depth, not a permission; the secret shouldn't be there at all.
-4. **Vercel** (Production): add `ANTHROPIC_API_KEY`, `JACK_DATABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and `JACK_MONTHLY_BUDGET_USD` if the cap isn't $50. Add them to Preview only if previews should answer too (they share whatever database they point at). Redeploy.
-5. **File storage.** With production's `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the environment, run `pnpm --filter @lsr/platform exec tsx scripts/jack-storage-setup.ts --dry-run`, then without `--dry-run`. It creates the private `jack` bucket. `--copy-from-blob` copies stored screenshots over from an old Blob store.
-6. **The scheduler.** Enable pg_cron and pg_net in the Supabase dashboard. Set `SCHEDULER_SIGNING_SECRET` in Vercel and redeploy. `pnpm --filter @lsr/platform jack:scheduler-setup` prints the SQL for Vault and pg_cron (with a placeholder for the secret); run it in the SQL editor. The Scheduled jobs page says "Ticking" within a minute. Turn on `proposals.sweep` and `files.cleanup`. Details: [`groundwork.md`](./jack-2/tracks/groundwork.md), "Scheduler".
-7. **Check it.** Open a room, ask "How many members are there?", and watch the answer stream with a query part. The function log shows a `[jack] Reply …` line with the cost; the room gets a name from Stand. Then open `/api/admin/jack/render-check` (signed in as an officer): it renders a slide with the real Chromium, then writes a small file to the store and reads it back. It should say `"ok": true` with `"store": { "kind": "supabase", "ok": true }` (`?image=1` shows the slide). Finally ask for "a one-slide Instagram story saying GM 2 is Monday": a deck card with a thumbnail appears, and **Open** shows the slide and its downloads.
-8. **Outside services, one at a time.** For each: create the account or key (the area doc says who owns it), set its env vars in Vercel and redeploy, run its smoke test on System → Connections, switch it on, then turn on its jobs. Web search and fetch: allow them in the Console (Settings → Capabilities), then set `JACK_WEB_TOOLS=on`. Claude Files: run its smoke test and switch it on.
+4. **No secrets in database settings.** Any role can read them, so check (names only) that nothing secret is set at the database or role level: `SELECT split_part(s, '=', 1) FROM pg_db_role_setting, unnest(setconfig) AS s;`. `run_sql` refuses these reads by name, but that's defense in depth, not a permission; the secret shouldn't be there at all.
+5. **Vercel** (Production): add `ANTHROPIC_API_KEY`, `JACK_DATABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and `JACK_MONTHLY_BUDGET_USD` if the cap isn't $50. Add them to Preview only if previews should answer too (they share whatever database they point at). Redeploy.
+6. **File storage.** With production's `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the environment, run `pnpm --filter @lsr/platform exec tsx scripts/jack-storage-setup.ts --dry-run`, then without `--dry-run`. It creates the private `jack` bucket. `--copy-from-blob` copies stored screenshots over from an old Blob store.
+7. **The scheduler.** Set `SCHEDULER_SIGNING_SECRET` in Vercel (Production, Sensitive) and redeploy. `pnpm --filter @lsr/platform jack:scheduler-setup --no-db` prints the SQL for Vault and pg_cron (with a placeholder for the secret); run it in the SQL editor. Use `--no-db`: without it the script also creates job rows in whatever database `DATABASE_URL` points at (usually your local one), and the Scheduled jobs page creates production's rows on its first visit. The page says "Ticking" within a minute. Turn on `proposals.sweep` and `files.cleanup`. Details: [`groundwork.md`](./jack-2/tracks/groundwork.md), "Scheduler".
+8. **Check it.** Open a room, ask "How many members are there?", and watch the answer stream with a query part. The function log shows a `[jack] Reply …` line with the cost; the room gets a name from Stand. Then open `/api/admin/jack/render-check` (signed in as an officer): it renders a slide with the real Chromium, then writes a small file to the store and reads it back. It should say `"ok": true` with `"store": { "kind": "supabase", "ok": true }` (`?image=1` shows the slide). Finally ask for "a one-slide Instagram story saying GM 2 is Monday": a deck card with a thumbnail appears, and **Open** shows the slide and its downloads.
+9. **Outside services, one at a time.** For each: create the account or key (the area doc says who owns it), set its env vars in Vercel and redeploy, run its smoke test on System → Connections, switch it on, then turn on its jobs. Twitch also needs an admin to connect the club's Twitch account on **Content → Streams** first; the connector won't switch on without that grant. Web search and fetch: allow them in the Console (Settings → Capabilities), then set `JACK_WEB_TOOLS=on`. Claude Files: run its smoke test and switch it on.
 
 ### Function duration
 
@@ -523,22 +524,23 @@ Design questions check the deck's size and slide count and render every slide fr
 
 Grading has two parts. A script checks what it can against the database: the right number or names, no forbidden tool, nothing changed, no secret in the answer. Opus 5.5 judges the rest against a written expectation and the database facts, blind to which model answered, and with the model's system prompt and the live tool list (each tool's description and inputs), so a claim that comes from them isn't counted as invented. It also grades tool use and notes tools that would have helped. If Opus declines to grade (a question about password hashes trips its checks), Fable 5.1 grades instead. If both decline and the script checks pass, the answer is saved ungraded: it's left out of the pass rate and listed apart, so read it yourself. (A script failure is still a failure.)
 
-Results go to `.claude/hillclimb/jack-<model>/<variant>/` at the repo root (one row and one full transcript per answer) and a comparison of the three models to `.claude/hillclimb/jack-compare/<variant>.md`. That folder holds real member data from the database it ran on and is gitignored; never commit it. Run it on a local copy of production (`lsr_eval`), not on production. `--variant=v1` (v2…) saves a run beside the baseline after a change, to compare.
+Results go to `.claude/hillclimb/jack-<model>/<variant>/` at the repo root (one row and one full transcript per answer) and a comparison of the three models to `.claude/hillclimb/jack-compare/<variant>.md`. That folder holds real member data from the database it ran on and is gitignored; never commit it. Run it on a local copy of production (`lsr_eval`, with `--db=lsr_eval`), not on production. `--variant=v1` (v2…) saves a run beside the baseline after a change, to compare.
 
 ```bash
-# from apps/platform, with DATABASE_URL, JACK_DATABASE_URL and ANTHROPIC_API_KEY in .env.local
-pnpm jack:eval:prepare                       # migrate the lsr_eval copy and seed every area's fake data (pnpm jack:fakes running)
-pnpm jack:eval --db=lsr_eval                 # everything, all three models, on the eval copy
-pnpm jack:eval --pilot                       # five questions, under $1, to check grades and cost first
-pnpm jack:eval --only=jack                   # one model
-pnpm jack:eval --group=safety                # one group (or --filter=<text> for question ids)
-pnpm jack:eval --track=memory                # one area's questions ("core" for the rest)
-pnpm jack:eval --group=design --only=jack    # the design questions on one model: about $1.50 with the judge
-pnpm jack:eval --variant=v1                  # save beside the baseline after a change
-pnpm jack:eval --regrade                     # grade saved answers again after a grader fix (judge calls only)
-pnpm jack:eval --regrade --no-judge          # rerun the answer-only checks on saved answers: free, no key
-pnpm jack:eval --dry-run                     # no API calls: a fake model checks the plumbing and the cleanup
-pnpm exec tsx scripts/jack-eval/judge-check.ts   # the judge passes a right answer and fails three wrong ones
+# from apps/platform, with DATABASE_URL, JACK_DATABASE_URL and ANTHROPIC_API_KEY in .env.local.
+# Keep --db=lsr_eval on every local run: without it the eval runs on DATABASE_URL's own database (your dev database).
+pnpm jack:eval:prepare                                    # migrate the lsr_eval copy and seed every area's fake data (pnpm jack:fakes running)
+pnpm jack:eval --db=lsr_eval                              # everything, all three models
+pnpm jack:eval --db=lsr_eval --pilot                      # five questions, under $1, to check grades and cost first
+pnpm jack:eval --db=lsr_eval --only=jack                  # one model
+pnpm jack:eval --db=lsr_eval --group=safety               # one group (or --filter=<text> for question ids)
+pnpm jack:eval --db=lsr_eval --track=memory               # one area's questions ("core" for the rest)
+pnpm jack:eval --db=lsr_eval --group=design --only=jack   # the design questions on one model: about $1.50 with the judge
+pnpm jack:eval --db=lsr_eval --variant=v1                 # save beside the baseline after a change
+pnpm jack:eval --db=lsr_eval --regrade                    # grade saved answers again after a grader fix (judge calls only)
+pnpm jack:eval --db=lsr_eval --regrade --no-judge         # rerun the answer-only checks on saved answers: free, no key
+pnpm jack:eval --db=lsr_eval --dry-run                    # no API calls: a fake model checks the plumbing and the cleanup (skips questions that need a real model)
+pnpm exec tsx scripts/jack-eval/judge-check.ts            # the judge passes a right answer and fails three wrong ones
 ```
 
 - It reads only `apps/platform/.env.local` and `.env` (found from the script, wherever it's run from), without overriding the environment.
@@ -572,4 +574,4 @@ The check scripts run against local Supabase (never production) and delete what 
 | `check-jack-eval-cleanup.ts` | That the eval's cleanup finds everything a question can make |
 | `check-jack-web-fetch-documents.ts` | Paid, a few cents: a link inside a PDF can't be web-fetched. Run again when the `web_fetch` tool version changes |
 
-Scripts that put things in the browser without Claude: `try-jack-proposal.ts`, `try-jack-changes.ts`, `try-jack-web.ts`, `try-jack-tools.ts` (every tool once against the local database), `try-discord.ts` and `try-discord-post.ts` (`--clean` removes what they made).
+Scripts that try things locally without calling Claude: `try-jack-proposal.ts`, `try-jack-changes.ts`, `try-jack-web.ts`, `try-jack-tools.ts` (every tool once against the local database), `try-discord.ts` and `try-discord-post.ts` (`--clean` removes what they made).

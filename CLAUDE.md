@@ -48,10 +48,10 @@ pnpm set-role <email|handle|userId> <role>  # Assign role to user
 # Jack (from apps/platform/; see docs/jack.md)
 pnpm jack:fakes       # Local HTTP fakes of every outside service, on 127.0.0.1:3999
 pnpm jack:tick        # Run due scheduled jobs once, in-process (--job <key> runs one now); local only
-pnpm jack:eval        # Jack's eval (--dry-run needs no API key)
+pnpm jack:eval --db=lsr_eval  # Jack's eval on the eval copy (without --db it uses DATABASE_URL's database; --dry-run needs no API key)
 pnpm jack:eval:prepare  # Migrate the lsr_eval copy and seed every area's fake data
-pnpm jack:scheduler-setup  # Print the pg_cron and Vault SQL for production
-pnpm exec tsx scripts/jack-local-sql-role.ts  # Local JACK_DATABASE_URL for Jack's read-only role
+pnpm jack:scheduler-setup  # Print the scheduler's pg_cron and Vault SQL; also creates switched-off job rows in DATABASE_URL's database (--no-db skips that)
+pnpm exec tsx scripts/jack-local-sql-role.ts  # Local JACK_DATABASE_URL; resets the role's password for every worktree, so copy an existing line if you have one
 pnpm exec tsx scripts/jack-storage-setup.ts   # Create the private `jack` Storage bucket
 ```
 
@@ -156,7 +156,7 @@ Required in `apps/platform/.env.local`:
 - `DATABASE_URL` (local: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`)
 - `DIRECT_URL` (same as `DATABASE_URL` for local dev)
 
-Optional ones (site URL, Stripe, Resend, Cloudinary, Shopify, Jack and its outside services) are listed in `apps/platform/.env.example`; Jack's are explained in `docs/jack.md`. Locally, `JACK_FAKES=all` with `pnpm jack:fakes` running points every outside service at the fakes (never on Vercel production). Prefer `pnpm jack:tick --job <key>` to switching a job on in a shared local database.
+Optional ones (site URL, Stripe, Resend, Cloudinary, Shopify, Jack and its outside services) are listed in `apps/platform/.env.example`; Jack's are explained in `docs/jack.md`. Locally, `JACK_FAKES=all` with `pnpm jack:fakes` running points Jack's connector clients at the fakes (never on Vercel production); the app's own email also needs `RESEND_BASE_URL=http://127.0.0.1:3999/resend`, and checkout Stripe isn't faked. Prefer `pnpm jack:tick --job <key>` to switching a job on in a shared local database.
 
 Prisma reads `.env` (not `.env.local`), so `DATABASE_URL` and `DIRECT_URL` must also be in `apps/platform/.env`.
 
