@@ -275,7 +275,9 @@ const INTERRUPTED_EMAIL_AFTER_MINUTES = 10;
 
 /**
  * Process all pending notifications for a user.
- * Skips unscheduled rows older than UNSCHEDULED_MAX_AGE_HOURS (see above).
+ * Skips unscheduled rows older than UNSCHEDULED_MAX_AGE_HOURS (see above). Due scheduled
+ * announcement emails get the same daily-limit hold as on the cron, so a member's own
+ * confirmation can't send one past it; unscheduled rows go out as they are.
  */
 export async function processUserNotifications(userId: string): Promise<void> {
   const now = new Date();
@@ -291,7 +293,8 @@ export async function processUserNotifications(userId: string): Promise<void> {
     include: { user: true },
   });
 
-  await processNotifications(notifications);
+  const held = await holdAnnouncementEmailsOverLimit(notifications.filter((n) => n.scheduledFor));
+  await processNotifications(notifications.filter((n) => !held.has(n.id)));
 }
 
 /**

@@ -66,7 +66,7 @@ Environment variables (Supabase credentials, Stripe keys, etc.) are configured i
 
 ## Scheduled jobs
 
-A GitHub Actions cron job (`.github/workflows/notification-cron.yml`) runs every 15 minutes to process queued notifications. It calls the `/api/cron/notifications` endpoint with a bearer token. This is independent of deployments. Scheduled announcements never use the 10 emails a day kept for confirmations and receipts: announcement emails past the day's limit when the job sends them are held back and show as failed on Notifications, to retry after the reset.
+A GitHub Actions cron job (`.github/workflows/notification-cron.yml`) runs every 15 minutes to process queued notifications. It calls the `/api/cron/notifications` endpoint with a bearer token. This is independent of deployments. Scheduled announcements never use the 10 emails a day kept for confirmations and receipts: an announcement email that comes due past the day's limit is held back, whether the job sends it or a member's own confirmation or receipt picks it up first, and shows as failed on Notifications, to retry after the reset.
 
 A second job (`.github/workflows/recruiting-cron.yml`) calls `/api/cron/recruiting` every 15 minutes. After a recruiting round's deadline it submits every complete draft for its applicant (and emails a confirmation); before the deadline it does nothing, and running it again changes nothing. Unlike the other cron routes it **refuses every request when `CRON_SECRET` is not set**, so the secret must exist in both Vercel and the repo's GitHub secrets (with `SITE_URL`) before the first recruiting deadline.
 

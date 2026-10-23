@@ -427,6 +427,51 @@ describe("processing pending notifications", () => {
     })
   })
 
+  it("holds a due scheduled announcement past today's limit when a member's own send flushes it, and still sends their confirmation", async () => {
+    vi.stubEnv("RESEND_DAILY_LIMIT", "")
+    db.notification.count.mockResolvedValue(90) // 90 of 100 sent today, 10 kept for receipts: no room for announcements
+    db.notification.findMany.mockResolvedValue([
+      { ...due("announcement", "EMAIL"), scheduledFor: new Date("2026-10-16T17:45:00Z") },
+      { ...due("confirmation", "EMAIL"), type: "REGISTRATION_CONFIRMED", scheduledFor: null },
+    ])
+
+    await processUserNotifications("u1")
+
+    const held = db.notification.updateMany.mock.calls.filter(([args]) => args.data.status === "FAILED").map(([args]) => args)
+    expect(held).toEqual([{ where: { id: { in: ["announcement"] }, status: "PENDING" }, data: { status: "FAILED", emailError: expect.stringContaining("today's email limit had no room left for announcements") } }])
+    const claimed = db.notification.updateMany.mock.calls.filter(([args]) => args.data.status === "SENT").map(([args]) => args.where.id)
+    expect(claimed).toEqual(["confirmation"])
+    expect(email.sendEmail).toHaveBeenCalledTimes(1)
+    expect(email.sendEmail.mock.calls[0][0]).toMatchObject({ to: "user-confirmation@utexas.edu" })
+  })
+
+  it("sends a member's due scheduled announcement when there's room, and doesn't hold unscheduled emails", async () => {
+    vi.stubEnv("RESEND_DAILY_LIMIT", "")
+    db.notification.count.mockResolvedValue(89) // room for one
+    db.notification.findMany.mockResolvedValue([
+      { ...due("announcement", "EMAIL"), scheduledFor: new Date("2026-10-16T17:45:00Z") },
+      { ...due("now", "EMAIL"), scheduledFor: null },
+    ])
+
+    await processUserNotifications("u1")
+
+    expect(db.notification.updateMany.mock.calls.every(([args]) => args.data.status === "SENT")).toBe(true)
+    expect(email.sendBatchEmails.mock.calls[0][0].map((e: { to: string }) => e.to)).toEqual(["user-announcement@utexas.edu", "user-now@utexas.edu"])
+  })
+
+  it("doesn't look up the day's usage when a member's flush has no scheduled announcement", async () => {
+    db.notification.findMany.mockResolvedValue([
+      { ...due("confirmation", "EMAIL"), type: "REGISTRATION_CONFIRMED", scheduledFor: null },
+      { ...due("reminder", "EMAIL"), type: "EVENT_REMINDER_24H", scheduledFor: new Date("2026-10-16T17:45:00Z") },
+    ])
+
+    await processUserNotifications("u1")
+
+    expect(db.notification.count).not.toHaveBeenCalled()
+    expect(db.applicationEmail.count).not.toHaveBeenCalled()
+    expect(email.sendBatchEmails.mock.calls[0][0]).toHaveLength(2)
+  })
+
   it("flags emails interrupted mid-send as failed, saying they may have gone out", async () => {
     vi.useFakeTimers({ now: NOW })
     db.notification.updateMany.mockResolvedValue({ count: 2 })
