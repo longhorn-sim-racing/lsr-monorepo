@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { buildConversation, buildHistory, formatTurnTime, windowStart, type HistoryRow } from "./history"
+import { ASIDE_LIMITS, ASIDE_MARK, buildConversation, buildHistory, formatTurnTime, windowStart, type HistoryRow } from "./history"
+import { PROMPT_SLOT } from "./prompt-sections/decks-rooms"
 
 let clock = Date.parse("2026-10-13T20:00:00.000Z")
 let ids = 0
@@ -256,6 +257,93 @@ describe("files in the history", () => {
     rows.at(-1)!.content = "Answer"
     rows.push(...room([{ ask: [["Gray", "Three"]], reply: { status: "streaming", content: "" } }]))
     expect(buildHistory(rows, rows.at(-1)!.id).slice(0, before.length)).toEqual(before)
+  })
+})
+
+describe("buildHistory in a mention-mode room (design §10)", () => {
+  const aside = (name: string, content: string, answeredById: string | null = null) => ({ ...officer(name, content, answeredById), expectsAnswer: false })
+
+  it("puts what officers said among themselves in the turn of the reply that took it, each marked, and the mention as is", () => {
+    const first = aside("Gray", "Should GM 2 move to Thursday?")
+    const second = aside("Dylan", "Thursday works for me")
+    const mention = officer("Dylan", "@Jack how many registered for GM 2?")
+    const reply = row({ kind: "assistant", status: "streaming" })
+    for (const m of [first, second, mention]) m.answeredById = reply.id
+
+    const history = buildHistory([first, second, mention, reply], reply.id)
+
+    expect(history).toEqual([
+      {
+        role: "user",
+        content: `[${formatTurnTime(mention.createdAt)}]\nGray: ${ASIDE_MARK} Should GM 2 move to Thursday?\nDylan: ${ASIDE_MARK} Thursday works for me\nDylan: @Jack how many registered for GM 2?`,
+      },
+    ])
+  })
+
+  it("keeps an earlier turn's asides with that turn, and leaves out asides no reply has taken yet", () => {
+    const earlier = row({ kind: "assistant", content: "Ten so far.", model: "claude-sonnet-5-5" })
+    const rows = [aside("Gray", "Room's booked", earlier.id), officer("Gray", "@jack how many registered?", earlier.id), earlier]
+    rows.push(aside("Dylan", "Nice", null))
+    const now = officer("Gray", "@jack and GM 3?")
+    const reply = row({ kind: "assistant", status: "streaming" })
+    now.answeredById = reply.id
+    rows.push(now, reply)
+
+    const history = buildHistory(rows, reply.id)
+
+    expect(history.map((m) => m.role)).toEqual(["user", "assistant", "user"])
+    expect(history[0].content).toMatch(/\]\nGray: \(not addressed to you\) Room's booked\nGray: @jack how many registered\?$/)
+    expect(history[1].content).toBe("Ten so far.")
+    expect(history[2].content).toMatch(/\]\nGray: @jack and GM 3\?$/)
+    expect(history[2].content).not.toContain("Nice")
+  })
+
+  /** One reply taking `asides` and a mention, as the reply loop does */
+  function mentionTurn(asides: HistoryRow[]) {
+    const mention = officer("Gray", "@Jack how many registered for GM 2?")
+    const reply = row({ kind: "assistant", status: "streaming" })
+    for (const m of [...asides, mention]) m.answeredById = reply.id
+    const history = buildHistory([...asides, mention, reply], reply.id)
+    expect(history).toHaveLength(1)
+    return (history[0].content as string).split("\n")
+  }
+
+  it("keeps only a turn's newest asides however long the backlog, and says how many it left out", () => {
+    const asides = Array.from({ length: 300 }, (_, i) => aside(i % 2 ? "Dylan" : "Gray", `chat ${i}`))
+
+    const lines = mentionTurn(asides)
+
+    expect(lines[0]).toBe("(260 earlier messages among officers, not addressed to you, aren't included.)")
+    expect(lines.filter((line) => line.includes(ASIDE_MARK))).toHaveLength(ASIDE_LIMITS.maxLines)
+    expect(lines[2]).toBe(`Gray: ${ASIDE_MARK} chat 260`)
+    expect(lines.at(-2)).toBe(`Dylan: ${ASIDE_MARK} chat 299`)
+    expect(lines.at(-1)).toBe("Gray: @Jack how many registered for GM 2?")
+  })
+
+  it("also keeps a turn's asides within a character budget", () => {
+    const asides = Array.from({ length: 30 }, (_, i) => aside("Gray", String(i).padEnd(1_000, ".")))
+
+    const lines = mentionTurn(asides)
+
+    expect(lines[0]).toBe("(10 earlier messages among officers, not addressed to you, aren't included.)")
+    expect(lines.filter((line) => line.includes(ASIDE_MARK))).toHaveLength(ASIDE_LIMITS.maxChars / 1_000)
+    expect(lines[2]).toBe(`Gray: ${ASIDE_MARK} ${"10".padEnd(1_000, ".")}`)
+  })
+
+  it("says so when it leaves out a single aside, and adds no line when it leaves out none", () => {
+    expect(mentionTurn(Array.from({ length: ASIDE_LIMITS.maxLines + 1 }, (_, i) => aside("Gray", `chat ${i}`)))[0]).toBe(
+      "(1 earlier message among officers, not addressed to you, isn't included.)"
+    )
+    expect(mentionTurn(Array.from({ length: ASIDE_LIMITS.maxLines }, (_, i) => aside("Gray", `chat ${i}`)))[0]).toMatch(/^\[/)
+  })
+
+  it("marks nothing in a room that answers every message", () => {
+    const rows = room([{ ask: [["Gray", "Hi"]], reply: { status: "streaming" } }])
+    expect(buildHistory(rows, rows.at(-1)!.id)[0].content).not.toContain(ASIDE_MARK)
+  })
+
+  it("uses the mark the prompt explains", () => {
+    expect(PROMPT_SLOT.section).toContain(`"${ASIDE_MARK}"`)
   })
 })
 

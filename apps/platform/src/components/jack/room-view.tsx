@@ -66,6 +66,8 @@ type RoomViewProps = {
   anchorId?: string
   /** Opened at an old message in a long room: newer messages weren't loaded after this one; a divider there links to the latest */
   gap?: { afterId: string; count: number }
+  /** Drawn in the header beside who answers (the room's menu: pin, mention mode, archive) */
+  headerActions?: ReactNode
 }
 
 /** Options for the room's composer (#188); each one left out keeps today's behavior */
@@ -103,8 +105,11 @@ export function JackRoomView({
   renderAttachments,
   anchorId,
   gap,
+  headerActions,
 }: RoomViewProps) {
   const title = jackRoomTitle(room)
+  // An archived room is read-only: no renaming or switching who answers either
+  const readOnly = Boolean(composer.readOnly)
   // Bumped when this officer sends, so the list jumps to the end even if they'd scrolled up
   const [sentCount, setSentCount] = useState(0)
 
@@ -118,7 +123,7 @@ export function JackRoomView({
     // Fills the workspace below the top bar so the conversation scrolls and the composer stays put
     <div className="-mx-4 -my-4 flex h-[calc(100dvh-44px)] bg-card md:-mx-6 md:-my-5">
       {/* The open room's title and persona are live; the rest of the rail is as of page load */}
-      <JackRoomRail rooms={rooms.map((r) => (r.id === room.id ? { ...r, title: room.title, persona: room.persona } : r))} activeId={room.id} />
+      <JackRoomRail rooms={rooms.map((r) => (r.id === room.id ? { ...r, title: room.title, persona: room.persona, pinnedAt: room.pinnedAt === undefined ? r.pinnedAt : room.pinnedAt } : r))} activeId={room.id} />
       <section aria-label={title} className="flex min-w-0 flex-1 flex-col">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-admin-row px-4 py-2.5 md:px-5">
           <div className="flex min-w-0 flex-col">
@@ -126,15 +131,16 @@ export function JackRoomView({
               <ChevronLeft className="size-3.5" aria-hidden />
               All rooms
             </Link>
-            <RoomTitle title={title} saved={room.title} onRename={onRename} />
+            <RoomTitle title={title} saved={room.title} onRename={onRename} readOnly={readOnly} />
             <span className="flex flex-wrap items-center gap-x-3">
               <ConnectionLine connection={connection} />
               {spend ? <SpendMeter spend={spend} /> : null}
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-3.5">
-            <PersonaSwitch persona={room.persona} onSwitch={onSwitchPersona} />
+            <PersonaSwitch persona={room.persona} onSwitch={onSwitchPersona} readOnly={readOnly} />
             <PresenceStack present={present} />
+            {headerActions}
           </div>
         </header>
         <MessageList
@@ -158,7 +164,7 @@ export function JackRoomView({
 }
 
 /** The room's name, with a pencil to rename it in place: Enter saves, Escape cancels */
-function RoomTitle({ title, saved, onRename }: { title: string; saved: string | null; onRename: RoomViewProps["onRename"] }) {
+function RoomTitle({ title, saved, onRename, readOnly }: { title: string; saved: string | null; onRename: RoomViewProps["onRename"]; readOnly: boolean }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -195,6 +201,8 @@ function RoomTitle({ title, saved, onRename }: { title: string; saved: string | 
     if (problem) setError(problem)
     else stop()
   }
+
+  if (readOnly) return <h1 className="truncate font-display text-lg font-semibold leading-tight">{title}</h1>
 
   if (!editing)
     return (
@@ -313,7 +321,7 @@ function PresenceStack({ present }: { present: JackPresence[] }) {
   )
 }
 
-function PersonaSwitch({ persona, onSwitch }: { persona: JackRoomPersonaKey; onSwitch: RoomViewProps["onSwitchPersona"] }) {
+function PersonaSwitch({ persona, onSwitch, readOnly }: { persona: JackRoomPersonaKey; onSwitch: RoomViewProps["onSwitchPersona"]; readOnly: boolean }) {
   const [error, setError] = useState<string | null>(null)
   // What the officer picked, shown while the switch goes through so the select doesn't flick back
   const [pending, setPending] = useState<JackRoomPersonaKey | null>(null)
@@ -336,7 +344,7 @@ function PersonaSwitch({ persona, onSwitch }: { persona: JackRoomPersonaKey; onS
       <Select
         id="jack-persona"
         value={pending ?? persona}
-        disabled={pending !== null}
+        disabled={pending !== null || readOnly}
         onChange={(e) => void pick(e.target.value as JackRoomPersonaKey)}
         // 16px on phones so iOS doesn't zoom in on focus
         className="h-8 w-auto text-base font-semibold md:h-7 md:text-sm"

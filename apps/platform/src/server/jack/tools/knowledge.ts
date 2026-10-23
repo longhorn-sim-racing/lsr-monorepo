@@ -225,7 +225,8 @@ function refusal(result: Exclude<KnowledgeWriteResult, { ok: true }>): JackToolR
 
 export async function runKnowledge(value: KnowledgeInput, ctx: JackToolContext): Promise<JackToolResult> {
   const reply = ctx.reply
-  if (!reply?.fromOfficer) {
+  // A scheduled reply (a recurring question) answers a note, so fromOfficer is false already; checked on its own too
+  if (!reply?.fromOfficer || ctx.requestType === "scheduled") {
     return fail(
       "Knowledge can only be saved in a reply to an officer's own message, not in continue notes, recurring questions or the digest. Say what you'd save, and an officer can ask for it.",
     )

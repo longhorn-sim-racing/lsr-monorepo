@@ -22,5 +22,7 @@ vi.mock("@/server/db", () => ({ prisma: {} }))
 // Importing the whole actions module takes a few seconds when the full suite runs in parallel
 it("the room's server actions never load the file parsers", { timeout: 30_000 }, async () => {
   await import("./actions")
+  // The room page's settings and ratings (decks-rooms) too
+  await import("./room-actions")
   expect(loaded).toEqual([])
 })

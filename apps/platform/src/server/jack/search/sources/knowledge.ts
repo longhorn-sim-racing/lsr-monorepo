@@ -89,7 +89,8 @@ export const knowledgeSource: SearchSource = {
             archivedAt: true,
             updatedAt: true,
             owner: { select: { displayName: true, handle: true } },
-            versions: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true } },
+            // The newest version as the knowledge service orders them, so an update based on it isn't refused as stale
+            versions: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1, select: { id: true } },
           },
         })
         if (!entry) return { ok: false, error: `No knowledge entry ${id}. Search for it again: it may have been deleted.` }

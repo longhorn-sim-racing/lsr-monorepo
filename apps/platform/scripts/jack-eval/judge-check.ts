@@ -7,7 +7,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { loadAppEnv } from "./env";
-import { judgeAnswer, judgeSystem, judgeTools, type JudgeInput } from "./judge";
+import { judgeAnswer, judgeSystem, requestJudgeTools, type JudgeInput } from "./judge";
 
 // apps/platform's env files, like the eval itself (without overriding the environment)
 loadAppEnv();
@@ -35,9 +35,14 @@ const cases: { label: string; shouldPass: boolean; input: JudgeInput }[] = [
 
 async function main() {
   const client = new Anthropic({ apiKey, maxRetries: 4 });
-  // The judge's tool overview from the live tool list, as the eval builds it
-  const [{ JACK_TOOLS }, { PROPOSE_TOOLS }] = await Promise.all([import("../../src/server/jack/tools"), import("../../src/server/jack/proposals/types")]);
-  const system = judgeSystem(judgeTools(JACK_TOOLS, PROPOSE_TOOLS));
+  // The judge's tool overview from what a room reply's request sends, as the eval builds it
+  const [{ JACK_TOOLS }, { PROPOSE_TOOLS }, { requestTools }, { webToolsOn }] = await Promise.all([
+    import("../../src/server/jack/tools"),
+    import("../../src/server/jack/proposals/types"),
+    import("../../src/server/jack/model-loop"),
+    import("../../src/server/jack/web-tools"),
+  ]);
+  const system = judgeSystem(requestJudgeTools(requestTools(JACK_TOOLS, { web: webToolsOn() }), PROPOSE_TOOLS));
   let wrong = 0;
   for (const c of cases) {
     const { grade } = await judgeAnswer(client, { ...c.input, system });
