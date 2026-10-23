@@ -1,7 +1,30 @@
+import { JACK_DECK_SIZES, type JackDeckSizeKey } from "./decks"
+
 /**
  * Instagram publishing's plain values (#188, design §12.6), for the server, the deck page's dialogs and
  * the publish history alike. The flow itself is src/server/jack/publish/instagram.ts.
  */
+
+/** Feed posts and carousels are 4:5 (the deck "post" size); stories are 9:16 (research §3d, §6) */
+export type InstagramShape = "feed" | "story"
+
+export const INSTAGRAM_CANVAS: Record<InstagramShape, { width: number; height: number; label: string }> = {
+  feed: { width: 1080, height: 1350, label: "4:5" },
+  story: { width: 1080, height: 1920, label: "9:16" },
+}
+
+const RATIO: Record<JackDeckSizeKey, string> = { slides: "16:9", post: "4:5", story: "9:16", square: "1:1" }
+
+export const sameRatio = (a: { width: number; height: number }, b: { width: number; height: number }) => Math.abs(a.width / a.height - b.width / b.height) < 0.01
+
+/** How a deck of this size goes on an Instagram shape: null when it fills it, else a sentence about the bars */
+export function fitNote(size: JackDeckSizeKey, shape: InstagramShape): string | null {
+  const slide = JACK_DECK_SIZES[size]
+  const canvas = INSTAGRAM_CANVAS[shape]
+  if (sameRatio(slide, canvas)) return null
+  const bars = slide.width / slide.height > canvas.width / canvas.height ? "above and below" : "at the sides"
+  return `The slides are ${RATIO[size]}, so each sits whole on a ${canvas.label} image with bars ${bars}.`
+}
 
 /** What an officer picks: one slide in the feed, 2-20 as one feed post, or one slide as a story */
 export type PublishType = "post" | "carousel" | "story"
@@ -32,6 +55,16 @@ export const PUBLISH_STATUS: Record<PublishStatus, { label: string; tone: "neutr
 
 export function isPublishStatus(value: string): value is PublishStatus {
   return Object.hasOwn(PUBLISH_STATUS, value)
+}
+
+/** What the deck page's Publish and Add to gallery dialogs know, from the server (nothing in it is a secret) */
+export type DeckPublishOptions = {
+  instagram: { ready: boolean; problem: string | null; account: string | null }
+  /** The newest caption Jack drafted in the deck's room, to start from */
+  captionDraft: string | null
+  /** How the slides go on each Instagram shape, or null when they fill it */
+  fit: { feed: string | null; story: string | null }
+  gallery: { ready: boolean; albums: { id: string; title: string }[] }
 }
 
 /** What fits a deck: the type an officer most likely wants for its size and how many slides it has */

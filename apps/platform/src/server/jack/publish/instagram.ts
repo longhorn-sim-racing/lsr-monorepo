@@ -1,5 +1,5 @@
 import { Prisma, type InstagramPublish } from "@prisma/client"
-import { ACTIVE_STATUSES, MEDIA_TYPE, PUBLISH_HISTORY, TYPE_LABEL, type PublishMediaType, type PublishStatus, type PublishType } from "@/lib/jack/publish"
+import { ACTIVE_STATUSES, MEDIA_TYPE, PUBLISH_HISTORY, TYPE_LABEL, type InstagramShape, type PublishMediaType, type PublishStatus, type PublishType } from "@/lib/jack/publish"
 import { JACK_EVENT } from "@/lib/jack/types"
 import { redactSecrets } from "@/lib/redact"
 import { createAuditLog } from "@/server/audit/log"
@@ -13,7 +13,7 @@ import { getRenderFile } from "@/server/jack/decks/renders"
 import type { DeckView } from "@/server/jack/decks/service"
 import { jackMessageInclude, toMessageView } from "@/server/jack/messages"
 import { mapLimit, plural } from "@/server/jack/proposals/changes/shared"
-import { instagramJpeg, type InstagramShape } from "./images"
+import { instagramJpeg } from "./images"
 import { slideSource, type PickedSlide } from "./slides"
 
 /**
