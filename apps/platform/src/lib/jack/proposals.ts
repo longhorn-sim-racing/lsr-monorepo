@@ -76,7 +76,7 @@ export function isProposalStatus(value: unknown): value is JackProposalStatusKey
 /** Where officers see every proposal */
 export const PROPOSALS_PAGE = "/admin/jack/proposals"
 
-/** A room, scrolled to one of its messages (the anchor works once rooms support `?m=`) */
+/** A room opened at one of its messages (the room page reads `?m=`, as search results use it); the Proposals page links each proposal's reply this way */
 export function roomMessageUrl(roomId: string, messageId: string | null): string {
   return messageId ? `/admin/jack/${roomId}?m=${encodeURIComponent(messageId)}` : `/admin/jack/${roomId}`
 }
