@@ -72,7 +72,10 @@ export type ReplyLimits = {
   maxJsonRetries: number
   /**
    * Web searches and pages opened per reply, counted from each call's `usage.server_tool_use`; then it's
-   * told to wrap up. Each call also has its own smaller cap (WEB_LIMITS' max_uses)
+   * told to wrap up. A soft cap: it's checked when a call ends, and each call has its own (WEB_LIMITS'
+   * max_uses, 5 searches and 3 pages), so the call that crosses it can go up to 12 searches and 7 pages.
+   * When it's crossed in a turn still waiting on a web call, the note waits for a call that ends with none
+   * pending, and each call before it can add its share
    */
   maxWebSearches: number
   maxWebFetches: number
@@ -260,13 +263,21 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
     addCitations(cited, content)
     refreshWebParts()
   }
-  /** Why the reply should stop using the web, once it has used its share */
-  const webCap = () =>
-    usage.webSearches >= limits.maxWebSearches
-      ? `You've used this reply's ${limits.maxWebSearches} web searches.`
-      : usage.webFetches >= limits.maxWebFetches
-        ? `You've opened this reply's ${limits.maxWebFetches} web pages.`
-        : null
+  /**
+   * Why the reply should wrap up now, if it should: what the model is told (`note`), and what the room is
+   * told it ran out of (`used`) when it has to stop instead
+   */
+  const wrapUpReason = (): { note: string; used: string } | null => {
+    if (toolCalls >= toolCap()) return { note: `You've used this reply's ${toolCap()} tool calls.`, used: "used up its tool calls" }
+    if (usage.webSearches >= limits.maxWebSearches) return { note: `You've used this reply's ${limits.maxWebSearches} web searches.`, used: "used up its web searches" }
+    if (usage.webFetches >= limits.maxWebFetches) return { note: `You've opened this reply's ${limits.maxWebFetches} web pages.`, used: "opened all the web pages it can" }
+    if (usage.tokens.outputTokens >= outputCap() || now() - started >= elapsedCap()) return { note: "This reply is running long.", used: "ran long" }
+    return null
+  }
+  const wrapUpNote = (reason: { note: string }) =>
+    design
+      ? `${reason.note} Don't call any more tools: in a few sentences, say what's done (with the deck's link) and what's left. You'll pick it up in your next reply.`
+      : `${reason.note} Don't call any more tools: answer now with what you have, and say what you couldn't check.`
 
   for (let call = 0; call < Math.max(limits.maxToolCalls, limits.maxDesignToolCalls) + 4; call++) {
     const textBefore = text.length
@@ -386,16 +397,17 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
     if (message.stop_reason === "pause_turn") {
       // A long run of server tool calls paused; sending the turn back unchanged lets it carry on
       messages.push({ role: "assistant", content: echo })
-      const over = wrapUp ? null : webCap()
-      if (over) {
+      // The same limits as after a tool round: a run of pauses can't outlast the reply's time or web share
+      const reason = wrapUp ? null : wrapUpReason()
+      if (reason) {
         if (pending.size) {
           // Carrying on would run the pending call and maybe more; a turn with one pending can't take a wrap-up note
-          closeOpenParts("Didn't run: the reply used up its web searches")
-          finishWith(`(${name} stopped here: this answer used up its web searches. Ask a follow-up to keep going.)`)
+          closeOpenParts(`Didn't run: the reply ${reason.used}`)
+          finishWith(`(${name} stopped here: this answer ${reason.used}. Ask a follow-up to keep going.)`)
           return result("done", "tool_limit")
         }
         wrapUp = true
-        messages.push({ role: "user", content: [{ type: "text", text: `${over} Don't call any more tools: answer now with what you have, and say what you couldn't check.` }] })
+        messages.push({ role: "user", content: [{ type: "text", text: wrapUpNote(reason) }] })
       }
       continue
     }
@@ -417,22 +429,13 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
     )
     toolCalls += Math.min(toolUses.length, allowance)
 
-    const reason =
-      toolCalls >= toolCap()
-        ? `You've used this reply's ${toolCap()} tool calls.`
-        : (webCap() ??
-          (usage.tokens.outputTokens >= outputCap() || now() - started >= elapsedCap() ? "This reply is running long." : null))
+    const reason = wrapUpReason()
     const content: BetaContentBlockParam[] = [...results]
     // With a web call still pending, this turn may hold tool results only; the next round, once its
     // result is in, adds the note (the limits only grow, so the reason still holds then)
     if (reason && !pending.size) {
       wrapUp = true
-      content.push({
-        type: "text",
-        text: design
-          ? `${reason} Don't call any more tools: in a few sentences, say what's done (with the deck's link) and what's left. You'll pick it up in your next reply.`
-          : `${reason} Don't call any more tools: answer now with what you have, and say what you couldn't check.`,
-      })
+      content.push({ type: "text", text: wrapUpNote(reason) })
     }
     messages.push({ role: "assistant", content: echo })
     messages.push({ role: "user", content })

