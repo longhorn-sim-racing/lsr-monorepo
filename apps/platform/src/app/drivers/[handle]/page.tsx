@@ -385,7 +385,10 @@ export default async function DriverProfilePage({ params }: { params: Promise<{ 
                 </ol>
                 <p className="mt-4 font-sans text-sm text-white/60">
                   Average finish P{form.averageFinish.toFixed(1)}
-                  {form.gained !== null && ` · ${form.gained >= 0 ? `${form.gained} ${form.gained === 1 ? "place" : "places"} gained` : `${-form.gained} ${form.gained === -1 ? "place" : "places"} lost`} from qualifying`}
+                  {form.gained !== null &&
+                    (form.gained === 0
+                      ? " · finished where they qualified, overall"
+                      : ` · ${Math.abs(form.gained)} ${Math.abs(form.gained) === 1 ? "place" : "places"} ${form.gained > 0 ? "gained" : "lost"} from qualifying`)}
                 </p>
               </div>
             )}

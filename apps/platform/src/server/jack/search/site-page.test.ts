@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { decodeEntities, htmlTitle, htmlToText } from "./html-text"
+import { decodeEntities, htmlTitle, htmlToText, resolveStreamedHtml } from "./html-text"
 import { PAGE_MAX_BYTES, readSitePage, sitePagePath } from "./site-page"
 
 describe("sitePagePath: only the site's public pages", () => {
@@ -127,6 +127,27 @@ describe("htmlToText", () => {
 
   it("reads the whole body when there's no <main>", () => {
     expect(htmlToText("<body><p>Plain</p></body>")).toBe("Plain")
+  })
+
+  it("reads a streamed page as it looks once loaded, not its loading placeholder", () => {
+    // The shape Next.js and React stream: a Suspense fallback in <main>, the content in hidden
+    // segments after it, and scripts that move them into place ($RC for a boundary, $RS for a placeholder)
+    const streamed = [
+      "<html><body><header>Site nav</header><main>",
+      '<!--$?--><template id="B:0"></template><div role="status"><span>Loading</span><!--$--><div>nested fallback</div><!--/$--></div><!--/$-->',
+      "</main><footer>Footer</footer>",
+      '<div hidden id="S:0"><h1>About us</h1><div><p>Intro</p><template id="P:1"></template></div></div>',
+      '<script>$RC("B:0","S:0")</script>',
+      '<div hidden id="S:1"><h2>The board</h2><ul><li>Dylan</li></ul></div>',
+      '<script>$RS("S:1","P:1")</script></body></html>',
+    ].join("")
+    expect(resolveStreamedHtml(streamed)).not.toMatch(/Loading|hidden id/)
+    expect(htmlToText(streamed)).toBe("# About us\n\nIntro\n\n## The board\n\n- Dylan")
+  })
+
+  it("leaves a page that doesn't stream as it is", () => {
+    const plain = "<main><p>Done</p></main>"
+    expect(resolveStreamedHtml(plain)).toBe(plain)
   })
 })
 

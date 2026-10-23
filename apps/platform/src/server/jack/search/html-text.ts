@@ -48,6 +48,79 @@ export function htmlTitle(html: string): string | null {
   return title || null
 }
 
+/** The closing tag of the <div> whose opening tag ends at `from`, counting nested <div>s; null when it never closes */
+function closingDiv(html: string, from: number): { start: number; end: number } | null {
+  const tags = /<div\b[^>]*>|<\/div\s*>/gi
+  tags.lastIndex = from
+  let depth = 1
+  for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
+    depth += tag[0][1] === "/" ? -1 : 1
+    if (depth === 0) return { start: tag.index, end: tag.index + tag[0].length }
+  }
+  return null
+}
+
+/** Where a Suspense boundary that starts at `from` ends: after its <!--/$-->, counting nested boundaries */
+function boundaryEnd(html: string, from: number): number {
+  const marks = /<!--\$[?!]?-->|<!--\/\$-->/g
+  marks.lastIndex = from
+  let depth = 0
+  for (let mark = marks.exec(html); mark; mark = marks.exec(html)) {
+    depth += mark[0] === "<!--/$-->" ? -1 : 1
+    if (depth === 0) return mark.index + mark[0].length
+  }
+  return -1
+}
+
+/**
+ * The page as the browser shows it once it has loaded. The site streams: the first HTML has a loading
+ * placeholder where a page's content goes, and the content follows in hidden <div id="S:…"> blocks
+ * that small scripts move into place ($RC fills a Suspense boundary "B:…", $RS a placeholder
+ * "P:…"). This does the same moves on the text, without running anything.
+ */
+export function resolveStreamedHtml(html: string): string {
+  const segments = new Map<string, string>()
+  let doc = ""
+  let at = 0
+  const opener = /<div hidden id="(S:[0-9a-z]+)">/gi
+  for (let open = opener.exec(html); open; open = opener.exec(html)) {
+    const close = closingDiv(html, open.index + open[0].length)
+    if (!close) break
+    segments.set(open[1], html.slice(open.index + open[0].length, close.start))
+    doc += html.slice(at, open.index)
+    at = close.end
+    opener.lastIndex = close.end
+  }
+  doc += html.slice(at)
+  if (!segments.size) return html
+
+  const moves = [...html.matchAll(/\$R([CRS])\("([^"]+)","([^"]+)"/g)].map((m) => (m[1] === "S" ? { segment: m[2], target: m[3] } : { segment: m[3], target: m[2] }))
+  for (let pass = 0; pass <= segments.size; pass++) {
+    let changed = false
+    for (const { segment, target } of moves) {
+      const content = segments.get(segment)
+      if (content === undefined) continue
+      if (target.startsWith("P:")) {
+        const placeholder = `<template id="${target}"></template>`
+        if (doc.includes(placeholder)) {
+          doc = doc.replace(placeholder, () => content)
+          changed = true
+        }
+      } else {
+        const marker = `<!--$?--><template id="${target}"></template>`
+        const start = doc.indexOf(marker)
+        const end = start === -1 ? -1 : boundaryEnd(doc, start)
+        if (end !== -1) {
+          doc = `${doc.slice(0, start)}${content}${doc.slice(end)}`
+          changed = true
+        }
+      }
+    }
+    if (!changed) break
+  }
+  return doc
+}
+
 /** What's inside the first <main> element, or the whole page when it has none */
 function mainOf(html: string): string {
   const open = /<main(?:\s[^>]*)?>/i.exec(html)
@@ -58,7 +131,7 @@ function mainOf(html: string): string {
 }
 
 export function htmlToText(html: string): string {
-  let body = mainOf(html).replace(/<!--[\s\S]*?-->/g, " ")
+  let body = mainOf(resolveStreamedHtml(html)).replace(/<!--[\s\S]*?-->/g, " ")
   for (const tag of DROP) body = body.replace(new RegExp(`<${tag}(?:\\s[^>]*)?>[\\s\\S]*?</${tag}\\s*>`, "gi"), " ")
   // Void or unclosed leftovers of the dropped tags
   body = body.replace(new RegExp(`<(?:${DROP.join("|")})(?:\\s[^>]*)?/?>`, "gi"), " ")
