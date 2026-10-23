@@ -40,7 +40,8 @@ const SOURCE_LABEL: Record<string, string> = { knowledge: "Knowledge", documents
 
 export function hitLink(hit: SearchHit): JackLinkItem {
   const kind = typeof hit.meta.kind === "string" ? hit.meta.kind : typeof hit.meta.in === "string" ? hit.meta.in : (SOURCE_LABEL[hit.source] ?? hit.source)
-  return { title: hit.title, url: hit.url, meta: [kind, shortDate(hit.date)].filter(Boolean).join(" · "), snippet: hit.snippet || undefined }
+  // A model-only snippet (Discord's text, which the club doesn't keep) stays out of the room, where the reply is saved
+  return { title: hit.title, url: hit.url, meta: [kind, shortDate(hit.date)].filter(Boolean).join(" · "), snippet: (!hit.modelOnly && hit.snippet) || undefined }
 }
 
 /**
@@ -77,7 +78,7 @@ const searchInput = z.object({
 export const searchTool: JackTool<z.infer<typeof searchInput>> = {
   name: "search",
   description:
-    "Full-text search across the club's records: knowledge entries, Drive and SharePoint documents, what officers wrote in Jack rooms (and the rooms' notes), the public site (news, pages, events, gallery, Instagram) and Teams messages. Use it for decisions, how-tos, past discussions, documents and anything the club wrote down, before saying there's no record. Returns the best matches from every source with a link, date and the passage that matched; open one with read (its type and id) to see all of it. Cite results by their link.",
+    "Full-text search across the club's records: knowledge entries, Drive and SharePoint documents, what officers wrote in Jack rooms (and the rooms' notes), the public site (news, pages, events, gallery, Instagram), Teams messages and the club Discord's opted-in channels (searched live). Use it for decisions, how-tos, past discussions, documents and anything the club wrote down, before saying there's no record. Returns the best matches from every source with a link, date and the passage that matched; open one with read (its type and id) to see all of it. Cite results by their link.",
   input: searchInput,
   async run({ query, sources, includeJackReplies, limit }, ctx) {
     const { hits, outcomes } = await search({ query, sources, limit, includeJackReplies, replyId: ctx.messageId, signal: ctx.signal })
@@ -112,7 +113,7 @@ const readInput = z.object({
 export const readTool: JackTool<z.infer<typeof readInput>> = {
   name: "read",
   description:
-    "Opens one thing search found, by its type and id: a knowledge entry, a document's text, a room message with the messages around it, a news post, page, event, gallery album, Instagram post or Teams thread. Also reads any public page of the club site by its path (type site_page, e.g. /lone-star-cup), never the admin console. Long texts come a page at a time: the result gives total, nextOffset (read again from there) and an outline of its headings; or pass query to get just the passages that match.",
+    "Opens one thing search found, by its type and id: a knowledge entry, a document's text, a room message with the messages around it, a news post, page, event, gallery album, Instagram post, Teams thread or Discord conversation. Also reads any public page of the club site by its path (type site_page, e.g. /lone-star-cup), never the admin console. Long texts come a page at a time: the result gives total, nextOffset (read again from there) and an outline of its headings; or pass query to get just the passages that match.",
   input: readInput,
   async run({ type, id, offset, maxChars, query }, ctx) {
     const reader = findReader(type)

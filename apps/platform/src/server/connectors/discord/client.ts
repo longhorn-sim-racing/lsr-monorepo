@@ -212,7 +212,7 @@ export type DiscordRest = ReturnType<typeof discordRest>
 export type MessagePage = { after?: string; before?: string; around?: string; limit?: number }
 
 /** How long search waits for Discord to finish indexing (a 202) before saying so, in total */
-const SEARCH_INDEX_WAIT_MS = 4_000
+const SEARCH_INDEX_WAIT_MS = 3_000
 
 /** Search Guild Messages' answer: results, or Discord still building its index (a 202) */
 export type DiscordSearchResult = { status: "ok"; total: number; messages: DiscordMessage[] } | { status: "indexing" }
@@ -263,7 +263,8 @@ export function discordClient(options: DiscordClientOptions) {
       for (;;) {
         const response = await rest.request<DiscordSearchResponse & { code?: number; retry_after?: number }>("GET", `/guilds/${guild}/messages/search`, { query, signal })
         if (response.status !== 202) return { status: "ok", total: response.data.total_results ?? 0, messages: (response.data.messages ?? []).flat() }
-        const wait = Math.max(500, Math.ceil((response.data.retry_after ?? 0) * 1000))
+        // Discord's retry_after, or a short pause when it says 0
+        const wait = Math.max(250, Math.ceil((response.data.retry_after ?? 0) * 1000))
         if (Date.now() + wait > giveUpAt) return { status: "indexing" }
         await sleep(wait, signal)
       }

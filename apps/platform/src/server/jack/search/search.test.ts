@@ -39,9 +39,9 @@ beforeEach(() => {
 })
 
 describe("the source registry", () => {
-  it("has the club-data sources in order, and a reader for every type a hit can have", () => {
-    expect(SEARCH_SOURCES.map((s) => s.key)).toEqual(["knowledge", "documents", "rooms", "site", "teams"])
-    expect(SEARCH_READERS.map((r) => r.type)).toEqual(["knowledge", "document", "room_message", "post", "page", "event", "album", "instagram", "site_page", "teams"])
+  it("has the club-data sources in order, then Discord's, and a reader for every type a hit can have", () => {
+    expect(SEARCH_SOURCES.map((s) => s.key)).toEqual(["knowledge", "documents", "rooms", "site", "teams", "discord"])
+    expect(SEARCH_READERS.map((r) => r.type)).toEqual(["knowledge", "document", "room_message", "post", "page", "event", "album", "instagram", "site_page", "teams", "discord_message"])
   })
 })
 
