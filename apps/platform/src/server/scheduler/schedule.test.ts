@@ -71,6 +71,10 @@ describe("job schedules", () => {
       ["0 9 * * 7", "Sundays at 9:00 AM CT"],
       ["0 9 * * 1,3,5", "Mondays, Wednesdays and Fridays at 9:00 AM CT"],
       ["0 9 * * 0-6", "Daily at 9:00 AM CT"],
+      // 7 is Sunday too, but a range runs to it before it's read as 0
+      ["0 9 * * 0-7", "Daily at 9:00 AM CT"],
+      ["0 9 * * 1-7", "Daily at 9:00 AM CT"],
+      ["0 9 * * 6-7", "Weekends at 9:00 AM CT"],
       ["0 6 1 * *", "Monthly on the 1st at 6:00 AM CT"],
       ["0 6 22 * *", "Monthly on the 22nd at 6:00 AM CT"],
       ["0 6 11 * *", "Monthly on the 11th at 6:00 AM CT"],

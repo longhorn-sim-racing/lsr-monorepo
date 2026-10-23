@@ -73,9 +73,10 @@ function list(items: string[]): string {
 
 /** A day-of-week field as words ("Weekdays", "Mondays and Fridays"), or null when it's not a simple one */
 function describeDays(field: string): string | null {
+  // 0 and 7 are both Sunday. Ranges use the numbers as written ("0-7" is every day, "5-7" Friday to Sunday), then 7 becomes 0
   const day = (part: string): number | null => {
     const value = NUMBER.test(part) ? Number(part) : DAY_ALIASES[part.toLowerCase()]
-    return value === undefined || value > 7 ? null : value % 7
+    return value === undefined || value > 7 ? null : value
   }
   const days = new Set<number>()
   for (const part of field.split(",")) {
@@ -83,11 +84,11 @@ function describeDays(field: string): string | null {
     if (range.length === 2) {
       const [from, to] = range.map(day)
       if (from === null || to === null || from > to) return null
-      for (let d = from; d <= to; d++) days.add(d)
+      for (let d = from; d <= to; d++) days.add(d % 7)
     } else {
       const d = day(part)
       if (d === null) return null
-      days.add(d)
+      days.add(d % 7)
     }
   }
   const sorted = [...days].sort()
