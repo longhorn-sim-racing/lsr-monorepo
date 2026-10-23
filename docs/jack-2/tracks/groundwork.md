@@ -1,6 +1,7 @@
 Docs and env notes for the groundwork track; folded into docs/jack.md at the end.
 
 - **`@napi-rs/canvas` override.** The root `package.json` pins `pdfjs-dist>@napi-rs/canvas` to 1.0.10 (`pnpm.overrides`), because the newest release (1.0.13) was a day old when pdfjs-dist was added on 10/22. Remove the override once a newer release is at least two weeks old (from 11/04), then run `pnpm install` and commit the lockfile.
+- **Vitest pre-bundles `date-fns` and `date-fns-tz`** (`deps.optimizer.ssr` in `vitest.config.mts`). date-fns-tz imports date-fns's barrel, about 250 files, which took about a second to load in every test file that uses dates. Pre-bundled, the full suite takes about half as long, and the import-heavy registry tests (the tool, digest and job registries, the room's actions) stay well under 5 s in a full run. The 20 s `testTimeout` stays as a margin for slower CI machines.
 
 ## Connectors, HTTP fakes and the Connections page (G2)
 
@@ -109,7 +110,9 @@ Every outside service goes through the same shape, so Jack's tools, the sync job
 - **Smoke tests:** "Run smoke test" calls `connector.smoke()` on the server; it works while switched off. The page's `maxDuration` is 60 s.
   - Each run is written to the audit log (actionType `SMOKE_TEST`, entityType `CONNECTOR`, metadata `{ ok, summary, ms }`). The page shows the latest one per connector.
   - A connector without one says "No smoke test yet".
-- **Slots for later PRs:** `app/admin/connections/_panels/scheduler.tsx` (G3: the scheduler heartbeat) and `_panels/storage.tsx` (G5: file storage usage) are placeholders. Each PR replaces only its own file; the page renders both through `SafeSlot`.
+- **Panels above the list** (rendered through `SafeSlot`, each loading its own data inside the guard):
+  - **Scheduler** (`_panels/scheduler.tsx`): the Scheduled jobs page's heartbeat panel (`SchedulerHeartbeat`): Ticking, Not ticking or Not set up, the last tick and dispatch, pg_cron's tick job and pg_net's answers when the database has them, plus a Jobs line (how many are on, how many of those failed their last run) and a link to Scheduled jobs.
+  - **File storage** (`_panels/storage.tsx`, data from `src/server/jack/files/usage.ts`): the store in use (Supabase Storage, Vercel Blob, Local folder or None, as `jackFileStore()` and the render check pick it). On Supabase: the `jack` bucket's files and size and its settings (private, per-file limit), from `storage.buckets` and `storage.objects` in the app's own database (the sum of `metadata->>'size'`), with a bar against the Free plan's 1 GB (warning at 80%, danger at 95%; other buckets are added in, since the 1 GB is the project's). A missing bucket is a danger notice ("run scripts/jack-storage-setup.ts"); a database where Storage's tables can't be read leaves the usage out with a note. Then room files by status (`JackFile`: ready with their size, uploading, failed, and how many were never posted) and a link to `/api/admin/jack/render-check`. No keys, and no project URL.
 
 ### Env vars
 | Name | Where | What |
@@ -219,7 +222,7 @@ Jack proposes; an officer applies (design §4). Code paths are relative to `apps
 | The `propose_*` tools | `src/server/jack/tools/propose.ts`, sent from `tools/registry/groundwork.ts` |
 | Officer route | `src/app/api/admin/jack/proposals/[id]/route.ts` |
 | Apply and Discard actions | `src/app/admin/jack/proposals/actions.ts` |
-| Proposals page (Jack → Proposals) | `src/app/admin/jack/proposals/page.tsx`, list query in `src/server/jack/proposals/list.ts` |
+| Proposals page (Jack → Proposals); each proposal links to its room at the reply that proposed it (`roomMessageUrl`, the room page's `?m=` anchor; `app/admin/jack/[roomId]/page.test.ts`) | `src/app/admin/jack/proposals/page.tsx`, list query in `src/server/jack/proposals/list.ts` |
 | Card, its room context, note links | `src/components/jack/parts/proposal-card.tsx`, `proposal-context.tsx`, `src/components/jack/note-text.tsx` |
 | Sweep job `proposals.sweep` | `src/server/scheduler/jobs/proposals.ts` (joined into the groundwork slot) |
 
