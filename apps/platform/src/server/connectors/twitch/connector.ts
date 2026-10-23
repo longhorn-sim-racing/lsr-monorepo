@@ -151,9 +151,12 @@ export const twitchConnector = defineConnector<TwitchClient>({
   },
   async details() {
     const account = twitchAccountView(await readTwitchSettings())
-    if (account.reconnect) return [{ label: "Club account", value: `Needs connecting again (Content → Streams): ${account.reconnect.reason}` }]
-    if (!account.connected) return [{ label: "Club account", value: "Not connected: an admin connects it on Content → Streams" }]
+    const webhooks = account.webhooksRevoked.length
+      ? [{ label: "Webhooks", value: `Twitch revoked ${account.webhooksRevoked.map((r) => `${r.type} (${r.status})`).join(", ")}: run scripts/twitch-eventsub.ts --apply again` }]
+      : []
+    if (account.reconnect) return [{ label: "Club account", value: `Needs connecting again (Content → Streams): ${account.reconnect.reason}` }, ...webhooks]
+    if (!account.connected) return [{ label: "Club account", value: "Not connected: an admin connects it on Content → Streams" }, ...webhooks]
     const checked = ago(account.validatedAt)
-    return [{ label: "Club account", value: `@${account.login}${checked ? `, checked ${checked}` : ""}` }]
+    return [{ label: "Club account", value: `@${account.login}${checked ? `, checked ${checked}` : ""}` }, ...webhooks]
   },
 })

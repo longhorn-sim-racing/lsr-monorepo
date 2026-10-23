@@ -99,6 +99,13 @@ describe("the Twitch connector", () => {
     store.twitch = JSON.stringify({ ...JSON.parse(store.twitch!), reconnect: { reason: "Invalid refresh token", at: new Date().toISOString() } })
     expect((await twitchConnector.status()).details?.[0].value).toBe("Needs connecting again (Content → Streams): Invalid refresh token")
   })
+
+  it("lists revoked webhooks on the Connections page until they work again", async () => {
+    stubTwitchEnv()
+    await connectClubAccount()
+    store.twitch = JSON.stringify({ ...JSON.parse(store.twitch!), eventsubRevoked: [{ type: "stream.online", status: "notification_failures_exceeded", at: new Date().toISOString() }] })
+    expect((await twitchConnector.status()).details?.[1]).toEqual({ label: "Webhooks", value: "Twitch revoked stream.online (notification_failures_exceeded): run scripts/twitch-eventsub.ts --apply again" })
+  })
 })
 
 describe("the Instagram insights connector", () => {

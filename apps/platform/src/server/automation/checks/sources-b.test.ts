@@ -10,7 +10,7 @@ import { CHECKS, instagramInsightsFailing, twitchNeedsAttention } from "./source
 
 const ctx = { now: new Date("2026-10-22T18:00:00Z") }
 const status = (state: ConnectorStatus["state"], enabled = true): ConnectorStatus => ({ id: "x", label: "X", configured: true, missingEnv: [], missingSettings: [], enabled, state, lastSyncAt: null, lastError: "Twitch answered 401 on /streams: secret stuff", lastErrorAt: "2026-10-22T17:00:00.000Z", hasSmoke: true })
-const account = (reconnect: { reason: string; at: string } | null) => ({ connected: true, login: "lsr", scopes: [], connectedAt: null, validatedAt: null, refreshedAt: null, reconnect })
+const account = (reconnect: { reason: string; at: string } | null, webhooksRevoked: { type: string; status: string; at: string }[] = []) => ({ connected: true, login: "lsr", scopes: [], connectedAt: null, validatedAt: null, refreshedAt: null, reconnect, webhooksRevoked })
 
 describe("the sources-b checks", () => {
   it("each link to a console page", () => {
@@ -37,6 +37,20 @@ describe("the sources-b checks", () => {
     const failing = await twitchNeedsAttention.run(ctx)
     expect(failing).toMatchObject({ count: 1, severity: "warning", items: [{ title: "Twitch syncs are failing", href: "/admin/connections" }] })
     expect(JSON.stringify([reconnect, failing])).not.toMatch(/secret stuff|Invalid refresh token/)
+  })
+
+  it("flag revoked webhooks while everything else looks fine (they're kept apart from the last error, which the next sync clears)", async () => {
+    statuses.twitch = status("connected")
+    statuses.account = account(null, [
+      { type: "stream.online", status: "notification_failures_exceeded", at: "2026-10-22T16:00:00.000Z" },
+      { type: "stream.offline", status: "notification_failures_exceeded", at: "2026-10-22T16:00:01.000Z" },
+    ])
+    const result = await twitchNeedsAttention.run(ctx)
+    expect(result).toMatchObject({ count: 1, severity: "warning", items: [{ title: expect.stringContaining("revoked the stream.online and stream.offline webhooks"), href: "/admin/streams", detail: "Revoked Oct 22, 11:00 AM CT" }] })
+    expect(JSON.stringify(result)).not.toContain("notification_failures_exceeded")
+    // Alongside failing syncs, both are listed
+    statuses.twitch = status("error")
+    expect((await twitchNeedsAttention.run(ctx)).items.map((i) => i.href)).toEqual(["/admin/streams", "/admin/connections"])
   })
 
   it("flag failing Instagram insights", async () => {

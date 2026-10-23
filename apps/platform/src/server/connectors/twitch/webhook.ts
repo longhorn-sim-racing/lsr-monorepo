@@ -1,9 +1,10 @@
 import { prisma } from "@/server/db"
-import { connectorEnabled, recordConnectorError, recordConnectorSync } from "../state"
+import { connectorEnabled, recordConnectorSync } from "../state"
 import type { ConnectorEnv } from "../types"
 import { TWITCH_CONNECTOR_ID, twitchConnector } from "./connector"
 import { parseEventSubBody, verifyEventSub } from "./eventsub"
 import { closeStreams, recordStreamOnline, updateStreamDetails } from "./streams"
+import { clearEventSubRevoked, recordEventSubRevoked } from "./tokens"
 
 /**
  * What /api/webhooks/twitch does with one EventSub delivery (#188, design §12.2), apart from reading
@@ -12,6 +13,10 @@ import { closeStreams, recordStreamOnline, updateStreamDetails } from "./streams
  * each message id handled once (a resend gets 204 and nothing else); quick database work only, with the
  * Helix lookup (the stream's title) after the response, since Twitch wants an answer within seconds.
  * Notifications are ignored while the connector is switched off; challenges and revocations aren't.
+ *
+ * A revocation is kept in SystemSetting "twitch" (`eventsubRevoked`), not as the connector's last
+ * error (the next sync would hide it): Streams, Connections and the twitch.attention check show it
+ * until a challenge for that type (the setup script subscribing again) or a notification arrives.
  */
 
 export type EventSubOutcome = {
@@ -40,6 +45,15 @@ async function fillStreamDetails(streamId: string): Promise<void> {
   if (channel) await updateStreamDetails(streamId, channel)
 }
 
+/** Twitch is delivering to a subscription of `type` again: forget that it was revoked. Never fails the delivery */
+async function subscriptionWorks(type: string): Promise<void> {
+  try {
+    if (await clearEventSubRevoked(type)) console.info(`[twitch] EventSub ${type} is delivering again`)
+  } catch (error) {
+    console.warn(`[twitch] Couldn't clear the revoked mark for ${type}:`, error instanceof Error ? error.message : error)
+  }
+}
+
 export async function handleEventSub(headers: Headers, rawBody: string, { env = process.env, nowMs = Date.now() }: { env?: ConnectorEnv; nowMs?: number } = {}): Promise<EventSubOutcome> {
   const check = verifyEventSub(headers, rawBody, { secret: env.TWITCH_EVENTSUB_SECRET, nowMs })
   if (!check.ok) {
@@ -57,13 +71,20 @@ export async function handleEventSub(headers: Headers, rawBody: string, { env = 
       console.warn(`[twitch] Refused a ${body.subscription.type} subscription for a channel other than TWITCH_BROADCASTER_ID`)
       return { status: 403 }
     }
+    // The setup script is subscribing (again)
+    await subscriptionWorks(body.subscription.type)
     return { status: 200, text: body.challenge }
   }
 
   if (body.kind === "revocation") {
     if (await claimEventSubMessage(check.id, "revocation")) {
       const { type, status } = body.subscription
-      await recordConnectorError(TWITCH_CONNECTOR_ID, `Twitch revoked the ${type} webhook subscription (${status}). Run scripts/twitch-eventsub.ts --apply again (docs/jack-2/tracks/sources-b.md).`)
+      try {
+        await recordEventSubRevoked({ type, status: String(status).slice(0, 80), at: check.at.toISOString() })
+      } catch (error) {
+        await releaseEventSubMessage(check.id)
+        throw error
+      }
       console.warn(`[twitch] EventSub ${type} subscription revoked: ${status}`)
     }
     return { status: 204 }
@@ -71,6 +92,7 @@ export async function handleEventSub(headers: Headers, rawBody: string, { env = 
 
   if (body.kind === "other") return { status: 204 }
   if (!forUs(body.event.broadcaster_user_id)) return { status: 204 }
+  await subscriptionWorks(body.subscription.type)
   if (!(await connectorEnabled(TWITCH_CONNECTOR_ID))) {
     console.info(`[twitch] Ignored ${body.subscription.type}: the Twitch connector is switched off`)
     return { status: 204 }
@@ -86,9 +108,9 @@ export async function handleEventSub(headers: Headers, rawBody: string, { env = 
       await recordConnectorSync(TWITCH_CONNECTOR_ID)
       return { status: 204, after: () => fillStreamDetails(streamId) }
     }
-    // stream.offline: the stream it names, or every stream that was open when it was sent
-    const named = body.event.id ? await prisma.twitchStream.findFirst({ where: { id: body.event.id, endedAt: null }, select: { id: true } }) : null
-    await closeStreams(named ? { endedAt: check.at, id: named.id } : { endedAt: check.at, startedBefore: check.at })
+    // stream.offline: only the stream it names (a late one for a stream that's closed already must not
+    // close the one that replaced it); without an id, every stream that was open when it was sent
+    await closeStreams(body.event.id ? { endedAt: check.at, id: body.event.id } : { endedAt: check.at, startedBefore: check.at })
     await recordConnectorSync(TWITCH_CONNECTOR_ID)
     return { status: 204 }
   } catch (error) {

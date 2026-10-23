@@ -11,7 +11,9 @@ import { TwitchApiError, type TwitchApi, type TwitchTokenGrant } from "./client"
  *   a row lock (SELECT … FOR UPDATE), and a refresh re-reads the row first: whoever waited for the lock
  *   uses the token the refresh before it stored instead of refreshing again.
  * When Twitch refuses the refresh token (a password change, the app disconnected), the grant is kept
- * but marked `reconnect`, and an admin connects the club account again on Content → Streams.
+ * but marked `reconnect`, and an admin connects the club account again on Content → Streams. The same
+ * setting remembers EventSub subscriptions Twitch revoked (`eventsubRevoked`) until they work again.
+ * Every function here takes the setting's key, only so the local DB check can use a throwaway row.
  */
 
 export const TWITCH_SETTING_KEY = "twitch"
@@ -39,9 +41,14 @@ export type TwitchSettings = {
   user?: TwitchClubGrant
   /** Twitch refused the club account's refresh token: it has to be connected again. Redacted */
   reconnect?: { reason: string; at: string }
+  /** Webhook subscriptions Twitch revoked, one per type; cleared when that type's challenge or a notification arrives again */
+  eventsubRevoked?: EventSubRevoked[]
 }
 
-/** What pages show about the club account: never a token */
+/** A revoked EventSub subscription: its type, Twitch's reason (`status`) and when */
+export type EventSubRevoked = { type: string; status: string; at: string }
+
+/** What pages show about the club account and the webhooks: never a token */
 export type TwitchAccountView = {
   connected: boolean
   login: string | null
@@ -50,6 +57,8 @@ export type TwitchAccountView = {
   validatedAt: string | null
   refreshedAt: string | null
   reconnect: { reason: string; at: string } | null
+  /** Webhook subscriptions Twitch revoked: run scripts/twitch-eventsub.ts --apply again */
+  webhooksRevoked: EventSubRevoked[]
 }
 
 /** Thrown when the club account's grant is missing or refused: nothing works with user tokens until an admin connects it again */
@@ -70,8 +79,8 @@ export function parseTwitchSettings(value: string | null | undefined): TwitchSet
   }
 }
 
-export async function readTwitchSettings(): Promise<TwitchSettings> {
-  const row = await prisma.systemSetting.findUnique({ where: { key: TWITCH_SETTING_KEY } })
+export async function readTwitchSettings(key = TWITCH_SETTING_KEY): Promise<TwitchSettings> {
+  const row = await prisma.systemSetting.findUnique({ where: { key } })
   return parseTwitchSettings(row?.value)
 }
 
@@ -85,6 +94,7 @@ export function twitchAccountView(settings: TwitchSettings): TwitchAccountView {
     validatedAt: user?.validatedAt ?? null,
     refreshedAt: user?.refreshedAt ?? null,
     reconnect: settings.reconnect ?? null,
+    webhooksRevoked: Array.isArray(settings.eventsubRevoked) ? settings.eventsubRevoked : [],
   }
 }
 
@@ -97,17 +107,37 @@ export async function twitchAccount(): Promise<TwitchAccountView> {
  * lock is held for `change`'s whole run, Twitch calls included (a refresh), so keep those short: the
  * client's own timeout bounds them. Return a result instead of throwing when the write must still happen.
  */
-export async function withTwitchSettings<R>(change: (current: TwitchSettings) => Promise<{ next?: TwitchSettings; result: R }>): Promise<R> {
-  await prisma.$executeRaw`INSERT INTO "SystemSetting" ("key", "value", "updatedAt") VALUES (${TWITCH_SETTING_KEY}, '{}', now()) ON CONFLICT ("key") DO NOTHING`
+export async function withTwitchSettings<R>(change: (current: TwitchSettings) => Promise<{ next?: TwitchSettings; result: R }>, key = TWITCH_SETTING_KEY): Promise<R> {
+  await prisma.$executeRaw`INSERT INTO "SystemSetting" ("key", "value", "updatedAt") VALUES (${key}, '{}', now()) ON CONFLICT ("key") DO NOTHING`
   return prisma.$transaction(
     async (tx) => {
-      const rows = await tx.$queryRaw<{ value: string }[]>`SELECT "value" FROM "SystemSetting" WHERE "key" = ${TWITCH_SETTING_KEY} FOR UPDATE`
+      const rows = await tx.$queryRaw<{ value: string }[]>`SELECT "value" FROM "SystemSetting" WHERE "key" = ${key} FOR UPDATE`
       const { next, result } = await change(parseTwitchSettings(rows[0]?.value))
-      if (next) await tx.systemSetting.update({ where: { key: TWITCH_SETTING_KEY }, data: { value: JSON.stringify(next) } })
+      if (next) await tx.systemSetting.update({ where: { key }, data: { value: JSON.stringify(next) } })
       return result
     },
     { maxWait: 15_000, timeout: 40_000 },
   )
+}
+
+/** Remembers that Twitch revoked a webhook subscription (one entry per type, the newest kept) */
+export async function recordEventSubRevoked(revoked: EventSubRevoked, key = TWITCH_SETTING_KEY): Promise<void> {
+  await withTwitchSettings(async (current) => {
+    const others = (current.eventsubRevoked ?? []).filter((r) => r.type !== revoked.type)
+    return { next: { ...current, eventsubRevoked: [...others, revoked] }, result: undefined }
+  }, key)
+}
+
+/** Forgets a revoked subscription of `type` once Twitch delivers to it again (its challenge, or a notification). Reads before locking, so the usual call writes nothing */
+export async function clearEventSubRevoked(type: string, key = TWITCH_SETTING_KEY): Promise<boolean> {
+  if (!(await readTwitchSettings(key)).eventsubRevoked?.some((r) => r.type === type)) return false
+  return withTwitchSettings(async (current) => {
+    const rest = (current.eventsubRevoked ?? []).filter((r) => r.type !== type)
+    if (rest.length === (current.eventsubRevoked ?? []).length) return { result: false }
+    const next: TwitchSettings = { ...current, eventsubRevoked: rest }
+    if (!rest.length) delete next.eventsubRevoked
+    return { next, result: true }
+  }, key)
 }
 
 const fresh = (expiresAt: string | undefined, now: number) => Boolean(expiresAt && Date.parse(expiresAt) - EXPIRY_MARGIN_MS > now)
@@ -127,10 +157,10 @@ export type TwitchTokenSource = {
 /** Whether Twitch refused a refresh token for good (it's invalid or revoked), rather than failing for a while */
 const refusedRefresh = (error: unknown) => error instanceof TwitchApiError && (error.status === 400 || error.status === 401)
 
-/** The tokens in SystemSetting "twitch", the app's single store */
-export const settingsTwitchTokens: TwitchTokenSource = {
+/** The tokens in SystemSetting "twitch" (`key`), the app's single store */
+export const settingsTwitchTokensFor = (key = TWITCH_SETTING_KEY): TwitchTokenSource => ({
   async app(api, { failed, signal } = {}) {
-    const cached = (await readTwitchSettings()).app
+    const cached = (await readTwitchSettings(key)).app
     if (cached && cached.accessToken !== failed && fresh(cached.expiresAt, Date.now())) return cached.accessToken
     return withTwitchSettings(async (current) => {
       const now = Date.now()
@@ -138,11 +168,11 @@ export const settingsTwitchTokens: TwitchTokenSource = {
       if (current.app && current.app.accessToken !== failed && fresh(current.app.expiresAt, now)) return { result: current.app.accessToken }
       const grant = await api.mintAppToken(signal)
       return { next: { ...current, app: { accessToken: grant.access_token, expiresAt: expiry(grant, now) } }, result: grant.access_token }
-    })
+    }, key)
   },
 
   async user(api, { failed, signal } = {}) {
-    const settings = await readTwitchSettings()
+    const settings = await readTwitchSettings(key)
     if (!settings.user) throw new TwitchReconnectError("The club's Twitch account isn't connected: an admin connects it on Content → Streams.")
     if (settings.reconnect) throw new TwitchReconnectError(`The club's Twitch account has to be connected again on Content → Streams: ${settings.reconnect.reason}`)
     if (settings.user.accessToken !== failed && fresh(settings.user.expiresAt, Date.now())) return settings.user.accessToken
@@ -171,15 +201,17 @@ export const settingsTwitchTokens: TwitchTokenSource = {
         const reason = redactSecrets(error instanceof Error ? error.message : String(error), { maxLength: 300 })
         return { next: { ...current, reconnect: { reason, at: new Date(now).toISOString() } }, result: { refused: reason } }
       }
-    })
+    }, key)
     if ("refused" in outcome) throw new TwitchReconnectError(`Twitch refused the club account's refresh token, so it has to be connected again on Content → Streams (${outcome.refused}).`)
     return outcome.token
   },
 
   async validated(at) {
-    await withTwitchSettings(async (current) => (current.user ? { next: { ...current, user: { ...current.user, validatedAt: at.toISOString() } }, result: undefined } : { result: undefined }))
+    await withTwitchSettings(async (current) => (current.user ? { next: { ...current, user: { ...current.user, validatedAt: at.toISOString() } }, result: undefined } : { result: undefined }), key)
   },
-}
+})
+
+export const settingsTwitchTokens: TwitchTokenSource = settingsTwitchTokensFor()
 
 /** Saves the club account's grant after the connect flow; clears any reconnect mark */
 export async function saveTwitchClubGrant(grant: Omit<TwitchClubGrant, "refreshedAt">): Promise<void> {

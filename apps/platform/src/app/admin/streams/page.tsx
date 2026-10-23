@@ -66,6 +66,12 @@ export default async function AdminStreamsPage({ searchParams }: { searchParams:
           Twitch stopped accepting its token, so the follower count isn&apos;t updating. {isAdmin ? "Press Reconnect below and sign in to Twitch as the club account." : "An admin reconnects it here."}
         </Notice>
       )}
+      {account.webhooksRevoked.length > 0 && (
+        <Notice tone="warning" title="Twitch stopped sending live and offline notifications" className="mb-4">
+          Twitch revoked {account.webhooksRevoked.map((r) => `${r.type} (${r.status}, ${centralDateTime(new Date(r.at))})`).join(" and ")}. Going live is still noticed by the every-minute check, a minute or two later. To fix it, run{" "}
+          <code className="font-mono text-xs">pnpm --filter @lsr/platform exec tsx scripts/twitch-eventsub.ts --apply</code> with the production Twitch env vars (docs/jack-2/tracks/sources-b.md); this notice goes away when Twitch confirms the new subscription.
+        </Notice>
+      )}
 
       <StatRow>
         <Stat label="Live now" value={live ? <Badge tone="success">Live · {formatCount(live.viewersNow)} watching</Badge> : "Offline"} hint={live ? `Since ${formatInTimeZone(live.startedAt, DEFAULT_TIMEZONE, "h:mm a")}` : lastStream ? `Last streamed ${centralDateTime(lastStream.startedAt)}` : "No streams saved yet"} />
@@ -164,7 +170,9 @@ function StreamsPanel({ streams }: { streams: StreamSummary[] }) {
                 <TD className="max-w-[320px]">
                   <CellStack primary={stream.title || "Title not read yet"} secondary={stream.gameName ?? undefined} />
                 </TD>
-                <TD className="whitespace-nowrap text-right">{stream.endedAt ? streamLength(stream.minutes) : <Badge tone="success">Live</Badge>}</TD>
+                <TD className="whitespace-nowrap text-right" title={!stream.endedAt && !stream.live ? "Not seen live lately, and its end wasn't recorded: the Twitch jobs close it when they run again" : undefined}>
+                  {stream.live ? <Badge tone="success">Live</Badge> : streamLength(stream.minutes)}
+                </TD>
                 <TD className="text-right">{stream.sampled ? formatCount(stream.peakViewers) : <span className="text-admin-subtle" title="Viewers weren't counted for this stream">—</span>}</TD>
                 <TD className="text-right">{stream.sampled ? formatCount(stream.avgViewers) : <span className="text-admin-subtle">—</span>}</TD>
                 <TD className="whitespace-nowrap text-right">{stream.vodUrl ? <PartLink url={stream.vodUrl}>{formatCount(stream.vodViews)}</PartLink> : <span className="text-admin-subtle">—</span>}</TD>

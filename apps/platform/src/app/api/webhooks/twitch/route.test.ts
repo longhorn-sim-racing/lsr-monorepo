@@ -64,7 +64,8 @@ function delivery(type: "notification" | "webhook_callback_verification" | "revo
 }
 const online = (streamId: string, options: Parameters<typeof delivery>[2] & { streamType?: string; startedAt?: string } = {}) =>
   delivery("notification", { subscription: subscription("stream.online"), event: { id: streamId, ...club, type: options.streamType ?? "live", started_at: options.startedAt ?? "2026-10-22T23:00:00.123Z" } }, options)
-const offline = (options: Parameters<typeof delivery>[2] = {}) => delivery("notification", { subscription: subscription("stream.offline"), event: { ...club } }, options)
+const offline = ({ streamId, ...options }: Parameters<typeof delivery>[2] & { streamId?: string } = {}) => delivery("notification", { subscription: subscription("stream.offline"), event: { ...club, ...(streamId ? { id: streamId } : {}) } }, options)
+const setting = () => JSON.parse(String(tables.systemSetting.rows.get("twitch")?.value ?? "{}")) as { eventsubRevoked?: { type: string; status: string; at: string }[] }
 
 beforeEach(() => {
   tables = fakeSourcesBDb()
@@ -142,6 +143,20 @@ describe("POST /api/webhooks/twitch", () => {
     expect(tables.twitchStream.rows.get("555")?.endedAt).toEqual(new Date(sentAt))
   })
 
+  it("closes only the stream a stream.offline names: a late one for a closed stream leaves its replacement open", async () => {
+    // A dropped (its encoder reconnected), B replaced it and closed it; A's offline comes after B started
+    const bStarted = new Date(Date.now() - 60_000)
+    await route.POST(online("A", { startedAt: new Date(Date.now() - 3_600_000).toISOString() }))
+    await route.POST(online("B", { startedAt: bStarted.toISOString() }))
+    expect(tables.twitchStream.rows.get("A")?.endedAt).toEqual(bStarted)
+    expect((await route.POST(offline({ at: Date.now() - 1_000, streamId: "A" }))).status).toBe(204)
+    expect(tables.twitchStream.rows.get("B")?.endedAt).toBeNull()
+    expect(tables.twitchStream.rows.get("A")?.endedAt).toEqual(bStarted)
+    // Naming B closes B
+    await route.POST(offline({ streamId: "B" }))
+    expect(tables.twitchStream.rows.get("B")?.endedAt).toBeInstanceOf(Date)
+  })
+
   it("ignores notifications while the connector is switched off, without using up their ids", async () => {
     state.enabled = false
     expect((await route.POST(online("666", { id: "msg-off" }))).status).toBe(204)
@@ -151,11 +166,32 @@ describe("POST /api/webhooks/twitch", () => {
     expect(tables.twitchStream.rows.has("666")).toBe(true)
   })
 
-  it("records a revocation on the connector, once", async () => {
-    const revoked = { subscription: { ...subscription("stream.online"), status: "authorization_revoked" } }
-    expect((await route.POST(delivery("revocation", revoked, { id: "rev-1" }))).status).toBe(204)
-    await route.POST(delivery("revocation", revoked, { id: "rev-1", retry: true }))
-    expect(state.errors).toEqual(["Twitch revoked the stream.online webhook subscription (authorization_revoked). Run scripts/twitch-eventsub.ts --apply again (docs/jack-2/tracks/sources-b.md)."])
+  it("keeps a revocation in the Twitch setting (not as a sync error the next sync would hide), once per type", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const sentAt = Date.now() - 2_000
+    const revoked = (status: string) => ({ subscription: { ...subscription("stream.online"), status } })
+    expect((await route.POST(delivery("revocation", revoked("notification_failures_exceeded"), { id: "rev-1", at: sentAt }))).status).toBe(204)
+    await route.POST(delivery("revocation", revoked("notification_failures_exceeded"), { id: "rev-1", retry: true }))
+    await route.POST(delivery("revocation", revoked("authorization_revoked"), { id: "rev-2", at: sentAt }))
+    expect(setting().eventsubRevoked).toEqual([{ type: "stream.online", status: "authorization_revoked", at: new Date(sentAt).toISOString() }])
+    expect(state.errors).toEqual([])
+  })
+
+  it("forgets a revocation when that type's challenge arrives (the setup script subscribed again), even while switched off", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    await route.POST(delivery("revocation", { subscription: { ...subscription("stream.online"), status: "notification_failures_exceeded" } }))
+    await route.POST(delivery("revocation", { subscription: { ...subscription("stream.offline"), status: "notification_failures_exceeded" } }))
+    state.enabled = false
+    const res = await route.POST(delivery("webhook_callback_verification", { challenge: "c3", subscription: { ...subscription("stream.online"), status: "webhook_callback_verification_pending" } }))
+    expect(await res.text()).toBe("c3")
+    expect(setting().eventsubRevoked?.map((r) => r.type)).toEqual(["stream.offline"])
+  })
+
+  it("forgets a revocation when a notification of that type arrives", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    await route.POST(delivery("revocation", { subscription: { ...subscription("stream.offline"), status: "notification_failures_exceeded" } }))
+    await route.POST(offline())
+    expect(setting().eventsubRevoked).toBeUndefined()
   })
 
   it("answers 500 when handling fails, and lets Twitch's resend through", async () => {

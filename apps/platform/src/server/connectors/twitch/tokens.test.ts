@@ -11,7 +11,7 @@ const db = vi.hoisted(() => ({
 }))
 vi.mock("@/server/db", () => ({ prisma: db }))
 
-import { forgetTwitchClubGrant, saveTwitchClubGrant, settingsTwitchTokens, TwitchReconnectError, twitchAccountView, type TwitchSettings } from "./tokens"
+import { clearEventSubRevoked, forgetTwitchClubGrant, recordEventSubRevoked, saveTwitchClubGrant, settingsTwitchTokens, TwitchReconnectError, twitchAccountView, type TwitchSettings } from "./tokens"
 
 const NOW = Date.parse("2026-10-22T18:00:00Z")
 const HOUR = 3_600_000
@@ -169,7 +169,30 @@ describe("connecting and disconnecting", () => {
 
   it("shows pages the account, never a token", () => {
     const view = twitchAccountView({ app: { accessToken: "app-1", expiresAt: iso(NOW) }, user: grant({ validatedAt: iso(NOW) }) })
-    expect(view).toEqual({ connected: true, login: "lsr_club", scopes: ["moderator:read:followers"], connectedAt: iso(NOW - 24 * HOUR), validatedAt: iso(NOW), refreshedAt: null, reconnect: null })
+    expect(view).toEqual({ connected: true, login: "lsr_club", scopes: ["moderator:read:followers"], connectedAt: iso(NOW - 24 * HOUR), validatedAt: iso(NOW), refreshedAt: null, reconnect: null, webhooksRevoked: [] })
     expect(JSON.stringify(view)).not.toMatch(/access|refresh-1|app-1/)
+  })
+})
+
+describe("revoked webhooks", () => {
+  it("are kept one per type next to the grant, and forgotten by type without touching the rest", async () => {
+    save({ user: grant() })
+    await recordEventSubRevoked({ type: "stream.online", status: "notification_failures_exceeded", at: iso(NOW - HOUR) })
+    await recordEventSubRevoked({ type: "stream.offline", status: "authorization_revoked", at: iso(NOW - HOUR) })
+    await recordEventSubRevoked({ type: "stream.online", status: "authorization_revoked", at: iso(NOW) })
+    expect(twitchAccountView(settings()).webhooksRevoked).toEqual([
+      { type: "stream.offline", status: "authorization_revoked", at: iso(NOW - HOUR) },
+      { type: "stream.online", status: "authorization_revoked", at: iso(NOW) },
+    ])
+    expect(await clearEventSubRevoked("stream.online")).toBe(true)
+    expect(await clearEventSubRevoked("stream.online")).toBe(false)
+    expect(await clearEventSubRevoked("stream.offline")).toBe(true)
+    expect(settings()).toEqual({ user: grant() })
+  })
+
+  it("cost a notification one read when nothing is revoked (no lock, no write)", async () => {
+    save({ user: grant() })
+    expect(await clearEventSubRevoked("stream.online")).toBe(false)
+    expect(db.$transaction).not.toHaveBeenCalled()
   })
 })
