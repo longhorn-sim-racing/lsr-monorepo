@@ -1011,6 +1011,38 @@ describe("deck jobs that hit a reply's limits", () => {
     expect(db.state.messages.filter((m) => m.kind === "system" && m.continues)).toHaveLength(6)
   })
 
+  it("tell tools a reply that answers a note isn't only an officer's, so it can't save knowledge", async () => {
+    const seen: { fromOfficer: boolean | undefined; same: boolean }[] = []
+    let first: unknown = null
+    const recorder: JackTool<Record<string, never>> = {
+      name: "recorder",
+      description: "Records what the reply answers.",
+      input: z.object({}),
+      run: async (_input, ctx) => {
+        first ??= ctx.reply
+        seen.push({ fromOfficer: ctx.reply?.fromOfficer, same: ctx.reply === first })
+        return { forModel: "ok", label: "Recorded" }
+      },
+    }
+    claude = fakeClaude((_params: BetaMessageStreamParams, call: number): FakeTurn =>
+      call === 0 ? { tools: [{ name: "deck_write", input: {} }] } : call === 1 ? { text: "Slides 1-2 are done." } : call === 2 ? { tools: [{ name: "recorder", input: {} }, { name: "recorder", input: {} }] } : { text: "Done." }
+    )
+    ask("Make a 4-slide deck for GM 2")
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [deckWrite, recorder], limits: { maxDesignToolCalls: 1 } }))
+    // The second reply answered the continue note: both calls in it saw the same reply state, not an officer's
+    expect(seen).toEqual([
+      { fromOfficer: false, same: true },
+      { fromOfficer: false, same: true },
+    ])
+
+    seen.length = 0
+    first = null
+    claude = fakeClaude([{ tools: [{ name: "recorder", input: {} }] }, { text: "Noted." }])
+    ask("Remember that dues are $0 this semester")
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [recorder] }))
+    expect(seen).toEqual([{ fromOfficer: true, same: true }])
+  })
+
   it("leave a note when a deck reply is cut off at its time limit, not only when it wraps up", async () => {
     deps.timing = { runDeadlineMs: 100_000, minAnswerMs: 1_000, replyDeadlineMs: 2_000 }
     // The deck reply writes slides, then spends too long on its next call and is cancelled; the reply that

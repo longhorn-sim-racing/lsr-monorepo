@@ -11,7 +11,27 @@ export type JackToolContext = {
   actor: { userId: string | null; displayName: string }
   /** The reply this call is part of (deck changes record it). Absent outside a room reply, e.g. scripts */
   messageId?: string
+  /**
+   * The reply this call is part of, shared by every call in it (the reply loop makes one per reply).
+   * Absent in scripts, which then can't save knowledge
+   */
+  reply?: JackReplyState
   signal?: AbortSignal
+}
+
+/**
+ * What a reply answers, and what its tools have done so far. One object per reply: every tool call in
+ * it gets the same one, so a tool can count across calls (parallel calls included, since a count is
+ * taken before the first await)
+ */
+export type JackReplyState = {
+  /**
+   * Every message the reply answers is one an officer typed: not a continue note (and later not a
+   * recurring question or the digest). Knowledge saves need it (design §9)
+   */
+  fromOfficer: boolean
+  /** Knowledge changes made in this reply so far (the knowledge tool allows 3) */
+  knowledgeChanges: number
 }
 
 /** An image a tool shows the model (base64), after a line of text that says what it is */
