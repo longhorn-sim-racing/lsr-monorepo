@@ -16,9 +16,10 @@
  *   - run_sql refuses catalog and settings access the role itself is allowed: every pg_ name but
  *     pg_typeof and pg_size_pretty (pg_settings, pg_db_role_setting, pg_roles, pg_user, pg_trigger,
  *     pg_proc, advisory locks, notifications, file reads, ending other sessions), current_setting and
- *     set_config, the XML exports that read a table or schema named in a string, large objects and
- *     dblink, including after a -- comment ended by a carriage return. The check shows which of them
- *     the role itself could reach
+ *     set_config, the XML exports that read a table or schema named in a string, ts_rewrite (a query
+ *     in a string), large objects, dblink, and the net (pg_net), cron, vault and scheduler schemas,
+ *     including after a -- comment ended by a carriage return. The check shows which of them the role
+ *     itself could reach
  *   - run_sql drops session advisory locks after every query, failing ones included
  *   - Jack 2.0 (#188): pg_cron's cron schema and the scheduler are denied; every personal-data table
  *     has row level security on, Jack's read policy, and nothing for Supabase's anon/authenticated
@@ -318,6 +319,12 @@ async function main() {
     ["row_to_json over pg_user (useconfig)", `SELECT row_to_json(u)::text AS r FROM pg_user u`],
     ["pg_sleep (any pg_ function)", `SELECT pg_sleep(0)::text AS s`],
     ["a -- comment ended by a carriage return", `SELECT 1 AS a -- note\r, length(current_setting('app.settings.jwt_secret', true)) AS secret_len`],
+    ["net.http_get (outbound HTTP)", `SELECT net.http_get('https://example.com') AS id`],
+    ["net._http_response (pg_net's stored responses)", `SELECT count(*) AS n FROM net._http_response`],
+    ["cron.job", `SELECT count(*) AS n FROM cron.job`],
+    ["vault.decrypted_secrets", `SELECT count(*) AS n FROM vault.decrypted_secrets`],
+    ["scheduler.tick", `SELECT scheduler.tick()::text AS t`],
+    ["ts_rewrite (a query hidden in a string)", `SELECT ts_rewrite('a'::tsquery, 'SELECT ''a''::tsquery, quote_literal(left(content, 200))::tsquery FROM net._http_response')::text AS t`],
   ];
   for (const [name, sql] of offLimits) {
     r = await tool(sql);
@@ -325,8 +332,8 @@ async function main() {
   }
   r = await tool(`SELECT 'current_setting' AS s -- pg_settings`);
   report(!r.isError, "run_sql: off-limits names inside strings and comments don't count", r.forModel.slice(0, 80));
-  r = await tool(`SELECT pg_typeof(1)::text AS t, pg_size_pretty(1024::bigint) AS s, 1 AS notify, 2 AS lo_count`);
-  report(!r.isError, "run_sql: pg_typeof, pg_size_pretty and harmless aliases still work", r.forModel.slice(0, 80));
+  r = await tool(`SELECT pg_typeof(1)::text AS t, pg_size_pretty(1024::bigint) AS s, 1 AS notify, 2 AS lo_count, 3 AS net, 4 AS cron`);
+  report(!r.isError, "run_sql: pg_typeof, pg_size_pretty and harmless aliases (net and cron included) still work", r.forModel.slice(0, 80));
 
   // A setting changed on the tool's pooled connection (outside run_sql, which refuses set_config)
   // doesn't carry into run_sql's next query: each gets its own 5s, read-only transaction

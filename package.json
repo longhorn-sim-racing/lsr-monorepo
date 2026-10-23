@@ -10,6 +10,9 @@
   },
   "packageManager": "pnpm@10.12.1",
   "pnpm": {
+    "overrides": {
+      "pdfjs-dist>@napi-rs/canvas": "1.0.10"
+    },
     "onlyBuiltDependencies": [
       "@prisma/client",
       "@prisma/engines",
