@@ -31,7 +31,7 @@ Every outside service goes through the same shape, so Jack's tools, the sync job
 2. **Write the client** with plain `fetch` (or the SDK) against `serviceBaseUrl("<service>", "<real base URL>")`. An SDK that takes only a host gets `serviceFetch()` instead (see "SDK notes" below).
    - Put a timeout on every call, and keep it when the caller passes a signal (`AbortSignal.any()`, as `example/client.ts` does).
    - Errors carry the status and path, never the key.
-   - If the client already has its own override env var, pass it as the real URL: `serviceBaseUrl("instagram", process.env.INSTAGRAM_GRAPH_URL || "https://graph.instagram.com")`.
+   - If the client already has its own override env var, pass it through `localOverride()` as the real URL: `serviceBaseUrl("instagram", localOverride("INSTAGRAM_GRAPH_URL", "https://graph.instagram.com"))`. It holds the override to `JACK_FAKES_URL`'s rules, since the client sends its real key there: ignored on Vercel production, and plain http on this machine only (anything else throws).
 3. **Wrap it in `defineConnector({ id, label, requiredEnv, missingSettings?, createClient, smoke?, details? })`.**
    - `client()` returns null unless the env is set, an admin switched it on and its settings are saved. Callers turn null into "not connected".
    - `smoke()` must work while the connector is switched off: build the client directly instead of calling `client()`.
