@@ -63,13 +63,18 @@ export type RuleView = {
 
 export type PendingProposalView = { id: string; kind: string; title: string; href: string; when: string }
 
-/** Discord's own markup as words, for the page: <#id> → #name, <@&id> → @role, <t:unix:F> → a Central time */
+/**
+ * Discord's own markup as words, for the page: <#id> → #name, <@&id> → @role, <t:unix:F> → a Central
+ * time, bold markers and Markdown escapes dropped
+ */
 export function readableText(text: string, names: { channels: Map<string, string>; roles: Map<string, string> }): string {
   return text
     .replace(/<#(\d{17,20})>/g, (_, id: string) => `#${names.channels.get(id) ?? "channel"}`)
     .replace(/<@&(\d{17,20})>/g, (_, id: string) => `@${names.roles.get(id) ?? "role"}`)
     .replace(/<@!?(\d{17,20})>/g, "@member")
     .replace(/<t:(\d+)(?::[a-zA-Z])?>/g, (_, unix: string) => when(new Date(Number(unix) * 1000)))
+    .replace(/(?<!\\)\*\*/g, "")
+    .replace(/\\([\\*_~`|<>[\]#\-+.])/g, "$1")
 }
 
 /** Role names the rules know (a rule saves its ping's name), for showing pings without asking Discord */

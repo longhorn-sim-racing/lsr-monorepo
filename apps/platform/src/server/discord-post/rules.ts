@@ -103,8 +103,10 @@ export function describeRule(rule: { kind: string; channelId: string | null; con
   if (config.series) parts.push(`${names.series?.get(config.series) ?? config.series} events only`)
   if (rule.kind === "standings_update") parts.push(`top ${config.top ?? 5}`)
   if (config.location) parts.push(`location “${config.location}” when an event has no venue`)
-  const ping = pingLabel(config.ping)
-  parts.push(ping ? `pinging ${ping}` : "no ping")
+  if (RULE_INFO[rule.kind].posts) {
+    const ping = pingLabel(config.ping)
+    parts.push(ping ? `pinging ${ping}` : "no ping")
+  }
   return parts.join(", ")
 }
 
