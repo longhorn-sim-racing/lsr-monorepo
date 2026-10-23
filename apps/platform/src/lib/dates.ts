@@ -38,3 +38,14 @@ export function dateToZonedValue(date: Date | null | undefined, timeZone: string
     return "";
   }
 }
+
+/**
+ * The America/Chicago calendar day a moment falls on, as midnight UTC of that date: the value to store
+ * in a `@db.Date` column. Jack 2.0's daily tables (#188) all key on the club's own day, so an 11 PM
+ * CT event counts for that evening rather than the next UTC day.
+ */
+export function chicagoDay(date: Date): Date {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: DEFAULT_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return new Date(Date.UTC(get("year"), get("month") - 1, get("day")));
+}

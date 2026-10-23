@@ -20,6 +20,9 @@
  *     dblink, including after a -- comment ended by a carriage return. The check shows which of them
  *     the role itself could reach
  *   - run_sql drops session advisory locks after every query, failing ones included
+ *   - Jack 2.0 (#188): pg_cron's cron schema and the scheduler are denied; every personal-data table
+ *     has row level security on, Jack's read policy, and nothing for Supabase's anon/authenticated
+ *     roles; DRAFT applications, and reviews of officers' own applications, are invisible to the role
  *
  * Warns (doesn't fail) when the database keeps secret-looking settings in pg_db_role_setting, which any
  * role can read. Local Supabase does by design (its well-known local JWT secret in
@@ -139,6 +142,43 @@ async function main() {
   expectDenied("jack_private.is_officer()", await attempt(`SELECT jack_private.is_officer() AS x`), ["42501"]);
   expectDenied("pg_authid (password hashes)", await attempt(`SELECT rolpassword FROM pg_authid LIMIT 1`), ["42501"]);
   expectDenied("pg_read_file", await attempt(`SELECT pg_read_file('postgresql.conf') AS f`), ["42501"]);
+
+  // Jack 2.0 (#188): pg_cron and the scheduler are out of reach. (pg_net's `net` schema is granted to
+  // PUBLIC on Supabase and can't be revoked; run_sql refuses its names instead, see run-sql.test.ts.)
+  // A database without pg_cron answers "schema does not exist", which is denied too
+  expectDenied("cron.job (pg_cron)", await attempt(`SELECT count(*)::int AS n FROM cron.job`), ["42501", "3F000", "42P01"]);
+  expectDenied("scheduler.tick()", await attempt(`SELECT scheduler.tick() AS t`), ["42501", "3F000", "42883"]);
+
+  // Jack 2.0 personal-data tables: RLS on, Jack's read policy there, Supabase's API roles shut out.
+  // Read through the app's own connection, since the catalog query needs no special rights
+  const app = new PrismaClient({ log: [], errorFormat: "minimal" });
+  const personal = [
+    "JackFile", "JackProposal", "EmailEvent", "ExternalDocument", "DiscordMessage", "DiscordMember", "TeamsMessage",
+    "SponsorProspect", "SponsorActivity", "Meeting", "MeetingDecision", "ActionItem", "KnowledgeEntry", "KnowledgeEntryVersion",
+  ];
+  const rls = await app.$queryRawUnsafe<{ table: string; rls: boolean; policy: boolean; api: boolean }[]>(
+    `SELECT c.relname AS "table", c.relrowsecurity AS rls,
+            EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname = 'public' AND p.tablename = c.relname AND p.policyname = 'jack_readonly_select') AS policy,
+            EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname IN ('anon', 'authenticated') AND has_table_privilege(r.oid, c.oid, 'SELECT')) AS api
+     FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relname = ANY($1)`,
+    personal,
+  );
+  for (const table of personal) {
+    const row = rls.find((r) => r.table === table);
+    report(!!row && row.rls && row.policy && !row.api, `"${table}": row level security, Jack's read policy, no API-role access`, row ? `rls ${row.rls}, policy ${row.policy}, api ${row.api}` : "table missing");
+  }
+
+  // Recruiting (design §3.2): drafts, and anything about an officer's own application, stay hidden
+  const appDrafts = (await app.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "Application" WHERE state = 'DRAFT'`))[0].n;
+  const jackDrafts = await attempt(`SELECT count(*)::int AS n FROM "Application" WHERE state = 'DRAFT'`);
+  report(jackDrafts.ok && (jackDrafts.rows as { n: number }[])[0].n === 0, "recruiting: DRAFT applications are invisible", `${appDrafts} in the database`);
+  const officerReviewsSql = `SELECT count(*)::int AS n FROM "ApplicationReview" rv JOIN "ApplicationTrack" t ON t.id = rv."applicationTrackId"
+    JOIN "Application" a ON a.id = t."applicationId"
+    WHERE EXISTS (SELECT 1 FROM "UserRole" ur JOIN "Role" r ON r.id = ur."roleId" WHERE ur."userId" = a."userId" AND r.key IN ('officer', 'admin'))`;
+  const appOfficerReviews = (await app.$queryRawUnsafe<{ n: number }[]>(officerReviewsSql))[0].n;
+  const jackOfficerReviews = await attempt(officerReviewsSql);
+  report(jackOfficerReviews.ok && (jackOfficerReviews.rows as { n: number }[])[0].n === 0, "recruiting: reviews of officers' applications are invisible", `${appOfficerReviews} in the database`);
+  await app.$disconnect();
 
   // One statement at a time
   expectDenied("multi-statement query", await attempt(`SELECT 1 AS a; SELECT 2 AS b`), ["42601"]);
