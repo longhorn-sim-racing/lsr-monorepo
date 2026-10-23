@@ -187,27 +187,3 @@ export function cleanDocumentName(name: string): string {
 export function folderPath(names: string[]): string {
   return `/${names.map((name) => cleanDocumentName(name).replace(/\//g, "∕")).join("/")}`
 }
-
-/** Reads a response body up to `maxBytes`; null when there's more (the caller marks it too large). Stops reading as soon as it's over */
-export async function readCapped(response: Response, maxBytes: number): Promise<Buffer | null> {
-  const declared = Number(response.headers.get("content-length"))
-  if (Number.isFinite(declared) && declared > maxBytes) {
-    await response.body?.cancel().catch(() => {})
-    return null
-  }
-  if (!response.body) return Buffer.alloc(0)
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let size = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    size += value.length
-    if (size > maxBytes) {
-      await reader.cancel().catch(() => {})
-      return null
-    }
-    chunks.push(value)
-  }
-  return Buffer.concat(chunks, size)
-}

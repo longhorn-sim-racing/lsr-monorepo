@@ -32,14 +32,29 @@ export type ServiceAccount = {
   keyId?: string
 }
 
-/** The service account from env (GOOGLE_DRIVE_SA_EMAIL, GOOGLE_DRIVE_SA_PRIVATE_KEY, optional GOOGLE_DRIVE_SA_KEY_ID); null when either is missing */
+/**
+ * The service account from GOOGLE_SERVICE_ACCOUNT_JSON, the JSON key Google gives you (its client_email,
+ * private_key and private_key_id); null when it's unset. Throws, without quoting it, when it isn't a
+ * service account key
+ */
 export function serviceAccountFromEnv(env: ConnectorEnv = process.env): ServiceAccount | null {
-  const email = env.GOOGLE_DRIVE_SA_EMAIL?.trim()
-  const key = env.GOOGLE_DRIVE_SA_PRIVATE_KEY?.trim()
-  if (!email || !key) return null
-  const keyId = env.GOOGLE_DRIVE_SA_KEY_ID?.trim()
-  // Vercel and .env files keep a PEM's line breaks as a literal "\n"
-  return { email, privateKey: key.replace(/\\n/g, "\n"), ...(keyId ? { keyId } : {}) }
+  const raw = env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim()
+  if (!raw) return null
+  let key: { type?: unknown; client_email?: unknown; private_key?: unknown; private_key_id?: unknown }
+  try {
+    key = JSON.parse(raw)
+  } catch {
+    throw new GoogleAuthError(0, "bad_key_file", "GOOGLE_SERVICE_ACCOUNT_JSON isn't JSON: paste the whole key file Google gave you")
+  }
+  if ((key.type !== undefined && key.type !== "service_account") || typeof key.client_email !== "string" || typeof key.private_key !== "string") {
+    throw new GoogleAuthError(0, "bad_key_file", "GOOGLE_SERVICE_ACCOUNT_JSON isn't a service account key (it needs client_email and private_key)")
+  }
+  return {
+    email: key.client_email.trim(),
+    // A key pasted with its line breaks escaped twice keeps a literal "\n"
+    privateKey: key.private_key.replace(/\\n/g, "\n"),
+    ...(typeof key.private_key_id === "string" && key.private_key_id ? { keyId: key.private_key_id } : {}),
+  }
 }
 
 export class GoogleAuthError extends Error {
@@ -60,7 +75,7 @@ function privateKeyOf(pem: string): KeyObject {
     return createPrivateKey(pem)
   } catch {
     // The parser's own message can quote the input
-    throw new GoogleAuthError(0, "bad_private_key", "GOOGLE_DRIVE_SA_PRIVATE_KEY isn't a PEM private key")
+    throw new GoogleAuthError(0, "bad_private_key", "the service account's private_key isn't a PEM private key")
   }
 }
 

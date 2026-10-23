@@ -20,15 +20,15 @@ export const DRIVE_SOURCE = "drive"
 /** The start of the error stored when the shared folder is gone; the digest check looks for it */
 export const DRIVE_ROOT_MISSING = "Google Drive: the shared folder is gone or no longer shared"
 
-/** Set in env: GOOGLE_DRIVE_SA_KEY_ID is optional (it only becomes the JWT's kid) */
-export const DRIVE_ENV = ["GOOGLE_DRIVE_SA_EMAIL", "GOOGLE_DRIVE_SA_PRIVATE_KEY", "GOOGLE_DRIVE_ROOT_FOLDER_ID"]
+/** The service account's JSON key (client email and private key) and the shared folder's id (design §15) */
+export const DRIVE_ENV = ["GOOGLE_SERVICE_ACCOUNT_JSON", "GOOGLE_DRIVE_FOLDER_ID"]
 
 export type DriveConnection = { drive: DriveClient; rootId: string }
 
 export function driveConnection(env: ConnectorEnv = process.env): DriveConnection {
   const account = serviceAccountFromEnv(env)
-  if (!account) throw new Error("Google Drive isn't set up: GOOGLE_DRIVE_SA_EMAIL and GOOGLE_DRIVE_SA_PRIVATE_KEY are needed")
-  return { drive: driveClient(account, { env }), rootId: (env.GOOGLE_DRIVE_ROOT_FOLDER_ID ?? "").trim() }
+  if (!account) throw new Error("Google Drive isn't set up: GOOGLE_SERVICE_ACCOUNT_JSON is needed")
+  return { drive: driveClient(account, { env }), rootId: (env.GOOGLE_DRIVE_FOLDER_ID ?? "").trim() }
 }
 
 const when = (iso: string) => `${formatInTimeZone(new Date(iso), DEFAULT_TIMEZONE, "MMM d, h:mm a")} CT`
@@ -43,13 +43,13 @@ export const googleDriveConnector = defineConnector<DriveConnection>({
     const { drive, rootId } = driveConnection()
     try {
       const root = await drive.getFile(rootId, "id,name,mimeType", signal)
-      if (root.mimeType !== FOLDER_TYPE) return { ok: false, summary: "GOOGLE_DRIVE_ROOT_FOLDER_ID names a file, not a folder." }
+      if (root.mimeType !== FOLDER_TYPE) return { ok: false, summary: "GOOGLE_DRIVE_FOLDER_ID names a file, not a folder." }
       const page = await drive.listChildren(rootId, undefined, signal)
       const count = page.files?.length ?? 0
       return { ok: true, summary: `Read the folder “${root.name}”: ${count}${page.nextPageToken ? "+" : ""} ${count === 1 ? "item" : "items"} at its top level.` }
     } catch (error) {
       if (error instanceof DriveApiError && error.status === 404) {
-        return { ok: false, summary: "The folder isn't there, or isn't shared with the service account (404). Share it with GOOGLE_DRIVE_SA_EMAIL as Viewer." }
+        return { ok: false, summary: "The folder isn't there, or isn't shared with the service account (404). Share it with the key's client_email as Viewer." }
       }
       throw error
     }

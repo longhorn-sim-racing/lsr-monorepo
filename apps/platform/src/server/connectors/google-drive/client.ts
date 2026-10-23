@@ -1,5 +1,5 @@
 import { serviceBaseUrl } from "../base-url"
-import { readCapped } from "../documents/text"
+import { readCapped, sleep } from "../documents/bytes"
 import type { ConnectorEnv } from "../types"
 import { googleTokenSource, type ServiceAccount } from "./auth"
 
@@ -72,22 +72,6 @@ async function errorReason(response: Response): Promise<string> {
   } catch {
     return ""
   }
-}
-
-/** Waits `ms`, or rejects as soon as `signal` aborts */
-export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(signal.reason)
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", stop)
-      resolve()
-    }, ms)
-    const stop = () => {
-      clearTimeout(timer)
-      reject(signal?.reason)
-    }
-    signal?.addEventListener("abort", stop, { once: true })
-  })
 }
 
 /** A query string literal: `'` and `\` escaped */

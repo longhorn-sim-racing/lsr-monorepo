@@ -1,4 +1,4 @@
-import { sleep } from "../google-drive/client"
+import { sleep } from "../documents/bytes"
 import { GraphApiError, type GraphClient, type GraphPage } from "../microsoft/graph"
 import { messagesPath, toTeamsMessage, type GraphChatMessage } from "./messages"
 import type { TeamsStore } from "./store"

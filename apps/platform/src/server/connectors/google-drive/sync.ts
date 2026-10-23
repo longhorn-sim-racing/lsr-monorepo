@@ -22,7 +22,7 @@ import { DriveApiError, FOLDER_TYPE, SHORTCUT_TYPE, type DriveChange, type Drive
 
 /** Where the Drive sync is (ConnectorState.cursor) */
 export type DriveCursor = {
-  /** The root folder the index was built from; a different GOOGLE_DRIVE_ROOT_FOLDER_ID starts over */
+  /** The root folder the index was built from; a different GOOGLE_DRIVE_FOLDER_ID starts over */
   rootId?: string
   /** The changes feed's position */
   pageToken?: string

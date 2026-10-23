@@ -1,6 +1,5 @@
 import { fakesEnabledFor, fakesOrigin, serviceBaseUrl } from "../base-url"
-import { readCapped } from "../documents/text"
-import { sleep } from "../google-drive/client"
+import { readCapped, sleep } from "../documents/bytes"
 import type { ConnectorEnv } from "../types"
 
 /**

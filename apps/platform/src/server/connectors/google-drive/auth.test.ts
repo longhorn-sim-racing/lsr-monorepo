@@ -47,10 +47,26 @@ describe("signServiceAccountJwt", () => {
 })
 
 describe("serviceAccountFromEnv", () => {
-  it("reads the env, turning a literal \\n back into line breaks (Vercel keeps them escaped)", () => {
-    const env = { GOOGLE_DRIVE_SA_EMAIL: " sa@x.iam.gserviceaccount.com ", GOOGLE_DRIVE_SA_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----", GOOGLE_DRIVE_SA_KEY_ID: "k1" }
-    expect(serviceAccountFromEnv(env)).toEqual({ email: "sa@x.iam.gserviceaccount.com", privateKey: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", keyId: "k1" })
-    expect(serviceAccountFromEnv({ GOOGLE_DRIVE_SA_EMAIL: "a" })).toBeNull()
+  const keyFile = { type: "service_account", project_id: "lsr-jack", private_key_id: "k1", private_key: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n", client_email: "sa@x.iam.gserviceaccount.com" }
+
+  it("reads the key file Google gives you", () => {
+    expect(serviceAccountFromEnv({ GOOGLE_SERVICE_ACCOUNT_JSON: JSON.stringify(keyFile) })).toEqual({ email: "sa@x.iam.gserviceaccount.com", privateKey: keyFile.private_key, keyId: "k1" })
+    expect(serviceAccountFromEnv({})).toBeNull()
+  })
+
+  it("turns a key whose line breaks were escaped twice back into a PEM", () => {
+    const twice = JSON.stringify(keyFile).replace(/\\n/g, "\\\\n")
+    expect(serviceAccountFromEnv({ GOOGLE_SERVICE_ACCOUNT_JSON: twice })?.privateKey).toBe(keyFile.private_key)
+  })
+
+  it("refuses something that isn't a service account key, without quoting it", () => {
+    expect(() => serviceAccountFromEnv({ GOOGLE_SERVICE_ACCOUNT_JSON: "{not json -----BEGIN" })).toThrow(/isn't JSON/)
+    expect(() => serviceAccountFromEnv({ GOOGLE_SERVICE_ACCOUNT_JSON: JSON.stringify({ ...keyFile, type: "authorized_user" }) })).toThrow(/isn't a service account key/)
+    try {
+      serviceAccountFromEnv({ GOOGLE_SERVICE_ACCOUNT_JSON: "{not json -----BEGIN" })
+    } catch (error) {
+      expect((error as Error).message).not.toContain("-----BEGIN")
+    }
   })
 })
 

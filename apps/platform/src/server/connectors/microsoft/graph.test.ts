@@ -78,9 +78,9 @@ describe("the Graph client against the fake", () => {
 
   it("names the path in errors, not the token", async () => {
     mountFakes([microsoftGraphFake])
-    const error = await client()
+    const error = (await client()
       .get("/drives/nope")
-      .catch((e: unknown) => e as GraphApiError)
+      .catch((e: unknown) => e)) as GraphApiError
     expect(error).toBeInstanceOf(GraphApiError)
     expect(error.message).toBe("Microsoft Graph answered 404 (itemNotFound) on /v1.0/drives/nope")
   })

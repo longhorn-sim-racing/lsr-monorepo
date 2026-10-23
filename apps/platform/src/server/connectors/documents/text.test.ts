@@ -2,7 +2,8 @@ import { strToU8, zipSync } from "fflate"
 import { describe, expect, it } from "vitest"
 import { EXTRACT_LIMITS } from "@/server/jack/files/extract"
 import { fakeDocx, fakePdf, fakePptx } from "../google-drive/fake/fixtures"
-import { cleanDocumentName, documentReader, documentText, folderPath, presentationText, readCapped, slideXmlText } from "./text"
+import { readCapped } from "./bytes"
+import { cleanDocumentName, documentReader, documentText, folderPath, presentationText, slideXmlText } from "./text"
 
 const buffer = (bytes: Uint8Array | string) => Buffer.from(typeof bytes === "string" ? strToU8(bytes) : bytes)
 
