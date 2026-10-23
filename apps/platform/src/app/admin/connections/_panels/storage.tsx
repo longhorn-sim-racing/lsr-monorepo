@@ -29,8 +29,7 @@ export async function StoragePanel() {
             <Badge tone={store.tone}>{store.label}</Badge>
             {usage.kind !== "none" && (
               <Button size="sm" variant="ghost" asChild>
-                {/* A JSON check: renders a slide, then writes a small file to the store and reads it back */}
-                <a href="/api/admin/jack/render-check" target="_blank" rel="noreferrer">
+                <a href="/api/admin/jack/render-check" target="_blank" rel="noreferrer" title="Renders a test slide, then writes a small file to the store and reads it back (JSON)">
                   Render check
                 </a>
               </Button>
@@ -82,7 +81,7 @@ function bucketItems(bucket: BucketUsage | null, error?: string) {
   const total = bucket.bytes + bucket.otherBytes
   const fill = storageFill(total)
   return [
-    { label: "Plan", value: <UsageBar bytes={total} share={fill.share} tone={fill.tone} /> },
+    { label: "Used", value: <UsageBar bytes={total} share={fill.share} tone={fill.tone} /> },
     {
       label: "Bucket jack",
       value: (
