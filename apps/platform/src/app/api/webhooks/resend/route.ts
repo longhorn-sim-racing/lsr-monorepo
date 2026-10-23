@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server"
+import { resendConnector } from "@/server/connectors/resend/connector"
 import { emailEventRow, recordEmailEvent, svixHeaders, verifyResendWebhook } from "@/server/connectors/resend/webhook"
 
 /**
  * Resend's delivery events (Jack 2.0, design §12.4). The signature is checked over the raw body before
  * anything is parsed; without RESEND_WEBHOOK_SECRET every request is refused (503, so Resend retries
- * once the secret is set). Each event is stored once per svix-id, so retries are no-ops. Events are
- * stored whether or not the connector is switched on (they're Resend's signed reports about our own
- * mail); the switch decides what Jack's email_delivery tool answers. Nothing here logs a body, an
- * address or a secret.
+ * once the secret is set). Each event is stored once per svix-id, so retries are no-ops. While the
+ * connector is switched off nothing is stored: the event is still answered 200, so Resend counts it as
+ * delivered and neither retries it nor disables the endpoint (those events are gone for good; there's
+ * no read key to fetch them later). Nothing here logs a body, an address or a secret.
  */
 
 export const dynamic = "force-dynamic"
@@ -35,6 +36,8 @@ export async function POST(request: Request) {
   const row = emailEventRow(payload, headers.id)
   if (!row) return NextResponse.json({ ok: true, stored: false })
   try {
+    // Switched off on System → Connections: keep nothing (members' addresses included)
+    if (!(await resendConnector.enabled())) return NextResponse.json({ ok: true, stored: false })
     const stored = await recordEmailEvent(row)
     return NextResponse.json({ ok: true, stored })
   } catch (error) {

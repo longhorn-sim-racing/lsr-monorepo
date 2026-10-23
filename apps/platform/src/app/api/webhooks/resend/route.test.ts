@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const prisma = vi.hoisted(() => ({
   emailEvent: { createMany: vi.fn() },
-  connectorState: { upsert: vi.fn() },
+  connectorState: { upsert: vi.fn(), findUnique: vi.fn() },
 }))
 vi.mock("@/server/db", () => ({ prisma }))
 
@@ -30,6 +30,7 @@ beforeEach(() => {
   vi.stubEnv("RESEND_WEBHOOK_SECRET", SECRET)
   prisma.emailEvent.createMany.mockResolvedValue({ count: 1 })
   prisma.connectorState.upsert.mockResolvedValue({})
+  prisma.connectorState.findUnique.mockResolvedValue({ enabled: true })
 })
 
 describe("POST /api/webhooks/resend", () => {
@@ -42,6 +43,26 @@ describe("POST /api/webhooks/resend", () => {
       skipDuplicates: true,
     })
     expect(prisma.connectorState.upsert).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "resend" } }))
+  })
+
+  it("stores nothing while the connector is switched off, and still answers 200 so Resend doesn't retry", async () => {
+    prisma.connectorState.findUnique.mockResolvedValue({ enabled: false })
+    const res = await POST(delivery())
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, stored: false })
+    expect(prisma.emailEvent.createMany).not.toHaveBeenCalled()
+    expect(prisma.connectorState.upsert).not.toHaveBeenCalled()
+
+    // No ConnectorState row at all is off too
+    prisma.connectorState.findUnique.mockResolvedValue(null)
+    expect(await (await POST(delivery({ id: "msg_test_2" }))).json()).toEqual({ ok: true, stored: false })
+    expect(prisma.emailEvent.createMany).not.toHaveBeenCalled()
+  })
+
+  it("checks the signature before the switch: a bad one is refused even while off", async () => {
+    prisma.connectorState.findUnique.mockResolvedValue({ enabled: false })
+    expect((await POST(delivery({ secret: "whsec_" + Buffer.from("another-secret-of-thirty-two-b!!").toString("base64") }))).status).toBe(400)
+    expect(prisma.connectorState.findUnique).not.toHaveBeenCalled()
   })
 
   it("answers a retried delivery (same svix-id) with 200 and stores nothing new", async () => {

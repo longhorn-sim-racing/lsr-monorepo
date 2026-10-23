@@ -15,7 +15,8 @@ vi.mock("@/server/db", () => ({
         return { count: fresh.length }
       }),
     },
-    connectorState: { upsert: vi.fn() },
+    // The connector is switched on, so the route stores what the fake sends
+    connectorState: { upsert: vi.fn(), findUnique: vi.fn(async () => ({ enabled: true })) },
   },
 }))
 
