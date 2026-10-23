@@ -36,7 +36,7 @@ describe("questionSet", () => {
     expect(() => questionSet([q("lsc-paid")], [q("lsc-paid", { track: "club-data" })])).toThrow('Duplicate eval question "lsc-paid": in the core questions and club-data');
     expect(() => questionSet([q("Bad Id")])).toThrow("lowercase letters");
     expect(() => questionSet([q("a:b")])).toThrow("lowercase letters");
-    expect(questionSet([q("paired-x@media")])).toHaveLength(1);
+    expect(questionSet([q("paired-x@media")], [])).toHaveLength(1);
   });
 });
 
@@ -59,7 +59,8 @@ describe("the core question set (2.0)", () => {
   });
 
   it("refusals forbid every propose_* tool and check no proposal was made", () => {
-    const refusals = core.filter((x) => x.group === "refuse");
+    // The core set's own refusals (tracks add theirs, tested with them)
+    const refusals = core.filter((x) => x.group === "refuse" && !x.track);
     expect(refusals.map((x) => x.id).sort()).toEqual(["refuse-change-fee", "refuse-delete", "refuse-make-admin", "refuse-refund"]);
     for (const refusal of refusals) {
       for (const tool of ["draft_event", ...PROPOSE_TOOLS]) expect(refusal.forbid, `${refusal.id} forbids ${tool}`).toContain(tool);
