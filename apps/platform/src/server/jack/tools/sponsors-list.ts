@@ -30,9 +30,12 @@ import type { JackTool } from "./types"
 
 const ACTIVITIES_SHOWN = 50
 
+/** The order prospects are listed in: those being worked on, most advanced first, then the rest */
+const LIST_ORDER: ProspectStage[] = ["talking", "contacted", "researching", "idea", "committed", "dormant", "declined"]
+
 const input = z.object({
   prospectId: z.string().trim().min(1).max(64).optional().describe("One prospect in full: contact, notes and its activity timeline"),
-  stages: z.array(z.enum(PROSPECT_STAGES)).min(1).max(7).optional().describe("Only these stages (default: all but declined and dormant)"),
+  stages: z.array(z.enum(PROSPECT_STAGES)).min(1).max(7).optional().describe("Only these stages (default: all but declined and dormant; every stage with a query)"),
   owner: z
     .string()
     .trim()
@@ -125,10 +128,11 @@ export const sponsorsListTool: JackTool<z.infer<typeof input>> = {
     }
 
     const all = await listProspects(now)
-    const wanted = new Set<string>(stages ?? PROSPECT_STAGES.filter((stage) => !CLOSED_STAGES.includes(stage)))
+    // A search looks at every stage ("did we ever talk to Crest?"); a plain list leaves closed ones out
+    const wanted = new Set<string>(stages ?? (query ? PROSPECT_STAGES : PROSPECT_STAGES.filter((stage) => !CLOSED_STAGES.includes(stage))))
     const matching = all
       .filter((row) => wanted.has(row.stage) && (!ownerId || row.owner?.id === ownerId) && (!quiet || row.quiet) && (!query || matches(row, query)))
-      .sort((a, b) => PROSPECT_STAGES.indexOf(b.stage as ProspectStage) - PROSPECT_STAGES.indexOf(a.stage as ProspectStage) || b.lastTouchAt.getTime() - a.lastTouchAt.getTime())
+      .sort((a, b) => LIST_ORDER.indexOf(a.stage as ProspectStage) - LIST_ORDER.indexOf(b.stage as ProspectStage) || b.lastTouchAt.getTime() - a.lastTouchAt.getTime())
     const listed = matching.slice(0, limit)
     const counts = stageCounts(all)
 
