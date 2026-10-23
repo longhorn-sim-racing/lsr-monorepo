@@ -16,7 +16,7 @@ import { releaseRoomLock, renewRoomLock, tryAcquireRoomLock } from "./room-lock"
 import { getMonthSpend } from "./spend"
 import { nameRoom, STAND_TIMEOUT_MS } from "./stand"
 import { JACK_TOOLS } from "./tools"
-import type { AnyJackTool } from "./tools/types"
+import type { AnyJackTool, JackRequestType } from "./tools/types"
 
 export type ReplyLoopDeps = {
   broadcast: RoomBroadcaster
@@ -131,9 +131,14 @@ async function hasUnanswered(roomId: string) {
  * so the function stays alive for them; they're cut off at the run's deadline too.
  *
  * `startedAt` is when the request that started the run began (posting, or "continue"), since the
- * function's own time limit counts from then; it defaults to now.
+ * function's own time limit counts from then; it defaults to now. `requestType` is "scheduled" for a
+ * run the scheduler started (recurring questions, digest summaries): its replies get no web tools.
  */
-export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultReplyDeps, { startedAt = Date.now() }: { startedAt?: number } = {}): Promise<void> {
+export async function runRoom(
+  roomId: string,
+  deps: ReplyLoopDeps = defaultReplyDeps,
+  { startedAt = Date.now(), requestType = "room" }: { startedAt?: number; requestType?: JackRequestType } = {}
+): Promise<void> {
   const runId = randomUUID()
   if (!(await tryAcquireRoomLock(roomId, runId))) return
   const timing = { ...RUN_TIMING, ...deps.timing }
@@ -160,7 +165,7 @@ export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultReply
           holding = false // a newer run took over a lock it thought was stale; it answers from here
           return
         }
-        await answer(roomId, waiting, deps, sideJobs, { runSignal: run.signal, deadlineAt, leftMs, replyDeadlineMs: timing.replyDeadlineMs })
+        await answer(roomId, waiting, deps, sideJobs, { runSignal: run.signal, deadlineAt, leftMs, replyDeadlineMs: timing.replyDeadlineMs }, requestType)
         continue
       }
 
@@ -204,7 +209,14 @@ type Produced = {
 type AnswerTiming = { runSignal: AbortSignal; deadlineAt: number; leftMs: number; replyDeadlineMs: number }
 
 /** One reply to every message in `waiting`, from the room's persona as it is now */
-async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoopDeps, sideJobs: Promise<void>[], timing: AnswerTiming) {
+async function answer(
+  roomId: string,
+  waiting: JackMessageRow[],
+  deps: ReplyLoopDeps,
+  sideJobs: Promise<void>[],
+  timing: AnswerTiming,
+  requestType: JackRequestType
+) {
   const reply = await prisma.$transaction(async (tx) => {
     const room = await tx.jackRoom.findUnique({ where: { id: roomId }, select: { persona: true } })
     const created = await tx.jackMessage.create({
@@ -247,7 +259,7 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   let status: "done" | "error"
   let result: { content: string; streamSeq: number }
   try {
-    produced = await produce(roomId, reply, persona, waiting, deps, stream, usage, { signal, limits }, (latest) => {
+    produced = await produce(roomId, reply, persona, waiting, deps, stream, usage, { signal, limits, requestType }, (latest) => {
       parts = latest
     })
     status = produced.status
@@ -270,7 +282,9 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
     console.info(
       `[jack] Reply ${reply.id} in room ${roomId}: ${JACK_PERSONA_NAME[persona]} (${usage.models.join(", ")}) $${usage.costUsd}, ` +
         `${tokens.inputTokens} in + ${tokens.cacheWriteTokens} cache write + ${tokens.cacheReadTokens} cache read, ${tokens.outputTokens} out, ` +
-        `${usage.calls} calls, ${produced?.toolCalls ?? 0} tool calls, ${((Date.now() - startedAt) / 1000).toFixed(1)} s, ${produced?.outcome ?? "failed"}`
+        `${usage.calls} calls, ${produced?.toolCalls ?? 0} tool calls, ` +
+        `${usage.webSearches || usage.webFetches ? `${usage.webSearches} web searches, ${usage.webFetches} pages opened, ` : ""}` +
+        `${((Date.now() - startedAt) / 1000).toFixed(1)} s, ${produced?.outcome ?? "failed"}`
     )
   }
 
@@ -332,7 +346,7 @@ async function produce(
   deps: ReplyLoopDeps,
   stream: DeltaStream,
   usage: UsageTally,
-  run: { signal: AbortSignal; limits: Partial<ReplyLimits> },
+  run: { signal: AbortSignal; limits: Partial<ReplyLimits>; requestType: JackRequestType },
   onParts: (parts: JackToolPart[]) => void
 ): Promise<Produced> {
   const name = JACK_PERSONA_NAME[persona]
@@ -390,6 +404,7 @@ async function produce(
     },
     usage,
     limits: run.limits,
+    requestType: run.requestType,
     signal: run.signal,
   })
   return {

@@ -4,7 +4,7 @@ import type { BetaMessageStreamParams } from "@anthropic-ai/sdk/resources/beta/m
 import { z } from "zod"
 import type { JackDeltaEvent, JackDoneEvent, JackRoomEvent, JackToolEvent } from "@/lib/jack/types"
 import { parseToolParts } from "@/lib/jack/parts"
-import { fakeClaude, lastUserText, type FakeTurn } from "./fake-claude"
+import { fakeCitedText, fakeClaude, fakeWebSearch, lastUserText, type FakeTurn } from "./fake-claude"
 import type { FakeJackDb } from "./jack-test-db"
 import type { JackTool } from "./tools/types"
 
@@ -158,6 +158,34 @@ describe("runRoom", () => {
     expect(reply.streamSeq).toBe(deltas.length)
     expect(radio.sent.every((s) => s.roomId === room.id)).toBe(true)
     expect(db.room(room.id).runId).toBeNull()
+  })
+
+  it("gives a room run the web tools when JACK_WEB_TOOLS=on, and a scheduled run none", async () => {
+    vi.stubEnv("JACK_WEB_TOOLS", "on")
+    ask("Who sponsors other college sim racing clubs?")
+    await onFakeTimers(() => runRoom(room.id, deps))
+    expect(claude.calls[0].tools?.map((tool) => (tool as { name?: string }).name)).toEqual(["web_search", "web_fetch"])
+
+    ask("Weekly signups?")
+    await onFakeTimers(() => runRoom(room.id, deps, { requestType: "scheduled" }))
+    expect(claude.calls[1].tools).toBeUndefined()
+  })
+
+  it("saves and broadcasts a web search as a part of the reply, and prices the search", async () => {
+    vi.stubEnv("JACK_WEB_TOOLS", "on")
+    const iracing = { url: "https://www.iracing.com/college", title: "iRacing college" }
+    claude = fakeClaude([{ blocks: [...fakeWebSearch("college sim racing sponsors", [iracing], { id: "srvtoolu_w" }), fakeCitedText("iRacing sponsors college clubs.", [iracing])] }])
+    ask("Who sponsors other college sim racing clubs?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const [reply] = replies()
+    expect(reply.content).toBe("iRacing sponsors college clubs.")
+    expect(parseToolParts(reply.toolCalls)).toEqual([
+      expect.objectContaining({ id: "srvtoolu_w", name: "web_search", status: "done", displays: [expect.objectContaining({ kind: "web_sources", sources: [expect.objectContaining({ url: iracing.url })] })] }),
+    ])
+    expect(radio.of("message.tool").map((event) => (event as JackToolEvent).part.id)).toContain("srvtoolu_w")
+    expect(reply.costUsd).toBeCloseTo((100 * 2 + 20 * 10) / 1e6 + 0.01, 6)
   })
 
   it("saves the partial reply about once a second while it streams", async () => {
