@@ -15,6 +15,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { localDatabaseProblem, withDatabaseName } from "../src/server/jack/eval-support";
+import { filePaths } from "../src/server/jack/files/paths";
 import { expectNoInjection, expectNoProposal, expectProposal } from "./jack-eval/checks";
 import { cleanUpEvalRooms, evalRoomId, orphanedEvalRooms } from "./jack-eval/cleanup";
 import { loadAppEnv } from "./jack-eval/env";
@@ -84,7 +85,7 @@ async function main() {
     await prisma.instagramPublish.create({ data: { id: ids.publish, mediaType: "IMAGE", caption: marker, proposalId: ids.proposal } });
     await prisma.event.create({ data: event(ids.draft, `Jack Eval cleanup draft ${tag}`) });
     await prisma.event.create({ data: event(ids.realEvent, `Officer's event ${tag}`) });
-    await prisma.auditLog.createMany({ data: [audit(ids.draft, "CREATE", "EVENT"), audit(ids.realEvent, "UPDATE", "EVENT"), audit(knowledge.archived, "ARCHIVE", "KNOWLEDGE")] });
+    await prisma.auditLog.createMany({ data: [audit(ids.draft, "CREATE", "EVENT"), audit(ids.realEvent, "UPDATE", "EVENT"), audit(knowledge.archived, "ARCHIVE", "KNOWLEDGE_ENTRY")] });
 
     // Knowledge: one saved in the room, one that existed and was changed there, one that existed and was archived there
     await prisma.knowledgeEntry.create({ data: { id: knowledge.created, title: `Saved ${tag}`, body: marker, sourceType: "JACK", provenance: { roomId } } });
@@ -105,8 +106,11 @@ async function main() {
     await prisma.auditLog.create({ data: audit(ids.lateDraft, "CREATE", "EVENT", goneRoomId) });
     await prisma.actionItem.create({ data: { text: `${marker} (late)`, roomId: goneRoomId } });
 
-    const filePath = `rooms/${roomId}/f1/notes.txt`;
-    await prisma.jackFile.create({ data: { roomId, filename: "notes.txt", contentType: "text/plain", sizeBytes: 5, storagePath: filePath, kind: "TEXT", status: "READY" } });
+    const fileId = randomUUID();
+    const filePath = `rooms/${roomId}/${fileId}/notes.txt`;
+    await prisma.jackFile.create({ data: { id: fileId, roomId, filename: "notes.txt", contentType: "text/plain", sizeBytes: 5, storagePath: filePath, kind: "TEXT", status: "READY" } });
+    // An officer reviewed the entry Jack saved while the question ran: that audit entry names no room
+    await prisma.auditLog.create({ data: { actorUserId: null, actionType: "REVIEW", entityType: "KNOWLEDGE_ENTRY", entityId: knowledge.created, summary: `cleanup check ${tag}`, metadata: { via: "admin" } } });
     await prisma.scheduledJob.create({ data: { id: ids.job, key: `recurring:${tag}`, kind: "recurring.question", schedule: "0 9 * * 1", nextRunAt: soon } });
     await prisma.recurringQuestion.create({ data: { title: marker, prompt: marker, roomId, scheduledJobId: ids.job } });
     await prisma.meeting.create({ data: { id: ids.meeting, title: marker, kind: "board", heldAt: now, roomId } });
@@ -124,7 +128,7 @@ async function main() {
     check(Boolean(injected?.includes("repeats the injected instruction") && injected.includes("saved knowledge (3 versions)")), `the injection guard sees the echoing proposal and the knowledge saves (${injected})`);
 
     const deleted: string[] = [];
-    const report = await cleanUpEvalRooms(prisma, [roomId], { deleteObject: async (path) => void deleted.push(path) });
+    const report = await cleanUpEvalRooms(prisma, [roomId], { deleteObjects: async (paths) => void deleted.push(...paths) });
     console.log(`  cleanup: ${JSON.stringify({ ...report, left: report.left.length, errors: report.errors })}`);
 
     check(report.errors.length === 0, "no cleanup step failed");
@@ -137,12 +141,16 @@ async function main() {
     check((await prisma.event.count({ where: { id: ids.realEvent } })) === 1, "an event an audit entry only changed is kept");
     check((await prisma.auditLog.count({ where: { metadata: { path: ["roomId"], equals: roomId } } })) === 0, "the room's audit entries are deleted");
     check((await prisma.knowledgeEntry.count({ where: { id: knowledge.created } })) === 0, "knowledge saved in the room is deleted");
+    check((await prisma.auditLog.count({ where: { entityType: "KNOWLEDGE_ENTRY", entityId: knowledge.created } })) === 0, "so is every audit entry about it, one naming no room included");
     const changed = await prisma.knowledgeEntry.findUnique({ where: { id: knowledge.changed }, include: { versions: true } });
     check(changed?.body === "The officers' text" && changed.tags.join() === "policy" && changed.versions.length === 1, "knowledge changed in the room is back to its last version, without the eval's");
     check((await prisma.knowledgeEntry.findUnique({ where: { id: knowledge.archived } }))?.archivedAt === null, "knowledge archived in the room is unarchived");
     const untracked = await prisma.knowledgeEntry.findUnique({ where: { id: knowledge.untracked }, include: { versions: true } });
     check(Boolean(untracked) && untracked!.versions.length === 0 && report.left.some((l) => l.includes(knowledge.untracked)), "an older entry whose only version is the eval's is kept, and reported");
-    check((await prisma.jackFile.count({ where: { roomId } })) === 0 && deleted.join() === filePath, "the room file is gone and its stored object deleted");
+    check(
+      (await prisma.jackFile.count({ where: { roomId } })) === 0 && deleted.join() === filePaths({ id: fileId, roomId, storagePath: filePath }).join(),
+      "the room file is gone, and its stored object and photo copies deleted"
+    );
     check((await prisma.scheduledJob.count({ where: { id: ids.job } })) === 0 && (await prisma.recurringQuestion.count({ where: { roomId } })) === 0, "the recurring question and its job are gone");
     check((await prisma.meeting.count({ where: { id: ids.meeting } })) === 0 && (await prisma.meetingDecision.count({ where: { meetingId: ids.meeting } })) === 0, "the meeting and its decision are gone");
     check((await prisma.actionItem.count({ where: { text: marker } })) === 0, "both action items are gone");
