@@ -67,10 +67,8 @@ describe("the discord-read tools", () => {
 
   it("say Discord isn't connected while it's off, without reading anything", async () => {
     connector.client.mockResolvedValue(null)
-    for (const tool of [discordActivityTool, discordPollsTool]) {
-      const out = await tool.run(tool.input.parse({}), ctx)
-      expect(out).toMatchObject({ label: "Discord isn't connected", forModel: expect.stringMatching(/Discord isn't connected/) })
-    }
+    const outs = [await discordActivityTool.run(discordActivityTool.input.parse({}), ctx), await discordPollsTool.run(discordPollsTool.input.parse({}), ctx)]
+    for (const out of outs) expect(out).toMatchObject({ label: "Discord isn't connected", forModel: expect.stringMatching(/Discord isn't connected/) })
     expect(queries.discordActivity).not.toHaveBeenCalled()
     expect(queries.discordPolls).not.toHaveBeenCalled()
   })
