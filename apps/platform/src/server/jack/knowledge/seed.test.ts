@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { duplicateSeedTitles, isSeedFileName, parseSeedFile, parseSeedOwner, splitFrontMatter } from "./seed"
+import { duplicateSeedTitles, isSeedFileName, parseSeedFile, parseSeedOwner, planSeedReload, splitFrontMatter, type LoadedSeed, type SeedFields } from "./seed"
 
 const file = (front: string, body = "The entry fee is $10, or $5 for returning drivers.") => `---\n${front}\n---\n\n${body}\n`
 
@@ -7,7 +7,7 @@ const GOOD = file(`title: LSC entry fee for Season 3
 tags: [lsc, fees, Decision]
 sourceNote: "Competition team post in Teams, Sep 28"
 sourceDate: 2026-09-28
-owner: "@Armando-Martinez"`)
+owner: "@Test-Owner"`)
 
 describe("parseSeedFile", () => {
   it("reads the front matter and the text", () => {
@@ -20,13 +20,13 @@ describe("parseSeedFile", () => {
         tags: ["lsc", "fees", "decision"],
         sourceNote: "Competition team post in Teams, Sep 28",
         sourceDate: "2026-09-28",
-        owner: { kind: "handle", handle: "armando-martinez" },
+        owner: { kind: "handle", handle: "test-owner" },
       },
     })
   })
 
   it("takes a department as the owner, and tags the entry with it", () => {
-    const parsed = parseSeedFile("fees.md", GOOD.replace('owner: "@Armando-Martinez"', 'owner: "Competition"'))
+    const parsed = parseSeedFile("fees.md", GOOD.replace('owner: "@Test-Owner"', 'owner: "Competition"'))
     expect(parsed).toMatchObject({ ok: true, entry: { owner: { kind: "department", id: "competition" }, tags: ["lsc", "fees", "decision", "competition"] } })
   })
 
@@ -87,5 +87,73 @@ describe("duplicateSeedTitles", () => {
   it("finds files that share a title, ignoring case", () => {
     const entry = (file: string, title: string) => ({ file, title, body: "x", tags: ["a"], sourceNote: "n", sourceDate: "2026-09-28", owner: null })
     expect(duplicateSeedTitles([entry("a.md", "Dues"), entry("b.md", "Brand"), entry("c.md", "dues")])).toEqual([{ title: "Dues", files: ["a.md", "c.md"] }])
+  })
+})
+
+describe("planSeedReload", () => {
+  const loadedAt = new Date("2026-10-25T17:00:00Z")
+  const signedOff = new Date("2026-10-25T05:00:00Z")
+  const later = new Date("2026-11-02T17:00:00Z")
+  const file: SeedFields = { title: "LSC entry fee", body: "$10, or $5 for returning drivers.", tags: ["lsc", "fees"], sourceNote: "Teams General", sourceDate: new Date("2026-09-28T05:00:00Z"), ownerId: "officer-1" }
+  // As the first load left it
+  const loaded = (overrides: Partial<LoadedSeed> = {}): LoadedSeed => ({
+    ...file,
+    reviewedAt: signedOff,
+    versions: [{ id: "v1", title: file.title, via: "seed", createdAt: loadedAt }],
+    changes: [{ at: loadedAt, actionType: "CREATE", via: "seed" }],
+    ...overrides,
+  })
+
+  it("leaves an entry alone when neither the file nor the sign-off changed", () => {
+    expect(planSeedReload(loaded(), file, { approvedAt: signedOff })).toEqual({ action: "same" })
+    expect(planSeedReload(loaded(), file, { approvedAt: null })).toEqual({ action: "same" })
+  })
+
+  it("updates what the file changed, on the newest version, reviewed as of the sign-off", () => {
+    expect(planSeedReload(loaded(), { ...file, body: "$12 now.", sourceNote: "Teams General, Oct 30" }, { approvedAt: later })).toEqual({
+      action: "update",
+      baseVersionId: "v1",
+      reviewedAt: later,
+      changed: ["text", "source"],
+      overwriting: false,
+    })
+    // A new sign-off alone re-dates the review
+    expect(planSeedReload(loaded(), file, { approvedAt: later })).toMatchObject({ action: "update", reviewedAt: later, changed: ["review date"] })
+  })
+
+  it("never moves an officer's later review back, unless the text changes", () => {
+    const reviewedLater = loaded({ reviewedAt: later })
+    expect(planSeedReload(reviewedLater, file, { approvedAt: signedOff })).toEqual({ action: "same" })
+    expect(planSeedReload(reviewedLater, { ...file, ownerId: "officer-2" }, { approvedAt: signedOff })).toMatchObject({ action: "update", reviewedAt: null, changed: ["owner"] })
+    expect(planSeedReload(reviewedLater, { ...file, body: "New." }, { approvedAt: signedOff })).toMatchObject({ action: "update", reviewedAt: signedOff })
+  })
+
+  it("skips an entry edited on the site since the last load, unless told to overwrite it", () => {
+    const edited = loaded({
+      body: "$10; officers fixed this on the page.",
+      versions: [
+        { id: "v2", title: file.title, via: "admin", createdAt: later },
+        { id: "v1", title: file.title, via: "seed", createdAt: loadedAt },
+      ],
+      changes: [
+        { at: loadedAt, actionType: "CREATE", via: "seed" },
+        { at: later, actionType: "UPDATE", via: "admin" },
+      ],
+    })
+    // Even a typo fix in another file mustn't put the old text back
+    expect(planSeedReload(edited, file, { approvedAt: signedOff })).toEqual({ action: "skip", reason: "edited on the site since the last load (by an officer on the Knowledge page, 2026-11-02)" })
+    expect(planSeedReload(edited, file, { approvedAt: signedOff, overwrite: true })).toMatchObject({ action: "update", baseVersionId: "v2", changed: ["text"], overwriting: true })
+  })
+
+  it("skips one whose details an officer or Jack changed since, and counts the seed's own detail changes as loads", () => {
+    const owner = loaded({ ownerId: "officer-2", changes: [{ at: loadedAt, actionType: "CREATE", via: "seed" }, { at: later, actionType: "UPDATE", via: "jack" }] })
+    expect(planSeedReload(owner, file, { approvedAt: signedOff })).toMatchObject({ action: "skip", reason: expect.stringMatching(/details were changed on the site .*by Jack/) })
+
+    // The seed changed the source last time (no version for that): still its own load, not an edit
+    const reloaded = loaded({ sourceNote: "Old note", changes: [{ at: loadedAt, actionType: "CREATE", via: "seed" }, { at: later, actionType: "UPDATE", via: "seed" }] })
+    expect(planSeedReload(reloaded, file, { approvedAt: null })).toMatchObject({ action: "update", changed: ["source"] })
+    // A review or an archive isn't an edit
+    const reviewed = loaded({ changes: [{ at: loadedAt, actionType: "CREATE", via: "seed" }, { at: later, actionType: "REVIEW", via: "admin" }] })
+    expect(planSeedReload(reviewed, { ...file, body: "New." }, { approvedAt: null })).toMatchObject({ action: "update", changed: ["text"] })
   })
 })

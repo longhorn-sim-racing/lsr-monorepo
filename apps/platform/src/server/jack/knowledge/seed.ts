@@ -161,3 +161,74 @@ export function duplicateSeedTitles(entries: SeedEntry[]): { title: string; file
   }
   return [...byTitle.entries()].filter(([, files]) => files.length > 1).map(([, files]) => ({ title: entries.find((e) => e.file === files[0])!.title, files }))
 }
+
+/** A seed entry already in the knowledge base, as the loader reads it to plan a reload */
+export type LoadedSeed = {
+  title: string
+  body: string
+  tags: string[]
+  sourceNote: string | null
+  sourceDate: Date | null
+  ownerId: string | null
+  reviewedAt: Date | null
+  /** Its versions, newest first */
+  versions: { id: string; title: string; via: string; createdAt: Date }[]
+  /** Its create and update audit entries: when, and from where ("seed", "admin" for the page, "jack") */
+  changes: { at: Date; actionType: string; via: string | null }[]
+}
+
+/** What a seed file says, as the loader writes it */
+export type SeedFields = { title: string; body: string; tags: string[]; sourceNote: string; sourceDate: Date; ownerId: string | null }
+
+export type SeedReload =
+  | { action: "same" }
+  /** Changed on the site since the last load: left alone unless the loader runs with --overwrite */
+  | { action: "skip"; reason: string }
+  /**
+   * `changed`: what differs from the file. Without `overwriting` the entry matches the last load, so
+   * it's the file that moved; with it, the site changed it too and the file replaces that
+   */
+  | { action: "update"; baseVersionId: string | null; reviewedAt: Date | null; changed: string[]; overwriting: boolean }
+
+const CHANGED_BY: Record<string, string> = { admin: "an officer on the Knowledge page", jack: "Jack", seed: "the seed" }
+
+/**
+ * Whether reloading a seed file changes the entry an earlier load made, and how. The seed's own newest
+ * version is what it last loaded. A newer version from anyone else, or an update to the details in the
+ * audit log since the last load, means officers (or Jack) changed it on the site: then it's skipped,
+ * unless `overwrite`, rather than quietly put back. An update names the newest version as its base, so
+ * an edit landing while the loader runs is refused, not overwritten. A new sign-off re-dates the
+ * review, but never moves an officer's later review back.
+ */
+export function planSeedReload(loaded: LoadedSeed, file: SeedFields, { approvedAt, overwrite = false }: { approvedAt: Date | null; overwrite?: boolean }): SeedReload {
+  const latest = loaded.versions[0] ?? null
+  const lastSeed = loaded.versions.find((v) => v.via === "seed") ?? null
+  const lastLoad = Math.max(lastSeed?.createdAt.getTime() ?? 0, ...loaded.changes.filter((c) => c.via === "seed").map((c) => c.at.getTime()))
+
+  const changed = [
+    loaded.title !== file.title && "title",
+    loaded.body !== file.body && "text",
+    loaded.tags.join(",") !== file.tags.join(",") && "tags",
+    (loaded.sourceNote !== file.sourceNote || loaded.sourceDate?.getTime() !== file.sourceDate.getTime()) && "source",
+    loaded.ownerId !== file.ownerId && "owner",
+  ].filter((what): what is string => !!what)
+  const contentChanged = changed.some((what) => what === "title" || what === "text" || what === "tags")
+  const reviewDue = !!approvedAt && (contentChanged || !loaded.reviewedAt || loaded.reviewedAt.getTime() < approvedAt.getTime())
+  if (!changed.length && !reviewDue) return { action: "same" }
+
+  const day = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(date)
+  const by = (via: string | null) => CHANGED_BY[via ?? ""] ?? "someone else"
+  const newerVersion = latest && latest.id !== lastSeed?.id ? latest : null
+  const newerDetails = loaded.changes.find((c) => c.via !== "seed" && c.actionType === "UPDATE" && c.at.getTime() > lastLoad)
+  if (!overwrite) {
+    if (newerVersion) return { action: "skip", reason: `edited on the site since the last load (by ${by(newerVersion.via)}, ${day(newerVersion.createdAt)})` }
+    if (newerDetails) return { action: "skip", reason: `its details were changed on the site since the last load (by ${by(newerDetails.via)}, ${day(newerDetails.at)})` }
+  }
+  return {
+    action: "update",
+    baseVersionId: latest?.id ?? null,
+    reviewedAt: reviewDue ? approvedAt : null,
+    changed: changed.length ? changed : ["review date"],
+    overwriting: !!(newerVersion || newerDetails),
+  }
+}

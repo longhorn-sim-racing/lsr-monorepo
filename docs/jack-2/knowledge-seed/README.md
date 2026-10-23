@@ -2,7 +2,7 @@
 
 The knowledge base starts with a reviewed set of entries: the club, who does what, decisions, policies, the brand, sponsors, the events playbook, recruiting, which services exist and who holds access (names only), and the calendar rhythm (design §9).
 
-**This repo is public, so seed files are never committed.** Only this README is. Keep the drafts in a private folder outside the repo; the default is `~/.lsr/jack-knowledge-seed/`. The loader refuses a folder inside the repo, and `.gitignore` keeps a stray `jack-knowledge-seed/` folder (or anything else in this folder) out of git.
+**This repo is public, so seed files are never committed.** Only this README is. Keep the drafts in a private folder outside the repo; the default is `~/.lsr/jack-knowledge-seed/`. The loader refuses any folder inside the repo (whatever it's called, and wherever you run it from), and `.gitignore` keeps a stray `jack-knowledge-seed/` folder (or anything else in this folder) out of git.
 
 ## The format
 
@@ -53,6 +53,6 @@ pnpm --filter @lsr/platform exec tsx scripts/jack-knowledge-seed.ts --approved=2
 
 - Nothing is written without `--approved`, and nothing loads unless every file passes the lint.
 - Entries load as `sourceType SEED`, reviewed as of the approval date, each with a version and an audit entry.
-- Running it again is safe: an entry whose title matches an earlier load is updated only if something changed (a new version for new text), and left alone otherwise. Similar existing entries are listed but don't block a load.
+- Running it again never undoes changes made on the site. An entry is matched to an earlier load by title (the title the seed last loaded, so a rename on the Knowledge page still matches). If officers or Jack changed it since the last load (a newer version, or new details such as the owner or source), it's **skipped** and listed, and the dry run says so; fold their change into the file, or pass `--overwrite` to replace it with the file (their text stays in the entry's history). Otherwise it's updated only if the file changed (a new version for new text) and left alone if not. A new sign-off date re-dates the review, but never moves an officer's later review back. Similar existing entries are listed but don't block a load.
 - Seed entries that are no longer in the folder are listed, never deleted; archive them on the Knowledge page.
 - It loads into the database `DATABASE_URL` points at. Loading production is a release step Gray runs; the sign-off is recorded in `docs/jack-2/build-log.md`.
