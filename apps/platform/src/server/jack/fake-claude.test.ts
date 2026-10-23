@@ -1,6 +1,6 @@
 import type { BetaContentBlockParam, BetaMessageStreamParams } from "@anthropic-ai/sdk/resources/beta/messages/messages"
 import { describe, expect, it } from "vitest"
-import { fakeCitedText, fakeClaude, fakeToolSearch, fakeWebFetch, fakeWebSearch, requestProblem, searchDeferredTools } from "./fake-claude"
+import { fakeCitedText, fakeClaude, fakeFileId, fakeToolSearch, fakeWebFetch, fakeWebSearch, requestProblem, searchDeferredTools } from "./fake-claude"
 
 /** The fake's stand-ins for the API's request checks, so the model loop's tests can trust a pass */
 
@@ -52,6 +52,39 @@ describe("requestProblem", () => {
     expect(requestProblem(request({ tools: [tool("a")], messages: [user([{ type: "text", text: "hi" }]), assistant(fakeToolSearch("q", ["stripe_overview"]))] }))).toMatch(
       /Tool reference 'stripe_overview' not found/
     )
+  })
+
+  it("rejects a Files API id in the wrong block type, and citations on some documents but not others", () => {
+    const toolResult = (content: unknown[]) => user([{ type: "tool_result", tool_use_id: "toolu_1", content }])
+    const turn = (result: ReturnType<typeof user>) => request({ messages: [user([{ type: "text", text: "hi" }]), assistant([{ type: "tool_use", id: "toolu_1", name: "a", input: {} }]), result] })
+    const pdf = fakeFileId("pdf")
+    const image = fakeFileId("image")
+    expect(requestProblem(turn(toolResult([{ type: "document", source: { type: "file", file_id: pdf } }])))).toBeNull()
+    expect(requestProblem(turn(toolResult([{ type: "document", source: { type: "file", file_id: image } }])))).toMatch(/is an image/)
+    expect(requestProblem(turn(toolResult([{ type: "image", source: { type: "file", file_id: pdf } }])))).toMatch(/is a PDF/)
+    expect(
+      requestProblem(
+        turn(
+          toolResult([
+            { type: "document", source: { type: "file", file_id: pdf }, citations: { enabled: true } },
+            { type: "document", source: { type: "file", file_id: fakeFileId("pdf") } },
+          ])
+        )
+      )
+    ).toMatch(/all of the documents or none/)
+    // A fetched page is a document too, without citations
+    const [fetchCall, fetchResult] = fakeWebFetch("https://a.example/", {})
+    expect(
+      requestProblem(
+        request({
+          messages: [
+            user([{ type: "text", text: "hi" }]),
+            assistant([fetchCall, fetchResult, { type: "tool_use", id: "toolu_1", name: "a", input: {} }]),
+            toolResult([{ type: "document", source: { type: "file", file_id: pdf }, citations: { enabled: true } }]),
+          ],
+        })
+      )
+    ).toMatch(/all of the documents or none/)
   })
 
   it("fails the stream with a 400 the way the SDK does", async () => {

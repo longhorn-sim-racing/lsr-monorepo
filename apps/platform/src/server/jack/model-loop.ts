@@ -245,7 +245,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
   const startWebCall = (block: { id: string; name: WebCall["name"] }) => {
     if (!webCalls.has(block.id)) webCalls.set(block.id, { id: block.id, name: block.name, input: null, found: null, error: null, startedAt: now() })
   }
-  /** After a call: the web calls, results and citations as the turn that goes back has them (streaming can miss nothing, but this is the record) */
+  /** After a call, from the turn that goes back: its web calls, their results and its citations, in case the stream left anything out */
   const syncWeb = (content: readonly BetaContentBlockParam[]) => {
     for (const block of content) {
       if (isWebCall(block)) {

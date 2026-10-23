@@ -213,9 +213,10 @@ type AnyBlock = BetaContentBlock | BetaContentBlockParam
 
 /**
  * Why the real API would reject this request (a 400), or null. Checks what Jack 2.0's model loop could
- * get wrong: tool search and deferral, url_sources, server tool calls and results sent back (each
- * result after its call, search results byte for byte, nothing but tool results while a server call is
- * still running), no tool_result for a server call, and forced tool_choice on the 5.5 models that refuse it
+ * get wrong: tool search and deferral, url_sources, documents (a Files API id in the wrong block type,
+ * citations on some documents but not all), server tool calls and results sent back (each result after
+ * its call, search results byte for byte, nothing but tool results while a server call is still
+ * running), no tool_result for a server call, and forced tool_choice on the 5.5 models that refuse it
  */
 export function requestProblem(params: BetaMessageStreamParams): string | null {
   type ToolDef = {
@@ -239,6 +240,25 @@ export function requestProblem(params: BetaMessageStreamParams): string | null {
   if ((params.tool_choice?.type === "any" || params.tool_choice?.type === "tool") && /^claude-(opus|sonnet)-5-5/.test(params.model)) {
     return `tool_choice: type "tool" and "any" are not supported for this model.`
   }
+
+  // Documents and images anywhere in the conversation: in user turns, tool results and fetched pages
+  const media: { type: string; source?: { type?: string; file_id?: string }; citations?: { enabled?: boolean } | null }[] = []
+  const collect = (blocks: unknown): void => {
+    if (!Array.isArray(blocks)) return
+    for (const block of blocks as { type?: string; content?: unknown }[]) {
+      if (block?.type === "document" || block?.type === "image") media.push(block as (typeof media)[number])
+      else if (block?.type === "tool_result") collect(block.content)
+      else if (block?.type === "web_fetch_tool_result") collect([(block.content as { content?: unknown } | null)?.content])
+    }
+  }
+  for (const message of params.messages) collect(message.content)
+  for (const block of media) {
+    const id = block.source?.type === "file" ? (block.source.file_id ?? "") : ""
+    if (block.type === "document" && id.includes("_image_")) return `File ${id} is an image: send it in an image block, not a document block.`
+    if (block.type === "image" && id.includes("_pdf_")) return `File ${id} is a PDF: send it in a document block, not an image block.`
+  }
+  const documents = media.filter((block) => block.type === "document")
+  if (new Set(documents.map((block) => block.citations?.enabled === true)).size > 1) return "Citations must be enabled on all of the documents or none of them."
 
   const serverCalls = new Set<string>()
   let running: string[] = []
@@ -281,6 +301,15 @@ export function requestProblem(params: BetaMessageStreamParams): string | null {
 
 let serverIds = 0
 const serverId = () => `srvtoolu_fake_${++serverIds}`
+let fileIds = 0
+
+/**
+ * A stand-in Claude Files API id for a PDF or an image. The kind is in the id, so requestProblem can
+ * reject a block of the wrong type the way the API does (it checks the file's MIME type)
+ */
+export function fakeFileId(kind: "pdf" | "image"): string {
+  return `file_fake_${kind}_${++fileIds}`
+}
 
 /** The stand-in for an encrypted_content or encrypted_index value */
 export function fakeEncrypted(seed: string): string {

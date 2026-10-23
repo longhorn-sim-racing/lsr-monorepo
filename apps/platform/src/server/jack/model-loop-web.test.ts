@@ -9,7 +9,7 @@ import type {
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { z } from "zod"
 import type { JackToolPart, JackWebSourcesDisplay } from "@/lib/jack/parts"
-import { fakeCitedText, fakeClaude, fakeEncrypted, fakeToolSearch, fakeWebFetch, fakeWebSearch, searchDeferredTools, type FakeTurn } from "./fake-claude"
+import { fakeCitedText, fakeClaude, fakeEncrypted, fakeFileId, fakeToolSearch, fakeWebFetch, fakeWebSearch, searchDeferredTools, type FakeTurn } from "./fake-claude"
 import { toolNote } from "./history"
 import { apiErrorMessage, echoContent, MAX_TOOL_RESULT_DOCUMENTS, requestTools, resultContent, runModelReply, type ModelReplyOptions } from "./model-loop"
 import { JACK_MODELS } from "./models"
@@ -536,17 +536,29 @@ describe("documents in tool results", () => {
   })
 
   it("puts a tool's documents in its tool_result, and keeps them out of the part", async () => {
-    const tool = countTool(async () => ({ forModel: "Read the file.", label: "Read Acme deck.pdf", documents: [{ caption: "Acme deck.pdf:", source: { type: "file", fileId: "file_011abc" } }] }))
+    const pdf = fakeFileId("pdf")
+    const tool = countTool(async () => ({ forModel: "Read the file.", label: "Read Acme deck.pdf", documents: [{ caption: "Acme deck.pdf:", source: { type: "file", fileId: pdf } }] }))
     const { run, fake } = setup([{ tools: [{ name: "count_rows", input: { table: "x" } }] }, { text: "The deck asks for $500." }], [tool])
 
     const result = await run()
 
+    expect(result).toMatchObject({ status: "done", outcome: "answered" })
     expect(toolResults(fake.calls[1].messages.at(-1)!)[0].content).toEqual([
       { type: "text", text: "Read the file." },
       { type: "text", text: "Acme deck.pdf:" },
-      { type: "document", source: { type: "file", file_id: "file_011abc" } },
+      { type: "document", source: { type: "file", file_id: pdf } },
     ])
-    expect(JSON.stringify(result.parts)).not.toContain("file_011abc")
+    expect(JSON.stringify(result.parts)).not.toContain(pdf)
+  })
+
+  it("sends a tool's document alongside a fetched page in one request (neither has citations)", async () => {
+    vi.stubEnv("JACK_WEB_TOOLS", "on")
+    const tool = countTool(async () => ({ forModel: "Read the file.", label: "Read it", documents: [{ caption: "The PDF:", source: { type: "file", fileId: fakeFileId("pdf") } }] }))
+    const { run } = setup(
+      [{ blocks: fakeWebFetch("https://fia.com/esports", {}), tools: [{ name: "count_rows", input: { table: "x" } }] }, { text: "Both say the same." }],
+      [tool]
+    )
+    expect(await run()).toMatchObject({ status: "done", outcome: "answered" })
   })
 })
 
