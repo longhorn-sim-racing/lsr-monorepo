@@ -36,7 +36,7 @@ describe("questionSet", () => {
     expect(() => questionSet([q("lsc-paid")], [q("lsc-paid", { track: "club-data" })])).toThrow('Duplicate eval question "lsc-paid": in the core questions and club-data');
     expect(() => questionSet([q("Bad Id")])).toThrow("lowercase letters");
     expect(() => questionSet([q("a:b")])).toThrow("lowercase letters");
-    expect(questionSet([q("paired-x@media")])).toHaveLength(1);
+    expect(questionSet([q("paired-x@media")], [])).toHaveLength(1);
   });
 });
 
