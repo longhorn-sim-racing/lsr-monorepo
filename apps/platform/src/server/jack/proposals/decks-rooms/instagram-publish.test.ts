@@ -74,6 +74,30 @@ describe("instagram.publish: proposing", () => {
     expect(prepared.view.preview).toBeUndefined()
   })
 
+  it("shows a post's alt text whole on the card (it goes out in public with the post), and says when there's none", async () => {
+    const altText = "The GM 2 podium: three drivers holding trophies in front of the sim rigs."
+    const prepared = await instagramPublishKind.prepare(payload({ type: "post", slides: [1], caption: "GM 2!", altText }), ctx)
+    expect(prepared.view.diff).toEqual([{ field: "altText", label: "Alt text (public on Instagram)", before: null, after: altText, format: "text" }])
+    expect(prepared.view.summary).not.toContain("No alt text.")
+    // The longest Jack may write is shown in full, not cut
+    const longest = "a".repeat(1_000)
+    expect((await instagramPublishKind.prepare(payload({ type: "post", slides: [1], altText: longest }), ctx)).view.diff[0].after).toBe(longest)
+
+    const without = await instagramPublishKind.prepare(payload({ type: "post", slides: [1], caption: "GM 2!" }), ctx)
+    expect(without.view.diff).toEqual([])
+    expect(without.view.summary).toContain("Caption: 5 characters, 0 hashtags. No alt text. It isn't marked as made with AI.")
+    // Carousels and stories take none, so their cards don't mention it
+    expect((await instagramPublishKind.prepare(payload({ type: "story", slides: [1] }), ctx)).view.summary).not.toContain("alt text")
+  })
+
+  it("puts a re-proposal's own alt text on its card, so a newer card for the same post can't swap it unseen", async () => {
+    const first = await instagramPublishKind.prepare(payload({ type: "post", slides: [1], caption: "GM 2!", altText: "The podium" }), ctx)
+    const second = await instagramPublishKind.prepare(payload({ type: "post", slides: [1], caption: "GM 2!", altText: "Something else entirely" }), ctx)
+    expect(second.targetId).toBe(first.targetId)
+    expect(second.view.diff).not.toEqual(first.view.diff)
+    expect(second.view.diff[0].after).toBe("Something else entirely")
+  })
+
   it("refuses input Jack can fix: the wrong count for the type, a story caption, alt text on a carousel, caption limits, missing slides", async () => {
     const refused = (p: Record<string, unknown>) => instagramPublishKind.prepare(payload(p), ctx)
     await expect(refused({ type: "post" })).rejects.toThrow(new ProposalInputError('A post is one slide; this picks 3. Use type "carousel" for 2-20 slides, or pick one slide.'))
@@ -125,9 +149,10 @@ describe("instagram.publish: applying", () => {
     })
   })
 
-  it("says when Instagram is still processing it", async () => {
+  it("says when Instagram is still processing it, and sends the alt text the card showed", async () => {
     flow.startInstagramPublish.mockResolvedValue({ state: "waiting", row: { id: "pub-1", mediaType: "IMAGE", slideIds: ["slide-a"], status: "containers", error: null, permalink: null } })
-    const result = await instagramPublishKind.apply(payload({ type: "post", slides: [1] }), applyCtx({ ...before, slideIds: ["slide-a"] }))
+    const result = await instagramPublishKind.apply(payload({ type: "post", slides: [1], altText: "The podium" }), applyCtx({ ...before, slideIds: ["slide-a"] }))
+    expect(flow.startInstagramPublish.mock.calls[0][0]).toMatchObject({ type: "post", altText: "The podium" })
     expect(result.summary).toMatch(/^Sent “GM 2 recap” as a post to Instagram\. Instagram is still processing the images/)
     expect(result.links).toEqual([{ title: "Publish history", url: "/admin/instagram#publishing" }])
   })

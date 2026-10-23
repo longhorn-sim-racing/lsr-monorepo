@@ -527,7 +527,8 @@ async function auditPublish(id: string, input: StartPublish) {
     entityType: "INSTAGRAM_PUBLISH",
     entityId: row.id,
     summary: describePublish(row, input.deck.title),
-    after: { deckId: row.deckId, version: row.version, slideIds: row.slideIds, mediaType: row.mediaType, caption: row.caption, aiGenerated: readContainers(row.containerIds).aiGenerated, status: row.status, igMediaId: row.igMediaId, permalink: row.permalink, error: row.error },
+    // Everything that went out in public: a single image's alt text too (the row has no column for it)
+    after: { deckId: row.deckId, version: row.version, slideIds: row.slideIds, mediaType: row.mediaType, caption: row.caption, altText: row.mediaType === "IMAGE" ? (input.altText ?? null) : null, aiGenerated: readContainers(row.containerIds).aiGenerated, status: row.status, igMediaId: row.igMediaId, permalink: row.permalink, error: row.error },
     metadata: { ...input.auditMetadata, publishId: row.id },
   })
 }

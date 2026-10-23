@@ -122,6 +122,14 @@ describe("startInstagramPublish", () => {
     expect(audit.createAuditLog).toHaveBeenCalledTimes(1)
     expect(audit.createAuditLog.mock.calls[0][0]).toMatchObject({ actorUserId: "u2", actionType: "CREATE", entityType: "INSTAGRAM_PUBLISH", entityId: row.id, metadata: { via: "jack", proposalId: "prop-1", publishId: row.id } })
     expect(audit.createAuditLog.mock.calls[0][0].summary).toBe("Posted “GM 2 recap” as a post on Instagram.")
+    // The record keeps everything that went out in public, the alt text with the caption
+    expect(audit.createAuditLog.mock.calls[0][0].after).toMatchObject({ caption: "GM 2 recap! #longhornsimracing", altText: "The GM 2 podium", aiGenerated: true })
+  })
+
+  it("records no alt text for a carousel or a story, which don't send one", async () => {
+    await startInstagramPublish(input({ type: "story", altText: "ignored" }), deps())
+    expect((await instagramState()).containers[0].altText).toBeNull()
+    expect(audit.createAuditLog.mock.calls[0][0].after).toMatchObject({ mediaType: "STORIES", altText: null })
   })
 
   it("posts a carousel: an item per slide in order, then the carousel with the caption and the AI label", async () => {
