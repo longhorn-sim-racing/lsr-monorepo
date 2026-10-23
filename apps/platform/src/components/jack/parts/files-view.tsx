@@ -41,9 +41,10 @@ export function FilesView({ files }: { files: JackFileItem[] }) {
   )
 }
 
+/** An image's thumbnail, only from our own file route (an outside URL would load a tracker in an officer's browser); otherwise the kind's icon */
 function FileThumb({ file }: { file: JackFileItem }) {
   const thumb = file.thumbUrl ? partLink(file.thumbUrl) : null
-  if (thumb)
+  if (thumb?.internal)
     return (
       // eslint-disable-next-line @next/next/no-img-element -- an officer-only route serves it; next/image can't pass the session
       <img src={thumb.href} alt="" aria-hidden loading="lazy" className="size-10 shrink-0 rounded-md border bg-muted object-cover" />

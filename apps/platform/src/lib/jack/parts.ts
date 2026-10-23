@@ -93,7 +93,7 @@ export type JackFileItem = {
   sizeBytes: number
   /** Where to open it: the officer-only file route (/api/admin/jack/files/…) */
   url: string
-  /** A small preview, for images */
+  /** A small preview, for images: a site path (the file route). Anything else isn't shown */
   thumbUrl?: string
 }
 

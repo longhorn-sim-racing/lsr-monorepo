@@ -23,17 +23,44 @@ export function linkHost(url: string): string | null {
 /** A link a part can draw: a page of this site, or a web link with its host */
 export type PartLink = { href: string; internal: true } | { href: string; internal: false; host: string }
 
+/** Stands in for this site when resolving a path, to check the path stays on it */
+const SITE_ORIGIN = "https://site.invalid"
+
 /**
- * Checks a URL from a tool before a part links it: site paths ("/admin/events", never "//host") stay
- * in the app; http(s) links get their host. Anything else (javascript:, data:, mailto:, garbage) is
- * null, and the part shows the text without a link
+ * Browsers drop tabs and line breaks from a URL and read a backslash as a slash, so "/\t/evil.example"
+ * opens evil.example. A link with any of them (or another control character) isn't drawn as a link
+ */
+function hasUnsafeCharacters(url: string): boolean {
+  for (const char of url) {
+    const code = char.charCodeAt(0)
+    if (code <= 0x1f || code === 0x7f || char === "\\") return true
+  }
+  return false
+}
+
+/**
+ * Checks a URL from a tool before a part links it, and returns it in the form the browser will
+ * follow. Site paths stay in the app, and only if they still point at this site once resolved
+ * ("/a/..//evil.example" doesn't). http(s) links get their host. Anything else (javascript:, data:,
+ * mailto:, control characters, backslashes, garbage) is null, and the part shows the text without a link
  */
 export function partLink(url: string): PartLink | null {
-  const href = safeHref(url.trim())
-  if (!href) return null
-  if (href.startsWith("/")) return { href, internal: true }
-  const host = linkHost(href)
-  return host ? { href, internal: false, host } : null
+  const raw = url.trim()
+  if (!raw || hasUnsafeCharacters(raw) || !safeHref(raw)) return null
+  try {
+    if (raw.startsWith("/")) {
+      const resolved = new URL(raw, SITE_ORIGIN)
+      const path = resolved.pathname + resolved.search + resolved.hash
+      if (resolved.origin !== SITE_ORIGIN || path.startsWith("//")) return null
+      return { href: path, internal: true }
+    }
+    const parsed = new URL(raw)
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null
+    const host = parsed.hostname.replace(/^www\./, "")
+    return host ? { href: parsed.href, internal: false, host } : null
+  } catch {
+    return null
+  }
 }
 
 /** A file size for people: "820 B", "14 KB", "2.4 MB" */

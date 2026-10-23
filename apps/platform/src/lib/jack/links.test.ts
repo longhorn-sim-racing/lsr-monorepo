@@ -23,12 +23,37 @@ describe("linkHost", () => {
 })
 
 describe("partLink", () => {
-  it("keeps site paths in the app", () => {
+  it("keeps site paths in the app, with their query and hash", () => {
     expect(partLink("/admin/events/abc/manage")).toEqual({ href: "/admin/events/abc/manage", internal: true })
+    expect(partLink("/admin/results?upload=1#top")).toEqual({ href: "/admin/results?upload=1#top", internal: true })
   })
 
-  it("gives web links their host", () => {
+  it("gives web links their host, in the form the browser will follow", () => {
     expect(partLink(" https://www.twitch.tv/longhornsimracing ")).toEqual({ href: "https://www.twitch.tv/longhornsimracing", internal: false, host: "twitch.tv" })
+    expect(partLink("https://Discord.com")).toEqual({ href: "https://discord.com/", internal: false, host: "discord.com" })
+  })
+
+  it("refuses paths that browsers would turn into another site (tabs, line breaks, backslashes)", () => {
+    for (const url of ["/\t/evil.example/x", "/\n/evil.example", "/\r/evil.example", "/\r\n/evil.example", "/\\evil.example", "/\\\\evil.example", "/a\\..\\..\\evil.example", "/\u0000/evil.example", "/\u007f/evil.example"]) {
+      expect(partLink(url), JSON.stringify(url)).toBeNull()
+    }
+  })
+
+  it("refuses a path that resolves to a protocol-relative one", () => {
+    expect(partLink("/a/..//evil.example")).toBeNull()
+    expect(partLink("/./..//evil.example/x")).toBeNull()
+  })
+
+  it("keeps encoded characters encoded, so they stay on this site", () => {
+    expect(partLink("/%09/evil.example")).toEqual({ href: "/%09/evil.example", internal: true })
+    expect(partLink("/%0A/evil.example")).toEqual({ href: "/%0A/evil.example", internal: true })
+    expect(partLink("/%2F%2Fevil.example")).toEqual({ href: "/%2F%2Fevil.example", internal: true })
+    expect(partLink("/%5Cevil.example")).toEqual({ href: "/%5Cevil.example", internal: true })
+  })
+
+  it("refuses control characters in web links too", () => {
+    expect(partLink("https://evil.exa\tmple/")).toBeNull()
+    expect(partLink("https://discord.com/\nx")).toBeNull()
   })
 
   it("refuses protocol-relative links, scripts, data and email", () => {
