@@ -3,6 +3,7 @@ import { z } from "zod"
 import { cronFor, DIGEST_DEFAULT_SCHEDULE, DIGEST_JOB_KEY, scheduleFromCron, WEEKDAYS, type DigestSettingsInput, type Weekday } from "@/lib/jack/recurring"
 import { createAuditLog } from "@/server/audit/log"
 import { prisma } from "@/server/db"
+import { postingChannels } from "@/server/discord-post/channels"
 import { nextRunAfter } from "@/server/scheduler/schedule"
 import { readDigestConfig, type DigestConfig } from "./config"
 
@@ -10,8 +11,9 @@ import { readDigestConfig, type DigestConfig } from "./config"
  * Reading and saving the weekly digest's settings (design §11.2). The job row ("digest.weekly") holds
  * them: its config, its schedule (one day a week at one time, Central) and whether it's on. Any officer
  * sets the room, the day and time, the summary and on/off; only an admin changes where it posts outside
- * the console (Discord, Teams), like the other standing posts. Each save records who made it (config and
- * the job's updatedById) and is audited.
+ * the console (Discord, Teams), like the other standing posts, and Discord only to a posting channel. A
+ * saved channel that stops being one is kept (so officers can still save the rest), and the run refuses
+ * it. Each save records who made it (config and the job's updatedById) and is audited.
  */
 
 export type { DigestSettingsInput }
@@ -44,12 +46,14 @@ export async function loadDigestJob(now = new Date()): Promise<DigestJob> {
 
 export type SaveDigestResult = { ok: true; changed: string[] } | { ok: false; error: string }
 
-/** A Discord channel the digest may post in: a text or announcement channel the sync knows (never a thread) */
+/**
+ * A Discord channel the digest may post in: one of the posting channels admins pick on Community →
+ * Announcements (text and announcement channels the sync still knows), like every post the bot makes.
+ * The send checks it again (discord.ts)
+ */
 async function discordChannelProblem(id: string): Promise<string | null> {
-  const channel = await prisma.discordChannel.findUnique({ where: { id }, select: { type: true, parentId: true } })
-  if (!channel) return "That Discord channel isn't one the site knows. Sync the server's channels on Community → Discord first."
-  if (channel.parentId || (channel.type !== 0 && channel.type !== 5)) return "Pick a text or announcement channel for the digest."
-  return null
+  if ((await postingChannels()).some((channel) => channel.id === id)) return null
+  return "Pick one of the Discord posting channels for the digest. An admin adds a channel to them on Community → Announcements."
 }
 
 export async function saveDigestSettings(raw: DigestSettingsInput, actor: { userId: string; isAdmin: boolean }, now = new Date()): Promise<SaveDigestResult> {

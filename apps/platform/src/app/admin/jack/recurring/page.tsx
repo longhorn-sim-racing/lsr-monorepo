@@ -17,6 +17,7 @@ import { runDigestChecks } from "@/server/automation/run-checks"
 import { discordConnector } from "@/server/connectors/discord/connector"
 import { teamsWebhookConnector } from "@/server/connectors/teams-webhook/connector"
 import { prisma } from "@/server/db"
+import { postingChannels } from "@/server/discord-post/channels"
 import { heartbeatState, HEARTBEAT_ID } from "@/server/scheduler/heartbeat"
 import { describeSchedule } from "@/server/scheduler/schedule"
 import { getSiteUrl } from "@/lib/site-url"
@@ -77,7 +78,8 @@ export default async function RecurringQuestionsPage({ searchParams }: { searchP
   // The digest: its settings, what it last posted, and (on request) what it would post now
   const [configuredBy, discordChannels, discordOn, teams, lastNote, previewReport] = await Promise.all([
     digest.config.configuredById ? userNames([digest.config.configuredById]).then((names) => names.get(digest.config.configuredById!)?.displayName ?? "a former officer") : null,
-    prisma.discordChannel.findMany({ where: { parentId: null, type: { in: [0, 5] } }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    // Only the posting channels: the digest posts where every other post may (Community → Announcements)
+    postingChannels().then((channels) => channels.map(({ id, name }) => ({ id, name }))),
     discordConnector.status().then((status) => status.state === "connected"),
     teamsWebhookConnector.status(),
     prisma.jackMessage.findFirst({ where: { jobKey: DIGEST_JOB_KEY }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, roomId: true, createdAt: true } }),
