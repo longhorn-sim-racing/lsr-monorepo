@@ -117,6 +117,7 @@ Calls made during the build, for Gray to review. Newest last.
 ## Test spend
 | Date | What | Cost |
 |---|---|---|
+| 10/23 | Live checks before the full eval: one reply with a deferred tool, web tools on Sonnet and Haiku, the web search question (twice), three attached-file questions with Claude Files on, the planted-PDF question with web fetch on, two direct web probes and the PDF link probe | about $1.00 |
 
 ## Log
 - **10/22:**
@@ -167,3 +168,13 @@ Calls made during the build, for Gray to review. Newest last.
   - **Found on main, fixed separately:** the Stripe webhook logged the whole error on a bad signature, and Stripe's error carries the raw request body. #216 (to main, for Gray).
   - Browser-checked (light, dark, 390 px): Overview cards, Sponsors, Meetings, Action items, Streams, Discord, Payments (Stripe panel), Notifications (Delivery tab), Usage, archived rooms, Knowledge tabs, Connections panels, the privacy page, and a room's new menu. No layout problems. In dev, each admin page's first load logs a hydration mismatch in the admin shell's menu button; the shell hasn't changed, and it's to be confirmed absent from a production build.
   - Wave 2b launched: T8, T9b, T11 and I2 (wave-2a follow-ups).
+  - **G5 gate passed** (the production upload path, on local Supabase Storage after fixing its two indexes): all 19 end-to-end checks with `JACK_FILE_STORE=supabase`, a browser upload (cross-origin PUT, register, READY, object in the bucket, removed again), render-check (`store: supabase`), a deck's slides and its PDF, PPTX and PNG exports. The dev-only hydration warning doesn't appear in a production build.
+  - **Eval copy ready:** `lsr_eval` migrated to 2.0 and seeded with every track's fake data. The dry run passed 108 of 110 per model; the two Discord ranking questions had checks that passed a non-answer (fixed).
+  - **Live checks (G8 and G6 gates), about $1:**
+    - A real reply with deferred tools works: tool search together with streamed tool input is accepted.
+    - With `JACK_WEB_TOOLS=on`, Sonnet and Haiku requests are accepted: dynamic filtering, `url_sources` naming the deferred `web_links`, and the Console allows web search and fetch.
+    - **Found:** with dynamic filtering Claude reads search results in code execution and writes its own links instead of citations, so a search part never listed its pages. Results the answer links to now count as cited. A web search question was added to the eval (it runs only with web tools on).
+    - Claude Files: a PDF uploaded at registration went to Claude by file id and the eval's cleanup deleted it from the Files API.
+    - **PDF link probe (files.md step 5):** fetching a URL that's only inside a PDF document in the user turn fails with `url_not_in_prior_context`, so the gate that sent PDFs as text while web fetch was on came off. The planted-PDF question passes with web fetch on.
+    - **Cost per cold reply:** the cached prefix (system prompt and always-loaded tools) is about 34,000 tokens. A reply after the 5-minute cache lapses pays about 8.5 cents to write it; replies within it read it for about a third of a cent. One web search adds 35,000 to 53,000 input tokens (dynamic filtering reads results in code execution).
+  - Security review launched on everything merged (six lenses, each finding verified by skeptics); wave 2b gets its own pass after it merges.
