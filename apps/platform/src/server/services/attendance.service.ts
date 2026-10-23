@@ -15,12 +15,14 @@ export type CheckInResult = {
 /**
  * Checks in a user to an event.
  * Handles validation of time windows (for self check-in) and idempotency.
+ * `extraMetadata` is added to a manual check-in's audit entry (Jack's proposal ids; see services/actor.ts).
  */
 export async function checkInUser(
     eventId: string,
     userId: string,
     method: CheckinMethod,
-    actorUserId: string
+    actorUserId: string,
+    extraMetadata?: Record<string, unknown>
 ): Promise<CheckInResult> {
     return await prisma.$transaction(async (tx) => {
         // 1. Fetch Event Settings
@@ -92,6 +94,7 @@ export async function checkInUser(
                 targetUserId: userId,
                 summary: `Manually checked in user ${userId} to event ${eventId}`,
                 metadata: {
+                    ...extraMetadata,
                     eventId,
                     userId,
                     method,
