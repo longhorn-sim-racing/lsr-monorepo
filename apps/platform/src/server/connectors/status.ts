@@ -42,11 +42,12 @@ async function safeStatus(connector: AnyConnector, row: ConnectorStateRow | null
     // A hand-written status() may not have redacted its error
     return { ...status, lastError: status.lastError ? redactSecrets(status.lastError) : null }
   } catch (error) {
-    console.error(`[connectors] ${connector.id} status() failed:`, error)
+    const text = redactSecrets(errorText(error))
+    console.error(`[connectors] ${connector.id} status() failed: ${text}`)
     return {
       ...buildConnectorStatus({ id: connector.id, label: connector.label, requiredEnv: connector.requiredEnv, row, hasSmoke: Boolean(connector.smoke) }),
       state: "error",
-      lastError: redactSecrets(`Couldn't read its status: ${errorText(error)}`),
+      lastError: `Couldn't read its status: ${text}`,
     }
   }
 }
@@ -61,17 +62,24 @@ export async function connectorStatus(id: string): Promise<ConnectorStatus | nul
 
 export type LastSmokeTest = { ok: boolean; summary: string; at: Date; by: string | null }
 
-/** The latest smoke test of each connector, from the audit log */
-async function lastSmokeTests(): Promise<Map<string, LastSmokeTest>> {
-  const entries = await prisma.auditLog.findMany({
-    where: { entityType: CONNECTOR_ENTITY, actionType: SMOKE_ACTION },
-    orderBy: { createdAt: "desc" },
-    take: 200,
-    select: { entityId: true, createdAt: true, metadata: true, actor: { select: { displayName: true } } },
-  })
+/**
+ * The latest smoke test of each of these connectors, from the audit log: one small query per id (about a
+ * dozen, on the entityType + entityId + createdAt index), so a connector tested long ago still shows its
+ * last run however many runs others had since
+ */
+async function lastSmokeTests(ids: readonly string[]): Promise<Map<string, LastSmokeTest>> {
+  const entries = await Promise.all(
+    [...new Set(ids)].map((id) =>
+      prisma.auditLog.findFirst({
+        where: { entityType: CONNECTOR_ENTITY, entityId: id, actionType: SMOKE_ACTION },
+        orderBy: { createdAt: "desc" },
+        select: { entityId: true, createdAt: true, metadata: true, actor: { select: { displayName: true } } },
+      }),
+    ),
+  )
   const latest = new Map<string, LastSmokeTest>()
   for (const entry of entries) {
-    if (latest.has(entry.entityId)) continue
+    if (!entry) continue
     const metadata = (entry.metadata ?? {}) as { ok?: unknown; summary?: unknown }
     latest.set(entry.entityId, {
       ok: metadata.ok === true,
@@ -99,7 +107,8 @@ export type ConnectionRow = {
  * ConnectorState row (planned connectors without code yet) by id.
  */
 export async function listConnections(): Promise<ConnectionRow[]> {
-  const [rows, smokes] = await Promise.all([prisma.connectorState.findMany(), lastSmokeTests()])
+  const rows = await prisma.connectorState.findMany()
+  const smokes = await lastSmokeTests([...CONNECTORS.map((connector) => connector.id), ...rows.map((row) => row.id)])
   const rowsById = new Map(rows.map((row) => [row.id, row]))
 
   const registered = await Promise.all(

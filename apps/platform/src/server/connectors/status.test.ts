@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AnyConnector, ConnectorStatus } from "./types"
 
-const db = vi.hoisted(() => ({ connectorState: { findMany: vi.fn(), findUnique: vi.fn() }, auditLog: { findMany: vi.fn() } }))
+const db = vi.hoisted(() => ({ connectorState: { findMany: vi.fn(), findUnique: vi.fn() }, auditLog: { findFirst: vi.fn() } }))
 const registry = vi.hoisted(() => ({ connectors: [] as AnyConnector[] }))
 vi.mock("@/server/db", () => ({ prisma: db }))
 vi.mock("./registry", () => ({
@@ -54,7 +54,7 @@ beforeEach(() => {
   registry.connectors = []
   db.connectorState.findMany.mockResolvedValue([])
   db.connectorState.findUnique.mockResolvedValue(null)
-  db.auditLog.findMany.mockResolvedValue([])
+  db.auditLog.findFirst.mockResolvedValue(null)
 })
 
 afterEach(() => {
@@ -78,21 +78,26 @@ describe("listConnections", () => {
     expect(rows[3].status).toMatchObject({ configured: false, enabled: true, state: "not_configured", missingEnv: [], hasSmoke: false })
   })
 
-  it("adds each connector's latest smoke test from the audit log", async () => {
-    registry.connectors = [connector("discord", { smoke: async () => ({ ok: true, summary: "" }) })]
-    const newer = new Date("2026-10-23T12:00:00Z")
-    db.auditLog.findMany.mockResolvedValue([
-      { entityId: "discord", createdAt: newer, metadata: { ok: false, summary: "401 Unauthorized", ms: 120 }, actor: { displayName: "Gray" } },
-      { entityId: "discord", createdAt: new Date("2026-10-22T12:00:00Z"), metadata: { ok: true, summary: "Read 6 channels" }, actor: null },
-    ])
+  it("adds each connector's latest smoke test, looked up per connector so others' runs can't crowd it out", async () => {
+    registry.connectors = [connector("discord", { smoke: async () => ({ ok: true, summary: "" }) }), connector("twitch")]
+    db.connectorState.findMany.mockResolvedValue([stateRow("discord"), stateRow("teams")])
+    const at = new Date("2026-09-01T12:00:00Z")
+    const key = "sk_" + "live_" + "4eC39HqLyjWDarjtT1zdp7dc"
+    db.auditLog.findFirst.mockImplementation(async ({ where }: { where: { entityId: string } }) =>
+      where.entityId === "discord" ? { entityId: "discord", createdAt: at, metadata: { ok: false, summary: `401 with ${key}`, ms: 120 }, actor: { displayName: "Gray" } } : null,
+    )
 
-    const [row] = await listConnections()
-    expect(row.lastSmoke).toEqual({ ok: false, summary: "401 Unauthorized", at: newer, by: "Gray" })
-    expect(db.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { entityType: "CONNECTOR", actionType: "SMOKE_TEST" }, orderBy: { createdAt: "desc" } }))
+    const rows = await listConnections()
+    expect(rows.find((r) => r.id === "discord")?.lastSmoke).toEqual({ ok: false, summary: "401 with [redacted]", at, by: "Gray" })
+    expect(rows.find((r) => r.id === "twitch")?.lastSmoke).toBeNull()
+    expect(db.auditLog.findFirst.mock.calls.map(([query]) => query.where.entityId)).toEqual(["discord", "twitch", "teams"])
+    expect(db.auditLog.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { entityType: "CONNECTOR", entityId: "twitch", actionType: "SMOKE_TEST" }, orderBy: { createdAt: "desc" } }),
+    )
   })
 
-  it("shows a connector whose status() throws as failing, without breaking the others", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {})
+  it("shows a connector whose status() throws as failing, without breaking the others or logging the key", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
     const key = "sk_" + "live_" + "4eC39HqLyjWDarjtT1zdp7dc"
     registry.connectors = [
       connector("stripe", {
@@ -105,6 +110,8 @@ describe("listConnections", () => {
     const [stripe, twitch] = await listConnections()
     expect(stripe.status).toMatchObject({ id: "stripe", state: "error", lastError: "Couldn't read its status: Invalid API Key provided: [redacted]" })
     expect(twitch.status.state).toBe("connected")
+    expect(logged).toHaveBeenCalledWith("[connectors] stripe status() failed: Invalid API Key provided: [redacted]")
+    expect(JSON.stringify(logged.mock.calls)).not.toContain(key)
   })
 
   it("redacts an error a hand-written status() returns", async () => {

@@ -67,11 +67,24 @@ export async function recordConnectorSync(id: string, options: { cursor?: unknow
   })
 }
 
-/** An error as one line of text, before redaction */
+/** How many causes deep errorText() goes */
+const MAX_CAUSE_DEPTH = 2
+
+/**
+ * An error as one line of text, before redaction, with its cause: fetch fails with "TypeError: fetch
+ * failed" and puts the reason (ECONNREFUSED, a timeout, a certificate) in `cause`, so that reads
+ * "TypeError: fetch failed (connect ECONNREFUSED 127.0.0.1:443)"
+ */
 export function errorText(error: unknown): string {
+  return describeError(error, 0)
+}
+
+function describeError(error: unknown, depth: number): string {
   if (error instanceof Error) {
-    const text = error.message || error.name
-    return error.name && error.name !== "Error" && !text.startsWith(error.name) ? `${error.name}: ${text}` : text
+    const code = "code" in error && typeof error.code === "string" ? error.code : ""
+    const message = error.message || code || error.name
+    const text = error.name && error.name !== "Error" && !message.startsWith(error.name) ? `${error.name}: ${message}` : message
+    return error.cause !== undefined && depth < MAX_CAUSE_DEPTH ? `${text} (${describeError(error.cause, depth + 1)})` : text
   }
   if (typeof error === "string") return error || "Unknown error"
   try {

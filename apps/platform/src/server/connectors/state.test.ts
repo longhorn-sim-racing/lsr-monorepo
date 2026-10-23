@@ -106,4 +106,25 @@ describe("errorText", () => {
     expect(errorText({ code: 50001 })).toBe('{"code":50001}')
     expect(errorText(undefined)).toBe("undefined")
   })
+
+  it("adds the cause, where fetch puts the reason a request failed", () => {
+    const refused = new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:443"), { code: "ECONNREFUSED" }) })
+    expect(errorText(refused)).toBe("TypeError: fetch failed (connect ECONNREFUSED 127.0.0.1:443)")
+    // Node gives an AggregateError with no message when every address refused
+    const everyAddress = new TypeError("fetch failed", { cause: Object.assign(new AggregateError([], ""), { code: "ECONNREFUSED" }) })
+    expect(errorText(everyAddress)).toBe("TypeError: fetch failed (AggregateError: ECONNREFUSED)")
+    expect(errorText(new Error("sync failed", { cause: "rate limited" }))).toBe("sync failed (rate limited)")
+  })
+
+  it("stops after a few causes, even when an error is its own cause", () => {
+    const loop = new Error("loop")
+    loop.cause = loop
+    expect(errorText(loop)).toBe("loop (loop (loop))")
+  })
+
+  it("leaves the cause's secrets for redaction to mask", async () => {
+    const key = "sk_" + "live_" + "4eC39HqLyjWDarjtT1zdp7dc"
+    const stored = await recordConnectorError("stripe", new TypeError("fetch failed", { cause: new Error(`bad key ${key}`) }))
+    expect(stored).toBe("TypeError: fetch failed (bad key [redacted])")
+  })
 })
