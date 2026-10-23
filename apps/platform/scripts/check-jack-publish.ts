@@ -6,17 +6,22 @@
  *   containers saved as JSON, published with its link;
  * - one row per proposal (the unique key), and of five claims on one row at once exactly one wins;
  * - a post Instagram is still processing waits, and the follow-up posts it and leaves a room note;
- * - a publish call whose answer was lost is found, never posted twice;
+ * - a publish call whose answer was lost is found, never posted twice (and its audit entry keeps the
+ *   alt text that went out);
  * - a post Instagram can't use fails, and its slide copies are deleted from the Cloudinary fake;
  * - two presses of the deck page's Publish for the same pick at once make one row (the advisory lock
  *   and the repeat check), and the second is told it was already sent;
  * - the site's daily cap and the history, digest and deck page queries run in SQL (Jack's newest
  *   caption draft in the room, found through the JSON tool calls);
  * - gallery.add's album and images: a new album with a free slug, at the end of the order, a slide
- *   never added twice;
+ *   never added twice; an add whose album goes between the check and the rows takes its copy off the
+ *   Cloudinary fake again;
  * - the real kinds through the proposal framework: gallery.add proposed (the album by title, rows with
  *   pictures) and applied (a new album, the slide on the Cloudinary fake, audited with the proposal),
- *   and instagram.publish proposed and refused at apply while publishing is switched off.
+ *   and instagram.publish proposed (its alt text on the card) and refused at apply while publishing is
+ *   switched off;
+ * - with one post of the day left under the site's cap, three approvals at once make exactly one row
+ *   (the cap is counted under the site-wide advisory lock).
  *
  *   pnpm --filter @lsr/platform exec tsx scripts/check-jack-publish.ts
  *
@@ -157,8 +162,10 @@ async function main() {
 
     // A publish call whose answer was lost
     await knob({ processingReads: 1, dropPublish: 1 })
-    const dropped = await track(publish.startInstagramPublish(input({ caption: `${tag} dropped` }), deps()))
+    const dropped = await track(publish.startInstagramPublish(input({ caption: `${tag} dropped`, altText: `${tag} alt text` }), deps()))
     check("a post whose publish answer was lost is found, not posted twice", dropped.state === "published" && Boolean(dropped.row.igMediaId) && (await instagramState()).posts.length === 3, JSON.stringify({ state: dropped.state, posts: (await instagramState()).posts.length }))
+    const droppedAudit = await prisma.auditLog.findFirst({ where: { entityType: "INSTAGRAM_PUBLISH", entityId: dropped.row.id } })
+    check("its audit entry keeps the alt text that went out with it", (droppedAudit?.after as { altText?: string } | null)?.altText === `${tag} alt text`, JSON.stringify(droppedAudit?.after))
 
     // A post Instagram can't use: nothing goes out, and its copies are deleted
     await knob({ errorNext: 1 })
@@ -215,6 +222,29 @@ async function main() {
     imageIds.push(...second.added.map((a) => a.imageId))
     check("the same slide is never added twice; a new one goes at the end", second.already.length === 2 && second.added.length === 1 && (await prisma.galleryImage.findUnique({ where: { id: second.added[0].imageId } }))?.order === 3, JSON.stringify(second))
 
+    // An add whose rows can't be written (its album deleted between the check and the transaction) takes its copies off Cloudinary again
+    const doomed = await prisma.galleryAlbum.create({ data: { title: `${tag} doomed`, slug: `${tag.replace(/\s+/g, "-")}-doomed` } })
+    albumIds.push(doomed.id)
+    const { galleryDeps } = await import("../src/server/jack/publish/gallery")
+    const extra = { ...slides[0], id: "chkslide9", html: `<section class="slide dark"><h1>${tag} 9</h1></section>` }
+    const extraId = galleryPublicId({ rowId: "x", kind: "slide", deck, slide: extra, alt: "" })
+    const albumGoes: typeof galleryDeps = {
+      ...galleryDeps,
+      slidePng: async () => png,
+      upload: async (body, publicId) => {
+        const image = await galleryDeps.upload(body, publicId)
+        await prisma.galleryAlbum.deleteMany({ where: { id: doomed.id } })
+        return image
+      },
+    }
+    const failedAdd = await addToGallery({ target: { albumId: doomed.id }, items: [{ rowId: "slide:chkslide9", kind: "slide", deck, slide: extra, alt: "x" }], actorUserId: officer.id, auditMetadata: { via: "check" } }, albumGoes).catch((error: Error) => error)
+    const stillThere = ((await (await fetch(`${fakes.url}/cloudinary/_fake/state`)).json()) as { assets: { publicId: string }[] }).assets.some((a) => a.publicId === extraId)
+    check(
+      "a gallery add that fails after uploading takes its copy off Cloudinary, and writes no row",
+      failedAdd instanceof Error && !stillThere && (await prisma.galleryImage.count({ where: { publicId: extraId } })) === 0,
+      JSON.stringify({ error: failedAdd instanceof Error ? failedAdd.message.slice(0, 120) : failedAdd, stillThere }),
+    )
+
     // Through the proposal framework with the real kinds (the slides' renders put in the local files store, so nothing renders)
     const { createProposal, applyProposal, getProposalDetail } = await import("../src/server/jack/proposals/service")
     const { renderKey } = await import("../src/server/jack/decks/document")
@@ -250,11 +280,32 @@ async function main() {
     }
     check("applying gallery.add makes the album and adds the slide (Cloudinary fake), audited with the proposal", Boolean(applied?.ok) && viaJack?.images.length === 1 && (await prisma.auditLog.count({ where: { entityType: "GALLERY_IMAGE", entityId: viaJack.images[0].id, metadata: { path: ["proposalId"], equals: fresh.ok ? fresh.proposal.proposalId : "" } } })) === 1, JSON.stringify(applied))
 
-    const postCard = await createProposal({ kind: "instagram.publish", payload: { deck: deck.id, type: "post", slides: [2], caption: `${tag} via Jack` }, roomId: room.id, proposedFor })
+    const postCard = await createProposal({ kind: "instagram.publish", payload: { deck: deck.id, type: "post", slides: [2], caption: `${tag} via Jack`, altText: `${tag} alt via Jack` }, roomId: room.id, proposedFor })
     const postDetail = postCard.ok ? await getProposalDetail(postCard.proposal.proposalId, officer.id) : null
     check("instagram.publish proposes: the slide's picture, the caption, a confirm, and that publishing is off", postDetail?.images.length === 1 && postDetail.preview?.label === "Caption" && postDetail.destructive && /isn't switched on yet/.test(postDetail.summary), JSON.stringify(postCard.ok ? postDetail?.summary : postCard))
+    check("…and the alt text it would send, on the card", postDetail?.diff.some((row) => row.field === "altText" && row.after === `${tag} alt via Jack`) === true, JSON.stringify(postDetail?.diff))
     const refused = postCard.ok ? await applyProposal(postCard.proposal.proposalId, me) : null
     check("applying it while publishing is off fails, and nothing is made", refused?.ok === false && /isn't switched on .*nothing was posted/.test(refused.error) && (await prisma.instagramPublish.count({ where: { caption: `${tag} via Jack` } })) === 0, JSON.stringify(refused))
+
+    // The day's cap under the site-wide lock: with one post of the day left, three approvals at once make one row
+    const sentToday = await prisma.instagramPublish.count({ where: { createdAt: { gt: new Date(Date.now() - 86_400_000) }, status: { not: "failed" } } })
+    const fill = publish.CLUB_DAILY_POSTS - 1 - sentToday
+    if (fill < 0) {
+      check("the day's cap holds with approvals at once", false, `this database already has ${sentToday} posts in the last 24 hours; run it on a quieter day`)
+    } else {
+      await prisma.instagramPublish.createMany({ data: Array.from({ length: fill }, (_, i) => ({ mediaType: "IMAGE", caption: `${tag} filler`, status: "published", proposalId: `${proposalBase}-fill-${i}` })) })
+      await knob({ processingReads: 1_000 })
+      const racing = await Promise.allSettled([1, 2, 3].map((n) => publish.startInstagramPublish(input({ proposalId: `${proposalBase}-cap-${n}`, caption: `${tag} cap ${n}` }), deps(), { waitMs: 300 })))
+      for (const outcome of racing) if (outcome.status === "fulfilled") publishIds.push(outcome.value.row.id)
+      const capped = racing.filter((o) => o.status === "rejected" && o.reason instanceof publish.PublishRefused && /already sent 10 posts/.test(o.reason.message))
+      const madeRows = await prisma.instagramPublish.count({ where: { proposalId: { startsWith: `${proposalBase}-cap-` } } })
+      check(
+        "with one post of the day left, three approvals at once make exactly one (the cap is counted under the lock)",
+        racing.filter((o) => o.status === "fulfilled").length === 1 && capped.length === 2 && madeRows === 1,
+        JSON.stringify({ outcomes: racing.map((o) => (o.status === "fulfilled" ? o.value.state : String(o.reason))), madeRows }),
+      )
+      await knob({ ready: true })
+    }
   } finally {
     const proposals = (await prisma.jackProposal.findMany({ where: { roomId: room.id }, select: { id: true } })).map((p) => p.id)
     await prisma.auditLog.deleteMany({
