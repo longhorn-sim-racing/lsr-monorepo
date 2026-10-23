@@ -4,6 +4,7 @@ import type { DigestCheck } from "./types"
 const fakeCheck = (id: string, order: number): DigestCheck => ({
   id,
   label: id,
+  href: "/admin",
   order,
   run: async () => ({ count: 0, severity: "info", items: [] }),
 })
@@ -19,6 +20,8 @@ describe("the digest check registry", () => {
   it("loads with unique ids, and finds nothing it doesn't know", async () => {
     const { DIGEST_CHECKS, findDigestCheck } = await import("./registry")
     expect(new Set(DIGEST_CHECKS.map((c) => c.id)).size).toBe(DIGEST_CHECKS.length)
+    // Outside posts link to these: console paths only
+    for (const check of DIGEST_CHECKS) expect(check.href, check.id).toMatch(/^\/admin(\/|$)/)
     expect(findDigestCheck("nope")).toBeUndefined()
   })
 

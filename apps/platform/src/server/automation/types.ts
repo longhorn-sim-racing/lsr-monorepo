@@ -5,10 +5,11 @@
  *
  * Where the results go:
  * - The digest room message and the Overview card show each check's items (officers only).
- * - Discord and Teams posts get only each check's label, count and a link into the console, never its
- *   items. Even so, items must never carry personal data that would matter if a post leaked: no emails,
- *   EIDs, phone numbers, payment amounts tied to a person, application answers or outside text. Name
- *   the thing (an event, a proposal, a prospect's company) and link to where an officer can see the rest.
+ * - Discord and Teams posts get only each check's label, count and `href` (the console page that deals
+ *   with it), never its items.
+ * - Even so, items must never carry personal data that would matter if a post leaked: no emails, EIDs,
+ *   phone numbers, payment amounts tied to a person, application answers or outside text. Name the
+ *   thing (an event, a proposal, a prospect's company) and link to where an officer can see the rest.
  */
 
 /** One thing that needs attention, linking to where an officer deals with it */
@@ -41,6 +42,8 @@ export type DigestCheck = {
   id: string
   /** e.g. "Pending proposals" */
   label: string
+  /** The console page where officers deal with it, e.g. "/admin/jack/proposals". Outside posts link here: a path, never a full URL or one with personal data in it */
+  href: string
   /** Where it sits in the digest and on the Overview, lowest first */
   order: number
   run(ctx: DigestContext): Promise<DigestCheckResult>
