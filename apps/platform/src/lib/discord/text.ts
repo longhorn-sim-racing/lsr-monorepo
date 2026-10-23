@@ -31,14 +31,14 @@ const MENTION = /@(?:everyone|here)\b|<@[!&]?\d{1,25}>/gi
 const MASKED_LINK = /\[([^\]\n]{0,256})\]\(\s*<?(https?:\/\/[^\s)>]+)>?(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*\)/gi
 /** <url>: a link without its preview */
 const ANGLE_LINK = /<(https?:\/\/[^\s>]+)>/gi
-/** A bare http(s) link */
-const BARE_LINK = /\bhttps?:\/\/[^\s<>]+/gi
-/** A Discord invite, with or without https:// in front: Discord shows an invite card for either. The code is case-sensitive */
-const INVITE = /\b(?:discord(?:app)?\.com\/invite|discord\.gg)\/([\w-]+)/gi
+/** A bare http(s) link, wherever it starts: one glued to a word ("Win1https://…", "Bob_https://…") still links in Discord */
+const BARE_LINK = /https?:\/\/[^\s<>]+/gi
+/** A Discord invite, with or without https:// in front (Discord shows an invite card for either), glued to a word or not. The code is case-sensitive */
+const INVITE = /(?:discord(?:app)?\.com\/invite|discord\.gg)\/([\w-]+)/gi
 
-/** An invite's code, when a link is one */
+/** An invite's code, when a link is one: its host is discord.gg, or it's a discord.com invite. Never a link that only has one in its path or query ("https://x.example/?r=discord.gg/abc") */
 function inviteCode(link: string): string | null {
-  return link.match(/\b(?:discord(?:app)?\.com\/invite|discord\.gg)\/([\w-]+)/i)?.[1] ?? null
+  return link.match(/^https?:\/\/(?:www\.)?(?:discord(?:app)?\.com\/invite|discord\.gg)\/([\w-]+)/i)?.[1] ?? null
 }
 
 /** An invite as one link, however it was written */
@@ -115,13 +115,29 @@ export function stripMentions(text: string): string {
   return text.replace(MENTION, (m) => (m.startsWith("@") ? m.slice(1) : ""))
 }
 
-/** Takes out every link: a masked link keeps its words, any other link (an invite without https:// too) goes */
+/** A pass again until nothing changes: taking one link out can join the text around it into another ("https:discord.gg/x//evil.example") */
+function untilSettled(text: string, pass: (text: string) => string): string {
+  let out = text
+  for (let before = ""; out !== before; ) {
+    before = out
+    out = pass(out)
+  }
+  return out
+}
+
+/**
+ * Takes out every link: a masked link keeps its words, any other link (an invite without https:// too)
+ * goes, until none is left. Any other scheme's "://" that's left (steam://) is broken up with a
+ * zero-width space, so nothing left links
+ */
 export function stripLinks(text: string): string {
-  return text
-    .replace(MASKED_LINK, (_, label: string) => label)
-    .replace(ANGLE_LINK, "")
-    .replace(BARE_LINK, (m) => m.slice(trimLink(m).length))
-    .replace(INVITE, "")
+  const once = (part: string) =>
+    part
+      .replace(MASKED_LINK, (_, label: string) => label)
+      .replace(ANGLE_LINK, "")
+      .replace(BARE_LINK, (m) => m.slice(trimLink(m).length))
+      .replace(INVITE, "")
+  return untilSettled(text, once).replace(/:\/\//g, ":\u200B//")
 }
 
 /**
@@ -147,7 +163,8 @@ export function clipText(text: string, max: number): string {
  * characters. Templates add their own links
  */
 export function templateValue(text: string | null | undefined, max = 200): string {
-  const plain = tidy(stripLinks(stripMentions(text ?? "")).replace(/\s+/g, " "))
+  // Taking out a mention can join a link together ("https:<@1>//…"), and taking out a link a mention
+  const plain = tidy(untilSettled(text ?? "", (part) => stripLinks(stripMentions(part))).replace(/\s+/g, " "))
   return escapeMarkdown(clipText(plain, max))
 }
 
@@ -159,8 +176,8 @@ export type CleanedText = {
 
 /** Stands in for a link that stays while the rest of the text is checked; the text never holds these characters (they're taken out first) */
 const HELD = /\uE000(\d+)\uE001/g
-/** A bare http(s) link in text that may hold stand-ins (they end it) */
-const BARE_HELD = /\bhttps?:\/\/[^\s<>\uE000\uE001]+/gi
+/** A bare http(s) link, wherever it starts, in text that may hold stand-ins (they end it) */
+const BARE_HELD = /https?:\/\/[^\s<>\uE000\uE001]+/gi
 
 /**
  * A post's text as Jack wrote it, checked against what officers wrote in the room (design §12.1): a
@@ -188,20 +205,22 @@ export function cleanPostText(text: string, { officerTexts, siteHosts }: { offic
   const held: string[] = []
   const hold = (kept: string) => `\uE000${held.push(kept) - 1}\uE001`
   const restore = (part: string) => part.replace(HELD, (_, i: string) => held[Number(i)] ?? "")
-  /** Bare links and invites: the ones that stay set aside, the rest taken out */
-  const checkBare = (part: string) =>
-    part
-      .replace(BARE_HELD, (m) => {
-        const url = trimLink(m)
-        if (keepLink(url)) return hold(url) + m.slice(url.length)
-        removed.links.push(url)
-        return m.slice(url.length)
-      })
-      .replace(INVITE, (m, code: string) => {
-        if (officerInvites.has(code)) return hold(m)
-        removed.links.push(inviteLink(code))
-        return ""
-      })
+  /** Bare links and invites: the ones that stay set aside, the rest taken out, until none is left (taking one out can join another) */
+  const checkBare = (text: string) =>
+    untilSettled(text, (part) =>
+      part
+        .replace(BARE_HELD, (m) => {
+          const url = trimLink(m)
+          if (keepLink(url)) return hold(url) + m.slice(url.length)
+          removed.links.push(url)
+          return m.slice(url.length)
+        })
+        .replace(INVITE, (m, code: string) => {
+          if (officerInvites.has(code)) return hold(m)
+          removed.links.push(inviteLink(code))
+          return ""
+        }),
+    )
 
   let out = text.replace(/[\uE000\uE001]/g, "")
   out = out.replace(MENTION, (m) => {
