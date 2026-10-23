@@ -57,7 +57,7 @@ export async function getDeckExport(deck: DeckView, format: DeckExportFormat): P
 export async function buildDeckExport(deck: DeckView, format: DeckExportFormat): Promise<{ body: Buffer; transient: boolean }> {
   const slides = deck.content.slides
   if (!slides.length) throw new Error("This deck has no slides yet.")
-  const source = (html: string) => ({ size: deck.size, css: deck.content.css, html })
+  const source = (html: string) => ({ size: deck.size, css: deck.content.css, html, roomId: deck.roomId })
 
   if (format === "zip") {
     const renders = await Promise.all(slides.map((slide) => getRenderFile(source(slide.html), "png")))

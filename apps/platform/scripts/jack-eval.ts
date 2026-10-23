@@ -495,7 +495,7 @@ async function slideImages(answer: Answer) {
     if (!deck) continue;
     for (const [i, slide] of deck.content.slides.entries()) {
       if (images.length >= 8) break;
-      const { view } = await ensureRender({ size: deck.size, css: deck.content.css, html: slide.html }, { withView: true });
+      const { view } = await ensureRender({ size: deck.size, css: deck.content.css, html: slide.html, roomId: deck.roomId }, { withView: true });
       if (view) images.push({ caption: `"${deck.title}", slide ${i + 1} of ${deck.content.slides.length}:`, mediaType: "image/jpeg", data: view.toString("base64") });
     }
   }
