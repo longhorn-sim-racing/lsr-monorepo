@@ -31,6 +31,27 @@ describe("pings", () => {
     expect(officerAskedPing({ type: "here" }, ["notify here"])).toBe(true)
   })
 
+  it("don't count an ask after a negation, or a name inside a longer word or an email address", () => {
+    expect(officerAskedPing({ type: "everyone" }, ["Please don't ping everyone for this one"])).toBe(false)
+    expect(officerAskedPing({ type: "everyone" }, ["No need to tag @everyone"])).toBe(false)
+    expect(officerAskedPing({ type: "everyone" }, ["Post it without pinging. Do not mention everyone"])).toBe(false)
+    expect(officerAskedPing({ type: "everyone" }, ["Don't forget to ping everyone"])).toBe(true)
+    expect(officerAskedPing({ type: "everyone" }, ["Don't ping the officers. Ping everyone else"])).toBe(true)
+    const lsc = { type: "role" as const, roleId: "300000000000000009", name: "lsc" }
+    expect(officerAskedPing(lsc, ["tell @lsc_drivers about it"])).toBe(false)
+    expect(officerAskedPing(lsc, ["mail them at x@lsc.example"])).toBe(false)
+    expect(officerAskedPing(lsc, ["ping @lsc please"])).toBe(true)
+    const a = { type: "role" as const, roleId: "300000000000000010", name: "a" }
+    expect(officerAskedPing(a, ["send it to ana@a.example and ping the admins"])).toBe(false)
+  })
+
+  it("never let an @everyone in the text through with a @here ping", () => {
+    const body = postBody({ text: "GM tonight, @everyone welcome", ping: { type: "here" } })
+    expect(body).toEqual({ content: "@here GM tonight, @\u200beveryone welcome", allowed_mentions: { parse: ["everyone"] } })
+    expect(postBody({ text: "@everyone GM tonight", ping: { type: "everyone" } }).content).toBe("@everyone @everyone GM tonight")
+    expect(postBody({ text: "@everyone GM tonight" })).toEqual({ content: "@everyone GM tonight", allowed_mentions: { parse: [] } })
+  })
+
   it("put the mention first and let exactly it through", () => {
     expect(postBody({ text: "GM tonight", ping: { type: "role", roleId: lscDriver.id, name: "LSC Driver" } })).toEqual({ content: `<@&${lscDriver.id}> GM tonight`, allowed_mentions: { parse: [], roles: [lscDriver.id] } })
     expect(postBody({ poll: { question: "Night?", answers: ["Mon", "Wed"] } })).toEqual({

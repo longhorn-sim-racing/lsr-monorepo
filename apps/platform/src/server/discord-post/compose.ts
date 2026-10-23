@@ -31,10 +31,15 @@ export function pollCreate(poll: PollInput): DiscordPollCreate {
   }
 }
 
-/** The message Discord gets: the ping's mention first, then the text, and the poll */
+/**
+ * The message Discord gets: the ping's mention first, then the text, and the poll. Discord has one switch
+ * for @everyone and @here, so with a @here ping an "@everyone" in the text is broken up (a zero-width
+ * space after the @): it shows, but pings nobody
+ */
 export function postBody({ text, poll, ping }: { text?: string | null; poll?: PollInput | null; ping?: PingTarget | null }): DiscordMessageBody {
   const { prefix, allowed } = pingParts(ping)
-  const content = `${prefix}${text ?? ""}`.trim()
+  const words = ping?.type === "here" ? (text ?? "").replace(/@(everyone)/gi, "@\u200b$1") : (text ?? "")
+  const content = `${prefix}${words}`.trim()
   return { ...(content ? { content } : {}), ...(poll ? { poll: pollCreate(poll) } : {}), allowed_mentions: allowed }
 }
 
@@ -58,19 +63,32 @@ export function resolvePing(asked: string | null | undefined, { roles, mentionEv
   return { ok: true, ping: { type: "role", roleId: role.id, name: role.name } }
 }
 
+/** A negation in the few words before an ask in the same sentence ("don't ping", "do not tag", "no need to mention", "without pinging"); "don't forget to ping" still asks */
+const NEGATED = /\b(?:(?:don['’]?t|do\s+not)(?!\s+forget\b)|doesn['’]?t|does\s+not|no|not|never|without|avoid|skip)\b(?:\W+\w+){0,3}\W*$/i
+
+/** Whether the pattern is in the text somewhere that isn't right after a negation */
+function askedIn(text: string, pattern: RegExp): boolean {
+  for (const m of text.matchAll(pattern)) {
+    const sentence = text.slice(0, m.index).split(/[.!?\n]/).pop() ?? ""
+    if (!NEGATED.test(sentence)) return true
+  }
+  return false
+}
+
 /**
  * Whether an officer asked for this ping in the room (design §12.1: no pings unless an officer names
- * one): their own message has the mention itself, or says to ping, tag, mention or notify that role
- * (by name) or everyone
+ * one): their own message has the mention itself, or says to ping, tag, mention or notify that role (by
+ * its whole name, or its plural) or everyone, and not right after a "don't" or "no"
  */
 export function officerAskedPing(ping: PingTarget, officerTexts: string[]): boolean {
   const text = officerTexts.join("\n").toLowerCase()
   const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  const asked = (target: string) => new RegExp(`\\b(ping|tag|mention|notify)\\W{0,3}(the\\s+)?${target}`, "i").test(text)
-  if (ping.type === "everyone") return text.includes("@everyone") || asked("everyone")
-  if (ping.type === "here") return text.includes("@here") || asked("here\\b")
-  const name = ping.name.toLowerCase()
-  return text.includes(`<@&${ping.roleId}>`) || text.includes(`@${name}`) || asked(escape(name))
+  // "@name" as a whole word (not inside "@name_two" or an email address), and "ping the name"
+  const at = (target: string) => new RegExp(`(?<!\\w)@${target}(?!\\w)`, "g")
+  const verb = (target: string) => new RegExp(`\\b(?:ping|tag|mention|notify)\\W{0,3}(?:the\\s+)?${target}(?!\\w)`, "g")
+  if (ping.type === "everyone" || ping.type === "here") return askedIn(text, at(ping.type)) || askedIn(text, verb(ping.type))
+  const name = `${escape(ping.name.toLowerCase())}s?`
+  return askedIn(text, new RegExp(`<@&${ping.roleId}>`, "g")) || askedIn(text, at(name)) || askedIn(text, verb(name))
 }
 
 /** When to send it: null for now, or a Central time in the next 30 days */
