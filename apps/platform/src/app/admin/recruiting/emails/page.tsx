@@ -44,6 +44,8 @@ export default async function RecruitingEmailsPage({ searchParams }: { searchPar
       return null;
     }),
   ]);
+  // Tracking is set up but reading it failed, so the list may be missing sent mail that didn't arrive
+  const deliveryUnavailable = delivery === null && Boolean(process.env.RESEND_WEBHOOK_SECRET);
 
   return (
     <EmailsConsole
@@ -51,6 +53,7 @@ export default async function RecruitingEmailsPage({ searchParams }: { searchPar
       cycle={{ id: cycle.id, slug: cycle.slug, name: cycle.name }}
       quota={quota}
       deliverySummary={delivery?.summary ?? null}
+      deliveryUnavailable={deliveryUnavailable}
       rows={[
         ...rows.map((r) => ({
           id: r.id,

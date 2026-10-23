@@ -32,12 +32,15 @@ export function EmailsConsole({
   quota,
   rows,
   deliverySummary,
+  deliveryUnavailable = false,
 }: {
   cycles: Array<{ slug: string; name: string; isActive: boolean }>;
   cycle: { id: string; slug: string; name: string };
   quota: { sentToday: number; dailyLimit: number | null; left: number | null };
   rows: Row[];
   deliverySummary: DeliverySummary | null;
+  /** Delivery tracking is set up but its reports couldn't be read this time */
+  deliveryUnavailable?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -94,6 +97,12 @@ export function EmailsConsole({
           </>
         )}
       </Notice>
+
+      {deliveryUnavailable && (
+        <Notice tone="warning" className="mb-3">
+          Couldn&apos;t load Resend&apos;s delivery reports, so sent emails that didn&apos;t arrive may be missing below. Reload to try again.
+        </Notice>
+      )}
 
       {deliverySummary && deliverySummary.sent > 0 && (
         <p className="mb-3 text-[13px] text-muted-foreground">

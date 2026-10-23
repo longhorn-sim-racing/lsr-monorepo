@@ -16,16 +16,39 @@ function matches(row: Row, where: Record<string, unknown>) {
   )
 }
 
+/** What deliveryCounts' SQL does, over the fake rows: each email with an event since the date gets its strongest event's rank (the CASE's order), counted per rank */
+function countByRank(values: unknown[]) {
+  const types = values.slice(0, -1) as string[]
+  const since = values[values.length - 1] as Date
+  const emails = new Set(db.events.filter((e) => e.occurredAt >= since).map((e) => e.resendId))
+  const ranks = new Map<string, number>()
+  for (const e of db.events) {
+    const rank = types.indexOf(e.type)
+    if (emails.has(e.resendId) && rank >= 0) ranks.set(e.resendId, Math.min(ranks.get(e.resendId) ?? rank, rank))
+  }
+  const counts = new Map<number, number>()
+  for (const rank of ranks.values()) counts.set(rank, (counts.get(rank) ?? 0) + 1)
+  return [...counts].map(([rank, emails]) => ({ rank, emails }))
+}
+
 vi.mock("@/server/db", () => ({
   prisma: {
-    emailEvent: { findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => db.events.filter((row) => matches(row, where))) },
+    $queryRaw: vi.fn(async (query: { values: unknown[] }) => countByRank(query.values)),
+    emailEvent: {
+      findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => db.events.filter((row) => matches(row, where))),
+      groupBy: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+        [...new Set(db.events.filter((row) => matches(row, { type: where.type, occurredAt: where.occurredAt }) && row.recipient !== "").map((row) => row.recipient))].map((recipient) => ({ recipient })),
+      ),
+    },
     user: { findMany: vi.fn(async () => db.users) },
     notification: { findMany: vi.fn(async () => [{ emailMessageId: "e-gm2", title: "GM 2 is tonight", type: "EVENT_REMINDER" }]) },
     applicationEmail: { findMany: vi.fn(async () => db.recruiting) },
   },
 }))
 
-import { bouncedRecipients, emailsTo, eventReason, PRIVATE_RECRUITING_EMAIL, subjectsFor, summarizeEvents } from "./delivery"
+import { DELIVERY_RANK } from "@/lib/email-delivery"
+import { prisma } from "@/server/db"
+import { bouncedRecipientCount, bouncedRecipients, deliveryCounts, emailsTo, eventReason, PRIVATE_RECRUITING_EMAIL, subjectsFor, summarizeEvents } from "./delivery"
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 9, 20, 18, minutes))
 const event = (resendId: string, recipient: string, type: string, minutes: number, detail: unknown = null): Row => ({ resendId, recipient, type, occurredAt: at(minutes), detail })
@@ -72,6 +95,39 @@ describe("bouncedRecipients", () => {
     expect(rows.map((r) => r.recipient)).toEqual(["spam@example.com", "member@example.com"])
     expect(rows[1]).toMatchObject({ failed: 1, lastStatus: "bounced", reason: "Permanent: No such user", deliveredSince: true, member: { id: "u1", displayName: "Test Member" }, lastEmail: { subject: "GM 2 is tonight" } })
     expect(rows[0]).toMatchObject({ lastStatus: "complained", deliveredSince: false, member: null })
+  })
+})
+
+describe("bouncedRecipientCount", () => {
+  it("counts the addresses the bounce list shows, without loading it", async () => {
+    db.events.push(event("e-blank", "", "email.failed", 7, { reason: "reached_daily_quota" }))
+    expect(await bouncedRecipientCount(at(-60))).toBe((await bouncedRecipients(at(-60))).total)
+    expect(await bouncedRecipientCount(at(-60))).toBe(2)
+    expect(await bouncedRecipientCount(at(3))).toBe(1)
+  })
+})
+
+describe("deliveryCounts", () => {
+  it("counts each email once, by its strongest event, as summarizeEvents does", async () => {
+    const { emails, byStatus } = await deliveryCounts(at(-60))
+    expect(emails).toBe(4)
+    expect(byStatus).toEqual({ complained: 1, bounced: 1, failed: 0, suppressed: 0, clicked: 0, opened: 0, delivered: 2, delayed: 0, sent: 0 })
+    const statuses = [...summarizeEvents(db.events).values()].map((d) => d.status)
+    for (const [status, n] of Object.entries(byStatus)) expect(statuses.filter((s) => s === status)).toHaveLength(n)
+  })
+
+  it("counts an email by all its events, even ones from before the window", async () => {
+    // e-gm2 bounced at minute 1; a late "delayed" event puts it in a window that starts after the bounce
+    db.events.push(event("e-gm2", "member@example.com", "email.delivery_delayed", 40))
+    expect((await deliveryCounts(at(35))).byStatus).toMatchObject({ bounced: 1 })
+  })
+
+  it("sends the event types as parameters in deliveryStatus's order, with only its own ranks in the SQL", async () => {
+    await deliveryCounts(at(0))
+    const query = vi.mocked(prisma.$queryRaw).mock.calls[0][0] as unknown as { text: string; values: unknown[] }
+    expect(query.values).toEqual([...DELIVERY_RANK.map(([type]) => type), at(0)])
+    expect(query.text).toContain("WHEN $1 THEN 0 WHEN $2 THEN 1")
+    expect(query.text).toContain(`WHEN $${DELIVERY_RANK.length} THEN ${DELIVERY_RANK.length - 1} END`)
   })
 })
 

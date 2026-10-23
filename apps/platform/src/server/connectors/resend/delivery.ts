@@ -1,4 +1,5 @@
-import { deliveryStatus, isUndelivered, type DeliveryStatus } from "@/lib/email-delivery"
+import { Prisma } from "@prisma/client"
+import { DELIVERY_RANK, deliveryStatus, isUndelivered, type DeliveryStatus } from "@/lib/email-delivery"
 import { prisma } from "@/server/db"
 
 /**
@@ -158,13 +159,43 @@ export async function bouncedRecipients(since: Date, limit = 100, options: Subje
   }
 }
 
-/** How the emails with events since `since` turned out, by status */
+/** How many addresses bouncedRecipients(since) lists, counted in the database (the Delivery tab's badge) */
+export async function bouncedRecipientCount(since: Date): Promise<number> {
+  // Any failure event makes its email undelivered (failures rank first), so this matches the list's total
+  const rows = await prisma.emailEvent.groupBy({ by: ["recipient"], where: { type: { in: FAILURE_TYPES }, occurredAt: { gte: since }, recipient: { not: "" } } })
+  return rows.length
+}
+
+/**
+ * How the emails with events since `since` turned out, by status. Worked out in the database: each
+ * email's strongest event over all its events (deliveryStatus's order), then one count per status, so
+ * a page load reads at most nine rows however much mail went out
+ */
 export async function deliveryCounts(since: Date): Promise<{ emails: number; byStatus: Record<DeliveryStatus, number> }> {
-  const ids = await prisma.emailEvent.findMany({ where: { occurredAt: { gte: since } }, distinct: ["resendId"], select: { resendId: true }, take: 20_000 })
-  const delivery = await deliveryFor(ids.map((row) => row.resendId))
+  // The ranks are our own constants, written into the SQL; the event types go as parameters
+  const rank = Prisma.join(
+    DELIVERY_RANK.map(([type], i) => Prisma.sql`WHEN ${type} THEN ${Prisma.raw(String(i))}`),
+    " ",
+  )
+  const rows = await prisma.$queryRaw<{ rank: number; emails: number }[]>(Prisma.sql`
+    SELECT email.rank, COUNT(*)::int AS emails
+    FROM (
+      SELECT MIN(CASE "type" ${rank} END) AS rank
+      FROM "EmailEvent"
+      WHERE "resendId" IN (SELECT "resendId" FROM "EmailEvent" WHERE "occurredAt" >= ${since})
+      GROUP BY "resendId"
+    ) AS email
+    WHERE email.rank IS NOT NULL
+    GROUP BY email.rank`)
   const byStatus = { complained: 0, bounced: 0, failed: 0, suppressed: 0, clicked: 0, opened: 0, delivered: 0, delayed: 0, sent: 0 } satisfies Record<DeliveryStatus, number>
-  for (const d of delivery.values()) byStatus[d.status] += 1
-  return { emails: delivery.size, byStatus }
+  let emails = 0
+  for (const row of rows) {
+    const status = DELIVERY_RANK[Number(row.rank)]?.[1]
+    if (!status) continue
+    byStatus[status] += Number(row.emails)
+    emails += Number(row.emails)
+  }
+  return { emails, byStatus }
 }
 
 export type RecipientEmail = EmailDelivery & { resendId: string; sentAt: Date; subject: EmailSubject | null }

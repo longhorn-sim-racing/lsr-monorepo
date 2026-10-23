@@ -10,6 +10,7 @@ describe("the Delivery tab", () => {
   it("shows how email turned out and lists the addresses that bounced, linking members", () => {
     const html = render({
       configured: true,
+      enabled: true,
       lastEventAt: "2026-10-21T23:00:00.000Z",
       counts: { emails: 40, byStatus: { ...zero, delivered: 36, opened: 1, bounced: 2, complained: 1 } },
       bounces: {
@@ -35,11 +36,27 @@ describe("the Delivery tab", () => {
     expect(html).toContain("Permanent: No such user")
     expect(html).toContain("A later email arrived")
     expect(html).not.toContain("Delivery tracking isn&#x27;t set up")
+    expect(html).not.toContain("switched off")
   })
 
   it("says tracking isn't set up, with no bounces to show", () => {
-    const html = render({ configured: false, lastEventAt: null, counts: { emails: 0, byStatus: zero }, bounces: { rows: [], total: 0 } })
+    const html = render({ configured: false, enabled: false, lastEventAt: null, counts: { emails: 0, byStatus: zero }, bounces: { rows: [], total: 0 } })
     expect(html).toContain("Delivery tracking isn&#x27;t set up")
     expect(html).toContain("Nothing is reported until delivery tracking is set up.")
+  })
+
+  it("says when tracking is switched off, and doesn't call an empty list good news", () => {
+    const html = render({ configured: true, enabled: false, lastEventAt: null, counts: { emails: 0, byStatus: zero }, bounces: { rows: [], total: 0 } })
+    expect(html).toContain("Delivery tracking is switched off")
+    expect(html).toContain("nothing new is kept while delivery tracking is switched off")
+    expect(html).not.toContain("Every reported email")
+  })
+
+  it("shows a warning in place of the numbers when loading failed", () => {
+    const html = render({ configured: true, failed: true })
+    expect(html).toContain("Couldn&#x27;t load this part of the page")
+    expect(html).not.toContain("No bounces")
+    expect(html).not.toContain("Emails reported")
+    expect(html).not.toContain("Every reported email")
   })
 })

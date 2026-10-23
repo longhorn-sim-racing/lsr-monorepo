@@ -31,7 +31,7 @@ export type DeliveryStatus = "complained" | "bounced" | "failed" | "suppressed" 
  * suppression); then engagement, which means it was delivered (a click, then an open); then delivered,
  * delayed (Resend still retrying) and sent (accepted, no report yet)
  */
-const RANK: [EmailEventType, DeliveryStatus][] = [
+export const DELIVERY_RANK: readonly [EmailEventType, DeliveryStatus][] = [
   ["email.complained", "complained"],
   ["email.bounced", "bounced"],
   ["email.failed", "failed"],
@@ -46,7 +46,7 @@ const RANK: [EmailEventType, DeliveryStatus][] = [
 /** One email's status from the types of all its events, or null when there are none */
 export function deliveryStatus(types: Iterable<string>): DeliveryStatus | null {
   const seen = new Set(types)
-  for (const [type, status] of RANK) if (seen.has(type)) return status
+  for (const [type, status] of DELIVERY_RANK) if (seen.has(type)) return status
   return null
 }
 
