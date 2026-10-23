@@ -196,6 +196,16 @@ describe("the posts job", () => {
     expect(posts(fakes).map((r) => JSON.parse(r.body).content)).toEqual(["Stuck but sent", "due now"])
   })
 
+  it("stops the run when Discord refuses the bot's token: one post fails, the rest wait", async () => {
+    const fakes = mountFakes([discordFake])
+    const writer = discordWriter(discordClient({ token: "not-the-token", guildId: FAKE_DISCORD.guildId, limiter: new DiscordRateLimiter() }).rest, FAKE_DISCORD.guildId)
+    const now = new Date()
+    for (let i = 0; i < 3; i++) table.rows.push(postRow({ id: `p${i}`, channelId: CHANNEL, content: body(`post ${i}`), scheduledFor: new Date(now.getTime() - (10 - i) * 1000) }))
+    await expect(sendDuePosts(writer, { now, deadline: Date.now() + 60_000, log: () => {}, check: async () => null, pause: noPause })).rejects.toThrow(/refused the bot's token.*the other due posts wait/)
+    expect(table.rows.map((r) => r.status)).toEqual(["FAILED", "SCHEDULED", "SCHEDULED"])
+    expect(posts(fakes)).toHaveLength(1)
+  })
+
   it("sends at most 10 a run, oldest first", async () => {
     const { fakes, writer } = setup()
     const now = new Date()

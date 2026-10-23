@@ -6,6 +6,7 @@ import { DISCORD_ERROR, DiscordApiError, DiscordRateLimitError, sleep } from "@/
 import { snowflakeAt } from "@/server/connectors/discord/snowflake"
 import type { DiscordMessage } from "@/server/connectors/discord/types"
 import { discordMessageUrl, messageProblems, type DiscordEmbed, type DiscordMessageBody, type DiscordWriter } from "@/server/connectors/discord/write"
+import { when } from "./time"
 
 /**
  * The Discord outbox (design §12.1 "Posting"): every message the bot posts is a DiscordPost row first,
@@ -120,7 +121,8 @@ export async function claimPost(id: string, now: Date): Promise<boolean> {
 
 export type SendOutcome =
   | { status: "SENT"; messageId: string }
-  | { status: "FAILED"; error: string }
+  /** `stop`: Discord refused the bot's token, so no other post can go either (the run stops) */
+  | { status: "FAILED"; error: string; stop?: boolean }
   /** Discord rate-limited the bot past what the client waits; the post goes out on the next run */
   | { status: "SCHEDULED"; error: string }
   /** It wasn't ours to send (another run claimed it, or it isn't due or scheduled) */
@@ -205,7 +207,10 @@ export async function deliverClaimed(post: DiscordPost, writer: DiscordWriter, d
         return { status: "SCHEDULED", error: text }
       }
       // Discord answered and refused it: nothing was posted
-      if (error instanceof DiscordApiError && error.status < 500) return markFailed(post.id, describeSendError(error))
+      if (error instanceof DiscordApiError && error.status < 500) {
+        const failed = await markFailed(post.id, describeSendError(error))
+        return error.status === 401 ? { ...failed, stop: true } : failed
+      }
       cause = error
       if (deps.signal?.aborted || attempt === SEND_TRIES - 1) break
       await pause(RETRY_PAUSES_MS[attempt] ?? 3_000, deps.signal).catch(() => {})
@@ -270,7 +275,7 @@ export async function sendDuePosts(writer: DiscordWriter, ctx: { now: Date; dead
   }
 
   const late = await prisma.discordPost.findMany({ where: { status: "SCHEDULED", scheduledFor: { lt: new Date(ctx.now.getTime() - LATE_LIMIT_MS) } }, select: { id: true, scheduledFor: true } })
-  for (const post of late) run.cancelled += await cancelPosts({ id: post.id }, `Too late to send: it was due ${post.scheduledFor.toISOString()} (Discord was off, or the scheduler wasn't running).`, { release: false })
+  for (const post of late) run.cancelled += await cancelPosts({ id: post.id }, `Too late to send: it was due ${when(post.scheduledFor)} (Discord was off, or the scheduler wasn't running).`, { release: false })
   if (late.length) ctx.log(`Cancelled ${late.length} post${late.length === 1 ? "" : "s"} more than 6 hours late.`)
 
   const due = await prisma.discordPost.findMany({ where: { status: "SCHEDULED", scheduledFor: { lte: ctx.now } }, orderBy: { scheduledFor: "asc" }, take: MAX_SENDS_PER_RUN })
@@ -291,6 +296,8 @@ export async function sendDuePosts(writer: DiscordWriter, ctx: { now: Date; dead
     } else if (outcome.status === "FAILED") {
       run.failed++
       ctx.log(`A post failed: ${outcome.error}`)
+      // A refused token fails every send: the rest wait, and the run fails so Jobs and Connections show it
+      if (outcome.stop) throw new Error(`${outcome.error} Sent ${run.sent} before that; the other due posts wait.`)
     } else if (outcome.status === "SCHEDULED") run.deferred++
   }
   return run
