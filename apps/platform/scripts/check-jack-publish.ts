@@ -7,9 +7,13 @@
  * - one row per proposal (the unique key), and of five claims on one row at once exactly one wins;
  * - a post Instagram is still processing waits, and the follow-up posts it and leaves a room note;
  * - a publish call whose answer was lost is found, never posted twice;
- * - the site's daily cap and the history, digest and deck page queries run in SQL;
+ * - the site's daily cap and the history, digest and deck page queries run in SQL (Jack's newest
+ *   caption draft in the room, found through the JSON tool calls);
  * - gallery.add's album and images: a new album with a free slug, at the end of the order, a slide
- *   never added twice.
+ *   never added twice;
+ * - the real kinds through the proposal framework: gallery.add proposed (the album by title, rows with
+ *   pictures) and applied (a new album, the slide on the Cloudinary fake, audited with the proposal),
+ *   and instagram.publish proposed and refused at apply while publishing is switched off.
  *
  *   pnpm --filter @lsr/platform exec tsx scripts/check-jack-publish.ts
  *
@@ -17,7 +21,8 @@
  * album and its images, room notes and audit entries, and deletes them all at the end, pass or fail.
  * Nothing goes to Instagram or Cloudinary: both are fakes on this machine, and the instagram-publish
  * connector is never switched on (the publisher is passed in). Slides aren't rendered: the checks hand
- * the flow a PNG. Refuses unless DATABASE_URL points at 127.0.0.1 or localhost.
+ * the flow a PNG, and put the slides' renders in the local files store for the kinds (deleted after).
+ * Refuses unless DATABASE_URL points at 127.0.0.1 or localhost.
  */
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
@@ -58,7 +63,8 @@ async function main() {
   const { instagramFake, INSTAGRAM_FAKE } = await import("../src/server/connectors/instagram/fake/handlers")
   const { cloudinaryFake, CLOUDINARY_FAKE } = await import("../src/server/connectors/cloudinary/fake/handlers")
   const fakes = await startFakeServer({ services: [instagramFake, cloudinaryFake], port: 0 })
-  // Every Instagram and Cloudinary call goes to the fakes, with the fakes' own credentials
+  // Every Instagram and Cloudinary call goes to the fakes, with the fakes' own credentials; renders stay on disk
+  process.env.JACK_FILE_STORE = "files"
   process.env.JACK_FAKES = "instagram,cloudinary"
   process.env.JACK_FAKES_URL = fakes.url
   process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME = CLOUDINARY_FAKE.cloudName
@@ -99,6 +105,7 @@ async function main() {
   const publishIds: string[] = []
   const albumIds: string[] = []
   const imageIds: string[] = []
+  const renderPaths: string[] = []
   const proposalBase = `chk-${Date.now().toString(36)}`
   const input = (over: Partial<import("../src/server/jack/publish/instagram").StartPublish> = {}): import("../src/server/jack/publish/instagram").StartPublish => ({
     deck,
@@ -158,6 +165,17 @@ async function main() {
     const sinceDay = await prisma.instagramPublish.count({ where: { createdAt: { gt: new Date(Date.now() - 86_400_000) }, status: { not: "failed" } } })
     check("the daily cap's count reads the last 24 hours", sinceDay >= publishIds.length, String(sinceDay))
 
+    // The deck page's dialogs start from the newest caption Jack drafted in the deck's room
+    const draft = (body: string, draftKind = "caption") => [{ id: "t1", name: "draft_text", label: "Drafted", status: "done", at: 0, input: {}, displays: [{ kind: "text_draft", draftKind, body }] }]
+    await prisma.jackMessage.create({ data: { roomId: room.id, kind: "assistant", persona: "jack", content: "", toolCalls: draft("Older caption"), createdAt: new Date(Date.now() - 60_000) } })
+    await prisma.jackMessage.create({ data: { roomId: room.id, kind: "assistant", persona: "jack", content: "", toolCalls: draft("Hi Jordan", "email") } })
+    const { deckPublishOptions } = await import("../src/server/jack/publish/deck-options")
+    const options = await deckPublishOptions(deck)
+    check("the deck page finds Jack's newest caption draft in the room, past other drafts", options.captionDraft === "Older caption", JSON.stringify(options.captionDraft))
+    await prisma.jackMessage.create({ data: { roomId: room.id, kind: "assistant", persona: "jack", content: "", toolCalls: draft("GM 2 recap! #LSR") } })
+    const newer = await deckPublishOptions(deck)
+    check("…and the newest one wins; the slides' fit is described", newer.captionDraft === "GM 2 recap! #LSR" && /16:9/.test(newer.fit.feed ?? "") && Array.isArray(newer.gallery.albums), JSON.stringify({ caption: newer.captionDraft, fit: newer.fit }))
+
     // The gallery
     const albumTitle = `${tag} album`
     const added = await addToGallery({ target: { newAlbum: { title: albumTitle, date: "2026-10-19" } }, items: slides.slice(0, 2).map((slide) => ({ rowId: `slide:${slide.id}`, kind: "slide" as const, deck, slide, alt: `${deck.title}, slide ${slide.n}` })), actorUserId: officer.id, auditMetadata: { via: "check" } })
@@ -168,8 +186,64 @@ async function main() {
     const second = await addToGallery({ target: { albumId: added.album.id }, items: slides.map((slide) => ({ rowId: `slide:${slide.id}`, kind: "slide" as const, deck, slide, alt: "x" })), actorUserId: officer.id, auditMetadata: { via: "check" } })
     imageIds.push(...second.added.map((a) => a.imageId))
     check("the same slide is never added twice; a new one goes at the end", second.already.length === 2 && second.added.length === 1 && (await prisma.galleryImage.findUnique({ where: { id: second.added[0].imageId } }))?.order === 3, JSON.stringify(second))
+
+    // Through the proposal framework with the real kinds (the slides' renders put in the local files store, so nothing renders)
+    const { createProposal, applyProposal, getProposalDetail } = await import("../src/server/jack/proposals/service")
+    const { renderKey } = await import("../src/server/jack/decks/document")
+    const { slideSource } = await import("../src/server/jack/publish/slides")
+    const { jackFileStore } = await import("../src/server/jack/decks/storage")
+    const store = jackFileStore()
+    // A second version of the deck, with new slides (the first's are all in the gallery now)
+    await prisma.jackDeckVersion.create({ data: { deckId: deck.id, version: 2, summary: "check v2", content: { css: "", slides: ["chkslide4", "chkslide5"].map((id) => ({ id, html: `<section class="slide light"><h2>${id}</h2></section>` })) } } })
+    await prisma.jackDeck.update({ where: { id: deck.id }, data: { version: 2 } })
+    const v2 = (await getDeck(deck.id))!
+    for (const slide of [...deck.content.slides, ...v2.content.slides]) {
+      const path = `jack/renders/${renderKey(slideSource(v2, slide))}/full.png`
+      renderPaths.push(path)
+      await store.put(path, png, "image/png")
+    }
+    const proposedFor = { userId: officer.id, displayName: officer.displayName }
+    const me = { id: officer.id, displayName: officer.displayName }
+    const allThere = await createProposal({ kind: "gallery.add", payload: { album: added.album.title.toUpperCase(), deck: deck.id, version: 1, slides: [3, 1] }, roomId: room.id, proposedFor })
+    check("gallery.add refuses slides that are all in the gallery already", !allThere.ok && /already in the gallery/.test(allThere.error), JSON.stringify(allThere))
+    const card = await createProposal({ kind: "gallery.add", payload: { album: added.album.title.toUpperCase(), deck: deck.id, slides: [2, 1] }, roomId: room.id, proposedFor })
+    const detail = card.ok ? await getProposalDetail(card.proposal.proposalId, officer.id) : null
+    check(
+      "gallery.add proposes against the real tables: the album by title, a row per slide with its picture, in the order asked",
+      Boolean(detail) && detail!.rows?.map((r) => r.id).join() === "slide:chkslide5,slide:chkslide4" && detail!.rows.every((r) => r.thumbUrl === `/api/admin/jack/decks/${deck.id}/slides/${r.id.slice(6)}?v=2&kind=thumb` && r.status === undefined),
+      JSON.stringify(card.ok ? detail?.rows : card),
+    )
+    const fresh = await createProposal({ kind: "gallery.add", payload: { newAlbum: { title: `${tag} via Jack` }, deck: deck.id, slides: [2] }, roomId: room.id, proposedFor })
+    const applied = fresh.ok ? await applyProposal(fresh.proposal.proposalId, me) : null
+    const viaJack = await prisma.galleryAlbum.findFirst({ where: { title: `${tag} via Jack` }, include: { images: true } })
+    if (viaJack) {
+      albumIds.push(viaJack.id)
+      imageIds.push(...viaJack.images.map((i) => i.id))
+    }
+    check("applying gallery.add makes the album and adds the slide (Cloudinary fake), audited with the proposal", Boolean(applied?.ok) && viaJack?.images.length === 1 && (await prisma.auditLog.count({ where: { entityType: "GALLERY_IMAGE", entityId: viaJack.images[0].id, metadata: { path: ["proposalId"], equals: fresh.ok ? fresh.proposal.proposalId : "" } } })) === 1, JSON.stringify(applied))
+
+    const postCard = await createProposal({ kind: "instagram.publish", payload: { deck: deck.id, type: "post", slides: [2], caption: `${tag} via Jack` }, roomId: room.id, proposedFor })
+    const postDetail = postCard.ok ? await getProposalDetail(postCard.proposal.proposalId, officer.id) : null
+    check("instagram.publish proposes: the slide's picture, the caption, a confirm, and that publishing is off", postDetail?.images.length === 1 && postDetail.preview?.label === "Caption" && postDetail.destructive && /isn't switched on yet/.test(postDetail.summary), JSON.stringify(postCard.ok ? postDetail?.summary : postCard))
+    const refused = postCard.ok ? await applyProposal(postCard.proposal.proposalId, me) : null
+    check("applying it while publishing is off fails, and nothing is made", refused?.ok === false && /isn't switched on .*nothing was posted/.test(refused.error) && (await prisma.instagramPublish.count({ where: { caption: `${tag} via Jack` } })) === 0, JSON.stringify(refused))
   } finally {
-    await prisma.auditLog.deleteMany({ where: { OR: [{ entityType: "INSTAGRAM_PUBLISH", entityId: { in: publishIds } }, { entityType: "GALLERY_ALBUM", entityId: { in: albumIds } }, { entityType: "GALLERY_IMAGE", entityId: { in: [...imageIds, "BATCH"] }, metadata: { path: ["via"], equals: "check" } }] } })
+    const proposals = (await prisma.jackProposal.findMany({ where: { roomId: room.id }, select: { id: true } })).map((p) => p.id)
+    await prisma.auditLog.deleteMany({
+      where: {
+        OR: [
+          { entityType: "INSTAGRAM_PUBLISH", entityId: { in: publishIds } },
+          { entityType: "GALLERY_ALBUM", entityId: { in: albumIds } },
+          { entityType: "GALLERY_IMAGE", entityId: { in: [...imageIds, "BATCH"] }, metadata: { path: ["via"], equals: "check" } },
+          { entityType: "GALLERY_IMAGE", entityId: { in: imageIds } },
+          { entityType: "JACK_PROPOSAL", entityId: { in: proposals } },
+        ],
+      },
+    })
+    if (renderPaths.length) {
+      const { jackFileStore } = await import("../src/server/jack/decks/storage")
+      await jackFileStore().delete(renderPaths)
+    }
     await prisma.instagramPublish.deleteMany({ where: { OR: [{ id: { in: publishIds } }, { proposalId: { startsWith: proposalBase } }] } })
     await prisma.galleryImage.deleteMany({ where: { OR: [{ id: { in: imageIds } }, { albumId: { in: albumIds } }] } })
     await prisma.galleryAlbum.deleteMany({ where: { id: { in: albumIds } } })
