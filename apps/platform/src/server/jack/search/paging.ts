@@ -4,9 +4,9 @@
  * query. Pure, so the tests cover it directly.
  */
 
-/** How much one read returns by default, and at most, in characters */
+/** How much one read returns by default, and at most, in characters (the whole result stays under MAX_MODEL_CHARS) */
 export const READ_DEFAULT_CHARS = 15_000
-export const READ_MAX_CHARS = 25_000
+export const READ_MAX_CHARS = 18_000
 
 export type TextPage = {
   text: string
@@ -44,6 +44,24 @@ function breakPoint(text: string, start: number, end: number): number {
 
 function isHighSurrogate(code: number) {
   return code >= 0xd800 && code <= 0xdbff
+}
+
+/** How far under its cap a fitted result aims, so a page ending somewhere new (or a longer nextOffset) can't tip it back over */
+const FIT_SLACK = 32
+
+/**
+ * Fits a result into `max` characters of JSON (design §7.3: results stay under the caps). `build`
+ * makes the result from at most `budget` characters of the text and says how many it `used`; while
+ * its JSON is too long, the next try's budget is what was used less the overflow. Escaping (quotes,
+ * newlines) never makes text shorter, so each try loses at least the overflow and it fits within a
+ * few. A result whose other fields alone are over the cap comes back as small as it gets.
+ */
+export function fitToCap<T extends { json: string; used: number }>(maxChars: number, max: number, build: (budget: number) => T): T {
+  let fitted = build(maxChars)
+  for (let tries = 0; fitted.json.length > max && fitted.used > 1 && tries < 8; tries++) {
+    fitted = build(Math.max(1, fitted.used - (fitted.json.length - max) - FIT_SLACK))
+  }
+  return fitted
 }
 
 export type OutlineEntry = { heading: string; level: number; offset: number }

@@ -1,11 +1,11 @@
 import { formatInTimeZone } from "date-fns-tz"
 import { z } from "zod"
 import type { JackLinkItem } from "@/lib/jack/parts"
-import { findPassages, outlineOf, pageOf, READ_DEFAULT_CHARS, READ_MAX_CHARS } from "@/server/jack/search/paging"
+import { findPassages, fitToCap, outlineOf, pageOf, READ_DEFAULT_CHARS, READ_MAX_CHARS } from "@/server/jack/search/paging"
 import { findReader, SEARCH_READERS, SEARCH_SOURCES } from "@/server/jack/search/registry"
 import { search, type SourceOutcome } from "@/server/jack/search/search"
 import type { SearchHit } from "@/server/jack/search/types"
-import { forModel, forModelWithList, plural } from "./display"
+import { forModel, forModelWithList, MAX_MODEL_CHARS, plural } from "./display"
 import { CLUB_TZ, ct } from "./time"
 import type { JackTool } from "./types"
 
@@ -43,9 +43,15 @@ export function hitLink(hit: SearchHit): JackLinkItem {
   return { title: hit.title, url: hit.url, meta: [kind, shortDate(hit.date)].filter(Boolean).join(" · "), snippet: hit.snippet || undefined }
 }
 
-/** Sources that weren't searched, for the model and the room: "teams: Teams isn't connected…" */
-function skipped(outcomes: SourceOutcome[]): string[] {
-  return outcomes.flatMap((outcome) => (outcome.status === "searched" ? [] : [`${outcome.source}: ${outcome.reason}`]))
+/**
+ * Sources that weren't searched, for the model and the room: "teams: Teams isn't connected…". One
+ * that failed always says so; one that's switched off only when the call named it, since Teams can
+ * stay off for months and every default search would mention it
+ */
+function skipped(outcomes: SourceOutcome[], named: string[] | undefined): string[] {
+  return outcomes.flatMap((outcome) =>
+    outcome.status === "searched" || (outcome.status === "unavailable" && !named?.includes(outcome.source)) ? [] : [`${outcome.source}: ${outcome.reason}`],
+  )
 }
 
 const searchInput = z.object({
@@ -75,7 +81,7 @@ export const searchTool: JackTool<z.infer<typeof searchInput>> = {
   input: searchInput,
   async run({ query, sources, includeJackReplies, limit }, ctx) {
     const { hits, outcomes } = await search({ query, sources, limit, includeJackReplies, replyId: ctx.messageId, signal: ctx.signal })
-    const notSearched = skipped(outcomes)
+    const notSearched = skipped(outcomes, sources)
     const rows = hits.map(hitForModel)
     const base = {
       query,
@@ -118,33 +124,44 @@ export const readTool: JackTool<z.infer<typeof readInput>> = {
     const head = { type: doc.type, id: doc.id, title: doc.title, url: doc.url, ...(doc.date ? { date: ct(new Date(doc.date)) } : {}), ...doc.meta, total: doc.text.length }
     const link: JackLinkItem = { title: doc.title, url: doc.url, meta: [shortDate(doc.date), `${doc.text.length.toLocaleString("en-US")} characters`].filter(Boolean).join(" · ") }
 
+    // Either way the text is as much as fits with the rest of the result in MAX_MODEL_CHARS, so the
+    // result is never cut short after nextOffset was worked out
     if (query) {
-      const match = findPassages(doc.text, query, maxChars)
-      return {
-        forModel: forModel({
+      const { match, json } = fitToCap(maxChars, MAX_MODEL_CHARS, (budget) => {
+        const match = findPassages(doc.text, query, budget)
+        const json = forModel({
           ...head,
           query,
           matched: match.matched,
           passages: match.passages,
           ...(match.matched ? {} : { note: "No passage matches those words. Read it from offset 0 instead, or try other words." }),
           ...(match.matched > match.passages.length ? { note: `Only the best ${match.passages.length} of ${match.matched} matching passages fit.` } : {}),
-        }),
+        })
+        return { match, json, used: match.passages.reduce((n, passage) => n + passage.text.length, 0) }
+      })
+      return {
+        forModel: json,
         label: `Read “${doc.title}” (${plural(match.matched, "matching passage")})`,
         displays: [{ kind: "links", items: [link] }],
       }
     }
 
-    const page = pageOf(doc.text, offset, maxChars)
-    const paged = page.nextOffset !== null || page.offset > 0
-    return {
-      forModel: forModel({
+    const outline = outlineOf(doc.text)
+    const { page, paged, json } = fitToCap(maxChars, MAX_MODEL_CHARS, (budget) => {
+      const page = pageOf(doc.text, offset, budget)
+      const paged = page.nextOffset !== null || page.offset > 0
+      const json = forModel({
         ...head,
         offset: page.offset,
         nextOffset: page.nextOffset,
-        ...(paged ? { outline: outlineOf(doc.text) } : {}),
+        ...(paged ? { outline } : {}),
         ...(page.offset >= page.total && page.total > 0 ? { note: `That's past the end: the text is ${page.total} characters long.` } : {}),
         text: page.text,
-      }),
+      })
+      return { page, paged, json, used: page.text.length }
+    })
+    return {
+      forModel: json,
       label: paged
         ? `Read “${doc.title}” (characters ${(page.offset + 1).toLocaleString("en-US")}–${(page.offset + page.text.length).toLocaleString("en-US")} of ${page.total.toLocaleString("en-US")})`
         : `Read “${doc.title}”`,
