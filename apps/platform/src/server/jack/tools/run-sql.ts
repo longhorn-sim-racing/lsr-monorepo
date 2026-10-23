@@ -60,8 +60,8 @@ export function prepareSql(raw: string): { ok: true; sql: string } | { ok: false
  *   sessions), except the harmless helpers in ALLOWED_PG_NAMES;
  * - the XML export functions (*_to_xml*, *xmlschema*), which read a table, a schema, a whole
  *   database or a query named in a string, where the name check can't see it;
- * - the names below: settings functions, catalog columns that hold settings or source, ts_stat
- *   (also runs a query from a string), large-object functions, and dblink (other databases).
+ * - the names below: settings functions, catalog columns that hold settings or source, ts_stat and
+ *   ts_rewrite (both run a query from a string), large-object functions, and dblink (other databases).
  *
  * Names count as identifiers only: in a string or a comment they're fine, and an alias like
  * "notify" or "lo_count" is fine too.
@@ -77,8 +77,9 @@ export const OFF_LIMITS_NAMES = new Set([
   "setconfig",
   "prosrc",
   "probin",
-  // runs a query given as text
+  // run a query given as text
   "ts_stat",
+  "ts_rewrite",
   // large objects (server files and stored blobs)
   "lo_import",
   "lo_export",

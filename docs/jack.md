@@ -98,7 +98,7 @@ As defense in depth on top of that, `run_sql` refuses a query before it reaches 
 
 - any name starting with `pg_` (the catalog tables and views, `pg_catalog` itself, and the server's `pg_` functions), except `pg_typeof` and `pg_size_pretty`;
 - the XML exports (any name with `_to_xml` or `xmlschema` in it), which read a table, schema, database or query named in a string;
-- `current_setting`, `set_config`, the catalog columns `rolconfig`, `useconfig`, `setconfig`, `prosrc` and `probin`, `ts_stat` (it runs a query from a string), the large-object functions (`lo_import`, `lo_get`, `loread`, …, by exact name) and `dblink*`.
+- `current_setting`, `set_config`, the catalog columns `rolconfig`, `useconfig`, `setconfig`, `prosrc` and `probin`, `ts_stat` and `ts_rewrite` (both run a query from a string), the large-object functions (`lo_import`, `lo_get`, `loread`, …, by exact name) and `dblink*`.
 
 Jack gets "Catalog and settings access is off-limits" (`isOffLimitsName` in `src/server/jack/tools/run-sql.ts`). It's a check on names, not a permission, so it narrows what Jack can try; what he can actually read is still whatever `jack_readonly` can, which is why the settings and catalogs shouldn't hold secrets in the first place.
 

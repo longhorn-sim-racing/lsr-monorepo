@@ -82,6 +82,8 @@ describe("prepareSql", () => {
       ["SELECT database_to_xmlschema(true, false, '')", "database_to_xmlschema"],
       ["SELECT cursor_to_xml('c', 1, true, false, '')", "cursor_to_xml"],
       ["SELECT * FROM ts_stat('select 1')", "ts_stat"],
+      // ts_rewrite's second argument is a query too: it could read anything named only inside a string
+      ["SELECT ts_rewrite('a'::tsquery, 'SELECT ''a''::tsquery, quote_literal(content)::tsquery FROM some_table')::text AS t", "ts_rewrite"],
       ["SELECT lo_get(1)", "lo_get"],
       ["SELECT loread(1, 10)", "loread"],
       ["SELECT * FROM dblink_exec('x')", "dblink_exec"],
