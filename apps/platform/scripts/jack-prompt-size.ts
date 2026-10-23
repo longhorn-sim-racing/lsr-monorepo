@@ -23,7 +23,8 @@ async function main() {
 
   console.log("Jack's cached prefix (characters)\n")
   console.log(`System prompt: jack ${n(size.system.jack)}, lift ${n(size.system.lift)}, stand ${n(size.system.stand)} (of which notes on the database ${n(size.schemaNotes)})`)
-  console.log(`Always-loaded tool definitions: ${n(size.tools)} (core tools ${n(size.coreTools)}, shared ${n(size.shared)}, tracks ${n(size.tools - size.coreTools - size.shared)})`)
+  const tracks = size.tracks.reduce((sum, t) => sum + t.tools + t.kinds, 0)
+  console.log(`Always-loaded tool definitions: ${n(size.tools)} (core tools ${n(size.coreTools)}, tracks ${n(tracks)}, shared: tool search ${n(size.shared.toolSearch)} and propose_* leads ${n(size.shared.propose)})`)
   console.log(`Deferred tool definitions (tool search): ${n(size.deferredTools)}; web tools add ${n(size.webTools)} when on`)
   console.log(`Prefix: ${n(size.prefix.noWeb)} (${tokens(size.prefix.noWeb)}), ${n(size.prefix.web)} with the web tools; budget ${n(PREFIX_MAX_CHARS)}\n`)
 

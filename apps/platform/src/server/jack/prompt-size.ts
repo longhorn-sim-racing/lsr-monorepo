@@ -10,6 +10,7 @@ import { CORE_JACK_TOOLS, JACK_TOOLS } from "./tools"
 import { proposeTool } from "./tools/propose"
 import { TOOL_SLOTS } from "./tools/registry"
 import type { AnyJackTool } from "./tools/types"
+import { TOOL_SEARCH_TOOL } from "./web-tools"
 
 /**
  * How big Jack's cached prefix is (design §8), in characters: the system prompt (the core rules with
@@ -87,8 +88,12 @@ export type PromptSize = {
   prefix: { noWeb: number; web: number }
   /** The tools Jack had before 2.0 */
   coreTools: number
-  /** What no one track owns: the propose_* tools' leads and rules where several tracks' kinds share a tool, and the tool search tool */
-  shared: number
+  /**
+   * What no one track owns, each part measured on its own (not as what's left of `tools`): the tool search
+   * tool, sent when any tool is deferred, and what's left of the always-loaded propose_* tools once each
+   * track's kinds are taken out (their leads and rules where several tracks' kinds share a tool)
+   */
+  shared: { toolSearch: number; propose: number }
   tracks: TrackSize[]
 }
 
@@ -98,7 +103,7 @@ const toolsSize = (tools: AnyJackTool[]) => defsSize(toolDefinitions(tools))
 const isDeferred = (def: BetaToolUnion) => "defer_loading" in def && def.defer_loading === true
 
 /** The propose_* tools as they'd be built from these kinds: always loaded, and deferred */
-function proposeSize(kinds: AnyProposalKind[]): { loaded: number; deferred: number } {
+export function proposeSize(kinds: AnyProposalKind[]): { loaded: number; deferred: number } {
   let loaded = 0
   let deferred = 0
   for (const name of PROPOSE_TOOLS) {
@@ -141,17 +146,20 @@ export function measurePrompt(): PromptSize {
       deferredKinds: withAll.deferred - without.deferred,
     }
   })
-  const coreTools = toolsSize(CORE_JACK_TOOLS)
+  const deferredTools = defsSize(offDefs.filter(isDeferred))
 
   return {
     system,
     schemaNotes: notes?.text.length ?? 0,
     tools,
-    deferredTools: defsSize(offDefs.filter(isDeferred)),
+    deferredTools,
     webTools: webLoaded - tools,
     prefix: { noWeb: biggest + tools, web: biggest + webLoaded },
-    coreTools,
-    shared: tools - coreTools - tracks.reduce((n, t) => n + t.tools + t.kinds, 0),
+    coreTools: toolsSize(CORE_JACK_TOOLS),
+    shared: {
+      toolSearch: deferredTools > 0 ? chars(TOOL_SEARCH_TOOL) : 0,
+      propose: withAll.loaded - tracks.reduce((n, t) => n + t.kinds, 0),
+    },
     tracks,
   }
 }
