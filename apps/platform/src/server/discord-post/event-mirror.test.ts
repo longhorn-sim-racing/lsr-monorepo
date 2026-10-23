@@ -127,7 +127,8 @@ describe("the event mirror", () => {
     await run()
     const mirror = (state.mirrors as Mirror[])[0]
     await writer.deleteScheduledEvent(mirror.discordEventId, "by hand")
-    ;(state.events as Ev[])[0].updatedAt = new Date()
+    // After the mirror's last sync, not just "now": both can fall in the same millisecond
+    ;(state.events as Ev[])[0].updatedAt = new Date(mirror.lastSyncedAt.getTime() + 1_000)
     const result = await run()
     expect(result).toMatchObject({ gone: 1, created: 0 })
     expect(await discordEvents()).toEqual([])
