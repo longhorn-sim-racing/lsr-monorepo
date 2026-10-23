@@ -5,10 +5,10 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Check, ImagePlus, Send } from "lucide-react"
 import { toast } from "sonner"
-import { Button, CheckboxField, Dialog, Field, FieldGrid, Input, Notice, Segmented, Select, Textarea, useConfirm } from "@/components/admin/kit"
+import { Badge, Button, CheckboxField, Dialog, Field, FieldGrid, Input, Notice, Segmented, Select, Textarea, useConfirm } from "@/components/admin/kit"
 import { unexpectedError } from "@/lib/action-result"
 import { slideImageUrl } from "@/lib/jack/decks"
-import { CAROUSEL_MAX, CAROUSEL_MIN, defaultPublishType, PUBLISH_HISTORY, type DeckPublishOptions, type PublishType } from "@/lib/jack/publish"
+import { CAROUSEL_MAX, CAROUSEL_MIN, defaultPublishType, PUBLISH_HISTORY, PUBLISH_STATUS, TYPE_LABEL, type DeckPublishOptions, type DeckRecentPost, type PublishType } from "@/lib/jack/publish"
 import { cn } from "@/lib/utils"
 import { addDeckToGallery, publishDeckToInstagram, readInstagramQuota } from "../publish-actions"
 
@@ -16,6 +16,35 @@ type Deck = { id: string; title: string; size: string; version: number; slides: 
 
 const HASHTAG = /#[\p{L}\p{N}_]+/gu
 const TAG = /(?<![\w.@])@[A-Za-z0-9._]{1,30}/g
+
+const when = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+
+/** This deck's posts on their way or sent in the last day, so an officer sees what already went before posting */
+function RecentPosts({ posts }: { posts: DeckRecentPost[] }) {
+  if (!posts.length) return null
+  return (
+    <div className="flex flex-col gap-1.5">
+      <p className="text-xs font-medium text-admin-subtle">Sent from this deck lately</p>
+      <ul className="flex flex-col rounded-md border bg-card text-sm">
+        {posts.map((post) => (
+          <li key={post.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-admin-row px-2.5 py-1.5 last:border-b-0">
+            <span className="min-w-0 flex-1">
+              {TYPE_LABEL[post.mediaType].replace(/^a /, "A ")}
+              {post.mediaType === "CAROUSEL" ? ` of ${post.slides} slides` : ""}
+              {post.version ? `, version ${post.version}` : ""} · {when.format(new Date(post.createdAt))} CT
+            </span>
+            <Badge tone={PUBLISH_STATUS[post.status].tone}>{PUBLISH_STATUS[post.status].label}</Badge>
+            {post.permalink && (
+              <a href={post.permalink} target="_blank" rel="noreferrer" className="text-xs underline underline-offset-2">
+                Open
+              </a>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
 
 /** Slides as a grid of thumbnails to tick; `single` makes it pick one */
 function SlidePicker({ deck, picked, onChange, single, max }: { deck: Deck; picked: string[]; onChange: (ids: string[]) => void; single: boolean; max: number }) {
@@ -65,6 +94,8 @@ export function PublishToInstagramDialog({ deck, options, open, onOpenChange }: 
   const [altText, setAltText] = useState("")
   const [aiLabel, setAiLabel] = useState(false)
   const [quota, setQuota] = useState<{ used: number; total: number } | null | "loading" | "error">("loading")
+  /** Why the last press was refused as already sent; cleared when the pick changes */
+  const [repeat, setRepeat] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open || !options.instagram.ready) return
@@ -79,6 +110,7 @@ export function PublishToInstagramDialog({ deck, options, open, onOpenChange }: 
 
   function changeType(next: PublishType) {
     setType(next)
+    setRepeat(null)
     if (next !== "carousel") setPicked((current) => (current.length ? [current[0]] : deck.slides.slice(0, 1).map((s) => s.id)))
     else if (picked.length < CAROUSEL_MIN) setPicked(deck.slides.slice(0, CAROUSEL_MAX).map((s) => s.id))
   }
@@ -90,20 +122,38 @@ export function PublishToInstagramDialog({ deck, options, open, onOpenChange }: 
   const fit = type === "story" ? options.fit.story : options.fit.feed
   const blocked = !options.instagram.ready || Boolean(countProblem) || captionTooLong || quotaFull
 
-  async function publish() {
+  function pick(ids: string[]) {
+    setPicked(ids)
+    setRepeat(null)
+  }
+
+  // While it's posting the dialog stays open (Esc and clicks outside do nothing), so nobody presses Post again thinking it stopped
+  function openChange(next: boolean) {
+    if (!next && pending) return
+    onOpenChange(next)
+  }
+
+  async function publish(again = false) {
     const what = type === "carousel" ? `a carousel of ${picked.length} slides` : type === "story" ? "a story" : "a post"
-    const ok = await confirm({
-      title: `Post ${what} on Instagram now?`,
-      description: `It goes up on ${options.instagram.account ? `@${options.instagram.account}` : "the club's account"} right away, in public, and can't be taken down from here (delete it in the Instagram app).`,
-      confirmLabel: "Post it",
-      tone: "danger",
-    })
+    const ok = await confirm(
+      again
+        ? { title: `Post ${what} again?`, description: `${repeat ?? "It was already sent."} Posting it again puts a second copy on Instagram.`, confirmLabel: "Post it again", tone: "danger" }
+        : {
+            title: `Post ${what} on Instagram now?`,
+            description: `It goes up on ${options.instagram.account ? `@${options.instagram.account}` : "the club's account"} right away, in public, and can't be taken down from here (delete it in the Instagram app).`,
+            confirmLabel: "Post it",
+            tone: "danger",
+          },
+    )
     if (!ok) return
     start(async () => {
       try {
-        const result = await publishDeckToInstagram({ deckId: deck.id, version: deck.version, slideIds: picked, type, caption: type === "story" ? "" : caption, altText: type === "post" ? altText : undefined, aiLabel })
+        const result = await publishDeckToInstagram({ deckId: deck.id, version: deck.version, slideIds: picked, type, caption: type === "story" ? "" : caption, altText: type === "post" ? altText : undefined, aiLabel, again })
         if (!result.ok) {
-          toast.error(result.error)
+          if ("repeat" in result) {
+            setRepeat(result.error)
+            router.refresh()
+          } else toast.error(result.error)
           return
         }
         if (result.data.state === "published") toast.success("It's up on Instagram")
@@ -119,7 +169,7 @@ export function PublishToInstagramDialog({ deck, options, open, onOpenChange }: 
   return (
     <Dialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={openChange}
       size="lg"
       title="Publish to Instagram"
       description={`Version ${deck.version} of “${deck.title}”. Pressing Post it is the approval: it goes out right away.`}
@@ -128,7 +178,7 @@ export function PublishToInstagramDialog({ deck, options, open, onOpenChange }: 
           <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={pending}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={() => void publish()} pending={pending} disabled={blocked}>
+          <Button variant="primary" onClick={() => void publish()} pending={pending} disabled={blocked || Boolean(repeat)}>
             <Send aria-hidden />
             Post…
           </Button>
@@ -144,6 +194,15 @@ export function PublishToInstagramDialog({ deck, options, open, onOpenChange }: 
             </Link>
           </Notice>
         )}
+        {repeat && (
+          <Notice tone="warning" title="Already sent">
+            {repeat}{" "}
+            <button type="button" className="font-medium underline underline-offset-2" onClick={() => void publish(true)} disabled={pending}>
+              Post it again…
+            </button>
+          </Notice>
+        )}
+        <RecentPosts posts={options.recent} />
         <Field label="Post as">
           <Segmented
             label="Post as"
@@ -157,7 +216,7 @@ export function PublishToInstagramDialog({ deck, options, open, onOpenChange }: 
           />
         </Field>
         <Field label={type === "carousel" ? `Slides (${picked.length} picked, in this order)` : "Slide"} error={countProblem ?? undefined} hint={fit ?? undefined}>
-          <SlidePicker deck={deck} picked={picked} onChange={setPicked} single={type !== "carousel"} max={CAROUSEL_MAX} />
+          <SlidePicker deck={deck} picked={picked} onChange={pick} single={type !== "carousel"} max={CAROUSEL_MAX} />
         </Field>
         {type !== "story" ? (
           <Field
@@ -217,6 +276,11 @@ export function AddToGalleryDialog({ deck, options, open, onOpenChange }: { deck
   const albumTitle = isNew ? title.trim() : (options.gallery.albums.find((a) => a.id === albumId)?.title ?? "the album")
   const blocked = !options.gallery.ready || picked.length === 0 || (isNew && !title.trim())
 
+  function openChange(next: boolean) {
+    if (!next && pending) return
+    onOpenChange(next)
+  }
+
   async function add() {
     const ok = await confirm({
       title: `Add ${picked.length === 1 ? "1 slide" : `${picked.length} slides`} to “${albumTitle}”?`,
@@ -249,7 +313,7 @@ export function AddToGalleryDialog({ deck, options, open, onOpenChange }: { deck
   return (
     <Dialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={openChange}
       size="lg"
       title="Add to gallery"
       description={`Slides of version ${deck.version} of “${deck.title}”, on the public gallery.`}

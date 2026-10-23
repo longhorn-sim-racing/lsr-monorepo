@@ -19,7 +19,7 @@ vi.mock("@/server/jack/broadcast", () => broadcast)
 vi.mock("@/server/jack/messages", () => ({ jackMessageInclude: {}, toMessageView: (row: unknown) => row }))
 vi.mock("@/server/jack/decks/renders", () => ({ getRenderFile: vi.fn() }))
 
-import { PublishRefused } from "@/server/jack/publish/instagram"
+import { PublishRefused, PublishRepeat } from "@/server/jack/publish/instagram"
 import { addDeckToGallery, publishDeckToInstagram, readInstagramQuota } from "./publish-actions"
 
 const DECK_ID = "11111111-1111-4111-8111-111111111111"
@@ -42,7 +42,7 @@ describe("Publish to Instagram on the deck page", () => {
     flow.startInstagramPublish.mockResolvedValue({ state: "published", row: { id: "pub-1", mediaType: "CAROUSEL", slideIds: ["slideaaa", "slidebbb"], status: "published", error: null, permalink: "https://www.instagram.com/p/X/" } })
     const result = await publishDeckToInstagram({ deckId: DECK_ID, version: 3, slideIds: ["slideaaa", "slidebbb"], type: "carousel", caption: " GM 2! ", aiLabel: true })
     expect(result).toEqual({ ok: true, data: { state: "published", permalink: "https://www.instagram.com/p/X/", summary: "Posted “GM 2 recap” as a carousel of 2 slides on Instagram." } })
-    expect(flow.startInstagramPublish.mock.calls[0][0]).toMatchObject({ type: "carousel", caption: "GM 2!", aiGenerated: true, createdById: "u1", approvedById: "u1", auditMetadata: { via: "deck_page", deckId: DECK_ID, version: 3 } })
+    expect(flow.startInstagramPublish.mock.calls[0][0]).toMatchObject({ type: "carousel", caption: "GM 2!", aiGenerated: true, createdById: "u1", approvedById: "u1", auditMetadata: { via: "deck_page", deckId: DECK_ID, version: 3 }, refuseRepeat: true })
     expect(flow.startInstagramPublish.mock.calls[0][0].proposalId).toBeUndefined()
     expect(db.jackMessage.create).toHaveBeenCalledWith(expect.objectContaining({ data: { roomId: "room-1", kind: "system", authorUserId: "u1", content: "Gray on the deck page: Posted “GM 2 recap” as a carousel of 2 slides on Instagram. → /admin/instagram#publishing" } }))
     expect(broadcast.broadcastRoomEvent).toHaveBeenCalledWith("room-1", expect.anything())
@@ -66,10 +66,40 @@ describe("Publish to Instagram on the deck page", () => {
     expect(flow.startInstagramPublish.mock.calls[0][0]).toMatchObject({ type: "story", caption: "", altText: undefined })
   })
 
+  it("refuses the same pick again while it's on its way or just went out, unless the officer confirms posting it again", async () => {
+    flow.startInstagramPublish.mockRejectedValueOnce(new PublishRepeat("These slides already went to Instagram as a carousel at Oct 23, 3:04 PM (Instagram is processing). See Content → Instagram.", "pub-1"))
+    const pick = { deckId: DECK_ID, version: 3, slideIds: ["slideaaa", "slidebbb"], type: "carousel" as const, caption: "GM 2!" }
+    expect(await publishDeckToInstagram(pick)).toEqual({
+      ok: false,
+      error: "These slides already went to Instagram as a carousel at Oct 23, 3:04 PM (Instagram is processing). See Content → Instagram. Nothing new was posted.",
+      repeat: true,
+    })
+    expect(db.jackMessage.create).not.toHaveBeenCalled()
+
+    flow.startInstagramPublish.mockResolvedValueOnce({ state: "waiting", row: { id: "pub-2", mediaType: "CAROUSEL", slideIds: ["slideaaa", "slidebbb"], status: "containers", error: null, permalink: null } })
+    expect(await publishDeckToInstagram({ ...pick, again: true })).toMatchObject({ ok: true, data: { state: "waiting" } })
+    expect(flow.startInstagramPublish.mock.calls.map(([request]) => request.refuseRepeat)).toEqual([true, false])
+  })
+
   it("reads the quota for the dialog, or null when publishing is off", async () => {
     expect(await readInstagramQuota()).toEqual({ ok: true, data: { used: 3, total: 50, account: "lsr_fake" } })
     connector.client.mockResolvedValue(null)
     expect(await readInstagramQuota()).toEqual({ ok: true, data: null })
+  })
+})
+
+describe("Permissions", () => {
+  it("refuses anyone who isn't an officer before any work: nothing posted, added or read from Instagram", async () => {
+    guards.requireOfficer.mockRejectedValue(new Error("Forbidden"))
+    await expect(publishDeckToInstagram({ deckId: DECK_ID, version: 3, slideIds: ["slideaaa"], type: "post" })).rejects.toThrow("Forbidden")
+    await expect(addDeckToGallery({ deckId: DECK_ID, version: 3, slideIds: ["slideaaa"], album: { kind: "existing", id: "44444444-4444-4444-8444-444444444444" } })).rejects.toThrow("Forbidden")
+    await expect(readInstagramQuota()).rejects.toThrow("Forbidden")
+    expect(flow.startInstagramPublish).not.toHaveBeenCalled()
+    expect(gallery.addToGallery).not.toHaveBeenCalled()
+    expect(connector.client).not.toHaveBeenCalled()
+    expect(slides.slidesById).not.toHaveBeenCalled()
+    expect(db.galleryAlbum.findFirst).not.toHaveBeenCalled()
+    expect(db.jackMessage.create).not.toHaveBeenCalled()
   })
 })
 

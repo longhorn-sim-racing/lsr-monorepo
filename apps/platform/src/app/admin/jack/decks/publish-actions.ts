@@ -13,7 +13,7 @@ import { broadcastRoomEvent } from "@/server/jack/broadcast"
 import { jackMessageInclude, toMessageView } from "@/server/jack/messages"
 import { captionProblem } from "@/server/jack/publish/caption"
 import { addToGallery, describeGalleryAdd, GalleryAlbumGone } from "@/server/jack/publish/gallery"
-import { describePublish, publishDeps, PublishRefused, startInstagramPublish } from "@/server/jack/publish/instagram"
+import { describePublish, publishDeps, PublishRefused, PublishRepeat, startInstagramPublish } from "@/server/jack/publish/instagram"
 import { slidesById } from "@/server/jack/publish/slides"
 
 /**
@@ -33,6 +33,8 @@ const publishSchema = z.object({
   caption: z.string().trim().max(2_200).default(""),
   altText: z.string().trim().max(1_000).optional(),
   aiLabel: z.boolean().default(false),
+  /** The officer saw it was already sent and confirmed posting it again */
+  again: z.boolean().default(false),
 })
 
 /** Instagram's API posts in the last 24 hours against its limit, read live for the dialog; null when publishing isn't connected */
@@ -59,8 +61,14 @@ async function deckRoomNote(roomId: string | null, officerId: string, content: s
   }
 }
 
-/** Posts the picked slides of the deck version on the page: the officer confirmed in the dialog */
-export async function publishDeckToInstagram(input: z.input<typeof publishSchema>): Promise<ActionResult<{ state: "published" | "waiting"; permalink: string | null; summary: string }>> {
+/**
+ * Posts the picked slides of the deck version on the page: the officer confirmed in the dialog. The same
+ * pick already on its way or sent in the last day is refused with `repeat` (a press after a slow answer, a
+ * reload, or another officer on the same deck), unless the officer confirms posting it again (`again`)
+ */
+export async function publishDeckToInstagram(
+  input: z.input<typeof publishSchema>,
+): Promise<ActionResult<{ state: "published" | "waiting"; permalink: string | null; summary: string }> | { ok: false; error: string; repeat: true }> {
   const officer = await requireOfficer()
   const parsed = publishSchema.safeParse(input)
   if (!parsed.success) return { ok: false, error: "Pick the slides and type again; something didn't come through." }
@@ -90,6 +98,7 @@ export async function publishDeckToInstagram(input: z.input<typeof publishSchema
         createdById: officer.id,
         approvedById: officer.id,
         auditMetadata: { via: "deck_page", deckId: picked.deck.id, version: picked.deck.version },
+        refuseRepeat: !p.again,
       },
       publishDeps(client),
     )
@@ -98,6 +107,7 @@ export async function publishDeckToInstagram(input: z.input<typeof publishSchema
     revalidatePath("/admin/instagram")
     return { ok: true, data: { state, permalink: row.permalink, summary } }
   } catch (error) {
+    if (error instanceof PublishRepeat) return { ok: false, error: `${error.message} Nothing new was posted.`, repeat: true }
     revalidatePath("/admin/instagram")
     const text = error instanceof Error ? error.message : "It couldn't be posted."
     return { ok: false, error: error instanceof PublishRefused ? `${text} Nothing was posted.` : text }
