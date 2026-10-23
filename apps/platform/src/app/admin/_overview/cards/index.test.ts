@@ -6,6 +6,7 @@ const fakeCard = (id: string, order: number): OverviewCard => ({ id, order, Card
 afterEach(() => {
   vi.doUnmock("./sources-a")
   vi.doUnmock("./automation")
+  vi.doUnmock("./sources-b")
   vi.resetModules()
 })
 
@@ -18,6 +19,7 @@ describe("the Overview card registry", () => {
   it("sorts the tracks' cards by order", async () => {
     vi.doMock("./sources-a", () => ({ CARDS: [fakeCard("site-traffic", 20)] }))
     vi.doMock("./automation", () => ({ CARDS: [fakeCard("needs-attention", 0)] }))
+    vi.doMock("./sources-b", () => ({ CARDS: [] }))
     const { OVERVIEW_CARDS } = await import("./index")
     expect(OVERVIEW_CARDS.map((c) => c.id)).toEqual(["needs-attention", "site-traffic"])
   })
