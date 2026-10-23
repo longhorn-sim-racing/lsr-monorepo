@@ -108,6 +108,20 @@ describe("the event mirror", () => {
     expect(fakes.requests.slice(before).every((r) => r.method === "GET")).toBe(true)
   })
 
+  it("never makes a second Discord event when a create's answer was lost: the next run finds the first and keeps it", async () => {
+    state.events = [event("a")]
+    await fetch(`${fakes.origin}/discord/_fake/drop`, { method: "POST", body: JSON.stringify({ path: "/scheduled-events", when: "after", times: 1 }) })
+    await expect(run()).rejects.toThrow()
+    expect(state.mirrors).toEqual([])
+    expect(await discordEvents()).toHaveLength(1)
+
+    const again = await run()
+    expect(again).toMatchObject({ created: 0 })
+    const listed = await discordEvents()
+    expect(listed).toHaveLength(1)
+    expect((state.mirrors as Mirror[]).map((m) => [m.eventId, m.discordEventId])).toEqual([["a", listed[0].id]])
+  })
+
   it("leaves an event an admin deleted in Discord deleted", async () => {
     state.events = [event("a")]
     await run()

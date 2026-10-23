@@ -2,7 +2,7 @@ import { getSiteUrl } from "@/lib/site-url"
 import { clipText, stripLinks, stripMentions, tidy } from "@/lib/discord/text"
 import { prisma } from "@/server/db"
 import { DiscordApiError } from "@/server/connectors/discord/client"
-import { DISCORD_WRITE_ERROR, type DiscordWriter, type ScheduledEventInput } from "@/server/connectors/discord/write"
+import { DISCORD_WRITE_ERROR, type DiscordScheduledEvent, type DiscordWriter, type ScheduledEventInput } from "@/server/connectors/discord/write"
 import { EVENT_SELECT, eventProblem, postableEvents, type EventRow } from "./events"
 import { readRuleConfig } from "./rules"
 import { eventUrl } from "./templates"
@@ -17,6 +17,9 @@ import { eventUrl } from "./templates"
  * - deletes the Discord event of one that was cancelled, postponed, unpublished or deleted before it
  *   started (past ones are left: Discord completes them on its own);
  * - leaves alone a Discord event an admin deleted by hand (it isn't made again);
+ * - never makes a second Discord event for one of ours: before creating, it looks in Discord's list for
+ *   one no mirror row holds with the same name, start and event-page link (a create whose answer was lost,
+ *   or whose row wasn't saved), and keeps that one instead;
  * - at most MAX_MIRROR_WRITES_PER_RUN writes a run.
  */
 
@@ -50,6 +53,16 @@ export type MirrorRun = { status: "ok" | "no-rule"; created: number; updated: nu
 
 const unknownEvent = (error: unknown) => error instanceof DiscordApiError && error.code === DISCORD_WRITE_ERROR.unknownEvent
 
+/**
+ * A Discord event the mirror made for this one before but has no row for (the create's answer was lost,
+ * or the run stopped before saving it): an external event no mirror row holds, with the same name and
+ * start, whose text links to this event's page
+ */
+export function unsavedMirror(listed: DiscordScheduledEvent[], input: ScheduledEventInput, eventPage: string, held: ReadonlySet<string>): DiscordScheduledEvent | null {
+  const start = Date.parse(input.scheduled_start_time)
+  return listed.find((e) => !held.has(e.id) && e.entity_type === 3 && e.name === input.name && Date.parse(e.scheduled_start_time) === start && (e.description ?? "").includes(eventPage)) ?? null
+}
+
 export async function runEventMirror(writer: DiscordWriter, ctx: { now: Date; log: (line: string) => void; signal?: AbortSignal; siteUrl?: string }): Promise<MirrorRun> {
   const run: MirrorRun = { status: "ok", created: 0, updated: 0, removed: 0, counted: 0, gone: 0 }
   const rule = await prisma.discordRule.findFirst({ where: { kind: "event_mirror", enabled: true }, orderBy: { createdAt: "asc" } })
@@ -68,7 +81,10 @@ export async function runEventMirror(writer: DiscordWriter, ctx: { now: Date; lo
   })
   const mirrors = await prisma.discordEventMirror.findMany()
   const byEvent = new Map(mirrors.map((m) => [m.eventId, m]))
+  const held = new Set(mirrors.map((m) => m.discordEventId))
   const wanted = new Set<string>()
+  // Discord's list, read once: to find a create whose row wasn't saved, and for the interested counts
+  const listed = await writer.scheduledEvents(ctx.signal)
 
   for (const event of events) {
     if (eventProblem(event, now, config.series)) continue
@@ -77,10 +93,13 @@ export async function runEventMirror(writer: DiscordWriter, ctx: { now: Date; lo
     const input = scheduledEventFor(event, { siteUrl, location: config.location })
     const mirror = byEvent.get(event.id)
     if (!mirror) {
-      const created = await writer.createScheduledEvent(input, REASON, ctx.signal)
-      writes++
+      const found = unsavedMirror(listed, input, eventUrl(siteUrl, event.slug), held)
+      const created = found ?? (await writer.createScheduledEvent(input, REASON, ctx.signal))
+      if (!found) writes++
+      held.add(created.id)
       await prisma.discordEventMirror.create({ data: { eventId: event.id, discordEventId: created.id, eventStartsAt: event.startsAtUtc, lastSyncedAt: now, interestedCount: created.user_count ?? 0 } })
-      run.created++
+      if (found) ctx.log(`“${event.title}” was already on Discord's Events list (an earlier run's create); kept that one.`)
+      else run.created++
       continue
     }
     if (event.updatedAt <= mirror.lastSyncedAt && event.startsAtUtc.getTime() === mirror.eventStartsAt.getTime()) continue
@@ -115,7 +134,6 @@ export async function runEventMirror(writer: DiscordWriter, ctx: { now: Date; lo
   }
 
   // Interested counts, for the events Discord still lists (finished ones keep their last count)
-  const listed = await writer.scheduledEvents(ctx.signal)
   for (const event of listed) {
     if (typeof event.user_count !== "number") continue
     const { count } = await prisma.discordEventMirror.updateMany({ where: { discordEventId: event.id, OR: [{ interestedCount: null }, { interestedCount: { not: event.user_count } }] }, data: { interestedCount: event.user_count } })
