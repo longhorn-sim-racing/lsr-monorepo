@@ -11,7 +11,7 @@ const price = (input: number, output: number, cacheRead: number): ModelPrice => 
 })
 
 export const MODEL_PRICES: Record<string, ModelPrice> = {
-  "claude-sonnet-5-5": price(2, 10, 0.2), // Jack
+  "claude-sonnet-5-5": price(2, 10, 0.1), // Jack (cache hits are 0.05x input on Sonnet 5.5 and Opus 5.5)
   "claude-opus-5-5": price(4, 20, 0.2), // Lift
   "claude-haiku-5-5": price(0.1, 0.5, 0.01), // Stand, for prompts up to 100K tokens (see LONG_PROMPT_PRICES)
   // A refused request can be answered by a fallback model, billed at that model's rates

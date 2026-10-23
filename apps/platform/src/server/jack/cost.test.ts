@@ -8,7 +8,7 @@ describe("costUsd", () => {
     const sonnet = "claude-sonnet-5-5"
     expect(costUsd(sonnet, { inputTokens: M, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 })).toBe(2)
     expect(costUsd(sonnet, { inputTokens: 0, cacheWriteTokens: M, cacheReadTokens: 0, outputTokens: 0 })).toBe(2.5) // 1.25x input
-    expect(costUsd(sonnet, { inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: M, outputTokens: 0 })).toBe(0.2)
+    expect(costUsd(sonnet, { inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: M, outputTokens: 0 })).toBe(0.1) // 0.05x input
     expect(costUsd(sonnet, { inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: M })).toBe(10)
   })
 
