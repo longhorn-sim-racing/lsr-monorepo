@@ -3,6 +3,7 @@ import type { JackMessageView, JackProposalState, JackRoomPersonaKey, JackRoomSu
 import { JACK_EVENT, JACK_PERSONA_NAME } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
 import { runAfterResponse } from "@/server/after-response"
+import { officerAuthorLabel } from "./author-label"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
 import { EVAL_ROOM_PREFIX } from "./eval-support"
 import { linkAttachments } from "./files/attach"
@@ -115,8 +116,9 @@ async function snapshotMessages(roomId: string, around: string | undefined): Pro
 export type RunRequest = { startedAt?: number; replyDeps?: ReplyLoopDeps }
 
 /**
- * Saves an officer's message, then (after the response) shows it to the room and gets the room's
- * persona answering: if a run is already going, it picks this message up on its next pass.
+ * Saves an officer's message, with their label as Jack reads it (author-label.ts), then (after the
+ * response) shows it to the room and gets the room's persona answering: if a run is already going, it
+ * picks this message up on its next pass.
  * `fileIds` are the officer's READY uploads to post with it (G5): checked first with
  * attachmentProblem(), then claimed in the same transaction, which throws AttachmentError (and saves
  * nothing) if one was taken meanwhile. Null when the room doesn't exist or is archived.
@@ -130,8 +132,10 @@ export async function postOfficerMessage(
   const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: { id: true } })
   if (!room) return null
 
+  // Who's asking, as Jack reads it, snapshotted now so the turn never changes (design §8)
+  const authorLabel = await officerAuthorLabel(authorUserId)
   const row = await prisma.$transaction(async (tx) => {
-    const created = await tx.jackMessage.create({ data: { roomId, kind: "user", authorUserId, content } })
+    const created = await tx.jackMessage.create({ data: { roomId, kind: "user", authorUserId, content, authorLabel } })
     await linkAttachments(tx, { messageId: created.id, roomId, officerId: authorUserId, fileIds })
     await tx.jackRoom.update({ where: { id: roomId }, data: { updatedAt: new Date() } })
     return tx.jackMessage.findUniqueOrThrow({ where: { id: created.id }, include: jackMessageInclude })
