@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest"
-import { DEFAULT_FAKES_URL, fakesEnabledFor, fakesOrigin, serviceBaseUrl } from "./base-url"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { DEFAULT_FAKES_URL, fakesEnabledFor, fakesOrigin, serviceBaseUrl, serviceFetch } from "./base-url"
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe("fakesEnabledFor", () => {
   it("is off unless JACK_FAKES names the service or says all", () => {
@@ -63,5 +67,44 @@ describe("serviceBaseUrl", () => {
   it("takes only service names that work as a path", () => {
     expect(() => serviceBaseUrl("Discord", "https://discord.com", {})).toThrow(/service name/)
     expect(() => serviceBaseUrl("../admin", "https://discord.com", {})).toThrow(/service name/)
+  })
+})
+
+describe("serviceFetch", () => {
+  /** Stubs the global fetch and returns where each call went */
+  function stubFetch() {
+    const calls: { url: string; method: string; body: string | null }[] = []
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init)
+      calls.push({ url: request.url, method: request.method, body: request.body ? await request.text() : null })
+      return new Response("{}")
+    })
+    return calls
+  }
+
+  it("moves requests to the fakes server under the service's mount", async () => {
+    const calls = stubFetch()
+    const stripeFetch = serviceFetch("stripe", { JACK_FAKES: "stripe" })
+    await stripeFetch("http://127.0.0.1:3999/v1/balance?expand[]=x")
+    await stripeFetch(new URL("http://127.0.0.1:3999/v1/charges"), { method: "POST", body: "amount=500" })
+    await stripeFetch(new Request("http://127.0.0.1:3999/v1/refunds", { method: "POST", body: "charge=ch_1" }))
+    expect(calls).toEqual([
+      { url: "http://127.0.0.1:3999/stripe/v1/balance?expand[]=x", method: "GET", body: null },
+      { url: "http://127.0.0.1:3999/stripe/v1/charges", method: "POST", body: "amount=500" },
+      { url: "http://127.0.0.1:3999/stripe/v1/refunds", method: "POST", body: "charge=ch_1" },
+    ])
+  })
+
+  it("leaves every request alone when fakes are off, and requests to other origins when they're on", async () => {
+    const calls = stubFetch()
+    await serviceFetch("stripe", {})("https://api.stripe.com/v1/balance")
+    await serviceFetch("stripe", { JACK_FAKES: "all", VERCEL_ENV: "production" })("https://api.stripe.com/v1/balance")
+    await serviceFetch("stripe", { JACK_FAKES: "all" })("http://127.0.0.1:4000/v1/balance")
+    expect(calls.map((call) => call.url)).toEqual(["https://api.stripe.com/v1/balance", "https://api.stripe.com/v1/balance", "http://127.0.0.1:4000/v1/balance"])
+  })
+
+  it("checks the service name and the fakes URL when it's made", () => {
+    expect(() => serviceFetch("../admin", {})).toThrow(/service name/)
+    expect(() => serviceFetch("stripe", { JACK_FAKES: "all", JACK_FAKES_URL: "http://evil.example" })).toThrow(/this machine/)
   })
 })

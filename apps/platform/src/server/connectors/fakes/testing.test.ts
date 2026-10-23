@@ -1,5 +1,6 @@
+import Stripe from "stripe"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { serviceBaseUrl } from "../base-url"
+import { fakesEnabledFor, fakesOrigin, serviceBaseUrl, serviceFetch } from "../base-url"
 import { exampleFake } from "../example/fake/handlers"
 import { mountFakes } from "./testing"
 import { FakeNetworkError, type FakeService } from "./types"
@@ -66,6 +67,41 @@ describe("mountFakes", () => {
     const failure = fetch("http://127.0.0.1:3999/flaky/v1/drop")
     await expect(failure).rejects.toThrow(TypeError)
     await expect(failure).rejects.toMatchObject({ message: "fetch failed", cause: expect.any(FakeNetworkError) })
+  })
+
+  it("rejects a request whose signal is already aborted, like fetch", async () => {
+    const fakes = mountFakes([exampleFake])
+    const reason = new DOMException("The operation timed out.", "TimeoutError")
+    await expect(fetch("http://127.0.0.1:3999/example/v1/ping", { signal: AbortSignal.abort(reason) })).rejects.toBe(reason)
+    expect(fakes.requests).toHaveLength(0)
+  })
+
+  it("runs the Stripe SDK against a fake under /stripe, through serviceFetch()", async () => {
+    // Stripe takes a host but no base path, so serviceFetch() adds the mount
+    const balance: FakeService = {
+      id: "stripe",
+      create: () => [
+        {
+          method: "GET",
+          path: "/v1/balance",
+          handle: () => Response.json({ object: "balance", available: [{ amount: 4200, currency: "usd", source_types: { card: 4200 } }], pending: [], livemode: false }),
+        },
+      ],
+    }
+    const fakes = mountFakes([balance])
+    const key = "sk_" + "test_" + "x".repeat(24)
+    const fakesUrl = fakesEnabledFor("stripe") ? new URL(fakesOrigin()) : null
+    const stripe = new Stripe(key, {
+      ...(fakesUrl && { host: fakesUrl.hostname, port: Number(fakesUrl.port || 80), protocol: "http" as const }),
+      httpClient: Stripe.createFetchHttpClient(serviceFetch("stripe")),
+      maxNetworkRetries: 0,
+      telemetry: false,
+    })
+
+    expect((await stripe.balance.retrieve()).available[0].amount).toBe(4200)
+    expect(fakes.requests).toHaveLength(1)
+    expect(fakes.requests[0]).toMatchObject({ method: "GET", service: "stripe", path: "/v1/balance", url: "http://127.0.0.1:3999/stripe/v1/balance" })
+    expect(fakes.requests[0].headers.get("authorization")).toBe(`Bearer ${key}`)
   })
 
   it("puts the previous fetch back", () => {

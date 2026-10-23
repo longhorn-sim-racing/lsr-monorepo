@@ -56,6 +56,8 @@ export function mountFakes(services: readonly FakeService[] = FAKE_SERVICES, opt
     if (url.origin !== origin) {
       throw new TypeError(`fetch to ${url.origin} isn't faked: tests never reach the network (does the client build its URL with serviceBaseUrl()?)`)
     }
+    // Like fetch: an aborted signal (a caller's cancel, a timeout that already fired) rejects with its reason
+    request.signal.throwIfAborted()
     const [first = "", ...rest] = url.pathname.split("/").filter(Boolean)
     const service = ids.has(first) ? first : null
     requests.push({
