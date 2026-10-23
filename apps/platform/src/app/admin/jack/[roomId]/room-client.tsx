@@ -32,12 +32,13 @@ export function JackRoomClient({ initial, rooms, me, spend }: JackRoomClientProp
 
   async function send(content: string) {
     try {
-      // Files still uploading go with this message once they're done (Send shows it's working meanwhile)
+      // Files still uploading go with this message once they're done (Send shows it's working meanwhile);
+      // files added during the wait stay in the composer for the next message
       const files = await uploads.settle()
       if (!files.ok) return files.error
       if (!content.trim() && !files.fileIds.length) return "Type a message first"
       const result = await room.send(content, files.fileIds)
-      if (result.ok) uploads.clear()
+      if (result.ok) uploads.clear(files.keys)
       return result.ok ? null : result.error
     } catch (error) {
       return unexpectedError(error, "Couldn't send that")

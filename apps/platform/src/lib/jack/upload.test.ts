@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { registerUpload, uploadError, uploadToSignedUrl, type UploadXhr } from "./upload"
+import { pastedFiles, registerUpload, uploadError, uploadToSignedUrl, type UploadXhr } from "./upload"
 
 /** A stand-in XMLHttpRequest that records the request and lets the test finish it */
 function fakeXhr() {
@@ -102,5 +102,25 @@ describe("registerUpload", () => {
         throw new TypeError("Failed to fetch")
       }) as unknown as typeof fetch)
     ).toMatchObject({ ok: false, error: expect.stringContaining("Couldn't reach the server") })
+  })
+})
+
+describe("pastedFiles", () => {
+  const clipboard = (files: File[], text = "") => ({ files, getData: (type: string) => (type === "text/plain" ? text : "") })
+  const picture = new File([new Uint8Array(3)], "image.png", { type: "image/png" })
+
+  it("attaches a screenshot or copied photo (an image with no text)", () => {
+    expect(pastedFiles(clipboard([picture]))).toEqual([picture])
+  })
+
+  it("leaves a paste from Excel or Word as text: the picture Office adds beside the text isn't attached", () => {
+    expect(pastedFiles(clipboard([picture], "Driver\tLap\nAda\t1:32.1"))).toEqual([])
+  })
+
+  it("attaches files copied in a file manager, and nothing for plain text", () => {
+    const pdf = new File(["%PDF"], "rules.pdf", { type: "application/pdf" })
+    expect(pastedFiles(clipboard([pdf, picture], "rules.pdf"))).toEqual([pdf, picture])
+    expect(pastedFiles(clipboard([], "just words"))).toEqual([])
+    expect(pastedFiles(null)).toEqual([])
   })
 })

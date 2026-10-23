@@ -7,6 +7,7 @@ import { ACCEPT_ATTRIBUTE, MAX_FILES_PER_MESSAGE } from "@/lib/jack/files"
 import { formatFileSize, partLink } from "@/lib/jack/links"
 import type { JackFileItem, JackFileKindKey } from "@/lib/jack/parts"
 import type { JackMessageView } from "@/lib/jack/types"
+import { pastedFiles } from "@/lib/jack/upload"
 import type { PendingUpload } from "@/lib/jack/upload-queue"
 import { cn } from "@/lib/utils"
 import { FilesView } from "./parts/files-view"
@@ -60,9 +61,9 @@ export function AttachButton({ onFiles, disabled }: { onFiles: (files: File[]) =
   )
 }
 
-/** Files pasted into the message box (a screenshot, files copied in a file manager) */
+/** Files pasted into the message box (a screenshot, files copied in a file manager); none for a text paste from Excel or Word (see pastedFiles) */
 export function filesFromPaste(event: ClipboardEvent<HTMLTextAreaElement>): File[] {
-  return Array.from(event.clipboardData?.files ?? [])
+  return pastedFiles(event.clipboardData)
 }
 
 /** Files dropped on the composer */

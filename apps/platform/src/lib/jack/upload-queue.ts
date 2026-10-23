@@ -45,7 +45,8 @@ export type UploadQueueDeps = {
 
 export type UploadQueueState = { items: PendingUpload[]; notice: string | null }
 
-export type UploadsSettled = { ok: true; fileIds: string[] } | { ok: false; error: string }
+/** `keys`: the composer's files going with this message, for `clear` once it's posted */
+export type UploadsSettled = { ok: true; fileIds: string[]; keys: string[] } | { ok: false; error: string }
 
 export function createUploadQueue(deps: UploadQueueDeps, onChange: (state: UploadQueueState) => void) {
   let items: PendingUpload[] = []
@@ -141,19 +142,26 @@ export function createUploadQueue(deps: UploadQueueDeps, onChange: (state: Uploa
       if (item.fileId) void deps.removeUpload(item.fileId).catch(() => {})
     },
 
-    /** After a send: the files went with the message, so only the local previews go */
-    clear() {
-      items.forEach(unpreview)
-      items = []
+    /** After a send: the files that went with the message leave the composer (only their local previews to free). Files added while it was sending stay */
+    clear(keys: string[]) {
+      const sent = new Set(keys)
+      items.filter((item) => sent.has(item.key)).forEach(unpreview)
+      items = items.filter((item) => !sent.has(item.key))
       notice = null
       emit()
     },
 
-    /** Waits for every upload still going, then says which files can be sent, or what to fix first */
+    /**
+     * Waits for the uploads in the composer now, then says which files can be sent, or what to fix
+     * first. Files added while it waits aren't part of this send; they wait for the next one
+     */
     async settle(): Promise<UploadsSettled> {
-      await Promise.all([...work.values()].map((w) => w.done))
-      if (items.some((item) => item.state === "error")) return { ok: false, error: "Some files couldn't be attached. Remove them (×), then send again." }
-      return { ok: true, fileIds: items.flatMap((item) => (item.state === "ready" && item.fileId ? [item.fileId] : [])) }
+      const keys = new Set(items.map((item) => item.key))
+      await Promise.all([...work].flatMap(([key, w]) => (keys.has(key) ? [w.done] : [])))
+      const sending = items.filter((item) => keys.has(item.key))
+      if (sending.some((item) => item.state === "error")) return { ok: false, error: "Some files couldn't be attached. Remove them (×), then send again." }
+      const ready = sending.filter((item) => item.state === "ready" && item.fileId)
+      return { ok: true, fileIds: ready.map((item) => item.fileId!), keys: ready.map((item) => item.key) }
     },
 
     /** Leaving the room: stops uploads still going (the cleanup job deletes what they left) and frees the previews */

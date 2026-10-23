@@ -52,7 +52,7 @@ describe("the upload queue", () => {
     uploads[0].progress?.(0.4)
     expect(queue.state.items[0].progress).toBe(0.4)
     uploads[0].finish({ ok: true })
-    expect(await queue.settle()).toEqual({ ok: true, fileIds: ["file-1"] })
+    expect(await queue.settle()).toEqual({ ok: true, fileIds: ["file-1"], keys: [queue.state.items[0].key] })
     expect(queue.state.items[0]).toMatchObject({ state: "ready", fileId: "file-1" })
     expect(deps.register).toHaveBeenCalledWith("file-1")
   })
@@ -64,7 +64,7 @@ describe("the upload queue", () => {
     await flush()
     uploads[1].finish({ ok: true })
     uploads[0].finish({ ok: true })
-    expect(await settled).toEqual({ ok: true, fileIds: ["file-1", "file-2"] })
+    expect(await settled).toMatchObject({ ok: true, fileIds: ["file-1", "file-2"] })
   })
 
   it("refuses a file the rules refuse without uploading it, and blocks the send until it's removed", async () => {
@@ -74,7 +74,7 @@ describe("the upload queue", () => {
     expect(deps.createUpload).not.toHaveBeenCalled()
     expect(await queue.settle()).toMatchObject({ ok: false, error: expect.stringContaining("Remove them") })
     queue.remove(queue.state.items[0].key)
-    expect(await queue.settle()).toEqual({ ok: true, fileIds: [] })
+    expect(await queue.settle()).toEqual({ ok: true, fileIds: [], keys: [] })
   })
 
   it("shows the server's reason when it refuses, the upload fails, or the check fails", async () => {
@@ -107,7 +107,7 @@ describe("the upload queue", () => {
     expect(deps.removeUpload).toHaveBeenCalledWith("file-1")
     expect(deps.revoke).toHaveBeenCalledWith("blob:car.png")
     expect(queue.state.items).toEqual([])
-    expect(await queue.settle()).toEqual({ ok: true, fileIds: [] })
+    expect(await queue.settle()).toEqual({ ok: true, fileIds: [], keys: [] })
   })
 
   it("deletes the server's file when removed before the upload even started", async () => {
@@ -142,10 +142,42 @@ describe("the upload queue", () => {
     queue.add([png()])
     await flush()
     uploads[0].finish({ ok: true })
-    await queue.settle()
-    queue.clear()
+    const settled = await queue.settle()
+    queue.clear(settled.ok ? settled.keys : [])
     expect(queue.state.items).toEqual([])
     expect(deps.revoke).toHaveBeenCalledWith("blob:car.png")
     expect(deps.removeUpload).not.toHaveBeenCalled()
+  })
+
+  it("keeps a file added while a send waits for uploads: it isn't sent, and stays for the next message", async () => {
+    const { queue, uploads, deps } = setup()
+    queue.add([png("first.png")])
+    await flush()
+    const settling = queue.settle()
+    // Dropped in while Send waits for the first upload
+    queue.add([png("second.png")])
+    await flush()
+    uploads[0].finish({ ok: true })
+    const settled = await settling
+    expect(settled).toEqual({ ok: true, fileIds: ["file-1"], keys: [queue.state.items[0].key] })
+    queue.clear(settled.ok ? settled.keys : [])
+    expect(queue.state.items).toEqual([expect.objectContaining({ name: "second.png", state: "uploading" })])
+    expect(deps.revoke).toHaveBeenCalledWith("blob:first.png")
+    expect(deps.revoke).not.toHaveBeenCalledWith("blob:second.png")
+    // It goes with the next message
+    uploads[1].finish({ ok: true })
+    expect(await queue.settle()).toMatchObject({ ok: true, fileIds: ["file-2"] })
+  })
+
+  it("doesn't hold a send for a file that failed after the send started waiting", async () => {
+    const { queue, uploads } = setup()
+    queue.add([png("first.png")])
+    await flush()
+    const settling = queue.settle()
+    queue.add([png("late.png")])
+    await flush()
+    uploads[1].finish({ ok: false, error: "The upload didn't go through." })
+    uploads[0].finish({ ok: true })
+    expect(await settling).toMatchObject({ ok: true, fileIds: ["file-1"] })
   })
 })

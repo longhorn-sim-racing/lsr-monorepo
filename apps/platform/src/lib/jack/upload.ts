@@ -78,6 +78,20 @@ export function uploadError(status: number, responseText: string): string {
   return `The upload failed (${code}). Remove the file and try again.`
 }
 
+/**
+ * The files a paste attaches. Copying cells in Excel or a paragraph in Word puts a picture of the
+ * selection on the clipboard beside its text, and the text is what's meant: when the paste has text
+ * and its files are all images, it's a text paste (nothing attached; the text goes into the message).
+ * A screenshot, a copied photo or files copied in a file manager come without text and are attached.
+ */
+export function pastedFiles(clipboard: Pick<DataTransfer, "getData"> & { files: ArrayLike<File> } | null | undefined): File[] {
+  const files = Array.from(clipboard?.files ?? [])
+  if (!files.length) return []
+  const text = clipboard?.getData("text/plain") ?? ""
+  if (text.trim() && files.every((file) => file.type.startsWith("image/"))) return []
+  return files
+}
+
 /** Asks the server to check an uploaded file and get it ready (POST /api/admin/jack/files/[id]/register) */
 export async function registerUpload(fileId: string, fetcher: typeof fetch = fetch): Promise<JackRegisterResult> {
   try {
