@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { revalidatePath } from "next/cache";
 import { syncInstagram } from "@/server/services/instagram.service";
 
@@ -11,11 +12,8 @@ export const maxDuration = 60;
  * The response lands in public Actions logs, so it carries counts only.
  */
 export async function GET(request: Request) {
-  const authHeader = request.headers.get("Authorization");
-  if (
-    process.env.NODE_ENV === "production" &&
-    authHeader !== `Bearer ${process.env.CRON_SECRET}`
-  ) {
+  // Fails closed: with no CRON_SECRET set, every request is refused (in every environment)
+  if (!isAuthorizedCronRequest(request.headers.get("Authorization"), process.env.CRON_SECRET)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
