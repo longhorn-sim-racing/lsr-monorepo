@@ -15,8 +15,6 @@ import { jackFileStore } from "@/server/jack/decks/storage"
  */
 
 export const dynamic = "force-dynamic"
-// A cold start launches Chromium before the first render
-export const maxDuration = 60
 
 const KINDS: JackRenderKind[] = ["thumb", "view", "png"]
 const SLIDE_ID = /^[A-Za-z0-9_-]{4,32}$/
@@ -45,7 +43,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ deck
 
   let file: { key: string; body: Buffer; transient: boolean }
   try {
-    file = await getRenderFile({ size: deck.size, css: deck.content.css, html: slide.html }, kind)
+    file = await getRenderFile({ size: deck.size, css: deck.content.css, html: slide.html, roomId: deck.roomId }, kind)
   } catch (error) {
     console.error(`[jack] Couldn't render slide ${slideId} of deck ${deckId}:`, error)
     return NextResponse.json({ error: "Couldn't render this slide" }, { status: 500 })

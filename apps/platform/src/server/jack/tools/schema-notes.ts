@@ -36,7 +36,7 @@ Payments (read only: Jack never moves money; refunds happen in the Stripe dashbo
 - metadata->>'duplicateOfEntitlementId' on a succeeded payment = they paid for something they already had; an officer should refund it in Stripe. Donations go through a Stripe link and never appear here.
 
 Race results
-- "RawResultUpload" is a results file an officer uploaded for an event (status UPLOADED, PARSED, INGESTED, FAILED). Ingesting it creates "RaceSession" rows (sessionType RACE, QUALIFYING or PRACTICE) with "RaceParticipant", "RaceResult" (position, points, status FINISHED/DNF/DSQ), "RaceLap" and "RaceEvent" (collisions). A round has results when its event has a RaceSession; an upload with no sessions isn't processed yet.
+- "RawResultUpload" is a results file an officer uploaded for an event (status UPLOADED, PARSED, INGESTED, FAILED). Ingesting it creates "RaceSession" rows (sessionType RACE, QUALIFYING or PRACTICE) with "RaceParticipant", "RaceResult" (position, points, status FINISHED or DSQ; DNF is never recorded), "RaceLap" and "RaceEvent" (collisions). A round has results when its event has a RaceSession; an upload with no sessions isn't processed yet.
 - RaceParticipant.userId links a sim driver to a member (through "DriverIdentity".driverGuid); unlinked drivers don't score standings. Lap and race times are milliseconds.
 
 Everything else

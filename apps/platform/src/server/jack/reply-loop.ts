@@ -7,16 +7,19 @@ import { prisma } from "@/server/db"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
 import { savedUsage, UsageTally } from "./cost"
 import { DeltaStream } from "./delta-stream"
-import { buildHistory } from "./history"
+import { attachTurnFiles } from "./files/turn"
+import { buildConversation } from "./history"
 import { FORMER_OFFICER, jackMessageInclude, toMessageView, type JackMessageRow } from "./messages"
 import { anthropicJackClient, REPLY_LIMITS, runModelReply, type JackModelClient, type ReplyLimits, type ReplyOutcome } from "./model-loop"
 import { JACK_MODELS } from "./models"
 import { buildSystemPrompt } from "./prompt"
 import { releaseRoomLock, renewRoomLock, tryAcquireRoomLock } from "./room-lock"
+import { REPLY_TRIGGERS } from "./reply-triggers"
+import { scheduledHistoryRows, scheduledPersona } from "./scheduled-replies"
 import { getMonthSpend } from "./spend"
 import { nameRoom, STAND_TIMEOUT_MS } from "./stand"
 import { JACK_TOOLS } from "./tools"
-import type { AnyJackTool } from "./tools/types"
+import type { AnyJackTool, JackRequestType } from "./tools/types"
 
 export type ReplyLoopDeps = {
   broadcast: RoomBroadcaster
@@ -92,13 +95,37 @@ function deadline(ms: number, reason: string) {
   return { signal: controller.signal, clear: () => clearTimeout(timer) }
 }
 
-/** What a reply answers: officer messages, and notes asking Jack to keep going on a deck (#177) */
-const ANSWERABLE = [{ kind: "user" as const }, { kind: "system" as const, continues: true }]
+/**
+ * Messages waiting for a reply: the kinds a reply answers (REPLY_TRIGGERS) that none has yet. None wait in
+ * an archived room, so no answer starts there (design §10)
+ */
+function waitingIn(roomId: string) {
+  return { roomId, answeredById: null, room: { archivedAt: null }, OR: REPLY_TRIGGERS }
+}
+
+/**
+ * The messages the next reply answers, from the waiting ones (oldest first): a scheduled note on its own,
+ * or else everything up to the next scheduled note. So whichever run picks up a scheduled note, it's
+ * never answered together with officer messages
+ */
+function nextReplyBatch(waiting: JackMessageRow[]): JackMessageRow[] {
+  if (waiting[0]?.scheduled) return waiting.slice(0, 1)
+  const end = waiting.findIndex((m) => m.scheduled)
+  return end === -1 ? waiting : waiting.slice(0, end)
+}
+
+/**
+ * What a reply is for, from the messages it answers (design §7.2): "scheduled" when any is a scheduled
+ * note, so it gets no web tools and its tools see ctx.requestType "scheduled"; "room" otherwise
+ */
+function replyRequestType(answering: JackMessageRow[]): JackRequestType {
+  return answering.some((m) => m.scheduled) ? "scheduled" : "room"
+}
 
 /** Messages nobody has answered yet, oldest first (other room notes don't get answers) */
 function findUnanswered(roomId: string) {
   return prisma.jackMessage.findMany({
-    where: { roomId, answeredById: null, OR: ANSWERABLE },
+    where: waitingIn(roomId),
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     include: jackMessageInclude,
   })
@@ -106,10 +133,25 @@ function findUnanswered(roomId: string) {
 
 async function hasUnanswered(roomId: string) {
   const first = await prisma.jackMessage.findFirst({
-    where: { roomId, answeredById: null, OR: ANSWERABLE },
+    where: waitingIn(roomId),
     select: { id: true },
   })
   return first !== null
+}
+
+/**
+ * Mention mode (design §10): officer messages that didn't mention Jack and no reply has taken yet, up to
+ * `last` (the newest message a reply answers). The reply takes them as context, so its turn holds the
+ * conversation the mention came out of; ones posted after `last` wait for the next mention. All of them
+ * are marked answered, but the history sends only the newest (history.ts, ASIDE_LIMITS).
+ */
+async function waitingAsides(roomId: string, last: JackMessageRow): Promise<string[]> {
+  const asides = await prisma.jackMessage.findMany({
+    where: { roomId, kind: "user", expectsAnswer: false, answeredById: null },
+    select: { id: true, createdAt: true },
+  })
+  const at = last.createdAt.getTime()
+  return asides.filter((m) => m.createdAt.getTime() < at || (m.createdAt.getTime() === at && m.id < last.id)).map((m) => m.id)
 }
 
 /**
@@ -118,10 +160,12 @@ async function hasUnanswered(roomId: string) {
  * officer asking Jack to continue).
  *
  * Each pass answers every officer message that's waiting, together in one reply, so messages posted
- * mid-answer are picked up by the next pass. When nothing is waiting the run lets go of the lock,
- * then looks once more: a message posted just before that found the lock taken and left it to this
- * run, so if one is there the run takes the lock back (or sees that a newer run has it). That way
- * nothing is left unanswered while the run has time.
+ * mid-answer are picked up by the next pass; a scheduled note gets a reply of its own (nextReplyBatch).
+ * In a mention-mode room only messages that mention Jack wait; the others go into the next reply to
+ * officers as context (waitingAsides). Nothing waits in an archived room, so no answer starts there.
+ * When nothing is waiting the run lets go of the lock, then looks once more: a message posted just
+ * before that found the lock taken and left it to this run, so if one is there the run takes the lock
+ * back (or sees that a newer run has it). That way nothing is left unanswered while the run has time.
  *
  * A run has RUN_TIMING.runDeadlineMs in all. It doesn't start an answer with less than minAnswerMs
  * left: it lets go of the lock instead and leaves the messages waiting, for the next post or for an
@@ -132,6 +176,10 @@ async function hasUnanswered(roomId: string) {
  *
  * `startedAt` is when the request that started the run began (posting, or "continue"), since the
  * function's own time limit counts from then; it defaults to now.
+ *
+ * A scheduled run (a recurring question) posts its note with `scheduled: true` and then calls this like
+ * any other run. What a reply may do comes from the messages it answers, not from the run, so the note
+ * gets a scheduled reply whichever run answers it (one an officer's post started included).
  */
 export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultReplyDeps, { startedAt = Date.now() }: { startedAt?: number } = {}): Promise<void> {
   const runId = randomUUID()
@@ -160,7 +208,7 @@ export async function runRoom(roomId: string, deps: ReplyLoopDeps = defaultReply
           holding = false // a newer run took over a lock it thought was stale; it answers from here
           return
         }
-        await answer(roomId, waiting, deps, sideJobs, { runSignal: run.signal, deadlineAt, leftMs, replyDeadlineMs: timing.replyDeadlineMs })
+        await answer(roomId, nextReplyBatch(waiting), deps, sideJobs, { runSignal: run.signal, deadlineAt, leftMs, replyDeadlineMs: timing.replyDeadlineMs })
         continue
       }
 
@@ -205,19 +253,25 @@ type AnswerTiming = { runSignal: AbortSignal; deadlineAt: number; leftMs: number
 
 /** One reply to every message in `waiting`, from the room's persona as it is now */
 async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoopDeps, sideJobs: Promise<void>[], timing: AnswerTiming) {
+  const requestType = replyRequestType(waiting)
+  // A reply to officers also takes what they said among themselves meanwhile (mention mode) as its turn's context
+  const asides = requestType === "room" && waiting.some((m) => m.kind === "user") ? await waitingAsides(roomId, waiting[waiting.length - 1]) : []
+  const taken = [...waiting.map((m) => m.id), ...asides]
+  // A scheduled note is answered by its recurring question's persona (Jack or Stand), not the room's
+  const scheduledAs = requestType === "scheduled" ? await scheduledPersona(waiting[0]) : null
   const reply = await prisma.$transaction(async (tx) => {
     const room = await tx.jackRoom.findUnique({ where: { id: roomId }, select: { persona: true } })
     const created = await tx.jackMessage.create({
-      data: { roomId, kind: "assistant", persona: room?.persona ?? "jack", status: "streaming" },
+      data: { roomId, kind: "assistant", persona: scheduledAs ?? room?.persona ?? "jack", status: "streaming" },
       include: jackMessageInclude,
     })
     await tx.jackMessage.updateMany({
-      where: { id: { in: waiting.map((m) => m.id) }, answeredById: null },
+      where: { id: { in: taken }, answeredById: null },
       data: { answeredById: created.id },
     })
     return created
   })
-  await deps.broadcast(roomId, { type: JACK_EVENT.created, message: toMessageView(reply), answers: waiting.map((m) => m.id) })
+  await deps.broadcast(roomId, { type: JACK_EVENT.created, message: toMessageView(reply), answers: taken })
 
   const persona: JackRoomPersonaKey = isJackRoomPersona(reply.persona) ? reply.persona : "jack"
   const usage = new UsageTally(JACK_MODELS[persona].model)
@@ -247,7 +301,7 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   let status: "done" | "error"
   let result: { content: string; streamSeq: number }
   try {
-    produced = await produce(roomId, reply, persona, waiting, deps, stream, usage, { signal, limits }, (latest) => {
+    produced = await produce(roomId, reply, persona, waiting, deps, stream, usage, { signal, limits, requestType }, (latest) => {
       parts = latest
     })
     status = produced.status
@@ -270,7 +324,9 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
     console.info(
       `[jack] Reply ${reply.id} in room ${roomId}: ${JACK_PERSONA_NAME[persona]} (${usage.models.join(", ")}) $${usage.costUsd}, ` +
         `${tokens.inputTokens} in + ${tokens.cacheWriteTokens} cache write + ${tokens.cacheReadTokens} cache read, ${tokens.outputTokens} out, ` +
-        `${usage.calls} calls, ${produced?.toolCalls ?? 0} tool calls, ${((Date.now() - startedAt) / 1000).toFixed(1)} s, ${produced?.outcome ?? "failed"}`
+        `${usage.calls} calls, ${produced?.toolCalls ?? 0} tool calls, ` +
+        `${usage.webSearches || usage.webFetches ? `${usage.webSearches} web searches, ${usage.webFetches} pages opened, ` : ""}` +
+        `${((Date.now() - startedAt) / 1000).toFixed(1)} s, ${produced?.outcome ?? "failed"}`
     )
   }
 
@@ -295,7 +351,8 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
   }
   await deps.broadcast(roomId, { type: JACK_EVENT.done, message: toMessageView(final) })
 
-  if (produced?.unfinishedDesign) {
+  // Not after a scheduled reply: its continue note would be answered as a room reply, with the web tools
+  if (produced?.unfinishedDesign && requestType === "room") {
     await leaveContinueNote(roomId, persona, waiting, deps).catch((error) => console.error(`[jack] Couldn't leave a continue note in room ${roomId}:`, error))
   }
 
@@ -332,7 +389,7 @@ async function produce(
   deps: ReplyLoopDeps,
   stream: DeltaStream,
   usage: UsageTally,
-  run: { signal: AbortSignal; limits: Partial<ReplyLimits> },
+  run: { signal: AbortSignal; limits: Partial<ReplyLimits>; requestType: JackRequestType },
   onParts: (parts: JackToolPart[]) => void
 ): Promise<Produced> {
   const name = JACK_PERSONA_NAME[persona]
@@ -353,13 +410,21 @@ async function produce(
     )
   }
 
-  const rows = await prisma.jackMessage.findMany({
-    where: { roomId },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: HISTORY_ROWS,
-    include: jackMessageInclude,
-  })
-  const history = buildHistory(rows.reverse(), reply.id)
+  // A scheduled note (a recurring question) is answered from a short history: it and its job's last answer
+  const rows =
+    run.requestType === "scheduled"
+      ? await scheduledHistoryRows(roomId, waiting[0], reply)
+      : (
+          await prisma.jackMessage.findMany({
+            where: { roomId },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            take: HISTORY_ROWS,
+            include: jackMessageInclude,
+          })
+        ).reverse()
+  const conversation = buildConversation(rows, reply.id)
+  // The files posted in this turn go with it: photos and PDFs as images and documents, others summarized
+  const history = await attachTurnFiles(conversation.history, conversation.attached, { signal: run.signal })
   const latest = waiting[waiting.length - 1]
 
   const out = await runModelReply({
@@ -368,8 +433,14 @@ async function produce(
     system: buildSystemPrompt(persona),
     tools: deps.tools,
     history,
-    // Tools run as the officer whose message started this reply: the newest one it answers
-    ctx: { roomId, messageId: reply.id, actor: { userId: latest.authorUserId, displayName: latest.author?.displayName ?? FORMER_OFFICER } },
+    // Tools run as the officer whose message started this reply: the newest one it answers. A reply
+    // that also answers a continue note isn't only an officer's, so it can't save knowledge
+    ctx: {
+      roomId,
+      messageId: reply.id,
+      actor: { userId: latest.authorUserId, displayName: latest.author?.displayName ?? FORMER_OFFICER },
+      reply: { fromOfficer: waiting.every((m) => m.kind === "user"), knowledgeChanges: 0 },
+    },
     onText: (text) => stream.write(text),
     onReset: (text) => stream.reset(text),
     onPart: (part, all) => {
@@ -390,6 +461,7 @@ async function produce(
     },
     usage,
     limits: run.limits,
+    requestType: run.requestType,
     signal: run.signal,
   })
   return {
@@ -411,8 +483,11 @@ async function produce(
  * reply's own hand-off note tells officers to ask him to keep going.
  */
 async function leaveContinueNote(roomId: string, persona: JackRoomPersonaKey, waiting: JackMessageRow[], deps: ReplyLoopDeps) {
+  // Archived while the reply was running: nobody can answer it there, and unarchiving shouldn't start a deck job
+  const room = await prisma.jackRoom.findUnique({ where: { id: roomId }, select: { archivedAt: true } })
+  if (!room || room.archivedAt) return
   const recent = await prisma.jackMessage.findMany({
-    where: { roomId, OR: ANSWERABLE },
+    where: { roomId, OR: REPLY_TRIGGERS },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: MAX_AUTO_CONTINUES + 1,
     select: { kind: true, continues: true },

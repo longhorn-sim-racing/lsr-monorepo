@@ -11,8 +11,6 @@ import { jackFileStore } from "@/server/jack/decks/storage"
  */
 
 export const dynamic = "force-dynamic"
-// A big deck renders every slide it hasn't rendered yet, from a cold Chromium
-export const maxDuration = 120
 
 const UUID = /^[0-9a-f-]{36}$/i
 const MAX_INLINE_BYTES = 4_000_000

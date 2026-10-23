@@ -1,0 +1,5 @@
+import { claudeFilesConnector } from "../anthropic/files"
+import type { AnyConnector } from "../types"
+
+/** Outside services from the groundwork track (design §12). The registry joins every track's connectors in a fixed order */
+export const CONNECTORS: AnyConnector[] = [claudeFilesConnector]

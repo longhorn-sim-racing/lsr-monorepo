@@ -11,6 +11,7 @@ import { expireOpenCheckouts } from "@/server/services/checkout-sessions";
 import type Stripe from "stripe";
 import { getSiteUrl } from "@/lib/site-url";
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
+import { saveDispute, savePayout } from "@/server/connectors/stripe/store";
 
 // ---------------------------------------------------------------------------
 // Checkout Session Creation
@@ -308,6 +309,24 @@ export async function handleStripeWebhook(
       break;
     case "charge.refunded":
       await handleChargeRefunded(event.data.object as Stripe.Charge);
+      break;
+    // Payouts and disputes only update Jack's read-only copy of Stripe (design §12.3); nothing here
+    // moves money or touches a Payment. Each write is stamped with the event's time, so an older
+    // event arriving late never replaces newer data.
+    case "payout.created":
+    case "payout.updated":
+    case "payout.paid":
+    case "payout.failed":
+    case "payout.canceled":
+    case "payout.reconciliation_completed":
+      await savePayout(event.data.object, new Date(event.created * 1000));
+      break;
+    case "charge.dispute.created":
+    case "charge.dispute.updated":
+    case "charge.dispute.closed":
+    case "charge.dispute.funds_withdrawn":
+    case "charge.dispute.funds_reinstated":
+      await saveDispute(event.data.object, new Date(event.created * 1000));
       break;
   }
 }

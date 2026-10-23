@@ -1,5 +1,11 @@
 import type { z } from "zod"
-import type { JackToolDisplay } from "@/lib/jack/parts"
+import type { JackToolDisplay, JackToolPart } from "@/lib/jack/parts"
+
+/**
+ * What a reply is for (design §7.2): an officer's message in a room, or a scheduled run (recurring
+ * questions, digest summaries). Scheduled runs never get the web tools
+ */
+export type JackRequestType = "room" | "scheduled"
 
 /** Who a tool call runs for, and where */
 export type JackToolContext = {
@@ -11,17 +17,62 @@ export type JackToolContext = {
   actor: { userId: string | null; displayName: string }
   /** The reply this call is part of (deck changes record it). Absent outside a room reply, e.g. scripts */
   messageId?: string
+  /**
+   * The reply this call is part of, shared by every call in it (the reply loop makes one per reply).
+   * Absent in scripts, which then can't save knowledge
+   */
+  reply?: JackReplyState
+  /** Set by the model loop; absent outside it (scripts). Tools that must not act in scheduled runs check it */
+  requestType?: JackRequestType
   signal?: AbortSignal
 }
 
-/** An image a tool shows the model (base64), after a line of text that says what it is */
-export type JackModelImage = { caption: string; mediaType: "image/jpeg" | "image/png"; data: string }
+/**
+ * What a reply answers, and what its tools have done so far. One object per reply: every tool call in
+ * it gets the same one, so a tool can count across calls (parallel calls included, since a count is
+ * taken before the first await)
+ */
+export type JackReplyState = {
+  /**
+   * Every message the reply answers is one an officer typed: not a continue note (and later not a
+   * recurring question or the digest). Knowledge saves need it (design §9)
+   */
+  fromOfficer: boolean
+  /** Knowledge changes made in this reply so far (the knowledge tool allows 3) */
+  knowledgeChanges: number
+  /**
+   * The reply's tool calls so far, as the model loop holds them (it sets this). The copy saved on the
+   * reply is written in the background and can lag behind, e.g. a call made alongside this one
+   */
+  toolParts?: () => readonly JackToolPart[]
+}
+
+/**
+ * An image a tool shows the model, after a line of text that says what it is: base64, or by Claude Files
+ * API id (uploaded on the server; never an id from the browser). The id must be an image's: a PDF's
+ * file id in an image block is a 400
+ */
+export type JackModelImage = { caption: string } & ({ mediaType: "image/jpeg" | "image/png"; data: string } | { fileId: string })
+
+/**
+ * A document a tool shows the model (a PDF, read with its pages as images), after a line of text that
+ * says what it is: by Claude Files API id (uploaded on the server; never an id from the browser), or
+ * as base64 when it isn't uploaded. The id must be a PDF's: an image's file id here is a 400
+ */
+export type JackModelDocument = {
+  caption: string
+  /** Shown to the model as the document's title */
+  title?: string
+  source: { type: "file"; fileId: string } | { type: "base64"; mediaType: "application/pdf"; data: string }
+}
 
 export type JackToolResult = {
   /** What the model reads back: compact JSON or text. Keep it small; rows are capped by the tool. */
   forModel: string
   /** Images the model looks at after the text (deck renders), each with its caption. Not saved or shown in the room */
   images?: JackModelImage[]
+  /** Documents the model reads after the text and before any images, each with its caption. Not saved or shown in the room */
+  documents?: JackModelDocument[]
   /** A short human summary for the room, e.g. "Ran a query (13 rows)" */
   label: string
   /** What the room shows for this call */
@@ -46,6 +97,14 @@ export type JackTool<I = unknown> = {
   design?: boolean
   /** How long one call may run, when it needs longer than REPLY_LIMITS.toolTimeoutMs (rendering many slides) */
   timeoutMs?: number
+  /**
+   * Loaded through tool search instead of up front, for rarely used tools (design §7.1): sent with
+   * `defer_loading`, and the request gets the tool search tool. Name it with its service's prefix
+   * (`stripe_`, `discord_`) and say what it covers in the description, since that's what search matches
+   */
+  deferred?: boolean
+  /** Only offered with the web tools (JACK_WEB_TOOLS=on, and only in room replies), e.g. web_links */
+  web?: boolean
   run: (input: I, ctx: JackToolContext) => Promise<JackToolResult>
 }
 

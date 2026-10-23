@@ -24,6 +24,90 @@ export type JackToolDisplay =
   | { kind: "event_draft"; eventId: string; title: string; startsAt: string; endsAt: string; venue: string | null; editUrl: string }
   | { kind: "note"; text: string }
   | JackDeckDisplay
+  | JackProposalDisplay
+  | JackLinksDisplay
+  | JackTextDraftDisplay
+  | JackStatsDisplay
+  | JackFilesDisplay
+  | JackWebSourcesDisplay
+
+/*
+ * Jack 2.0's display kinds (#188, design §7.5). Every outside link a part shows has its destination
+ * host beside it, read from the URL itself (a `host` field is never trusted for that).
+ */
+
+/**
+ * A change Jack proposed (design §4): small, to stay well under Realtime's message limit. The card loads
+ * the full diff and the live status from the proposal itself (G4); this is only what the reply showed
+ */
+export type JackProposalDisplay = {
+  kind: "proposal"
+  proposalId: string
+  /** The proposal's kind, e.g. "event.update" (`kind` already says which display this is) */
+  proposalKind: string
+  title: string
+  summary: string
+  /** e.g. { matched: 12, unmatched: 2 } for list kinds */
+  counts?: Record<string, number>
+  /**
+   * The first few changed fields, formatted on the server and cut short. A markdown row (long text) has
+   * no before, and a count of changed lines as its after; the card loads the real diff
+   */
+  preview: { label: string; before: string | null; after: string | null; format?: "text" | "value" | "markdown" }[]
+}
+
+/** A link in a `links` part */
+export type JackLinkItem = {
+  title: string
+  /** A web link or a site path ("/admin/…") */
+  url: string
+  /** e.g. "Updated Oct 3" or "PDF · 2 pages" */
+  meta?: string
+  snippet?: string
+  /** What the tool thinks the host is; the room shows the host it reads from `url` instead */
+  host?: string
+}
+
+/** Links a tool found: search results, documents, pages */
+export type JackLinksDisplay = { kind: "links"; items: JackLinkItem[]; caption?: string }
+
+/** A draft for an officer to copy and send themselves (draft_text): Jack never sends it */
+export type JackTextDraftDisplay = {
+  kind: "text_draft"
+  draftKind: "email" | "agenda" | "caption" | "text"
+  /** Emails */
+  subject?: string
+  /** Emails: who it's meant for, as written ("Sponsorship team at Acme") */
+  to?: string
+  body: string
+}
+
+/** A few headline numbers as tiles */
+export type JackStatsDisplay = { kind: "stats"; items: { label: string; value: string | number; hint?: string }[] }
+
+/** JackFile.kind */
+export type JackFileKindKey = "IMAGE" | "PDF" | "SPREADSHEET" | "CSV" | "JSON" | "TEXT" | "DOCUMENT" | "TRANSCRIPT" | "OTHER"
+
+/** A file in a room: an officer's upload, or one a tool made */
+export type JackFileItem = {
+  id: string
+  filename: string
+  kind: JackFileKindKey
+  sizeBytes: number
+  /** Where to open it: the officer-only file route (/api/admin/jack/files/…) */
+  url: string
+  /** A small preview, for images: a site path (the file route). Anything else isn't shown */
+  thumbUrl?: string
+}
+
+export type JackFilesDisplay = { kind: "files"; files: JackFileItem[] }
+
+/** What a web search looked for and the pages the answer cites or links to (G8; web-tools.ts) */
+export type JackWebSourcesDisplay = {
+  kind: "web_sources"
+  queries: string[]
+  sources: { title: string; url: string; host: string }[]
+}
 
 /**
  * A deck or graphic Jack made or changed (#177): the room shows its slides as thumbnails at `version`

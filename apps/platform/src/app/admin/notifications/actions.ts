@@ -16,6 +16,7 @@ import { createAuditLog } from "@/server/audit/log";
 import type { ActionResult } from "@/lib/action-result";
 import { fromZonedTime } from "date-fns-tz";
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
+import { deliveryFor } from "@/server/connectors/resend/delivery";
 
 export async function getNotificationStats() {
   await requireOfficer();
@@ -33,7 +34,7 @@ export async function getNotificationStats() {
 export async function getRecentNotifications(limit = 20, skip = 0) {
   await requireOfficer();
 
-  return prisma.notification.findMany({
+  const rows = await prisma.notification.findMany({
     include: {
       user: {
         select: { id: true, displayName: true, email: true },
@@ -43,6 +44,9 @@ export async function getRecentNotifications(limit = 20, skip = 0) {
     take: limit,
     skip: skip,
   });
+  // What happened to each email after Resend took it (Resend's delivery events; none until the webhook is set up)
+  const delivery = await deliveryFor(rows.map((row) => row.emailMessageId));
+  return rows.map((row) => ({ ...row, delivery: (row.emailMessageId && delivery.get(row.emailMessageId)) || null }));
 }
 
 export async function getScheduledNotifications() {
@@ -181,7 +185,7 @@ export async function sendCustomNotification(formData: FormData): Promise<Action
   }
 
   // Resend refuses email past its daily limit, so check an immediate email send first. Scheduled
-  // sends aren't checked: the day they go out isn't known yet.
+  // sends are checked when they go out: the cron holds back the emails over the limit then.
   if (sendEmail && !scheduledDate && formData.get("sendAnyway") !== "on") {
     const [{ sentToday, dailyLimit }, emailCount] = await Promise.all([
       getEmailUsage(),

@@ -7,11 +7,12 @@ vi.mock("@/server/jack/sql-client", () => ({ getJackSqlClient: () => null, JACK_
 
 import type { SeasonEntrant } from "@/server/services/league-entry.service"
 import { auditWhere } from "./audit-log"
-import { bucketSignups, compactRow, membersForModel, monthsBefore, tierCounts } from "./club-members"
+import { bucketSignups, compactRow, membersForModel, monthsBefore, rosterCounts, tierCounts } from "./club-members"
 import { forModelWithList, forModelWithLists, MAX_MODEL_CHARS } from "./display"
 import { formatSchema, parseConstraints, typeName } from "./describe-schema"
 import { summarizeEvent, searchWhere, type EventRow } from "./events-overview"
-import { JACK_TOOLS, findJackTool } from "./index"
+import { CORE_JACK_TOOLS, JACK_TOOLS, findJackTool } from "./index"
+import { SLOT_TOOLS } from "./registry"
 import { checkoutOutcome, driverRow, entrantSummary, schoolOf } from "./lsc-entries"
 import { rankActivity } from "./member-activity"
 import { itemName, purchaseKey, summarizePayments, unpaidCheckouts, type PaymentRow } from "./payments-summary"
@@ -268,6 +269,9 @@ describe("payments_summary shaping", () => {
 
   it("names productless payments as event fees", () => {
     expect(itemName({ product: null, eventRegistration: null })).toBe("Event fee")
+    // A checkout that never paid has no seat: the event title its checkout saved names it
+    expect(itemName({ product: null, eventRegistration: null, metadata: { eventId: "e2", eventTitle: "GM 2" } })).toBe("Event fee: GM 2")
+    expect(itemName({ product: null, eventRegistration: { event: { title: "Karting Night" } }, metadata: { eventTitle: "GM 2" } })).toBe("Event fee: Karting Night")
   })
 })
 
@@ -287,11 +291,21 @@ describe("audit_log filters", () => {
   it("matches action and entity case-insensitively, and 'system' as no actor", () => {
     expect(auditWhere({ ...range, action: "payment_succeeded", actor: "system" })).toEqual({
       createdAt: { gte: range.start, lte: range.end },
+      NOT: expect.anything(),
       actionType: { equals: "payment_succeeded", mode: "insensitive" },
       actorUserId: null,
     })
     const byName = auditWhere({ ...range, actor: "alex", search: "standings" })
     expect(byName).toMatchObject({ summary: { contains: "standings", mode: "insensitive" }, actor: { OR: expect.any(Array) } })
+  })
+
+  it("never shows recruiting entries about an officer's or admin's own application", () => {
+    expect(auditWhere(range).NOT).toEqual({
+      entityType: { in: ["APPLICATION", "APPLICATION_TRACK", "APPLICATION_EMAIL"] },
+      targetUser: { roles: { some: { role: { key: { in: ["officer", "admin"] } } } } },
+    })
+    // Filtering by entity doesn't lift it
+    expect(auditWhere({ ...range, entity: "APPLICATION_TRACK" }).NOT).toBeDefined()
   })
 })
 
@@ -344,6 +358,16 @@ describe("describe_schema formatting", () => {
     expect(missing).toEqual(["SystemSetting"])
     expect(text).toContain("Not found, or not readable by Jack: SystemSetting")
     expect(text).not.toContain("How the club's data fits together")
+  })
+
+  it("adds the tracks' notes after the core notes, only for the full schema, and their table notes beside the columns", () => {
+    const trackNotes = ["Discord\n- DiscordMessage keeps no message text."]
+    const full = formatSchema(columns, constraints, enums, { tableNotes: { Venue: "Where an event happens." }, trackNotes }).text
+    expect(full).toContain('"Venue" (Where an event happens.)')
+    expect(full.indexOf("DiscordMessage keeps no message text")).toBeGreaterThan(full.indexOf("How the club's data fits together"))
+    const some = formatSchema(columns, constraints, enums, { tables: ["Venue"], tableNotes: { Venue: "Where an event happens." }, trackNotes }).text
+    expect(some).toContain('"Venue" (Where an event happens.)')
+    expect(some).not.toContain("DiscordMessage")
   })
 })
 
@@ -406,8 +430,9 @@ describe("raceSessionsCount", () => {
 })
 
 describe("the tool list", () => {
-  it("has unique snake_case names in a fixed order, and finds tools by name", () => {
-    const names = JACK_TOOLS.map((t) => t.name)
+  it("starts with today's 21 tools, unchanged in name and order (the order is part of the cached prompt)", () => {
+    const names = JACK_TOOLS.slice(0, 21).map((t) => t.name)
+    expect(CORE_JACK_TOOLS.map((t) => t.name)).toEqual(names)
     expect(names).toEqual([
       "club_members",
       "member_activity",
@@ -431,14 +456,21 @@ describe("the tool list", () => {
       "deck_restore",
       "deck_screenshot",
     ])
+  })
+
+  it("follows them with the tracks' slot tools, and every name is unique snake_case", () => {
+    expect(JACK_TOOLS.slice(CORE_JACK_TOOLS.length)).toEqual(SLOT_TOOLS)
+    const names = JACK_TOOLS.map((t) => t.name)
+    expect(new Set(names).size).toBe(names.length)
     for (const name of names) expect(name).toMatch(/^[a-z][a-z_]*$/)
     expect(findJackTool("run_sql")?.name).toBe("run_sql")
     expect(findJackTool("nope")).toBeUndefined()
   })
 
-  it("marks only draft_event and the deck changes as writing; only draft_event touches club data", () => {
-    expect(JACK_TOOLS.filter((t) => t.writes).map((t) => t.name)).toEqual(["draft_event", "deck_create", "deck_write", "deck_edit", "deck_arrange", "deck_restore"])
-    expect(JACK_TOOLS.filter((t) => t.design).map((t) => t.name)).toEqual(JACK_TOOLS.filter((t) => t.name.startsWith("deck_")).map((t) => t.name))
+  it("marks only draft_event and the deck changes as writing among today's tools; only draft_event touches club data", () => {
+    expect(CORE_JACK_TOOLS.filter((t) => t.writes).map((t) => t.name)).toEqual(["draft_event", "deck_create", "deck_write", "deck_edit", "deck_arrange", "deck_restore"])
+    expect(CORE_JACK_TOOLS.filter((t) => t.design).map((t) => t.name)).toEqual(CORE_JACK_TOOLS.filter((t) => t.name.startsWith("deck_")).map((t) => t.name))
+    expect(CORE_JACK_TOOLS.some((t) => t.deferred)).toBe(false)
   })
 
   it("gives every tool an input the model loop can send as JSON Schema, and defaults that parse from {}", () => {
@@ -545,10 +577,30 @@ describe("club_members: the roster and the newest members", () => {
   const signups = [{ period: "2026-10", signups: 3 }]
   const member = (i: number, pad = 0) => ({ name: `Member ${i}`, email: `m${i}@utexas.edu`, joined: "2026-02-14", ...(pad ? { note: "x".repeat(pad) } : {}) })
 
+  it("counts the roster's columns for the reply, members and officers", () => {
+    const rows = [
+      { name: "A", email: "a@utexas.edu", eid: "a1", eventsRegistered: 2, checkIns: 1, lsc: "paid", paidDollars: 10 },
+      { name: "B", email: "b@utexas.edu", lsc: "form only" },
+      { name: "C", email: "c@utexas.edu", lsc: "form only", racesDriven: 3 },
+    ]
+    expect(rosterCounts({ rows, kind: "members" })).toEqual({
+      people: 3,
+      withEmail: 3,
+      withEid: 1,
+      registeredForAnEvent: 1,
+      checkedIn: 1,
+      drove: 1,
+      paidSomething: 1,
+      lscThisSeason: { paid: 1, "form only": 2 },
+    })
+    expect(rosterCounts({ rows: rows.slice(0, 1), kind: "officers" })).toEqual({ people: 1, withEmail: 1, withEid: 1 })
+  })
+
   it("leaves the newest list out when the whole club fits, and says why", () => {
-    const body = JSON.parse(membersForModel({}, { roster: { rows: [member(1), member(2)], definitions: "defs", kind: "members" }, wholeClub: true, newest, signups }))
+    const body = JSON.parse(membersForModel({}, { roster: { rows: [member(1), { ...member(2), eid: "ab123" }], definitions: "defs", kind: "members" }, wholeClub: true, newest, signups }))
     expect(body.roster).toHaveLength(2)
     expect(body.newest).toBe("left out: the roster has everyone, oldest first")
+    expect(body.rosterCounts).toEqual({ people: 2, withEmail: 2, withEid: 1, registeredForAnEvent: 0, checkedIn: 0, drove: 0, paidSomething: 0, lscThisSeason: {} })
   })
 
   it("puts the newest members first when the roster is cut short (its newest rows are the ones cut)", () => {

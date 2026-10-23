@@ -27,11 +27,15 @@ export type PaymentRow = {
   user: { displayName: string; email: string }
 }
 
-/** The name of what was bought: the product, or the event for a paid registration */
-export function itemName(p: Pick<PaymentRow, "product" | "eventRegistration">): string {
+/**
+ * The name of what was bought: the product, or the event for a paid registration. An event fee without
+ * a seat (a checkout that never paid) is named from the event title its checkout saved in metadata.
+ */
+export function itemName(p: { product: { name: string } | null; eventRegistration: { event: { title: string } } | null; metadata?: unknown }): string {
   if (p.product) return p.product.name
   if (p.eventRegistration) return `Event fee: ${p.eventRegistration.event.title}`
-  return "Event fee"
+  const saved = (p.metadata as Record<string, unknown> | null | undefined)?.eventTitle
+  return typeof saved === "string" && saved ? `Event fee: ${saved}` : "Event fee"
 }
 
 export function summarizePayments(payments: PaymentRow[]) {
@@ -229,7 +233,7 @@ async function runUnpaidCheckouts({ from, to, now }: { from?: string; to?: strin
   const rows = open.map((p) => ({
     name: p.user.displayName,
     email: p.user.email,
-    item: p.product?.name ?? (p.eventRegistration ? `Event fee: ${p.eventRegistration.event.title}` : "Event fee"),
+    item: itemName(p),
     dollars: dollars(p.amountCents),
     lastTry: ct(p.createdAt),
     status: p.status,

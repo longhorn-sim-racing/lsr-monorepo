@@ -1,17 +1,37 @@
 import type { NextConfig } from "next";
 
 const CHROMIUM_BINARY = ["./node_modules/@sparticuz/chromium/bin/**", "../../node_modules/.pnpm/@sparticuz+chromium@*/node_modules/@sparticuz/chromium/bin/**"]
+// Room files (G5) and documents (T6): src/server/jack/files/extract.ts imports the worker statically,
+// which file tracing follows; listed here too so a later change to a dynamic import can't quietly drop it
+const PDF_WORKER = ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", "../../node_modules/.pnpm/pdfjs-dist@*/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"]
 
 const nextConfig: NextConfig = {
   // Jack renders slides in headless Chromium (src/server/jack/decks/renderer.ts). The Chromium build
   // finds its binary next to its own files, so neither package can be bundled, and the binary has to
-  // be traced into the functions that render: the room page (Jack's reply loop runs there) and the
-  // deck image and export routes. pnpm links the package from node_modules/.pnpm and the code runs
+  // be traced into the functions that render: the room page (Jack's reply loop runs there, in the
+  // actions it posts to, and proposals applied there), the deck page (Publish to Instagram and Add to
+  // gallery render slides a deck hasn't rendered yet), the deck image and export routes, render-check,
+  // and the hand-off route that runs scheduled Jack replies. pnpm links the package from node_modules/.pnpm and the code runs
   // from there, so the binary is included at that real path as well as through the link.
-  serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core"],
+  // pdfjs-dist (text from PDFs Jack reads) loads its worker file from next to its own build at runtime;
+  // bundled, it can't find it ("Setting up fake worker failed"), so it stays a plain Node package too.
+  // That alone doesn't get the worker onto Vercel: file tracing only follows legacy/build/pdf.mjs. The
+  // code that reads PDFs must import "pdfjs-dist/legacy/build/pdf.worker.mjs" statically and set
+  // globalThis.pdfjsWorker to it (pdfjs checks that before loading the file), or the worker has to be
+  // added to outputFileTracingIncludes for the routes that read PDFs.
+  serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core", "pdfjs-dist"],
+  // Only those routes: a route the binary reaches grows by about 70 MB, Vercel splits big routes into
+  // more functions, and the Hobby plan takes at most 12 functions per deployment (with these on every
+  // /admin/jack and /api/admin/jack route, previews failed with "No more than 12 Serverless Functions").
+  // Keys match the route path anywhere in it ("/app/admin/jack/[roomId]"), so brackets are escaped.
   outputFileTracingIncludes: {
-    "/admin/jack/**": CHROMIUM_BINARY,
-    "/api/admin/jack/**": CHROMIUM_BINARY,
+    "/admin/jack/\\[roomId\\]": CHROMIUM_BINARY,
+    "/admin/jack/decks/\\[deckId\\]": CHROMIUM_BINARY,
+    "/api/admin/jack/decks/**": CHROMIUM_BINARY,
+    "/api/admin/jack/render-check": CHROMIUM_BINARY,
+    "/api/admin/jack/run": [...CHROMIUM_BINARY, ...PDF_WORKER],
+    "/api/admin/jack/files/**": PDF_WORKER,
+    "/api/cron/tick": PDF_WORKER,
   },
   images: {
     remotePatterns: [

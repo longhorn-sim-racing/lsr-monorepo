@@ -1,7 +1,10 @@
+import { localOverride, serviceBaseUrl } from "@/server/connectors/base-url"
+
 // Instagram API with Instagram Login: read the club's own posts with a long-lived token.
 // https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login
-// INSTAGRAM_GRAPH_URL points it at a stand-in server for local testing.
-const GRAPH_URL = process.env.INSTAGRAM_GRAPH_URL || "https://graph.instagram.com"
+// INSTAGRAM_GRAPH_URL (or JACK_FAKES=instagram, the shared fake) points it at a stand-in server for local testing:
+// http on this machine only, and ignored on Vercel production (the publishing token's renewal comes through here too).
+const graphUrl = () => serviceBaseUrl("instagram", localOverride("INSTAGRAM_GRAPH_URL", "https://graph.instagram.com")).replace(/\/+$/, "")
 
 export { INSTAGRAM_URL as INSTAGRAM_PROFILE_URL } from "@/lib/socials"
 
@@ -32,7 +35,8 @@ export class InstagramApiError extends Error {
 }
 
 async function graph<T>(path: string, params: Record<string, string>): Promise<T> {
-  const url = new URL(path, GRAPH_URL)
+  // Joined, not resolved: a stand-in mounted under a path (the fake's /instagram) keeps it
+  const url = new URL(`${graphUrl()}${path}`)
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
 
   const res = await fetch(url, { cache: "no-store" })

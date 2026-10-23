@@ -1,9 +1,9 @@
 "use client"
 
-import { useTransition } from "react"
+import { useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Download, MessageSquare } from "lucide-react"
+import { Download, ImagePlus, MessageSquare, Send } from "lucide-react"
 import { toast } from "sonner"
 import { Badge, Button, DetailList, Notice, PageHeader, Panel, PanelBody, PanelHeader, SplitLayout, useConfirm } from "@/components/admin/kit"
 import { unexpectedError } from "@/lib/action-result"
@@ -11,6 +11,8 @@ import { deckExportUrl, deckPageUrl, JACK_DECK_SIZES, slideImageUrl, type JackDe
 import { formatUsd } from "@/lib/jack/spend"
 import { cn } from "@/lib/utils"
 import { restoreJackDeckVersion } from "../actions"
+import type { DeckPublishOptions } from "@/lib/jack/publish"
+import { AddToGalleryDialog, PublishToInstagramDialog } from "./publish-dialogs"
 
 export type DeckPageData = {
   id: string
@@ -36,11 +38,14 @@ const formatWhen = (iso: string) => `${when.format(new Date(iso))} CT`
 /**
  * A deck's page (#177): each slide large with its notes and a PNG download, the deck's details, and its
  * versions, any of which can be viewed or restored. Changes to the slides go through Jack in the room.
+ * The version shown can be posted to Instagram or added to the gallery from here (#188).
  */
-export function JackDeckClient({ deck, versions }: { deck: DeckPageData; versions: DeckVersionRow[] }) {
+export function JackDeckClient({ deck, versions, publish }: { deck: DeckPageData; versions: DeckVersionRow[]; publish: DeckPublishOptions }) {
   const router = useRouter()
   const confirm = useConfirm()
   const [restoring, startRestore] = useTransition()
+  const [dialog, setDialog] = useState<"instagram" | "gallery" | null>(null)
+  const publishable = { id: deck.id, title: deck.title, size: deck.size, version: deck.version, slides: deck.slides }
   const { width, height } = JACK_DECK_SIZES[deck.size]
   const portrait = height > width
   const old = deck.version !== deck.currentVersion
@@ -95,6 +100,18 @@ export function JackDeckClient({ deck, versions }: { deck: DeckPageData; version
                 ))}
               </div>
             )}
+            {deck.slides.length > 0 && (
+              <>
+                <Button size="sm" onClick={() => setDialog("instagram")} title={`Post version ${deck.version} on the club's Instagram`}>
+                  <Send aria-hidden />
+                  Publish to Instagram
+                </Button>
+                <Button size="sm" onClick={() => setDialog("gallery")} title={`Add slides of version ${deck.version} to a gallery album`}>
+                  <ImagePlus aria-hidden />
+                  Add to gallery
+                </Button>
+              </>
+            )}
             {deck.room && (
               <Button asChild size="sm" variant="primary">
                 <Link href={`/admin/jack/${deck.room.id}`}>
@@ -106,6 +123,13 @@ export function JackDeckClient({ deck, versions }: { deck: DeckPageData; version
           </>
         }
       />
+      {deck.slides.length > 0 && (
+        <>
+          {/* Keyed by version, so a dialog opened on another version starts from that version's slides */}
+          <PublishToInstagramDialog key={`ig-${deck.version}`} deck={publishable} options={publish} open={dialog === "instagram"} onOpenChange={(open) => setDialog(open ? "instagram" : null)} />
+          <AddToGalleryDialog key={`gallery-${deck.version}`} deck={publishable} options={publish} open={dialog === "gallery"} onOpenChange={(open) => setDialog(open ? "gallery" : null)} />
+        </>
+      )}
 
       {old && (
         <Notice

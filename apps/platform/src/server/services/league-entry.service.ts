@@ -39,7 +39,8 @@ export async function getLeagueApplication(userId: string, seasonId: string) {
 
 /**
  * Creates or updates a driver's entry form for a season. A UT EID is saved to
- * the driver's profile, since it isn't season-specific.
+ * the driver's profile, since it isn't season-specific. `auditMetadata` is added
+ * to the audit entry (Jack's proposal ids; see services/actor.ts).
  */
 export async function saveLeagueApplication(params: {
   userId: string;
@@ -47,8 +48,9 @@ export async function saveLeagueApplication(params: {
   input: LeagueApplicationInput;
   actorUserId: string;
   source?: LeagueApplicationSource;
+  auditMetadata?: Record<string, unknown>;
 }) {
-  const { userId, seasonId, input, actorUserId, source = "SITE" } = params;
+  const { userId, seasonId, input, actorUserId, source = "SITE", auditMetadata } = params;
   const data = {
     discordUsername: input.discordUsername,
     experience: input.experience,
@@ -90,7 +92,7 @@ export async function saveLeagueApplication(params: {
     targetUserId: userId,
     summary: `${created ? "Submitted" : "Updated"} league entry form`,
     after: application,
-    metadata: { seasonId, source },
+    metadata: { ...auditMetadata, seasonId, source },
   });
 
   return application;

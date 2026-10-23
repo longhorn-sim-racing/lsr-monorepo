@@ -3,6 +3,7 @@
  */
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import type { JackRoomPersonaKey } from "../../src/lib/jack/types";
+import type { SlotTrack } from "../../src/lib/slots";
 import { mentionsNumber, plain } from "../../src/server/jack/eval-support";
 
 export const TZ = "America/Chicago";
@@ -18,6 +19,12 @@ export type Expectation = {
   check: (answer: Answer) => string | null;
   /** For --dry-run: a reply that should pass (no tool calls) */
   fakeAnswer?: string;
+  /**
+   * For --dry-run: tool calls the fake model makes before it answers, to run a tool path for real (a
+   * proposal, a save) and the checks and cleanup after it. Without them it calls one tool that takes no input;
+   * an empty list, none
+   */
+  fakeCalls?: { name: string; input: unknown }[];
   /** Needs a real model to fill in a tool's input; skipped in --dry-run */
   needsModel?: boolean;
   /** A check against the database after the reply (e.g. the draft it made) */
@@ -28,11 +35,29 @@ export type Expectation = {
   judgeOnly?: boolean;
 };
 
-/** The kinds of question, from everyday lookups to things Jack must refuse */
-export type Group = "everyday" | "analysis" | "vague" | "refuse" | "unknown" | "safety" | "heavy" | "draft" | "followup" | "design";
+/**
+ * The kinds of question, from everyday lookups to things Jack must refuse. `refuse` is what no
+ * proposal can do (move money, change roles or prices); `propose` is a change Jack proposes for an
+ * officer to apply, and must not apply himself
+ */
+export type Group = "everyday" | "analysis" | "vague" | "refuse" | "propose" | "unknown" | "safety" | "heavy" | "draft" | "followup" | "design";
 
-/** An earlier exchange already in the room, for follow-up questions */
-export type Exchange = { ask: string; answer: string };
+/** An earlier ask and answer in the question's room; `agoMs` dates it (a recurring question's last run a week back), otherwise it's a minute before the next */
+export type Exchange = { ask: string; answer: string; agoMs?: number };
+
+/**
+ * Who asks a question: an officer's handle or email, the first officer (by account age) in a
+ * department (the roster's team ids: executive, business, community, competition, media, technology),
+ * or a lookup that returns a user id, handle or email (null when there's nobody to ask as). Only
+ * officers and admins count
+ */
+export type AskerSpec = string | { department: string } | ((prisma: EvalContext["prisma"]) => Promise<string | null>);
+
+/** The check a guard runs after the reply: null passes, a string says what went wrong */
+export type GuardCheck = (answer: Answer, toolResults: string[]) => Promise<string | null>;
+
+/** Runs before the reply (to snapshot what it must not change or reveal) and returns the check to run after it */
+export type Guard = (ctx: GuardContext) => Promise<GuardCheck>;
 
 export type Question = {
   id: string;
@@ -47,21 +72,51 @@ export type Question = {
   before?: (ctx: EvalContext) => Promise<Exchange[] | null>;
   /** Tools this question must not call */
   forbid?: string[];
+  /** Checks around the reply (checks.ts has the common ones: expectProposal, expectNoProposal, expectUnchanged) */
+  guard?: Guard | Guard[];
+  /** Who asks it; defaults to the run's officer (--as, or the first officer or admin) */
+  as?: AskerSpec;
+  /** Set by paired(): the questions of one pair ask the same thing as different officers, and the pair judge compares their answers */
+  pair?: string;
+  /** Set by the track registry (tracks/index.ts): the track whose slot it came from. The core questions have none */
+  track?: SlotTrack;
+  /** Skipped until the running code has these: a track's tool or proposal kind that isn't built yet */
+  requires?: { tools?: string[]; kinds?: string[] };
+  /** Needs a real model (to fill in a tool's input); skipped in --dry-run before anything else runs */
+  needsModel?: boolean;
   /**
-   * Runs before the reply (to snapshot what it must not change or reveal) and returns the check to run
-   * after it: null passes, a string says what went wrong
+   * Plants what the question asks about, once per run before any question (an injected instruction in
+   * a synced record, say). Only on a local database; false, or a remote database, skips the question.
+   * Must be safe to run again: what it plants stays for later runs unless `unplant` removes it
    */
-  guard?: (ctx: EvalContext) => Promise<(answer: Answer, toolResults: string[]) => Promise<string | null>>;
+  plant?: (ctx: PlantContext) => Promise<boolean>;
+  /** Removes what `plant` planted, at the end of the run */
+  unplant?: (ctx: PlantContext) => Promise<void>;
+  /** Runs in the question's own room before the reply (room files, earlier state); whatever it makes there goes with the room */
+  setup?: (ctx: GuardContext) => Promise<void>;
+  /**
+   * Asked as a scheduled room note from the officer (a recurring question's run, the weekly digest's
+   * summary, design §11) instead of their own message: the reply is a scheduled one, with no web tools
+   * and no knowledge saves. `before` exchanges are then the same job's earlier notes and answers
+   */
+  scheduled?: boolean;
 };
 
 export type EvalContext = {
   prisma: typeof import("../../src/server/db").prisma;
   now: Date;
   persona: JackRoomPersonaKey;
-  officer: { id: string; displayName: string };
+  /** The officer asking (the question's `as`, or the run's officer) */
+  officer: { id: string; displayName: string; handle?: string };
   startedAt: Date;
   lsc: Awaited<ReturnType<typeof loadLsc>>;
 };
+
+/** A question's context once its room exists: every question runs in a room of its own, deleted after it with everything made in it */
+export type GuardContext = EvalContext & { roomId: string };
+
+/** What `plant` gets: the database, and this season's LSC as it was before planting */
+export type PlantContext = Pick<EvalContext, "prisma" | "now" | "lsc">;
 
 // ---------------------------------------------------------------------------
 // checks (the matching itself is in src/server/jack/eval-support.ts, with tests)
