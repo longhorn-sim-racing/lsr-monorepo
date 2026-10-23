@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { mountFakes } from "../fakes/testing"
-import { PUBLIC_PAGES_FILTER, SITE_TRAFFIC_PATHS, SITE_TRAFFIC_TIMEOUT_MS, SiteTrafficApiError, siteTrafficClient, trafficKey, utcDay } from "./client"
+import { assertSiteTrafficPath, PUBLIC_PAGES_FILTER, SITE_TRAFFIC_PATHS, SITE_TRAFFIC_TIMEOUT_MS, SiteTrafficApiError, siteTrafficClient, trafficKey, utcDay } from "./client"
 import { fakePageViews, SITE_TRAFFIC_FAKE_PROJECT, SITE_TRAFFIC_FAKE_TOKEN, SITE_TRAFFIC_FAKE_TOKEN_EXPIRED, siteTrafficFake } from "./fake/handlers"
 import { parseFilter } from "./fake/odata"
 
@@ -80,6 +80,32 @@ describe("the site traffic client against the fake", () => {
     await expect(client().count(utcDay(yesterday()), AbortSignal.abort(reason))).rejects.toBe(reason)
     expect(timeout).toHaveBeenCalledWith(SITE_TRAFFIC_TIMEOUT_MS)
     expect(fakes.requests).toHaveLength(0)
+  })
+
+  it("never follows a redirect: a 302 fails the call, and the token goes nowhere else", async () => {
+    const fakes = mountFakes([siteTrafficFake])
+    await fetch("http://127.0.0.1:3999/site-traffic/_fake/fault", { method: "POST", body: JSON.stringify({ status: 302, times: 1 }) })
+    // Like real fetch, which the in-process fakes aren't: unless told otherwise it follows a redirect, Authorization and all (same origin)
+    const fake = globalThis.fetch
+    vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
+      const response = await fake(input, init)
+      const location = response.headers.get("location")
+      const redirected = response.status >= 300 && response.status < 400 && location
+      if (redirected && init?.redirect === "error") throw new TypeError("fetch failed")
+      if (redirected && (init?.redirect ?? "follow") === "follow") return fake(new URL(location, String(input)), init)
+      return response
+    })
+
+    await expect(client().count(utcDay(yesterday()))).rejects.toMatchObject({ status: 302, code: "redirect", message: expect.stringMatching(/never follows a redirect/) })
+    const calls = fakes.requests.filter((r) => !r.path.startsWith("/_fake"))
+    expect(calls.map((r) => r.path)).toEqual(["/v1/query/web-analytics/visits/count"])
+  })
+
+  it("refuses any path but the two page-view queries, before a request is made", () => {
+    expect(() => assertSiteTrafficPath("/v9/projects/prj_x")).toThrow(/refused \/v9\/projects\/prj_x/)
+    expect(() => assertSiteTrafficPath("/v1/query/web-analytics/visits/count/../../../../v9/projects")).toThrow()
+    expect(() => assertSiteTrafficPath("/v1/query/web-analytics/visits/aggregate?x=1")).toThrow()
+    for (const path of SITE_TRAFFIC_PATHS) expect(() => assertSiteTrafficPath(path)).not.toThrow()
   })
 })
 

@@ -6,6 +6,7 @@ import type { ConnectorEnv } from "../types"
  * read-only token: the project-scoped token (VERCEL_ANALYTICS_TOKEN) can also change the production
  * project. So this client can only ever send GETs to the two page-view query paths below; any other
  * path is refused in code before a request is made, and the path is never built from outside input.
+ * It never follows a redirect either (fetch would carry the token to wherever one points).
  */
 
 export const SITE_TRAFFIC_REAL_URL = "https://api.vercel.com"
@@ -16,6 +17,11 @@ export const SITE_TRAFFIC_TIMEOUT_MS = 20_000
 /** The only paths this client calls */
 export const SITE_TRAFFIC_PATHS = ["/v1/query/web-analytics/visits/aggregate", "/v1/query/web-analytics/visits/count"] as const
 export type SiteTrafficPath = (typeof SITE_TRAFFIC_PATHS)[number]
+
+/** The allowlist, checked at run time before every request: nothing reaches another path, whatever a caller passes */
+export function assertSiteTrafficPath(path: string): asserts path is SiteTrafficPath {
+  if (!(SITE_TRAFFIC_PATHS as readonly string[]).includes(path)) throw new Error(`The site traffic client only reads ${SITE_TRAFFIC_PATHS.join(" and ")}; it refused ${path}`)
+}
 
 /**
  * Every query counts the production site's public pages: admin pages are left out (officers browse
@@ -69,12 +75,17 @@ export function siteTrafficClient(token: string, projectId: string, env: Connect
   const base = serviceBaseUrl("site-traffic", SITE_TRAFFIC_REAL_URL, env)
 
   async function get(path: SiteTrafficPath, params: [string, string][], signal?: AbortSignal): Promise<unknown> {
-    // The allowlist, checked at run time too: nothing reaches another path, whatever a caller passes
-    if (!(SITE_TRAFFIC_PATHS as readonly string[]).includes(path)) throw new Error(`The site traffic client only reads ${SITE_TRAFFIC_PATHS.join(" and ")}; it refused ${path}`)
+    assertSiteTrafficPath(path)
     const query = new URLSearchParams([["projectId", projectId], ...params])
-    const send = () => {
+    const send = async () => {
       const timeout = AbortSignal.timeout(SITE_TRAFFIC_TIMEOUT_MS)
-      return fetch(`${base}${path}?${query}`, { method: "GET", headers: { authorization: `Bearer ${token}`, accept: "application/json" }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
+      // "manual": a redirect comes back as itself (fetch would otherwise follow it with the token, to a path the allowlist never saw)
+      const response = await fetch(`${base}${path}?${query}`, { method: "GET", redirect: "manual", headers: { authorization: `Bearer ${token}`, accept: "application/json" }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
+      if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+        await response.body?.cancel()
+        throw new SiteTrafficApiError(response.status, "redirect", `Vercel answered ${response.status || "a redirect"} on ${path.split("/").pop()}; the site traffic client never follows a redirect (the token would go with it)`)
+      }
+      return response
     }
     let response = await send()
     // A passing hiccup (Vercel's 500 or 503) gets one more try after a second

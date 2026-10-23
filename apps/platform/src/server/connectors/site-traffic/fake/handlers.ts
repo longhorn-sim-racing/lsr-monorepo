@@ -9,7 +9,8 @@ import { FILTER_FIELDS, mentions, parseFilter, type Event } from "./odata"
  * project, the 400s for bad by/since/until/limit/filter, the OData filter (production only unless the
  * filter names environment), per-day visitors, the top-N plus "Others" layout, and the Hobby plan's
  * one-month window (clamped, or a 402 with POST /_fake/plan). POST /_fake/fault makes the next calls
- * answer 429 (with Vercel's rate-limit body), 503 or 410. Every other path is a 404.
+ * answer 429 (with Vercel's rate-limit body), 503 or 410, or 302 to another path on the same host (to
+ * check the client never follows a redirect with its token). Every other path is a 404.
  */
 
 /** The token and project the fake knows. Built from pieces so no scanner mistakes it for a real token */
@@ -162,6 +163,7 @@ export const siteTrafficFake: FakeService = {
           const reset = Math.ceil((Date.now() + 30_000) / 1000)
           return fail(429, "rate_limited", "Rate limit exceeded", { limit: { remaining: 0, reset, resetMs: reset * 1000, total: 100 } }, { "x-ratelimit-limit": "100", "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset) })
         }
+        if (fault.status === 302) return new Response(null, { status: 302, headers: { location: new URL("/site-traffic/v9/projects/" + PROJECT_NAME, request.url).toString() } })
         return fail(fault.status, fault.status === 410 ? "gone" : "service_unavailable", fault.status === 410 ? "Gone" : "Service unavailable")
       }
       const auth = request.headers.get("authorization") ?? ""
