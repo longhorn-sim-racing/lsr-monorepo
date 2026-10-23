@@ -1,3 +1,4 @@
+import type { SnapshotGap } from "@/lib/jack/room-gap"
 import type { JackMessageView, JackRoomPersonaKey, JackRoomSummary, JackRoomView } from "@/lib/jack/types"
 import { JACK_EVENT, JACK_PERSONA_NAME } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
@@ -8,7 +9,7 @@ import { defaultReplyDeps, runRoom, type ReplyLoopDeps } from "./reply-loop"
 import { isRoomLockHeld } from "./room-lock"
 
 /** How much of a room a snapshot loads: the latest messages */
-const SNAPSHOT_LIMIT = 500
+export const SNAPSHOT_LIMIT = 500
 
 export async function listRooms(): Promise<JackRoomSummary[]> {
   const rooms = await prisma.jackRoom.findMany({
@@ -42,19 +43,20 @@ export type RoomSnapshot = {
   room: JackRoomView
   /** Oldest first, including a reply still streaming (its text as last saved, with `streamSeq`) */
   messages: JackMessageView[]
+  /** Opened at an old message in a long room: the newer messages this window left out */
+  gap?: SnapshotGap
 }
 
 /** A snapshot opened at a message (?m=, design §10) also loads this many messages before it */
 export const ANCHOR_BEFORE = 40
-/** The most a snapshot opened at an old message loads: from a little before it on toward the newest */
-export const ANCHOR_LIMIT = 1_000
+
+const placed = (message: { id: string; createdAt: Date }) => ({ id: message.id, createdAt: message.createdAt.toISOString() })
 
 /**
  * The room as saved: its latest messages. With `around` (a message in this room), the snapshot also
  * holds that message with ANCHOR_BEFORE messages before it: the latest messages when they already
- * do, otherwise from a little before it onward (at most ANCHOR_LIMIT; in a longer room the live page
- * adds the latest messages after it, as with any snapshot). An `around` that isn't in the room is
- * ignored.
+ * do, otherwise a window of the same size from a little before it on, and the `gap` it leaves before
+ * the newest (the page links to the latest there). An `around` that isn't in the room is ignored.
  */
 export async function getRoomSnapshot(roomId: string, { around }: { around?: string } = {}): Promise<RoomSnapshot | null> {
   const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: jackRoomViewSelect })
@@ -64,7 +66,7 @@ export async function getRoomSnapshot(roomId: string, { around }: { around?: str
     const after = { OR: [{ createdAt: { gt: anchor.createdAt } }, { createdAt: anchor.createdAt, id: { gt: anchor.id } }] }
     const newer = await prisma.jackMessage.count({ where: { roomId, ...after } })
     if (newer + 1 + ANCHOR_BEFORE > SNAPSHOT_LIMIT) {
-      const [before, fromAnchor] = await Promise.all([
+      const [before, fromAnchor, newest] = await Promise.all([
         prisma.jackMessage.findMany({
           where: { roomId, OR: [{ createdAt: { lt: anchor.createdAt } }, { createdAt: anchor.createdAt, id: { lt: anchor.id } }] },
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -74,11 +76,14 @@ export async function getRoomSnapshot(roomId: string, { around }: { around?: str
         prisma.jackMessage.findMany({
           where: { roomId, OR: [{ id: anchor.id }, after] },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-          take: ANCHOR_LIMIT - ANCHOR_BEFORE,
+          take: SNAPSHOT_LIMIT - ANCHOR_BEFORE,
           include: jackMessageInclude,
         }),
+        prisma.jackMessage.findFirst({ where: { roomId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, createdAt: true } }),
       ])
-      return { room: toRoomView(room), messages: [...before.reverse(), ...fromAnchor].map(toMessageView) }
+      const last = fromAnchor.at(-1) ?? anchor
+      const gap: SnapshotGap | null = newest && newest.id !== last.id ? { after: placed(last), through: placed(newest), count: Math.max(1, newer - (fromAnchor.length - 1)) } : null
+      return { room: toRoomView(room), messages: [...before.reverse(), ...fromAnchor].map(toMessageView), ...(gap ? { gap } : {}) }
     }
   }
   const latest = await prisma.jackMessage.findMany({

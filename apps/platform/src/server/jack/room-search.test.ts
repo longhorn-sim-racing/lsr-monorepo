@@ -13,7 +13,7 @@ vi.mock("./broadcast", () => ({ broadcastRoomEvent: vi.fn() }))
 vi.mock("@/server/after-response", () => ({ runAfterResponse: vi.fn() }))
 
 import { roomSearchQuery, searchRooms } from "./room-search"
-import { ANCHOR_BEFORE, ANCHOR_LIMIT, getRoomSnapshot } from "./rooms"
+import { ANCHOR_BEFORE, getRoomSnapshot, SNAPSHOT_LIMIT } from "./rooms"
 
 const room = { id: "room-1", title: "GM 2", persona: "jack", updatedAt: new Date("2026-10-20T00:00:00Z") }
 const message = (id: string) => ({
@@ -59,11 +59,14 @@ describe("getRoomSnapshot with an anchor (?m=)", () => {
     expect(db.jackMessage.findMany.mock.calls[0][0]).toMatchObject({ take: 500 })
   })
 
-  it("loads from a little before an older anchor onward, in order", async () => {
+  it("loads a window the size of a normal snapshot from a little before an older anchor, and the gap it leaves before the newest", async () => {
     const anchorAt = new Date("2026-09-01T00:00:00Z")
-    db.jackMessage.findFirst.mockResolvedValue({ id: "m50", createdAt: anchorAt })
+    const newestAt = new Date("2026-10-20T00:00:00Z")
+    db.jackMessage.findFirst.mockResolvedValueOnce({ id: "m50", createdAt: anchorAt }).mockResolvedValueOnce({ id: "m951", createdAt: newestAt })
+    // 900 messages after the anchor: the window holds the anchor and 459 of them
     db.jackMessage.count.mockResolvedValue(900)
-    db.jackMessage.findMany.mockResolvedValueOnce([message("m49"), message("m48")]).mockResolvedValueOnce([message("m50"), message("m51")])
+    const fromAnchor = Array.from({ length: SNAPSHOT_LIMIT - ANCHOR_BEFORE }, (_, i) => message(`m${50 + i}`))
+    db.jackMessage.findMany.mockResolvedValueOnce([message("m49"), message("m48")]).mockResolvedValueOnce(fromAnchor)
     const snapshot = await getRoomSnapshot("room-1", { around: "m50" })
     const [before, from] = db.jackMessage.findMany.mock.calls.map((call) => call[0])
     expect(before).toMatchObject({
@@ -71,9 +74,24 @@ describe("getRoomSnapshot with an anchor (?m=)", () => {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: ANCHOR_BEFORE,
     })
-    expect(from).toMatchObject({ orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: ANCHOR_LIMIT - ANCHOR_BEFORE })
+    expect(from).toMatchObject({ orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: SNAPSHOT_LIMIT - ANCHOR_BEFORE })
     expect(from.where.OR[0]).toEqual({ id: "m50" })
-    expect(snapshot!.messages.map((m) => m.id)).toEqual(["m48", "m49", "m50", "m51"])
+    expect(db.jackMessage.findFirst.mock.calls[1][0]).toMatchObject({ where: { roomId: "room-1" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] })
+    expect(snapshot!.messages.map((m) => m.id).slice(0, 4)).toEqual(["m48", "m49", "m50", "m51"])
+    expect(snapshot!.messages.length).toBeLessThanOrEqual(SNAPSHOT_LIMIT)
+    expect(snapshot!.gap).toEqual({
+      after: { id: "m509", createdAt: "2026-10-19T23:00:00.000Z" },
+      through: { id: "m951", createdAt: "2026-10-20T00:00:00.000Z" },
+      count: 900 - (SNAPSHOT_LIMIT - ANCHOR_BEFORE - 1),
+    })
+  })
+
+  it("leaves no gap when the window turns out to reach the newest message (some were deleted meanwhile)", async () => {
+    const anchorAt = new Date("2026-09-01T00:00:00Z")
+    db.jackMessage.findFirst.mockResolvedValueOnce({ id: "m50", createdAt: anchorAt }).mockResolvedValueOnce({ id: "m51", createdAt: anchorAt })
+    db.jackMessage.count.mockResolvedValue(SNAPSHOT_LIMIT)
+    db.jackMessage.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([message("m50"), message("m51")])
+    expect((await getRoomSnapshot("room-1", { around: "m50" }))!.gap).toBeUndefined()
   })
 
   it("finds nothing for an archived or missing room", async () => {

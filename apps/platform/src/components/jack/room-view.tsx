@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { memo, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode } from "react"
+import { Fragment, memo, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode } from "react"
 import { ChevronLeft, Pencil } from "lucide-react"
 import { Button, Input, Notice, Select, Textarea } from "@/components/admin/kit"
 import { cn } from "@/lib/utils"
@@ -63,6 +63,8 @@ type RoomViewProps = {
   renderAttachments?: (message: JackMessageView) => ReactNode
   /** A message to open the room at (?m=, from search): shown highlighted in the middle instead of the end */
   anchorId?: string
+  /** Opened at an old message in a long room: newer messages weren't loaded after this one; a divider there links to the latest */
+  gap?: { afterId: string; count: number }
 }
 
 /** Options for the room's composer (#188); each one left out keeps today's behavior */
@@ -97,6 +99,7 @@ export function JackRoomView({
   messageActions,
   renderAttachments,
   anchorId,
+  gap,
 }: RoomViewProps) {
   const title = jackRoomTitle(room)
   // Bumped when this officer sends, so the list jumps to the end even if they'd scrolled up
@@ -131,7 +134,14 @@ export function JackRoomView({
             <PresenceStack present={present} />
           </div>
         </header>
-        <MessageList messages={messages} followSignal={sentCount} anchorId={anchorId} messageActions={messageActions} renderAttachments={renderAttachments} />
+        <MessageList
+          messages={messages}
+          followSignal={sentCount}
+          anchorId={anchorId}
+          gap={gap ? { ...gap, latestHref: `/admin/jack/${room.id}` } : undefined}
+          messageActions={messageActions}
+          renderAttachments={renderAttachments}
+        />
         <AnswerStatus messages={messages} />
         {stall && !composer.readOnly ? <ContinueBar stall={stall} name={stalledName(stall, messages, room.persona)} onContinue={onContinue} /> : null}
         {composer.readOnly ? (
@@ -352,9 +362,10 @@ function MessageList({
   messages,
   followSignal,
   anchorId,
+  gap,
   messageActions,
   renderAttachments,
-}: { messages: JackMessageView[]; followSignal: number; anchorId?: string } & MessageExtras) {
+}: { messages: JackMessageView[]; followSignal: number; anchorId?: string; gap?: { afterId: string; count: number; latestHref: string } } & MessageExtras) {
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
   // Opened at a message: stay there instead of following the end
@@ -404,7 +415,21 @@ function MessageList({
         {messages.length ? (
           <ol className="flex flex-col gap-4">
             {messages.map((message) => (
-              <MessageRow key={message.id} message={message} anchored={message.id === anchorId} messageActions={messageActions} renderAttachments={renderAttachments} />
+              <Fragment key={message.id}>
+                <MessageRow message={message} anchored={message.id === anchorId} messageActions={messageActions} renderAttachments={renderAttachments} />
+                {gap && message.id === gap.afterId ? (
+                  <li className="flex items-center gap-2.5 text-xs text-admin-subtle">
+                    <span aria-hidden className="h-px flex-1 bg-admin-row" />
+                    <span>
+                      {gap.count} newer {gap.count === 1 ? "message" : "messages"} not loaded ·{" "}
+                      <Link href={gap.latestHref} className="font-semibold text-foreground hover:underline">
+                        Jump to latest
+                      </Link>
+                    </span>
+                    <span aria-hidden className="h-px flex-1 bg-admin-row" />
+                  </li>
+                ) : null}
+              </Fragment>
             ))}
           </ol>
         ) : (

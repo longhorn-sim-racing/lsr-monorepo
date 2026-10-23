@@ -39,14 +39,19 @@ export default async function JackRoomPage({ params, searchParams }: JackRoomPag
     }),
   ])
   if (!snapshot) notFound()
+  const { gap, ...initial } = snapshot
+  const openAt = anchorId && snapshot.messages.some((message) => message.id === anchorId) ? anchorId : undefined
 
   return (
     <JackRoomClient
-      initial={snapshot}
+      // A new ?m= (or none: "jump to latest") starts the room over from its own snapshot
+      key={openAt ?? "latest"}
+      initial={initial}
       rooms={rooms}
       spend={spend}
       me={{ userId: officer.id, displayName: officer.displayName, avatarUrl: officer.avatarUrl }}
-      anchorId={anchorId && snapshot.messages.some((message) => message.id === anchorId) ? anchorId : undefined}
+      anchorId={openAt}
+      gap={gap}
     />
   )
 }
