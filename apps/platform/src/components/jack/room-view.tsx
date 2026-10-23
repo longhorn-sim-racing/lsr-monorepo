@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { memo, useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronLeft, Pencil } from "lucide-react"
 import { Button, Input, Notice, Select, Textarea } from "@/components/admin/kit"
 import { cn } from "@/lib/utils"
@@ -17,6 +17,7 @@ import {
 import { replyPieces } from "@/lib/jack/reply-pieces"
 import { JACK_TITLE_MAX } from "@/schemas/jack.schema"
 import type { JackSpend } from "@/lib/jack/spend"
+import { FilesView } from "./parts/files-view"
 import { JackToolPartView } from "./parts/tool-part"
 import { PersonaAvatar } from "./persona-avatar"
 import { ReplyText } from "./reply-text"
@@ -49,9 +50,35 @@ type RoomViewProps = {
   onRename: (title: string) => Promise<string | null>
   /** Resolves with an error to show, or null once a run is asked to start */
   onContinue: () => Promise<string | null>
+  /*
+   * Extension points for Jack 2.0's tracks (#188, design §2.2); leaving them out changes nothing. The
+   * two functions run for every message row, which is memoized: pass stable functions (useCallback),
+   * or every row redraws while a reply streams.
+   */
+  /** Drawn beside the composer's Send button (attach files, the mention-mode hint) */
+  composerAddons?: ReactNode
+  /** Drawn under each officer message and reply (feedback, pin, copy link); not under room notes */
+  messageActions?: (message: JackMessageView) => ReactNode
+  /** Draws a message's attachments in place of the default (its `files` as tiles, when it has any) */
+  renderAttachments?: (message: JackMessageView) => ReactNode
 }
 
-export function JackRoomView({ room, messages, present, connection, stall, rooms, spend, onSend, onSwitchPersona, onRename, onContinue }: RoomViewProps) {
+export function JackRoomView({
+  room,
+  messages,
+  present,
+  connection,
+  stall,
+  rooms,
+  spend,
+  onSend,
+  onSwitchPersona,
+  onRename,
+  onContinue,
+  composerAddons,
+  messageActions,
+  renderAttachments,
+}: RoomViewProps) {
   const title = jackRoomTitle(room)
   // Bumped when this officer sends, so the list jumps to the end even if they'd scrolled up
   const [sentCount, setSentCount] = useState(0)
@@ -85,10 +112,10 @@ export function JackRoomView({ room, messages, present, connection, stall, rooms
             <PresenceStack present={present} />
           </div>
         </header>
-        <MessageList messages={messages} followSignal={sentCount} />
+        <MessageList messages={messages} followSignal={sentCount} messageActions={messageActions} renderAttachments={renderAttachments} />
         <AnswerStatus messages={messages} />
         {stall ? <ContinueBar stall={stall} name={stalledName(stall, messages, room.persona)} onContinue={onContinue} /> : null}
-        <Composer persona={room.persona} onSend={send} />
+        <Composer persona={room.persona} onSend={send} addons={composerAddons} />
       </section>
     </div>
   )
@@ -296,7 +323,9 @@ const timeOfDay = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago"
 /** Within this many pixels of the bottom, the list follows new text; further up, it leaves the reader where they are */
 const FOLLOW_PX = 80
 
-function MessageList({ messages, followSignal }: { messages: JackMessageView[]; followSignal: number }) {
+type MessageExtras = Pick<RoomViewProps, "messageActions" | "renderAttachments">
+
+function MessageList({ messages, followSignal, messageActions, renderAttachments }: { messages: JackMessageView[]; followSignal: number } & MessageExtras) {
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const following = useRef(true)
@@ -336,7 +365,7 @@ function MessageList({ messages, followSignal }: { messages: JackMessageView[]; 
         {messages.length ? (
           <ol className="flex flex-col gap-4">
             {messages.map((message) => (
-              <MessageRow key={message.id} message={message} />
+              <MessageRow key={message.id} message={message} messageActions={messageActions} renderAttachments={renderAttachments} />
             ))}
           </ol>
         ) : (
@@ -354,7 +383,7 @@ function MessageList({ messages, followSignal }: { messages: JackMessageView[]; 
  * One message. Memoized: the reducer keeps a message's object as it is until that message changes, so
  * while a reply streams only its row re-renders, not every table and chart above it.
  */
-const MessageRow = memo(function MessageRow({ message }: { message: JackMessageView }) {
+const MessageRow = memo(function MessageRow({ message, messageActions, renderAttachments }: { message: JackMessageView } & MessageExtras) {
   if (message.author.kind === "system")
     return (
       <li className="flex items-center gap-2.5 text-xs text-admin-subtle">
@@ -367,6 +396,8 @@ const MessageRow = memo(function MessageRow({ message }: { message: JackMessageV
     )
   const isModel = message.author.kind === "assistant"
   const name = message.author.kind === "assistant" ? JACK_PERSONA_NAME[message.author.persona] : message.author.displayName
+  const attachments = renderAttachments ? renderAttachments(message) : message.files?.length ? <FilesView files={message.files} /> : null
+  const actions = messageActions?.(message) ?? null
   return (
     <li className="flex gap-3">
       {message.author.kind === "assistant" ? (
@@ -380,11 +411,13 @@ const MessageRow = memo(function MessageRow({ message }: { message: JackMessageV
           <span className="text-xs text-admin-subtle">{message.status === "streaming" ? "answering" : timeOfDay.format(new Date(message.createdAt))}</span>
         </span>
         {isModel ? <ReplyBody message={message} /> : <p className="max-w-3xl whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>}
+        {attachments ? <div className="max-w-3xl">{attachments}</div> : null}
         {message.status === "error" ? (
           <Notice tone="warning" className="max-w-xl">
             This answer stopped early. Ask again to retry.
           </Notice>
         ) : null}
+        {actions}
       </div>
     </li>
   )
@@ -472,7 +505,7 @@ function ContinueBar({ stall, name, onContinue }: { stall: "unanswered" | "stuck
   )
 }
 
-function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: RoomViewProps["onSend"] }) {
+function Composer({ persona, onSend, addons }: { persona: JackRoomPersonaKey; onSend: RoomViewProps["onSend"]; addons?: ReactNode }) {
   const [content, setContent] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
@@ -491,6 +524,12 @@ function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: Ro
       setContent((typed) => (typed.trim() ? `${sent}\n${typed}` : sent))
     }
   }
+
+  const sendButton = (
+    <Button type="submit" variant="primary" pending={sending} disabled={!content.trim()}>
+      Send
+    </Button>
+  )
 
   return (
     <form
@@ -528,9 +567,14 @@ function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: Ro
             {persona !== "jack" ? `${JACK_PERSONA_NAME[persona]} answers in this room until someone switches it back to Jack.` : "Enter sends, Shift+Enter adds a line."}
           </span>
         )}
-        <Button type="submit" variant="primary" pending={sending} disabled={!content.trim()}>
-          Send
-        </Button>
+        {addons ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {addons}
+            {sendButton}
+          </div>
+        ) : (
+          sendButton
+        )}
       </div>
     </form>
   )
