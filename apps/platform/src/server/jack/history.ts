@@ -109,7 +109,7 @@ export function buildConversation(rows: HistoryRow[], replyId: string, limits: H
   shown.forEach((turn, index) => {
     const current = index > lastReply
     const lead = index === 0 && start > 0 ? `${EARLIER_LEFT_OUT}\n` : ""
-    const officers = renderOfficerTurn(turn.items, current)
+    const officers = renderOfficerTurn(turn.items)
     if (current) attached.push(...turn.items.flatMap((item) => (item.kind === "user" ? (item.files ?? []) : [])))
     if (officers || lead) entries.push({ role: "user", text: lead + officers })
     if (replyTexts[index]) entries.push({ role: "assistant", text: replyTexts[index] })
@@ -163,13 +163,12 @@ export function formatTurnTime(date: Date): string {
   return `${turnTime.format(date).replace(/ /g, " ")} CT`
 }
 
-/** `current`: the turn being answered, whose files follow it */
-function renderOfficerTurn(items: HistoryRow[], current: boolean): string {
+function renderOfficerTurn(items: HistoryRow[]): string {
   if (!items.length) return ""
   const lines = items.flatMap((item) => {
     if (item.kind === "system") return [`(Room note: ${item.content})`]
     const line = `${officerName(item)}:${item.content ? ` ${item.content}` : ""}`
-    return item.files?.length ? [line, attachmentLine(item.files, { current })] : [line]
+    return item.files?.length ? [line, attachmentLine(item.files)] : [line]
   })
   return `[${formatTurnTime(items[items.length - 1].createdAt)}]\n${lines.join("\n")}`
 }

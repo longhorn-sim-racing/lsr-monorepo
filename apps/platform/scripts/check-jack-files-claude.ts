@@ -66,7 +66,7 @@ async function main() {
   const { jackFileStore } = await import("../src/server/jack/decks/storage")
   const { createUpload, removeUpload } = await import("../src/server/jack/files/service")
   const { registerFile } = await import("../src/server/jack/files/register")
-  const { attachTurnFiles } = await import("../src/server/jack/files/turn")
+  const { attachTurnFiles, FILES_FOLLOW } = await import("../src/server/jack/files/turn")
   const { buildConversation } = await import("../src/server/jack/history")
   const { jackMessageInclude } = await import("../src/server/jack/messages")
   const { postOfficerMessage } = await import("../src/server/jack/rooms")
@@ -129,7 +129,8 @@ async function main() {
     const turn = fake.calls[0]?.messages.at(-1)?.content
     const blocks = Array.isArray(turn) ? (turn as { type: string; text?: string; source?: { type: string } }[]) : []
     check("the turn starts with the officer's label", blocks[0]?.text?.includes(`${label}: What's in these?`) ?? false, blocks[0]?.text?.slice(-300))
-    check("the turn lists the files by id", (blocks[0]?.text ?? "").includes(`id ${photo.id}`) && (blocks[0]?.text ?? "").includes("Shown below."))
+    check("the turn lists the files by id", (blocks[0]?.text ?? "").includes(`[Attached: `) && (blocks[0]?.text ?? "").includes(`id ${photo.id}`))
+    check("a note says the files follow", blocks[1]?.text === FILES_FOLLOW, blocks[1]?.text)
     // JACK_FAKES covers anthropic here, so ids can't reach a real model: the photo goes inline, the PDF as text
     check("the photo follows, inline (fakes on)", blocks.some((b) => b.type === "image" && b.source?.type === "base64"))
     check("the PDF follows as its text", blocks.some((b) => b.type === "text" && (b.text ?? "").includes(`<attached_file id="${pdf.id}"`) && (b.text ?? "").includes("Gold tier")))
@@ -148,12 +149,17 @@ async function main() {
     const rows = await prisma.jackMessage.findMany({ where: { roomId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], include: jackMessageInclude })
     const conversation = buildConversation(rows, reply!.id)
     check("the conversation hands over the turn's files", conversation.attached.map((f) => f.id).join() === [photo.id, pdf.id, csv.id].join(), conversation.attached.map((f) => f.filename).join())
-    const withIds = await attachTurnFiles(conversation.history, conversation.attached, { store, claude, sendIds: true })
-    const idBlocks = withIds.at(-1)!.content as { type: string; source?: { type: string; file_id?: string } }[]
+    const withIds = await attachTurnFiles(conversation.history, conversation.attached, { store, claude, sendIds: true, webTools: false })
+    const idBlocks = withIds.at(-1)!.content as { type: string; text?: string; source?: { type: string; file_id?: string } }[]
     check("with ids: the photo goes as an image by id", idBlocks.some((b) => b.type === "image" && b.source?.file_id === photo.anthropicFileId))
     check("with ids: the PDF goes as a document by id", idBlocks.some((b) => b.type === "document" && b.source?.file_id === pdf.anthropicFileId))
+    const withWeb = (await attachTurnFiles(conversation.history, conversation.attached, { store, claude, sendIds: true, webTools: true })).at(-1)!.content as typeof idBlocks
+    check(
+      "with web fetch on: the PDF goes as its text, never as a document",
+      !withWeb.some((b) => b.type === "document") && withWeb.some((b) => b.type === "text" && (b.text ?? "").includes(`<attached_file id="${pdf.id}"`) && (b.text ?? "").includes("room_files read"))
+    )
     await claude.remove(photo.anthropicFileId!)
-    await attachTurnFiles(conversation.history, conversation.attached, { store, claude, sendIds: true })
+    await attachTurnFiles(conversation.history, conversation.attached, { store, claude, sendIds: true, webTools: false })
     const healed = await prisma.jackFile.findUniqueOrThrow({ where: { id: photo.id } })
     check("a copy that's gone is uploaded again and recorded", Boolean(healed.anthropicFileId) && healed.anthropicFileId !== photo.anthropicFileId, String(healed.anthropicFileId))
 

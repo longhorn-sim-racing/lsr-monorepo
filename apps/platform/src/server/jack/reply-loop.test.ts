@@ -1165,8 +1165,9 @@ describe("who's asking and the turn's files", () => {
     await onFakeTimers(() => runRoom(room.id, deps))
 
     const blocks = claude.calls[0].messages.at(-1)!.content as { type: string; text: string }[]
-    expect(blocks[0].text).toMatch(/\nGray \(Technology Director · Technology · CS\) \[@gray-marshall\]: Who was fastest\?\n\[Attached: "laps\.csv" \(CSV, 48 KB; id file-1\)\. Shown below\.\]$/)
-    expect(blocks[1].text).toMatch(/^<attached_file id="file-1" name="laps\.csv" kind="CSV" size="48 KB">\n1 row under a header row\./)
+    expect(blocks[0].text).toMatch(/\nGray \(Technology Director · Technology · CS\) \[@gray-marshall\]: Who was fastest\?\n\[Attached: "laps\.csv" \(CSV, 48 KB; id file-1\)\.\]$/)
+    expect(blocks[1].text).toBe("(The files attached in this turn follow.)")
+    expect(blocks[2].text).toMatch(/^<attached_file id="file-1" name="laps\.csv" kind="CSV" size="48 KB">\n1 row under a header row\./)
     expect(replies()[0].status).toBe("done")
   })
 })

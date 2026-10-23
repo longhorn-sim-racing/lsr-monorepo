@@ -215,15 +215,15 @@ describe("files in the history", () => {
   const pdf = { id: "f-pdf", filename: "packet.pdf", kind: "PDF" as const, sizeBytes: 2_140_000, pageCount: 12 }
   const photo = { id: "f-img", filename: "grid.jpg", kind: "IMAGE" as const, sizeBytes: 900_000 }
 
-  it("lists the turn's files under their message and hands them over; earlier turns' files get a note", () => {
+  it("lists every turn's files under their message, the same way, and hands over only the turn's own", () => {
     const rows = room([{ ask: [["Gray", "Here's the packet"]] }, { ask: [["Dylan", "And a photo"]], reply: { status: "streaming", content: "" } }])
     rows[0].files = [pdf]
     rows[2].files = [photo]
 
     const { history, attached } = buildConversation(rows, rows.at(-1)!.id)
 
-    expect(history[0].content).toMatch(/\nGray: Here's the packet\n\[Attached: "packet\.pdf" \(PDF, 2\.1 MB, 12 pages; id f-pdf\)\. Not shown again; room_files reads it by id\.\]$/)
-    expect(history[2].content).toMatch(/\nDylan: And a photo\n\[Attached: "grid\.jpg" \(photo, 900 KB; id f-img\)\. Shown below\.\]$/)
+    expect(history[0].content).toMatch(/\nGray: Here's the packet\n\[Attached: "packet\.pdf" \(PDF, 2\.1 MB, 12 pages; id f-pdf\)\.\]$/)
+    expect(history[2].content).toMatch(/\nDylan: And a photo\n\[Attached: "grid\.jpg" \(photo, 900 KB; id f-img\)\.\]$/)
     expect(attached).toEqual([photo])
     expect(buildHistory(rows, rows.at(-1)!.id)).toEqual(history)
   })
@@ -236,7 +236,7 @@ describe("files in the history", () => {
     rows[0].files = [pdf]
     const { history, attached } = buildConversation(rows, rows.at(-1)!.id)
     expect(history).toHaveLength(1)
-    expect(history[0].content).toContain("Shown below.")
+    expect(history[0].content).toContain('[Attached: "packet.pdf"')
     expect(attached).toEqual([pdf])
   })
 
@@ -246,9 +246,12 @@ describe("files in the history", () => {
     expect(buildHistory(rows, rows.at(-1)!.id)[0].content).toMatch(/\nGray:\n\[Attached: "grid\.jpg"/)
   })
 
-  it("keeps earlier turns the same bytes once they're answered, apart from their files' note", () => {
+  it("keeps earlier turns the same bytes once they're answered, files and all", () => {
     const rows = room([{ ask: [["Gray", "One"]] }, { ask: [["Gray", "Two"]], reply: { status: "streaming", content: "" } }])
+    rows[0].files = [pdf]
+    rows[2].files = [photo]
     const before = buildHistory(rows, rows.at(-1)!.id)
+    expect(before.at(-1)!.content).toContain('[Attached: "grid.jpg"')
     rows.at(-1)!.status = "done"
     rows.at(-1)!.content = "Answer"
     rows.push(...room([{ ask: [["Gray", "Three"]], reply: { status: "streaming", content: "" } }]))

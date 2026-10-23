@@ -47,6 +47,28 @@ export function practiceLapsCsv(): EvalFile {
   return { name: "practice-laps.csv", bytes: Buffer.from(rows.map((row) => row.join(",")).join("\n")) };
 }
 
+/** A PDF with these lines on one page (Helvetica, so plain ASCII), long lines wrapped to fit */
+export async function textPdf(name: string, lines: string[]): Promise<EvalFile> {
+  const { PDFDocument, StandardFonts } = await import("pdf-lib");
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const page = pdf.addPage([612, 792]);
+  lines.flatMap((line) => wrap(line, 85)).forEach((line, i) => page.drawText(line, { x: 48, y: 740 - i * 18, size: 11, font }));
+  return { name, bytes: Buffer.from(await pdf.save()) };
+}
+
+function wrap(line: string, width: number): string[] {
+  const out: string[] = [];
+  let current = "";
+  for (const word of line.split(" ")) {
+    if (current && `${current} ${word}`.length > width) {
+      out.push(current);
+      current = word;
+    } else current = current ? `${current} ${word}` : word;
+  }
+  return [...out, current];
+}
+
 /** A photo-sized JPEG: a dark track with an orange car shape, so a slide has something to frame */
 export async function trackPhoto(): Promise<EvalFile> {
   const { default: sharp } = await import("sharp");

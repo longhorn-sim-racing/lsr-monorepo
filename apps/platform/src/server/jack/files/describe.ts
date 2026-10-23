@@ -34,27 +34,39 @@ export function sizeLabel(bytes: number): string {
 /** "deck.pdf" (PDF, 2.1 MB, 12 pages; id …), as the officer's turn names a file */
 export function fileMention(file: HistoryFile): string {
   const pages = file.kind === "PDF" && file.pageCount ? `, ${file.pageCount} page${file.pageCount === 1 ? "" : "s"}` : ""
-  return `${JSON.stringify(file.filename)} (${FILE_KIND_LABEL[file.kind]}, ${sizeLabel(file.sizeBytes)}${pages}; id ${file.id})`
+  return `${JSON.stringify(shownName(file.filename))} (${FILE_KIND_LABEL[file.kind]}, ${sizeLabel(file.sizeBytes)}${pages}; id ${file.id})`
 }
 
 /**
- * The line under an officer's message that lists what they attached. In the turn being answered the
- * files follow the messages (`current`); in earlier turns they aren't sent again, and room_files reads
- * them by id. Either way it depends only on the saved rows, so a turn's text never changes
+ * A file's name as the officer's turn shows it: with any link in it neutralized, like the file's text
+ * (an outside file can be named "www.evil.example.pdf"). room_files gives the name as it is
  */
-export function attachmentLine(files: HistoryFile[], { current }: { current: boolean }): string {
-  const list = files.map(fileMention).join(", ")
-  return current ? `[Attached: ${list}. Shown below.]` : `[Attached: ${list}. Not shown again; room_files reads ${files.length === 1 ? "it" : "them"} by id.]`
+export function shownName(filename: string): string {
+  return neutralizeLinks(filename)
+}
+
+/**
+ * The line under an officer's message that lists what they attached. It's the same whether the turn is
+ * the one being answered (its files follow it, after a note saying so: files/turn.ts) or an earlier one
+ * (its files aren't sent again; room_files reads them by id, as the prompt says), so an officer turn's
+ * text never changes once it's posted, and it stays in the cached prefix
+ */
+export function attachmentLine(files: HistoryFile[]): string {
+  return `[Attached: ${files.map(fileMention).join(", ")}.]`
 }
 
 /*
- * Links in a file's text are made unopenable before the text goes into the officer's turn. web_fetch may
- * open any URL in a user turn (its url_sources take user input, design §7.2), and the turn is where the
- * file's summary goes, so a link planted in an uploaded file would otherwise become fetchable. The full
- * text, links included, stays readable through room_files read: a tool result, which url_sources
- * excludes. A link becomes "[link to example[.]com]": the reader still knows where it pointed.
+ * Links in a file's text (and its name) are made unopenable before they go into the officer's turn.
+ * web_fetch may open any URL in a user turn (its url_sources take user input, design §7.2), and the turn
+ * is where the file's summary goes, so a link planted in an uploaded file would otherwise become
+ * fetchable. The full text, links included, stays readable through room_files read: a tool result,
+ * which url_sources excludes. A link becomes "[link to example[.]com]": the reader still knows where it
+ * pointed. What counts as a link: anything with a scheme or starting www.; a host name followed by a
+ * path, a query or a fragment (evil.example/x, evil.example?list=1, evil.example#x); an IPv4 address
+ * with a port or followed by a path, a query or a fragment
  */
-const LINK = /\b(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>"'`]+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?\/[^\s<>"'`]*/gi
+const LINK =
+  /\b(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>"'`]+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(?:\/[^\s<>"'`]*|[?#][^\s<>"'`]+)|\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+(?:[/?#][^\s<>"'`]*)?|[/?#][^\s<>"'`]*)/gi
 const TRAILING = /[.,;:!?)\]}>'"]+$/
 
 export function neutralizeLinks(text: string): string {

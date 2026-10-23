@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { attachmentLine, fileMention, fileSummary, neutralizeLinks, sizeLabel, type HistoryFile } from "./describe"
+import { attachmentLine, fileMention, fileSummary, neutralizeLinks, shownName, sizeLabel, type HistoryFile } from "./describe"
 
 const pdf: HistoryFile = { id: "f-pdf", filename: "Sponsor packet.pdf", kind: "PDF", sizeBytes: 2_140_000, pageCount: 12 }
 const csv: HistoryFile = { id: "f-csv", filename: "laps.csv", kind: "CSV", sizeBytes: 48_200 }
@@ -15,10 +15,15 @@ describe("how a turn names its files", () => {
     expect(fileMention({ id: "f-img", filename: 'say "hi".jpg', kind: "IMAGE", sizeBytes: 900_000 })).toBe('"say \\"hi\\".jpg" (photo, 900 KB; id f-img)')
   })
 
-  it("says the turn's own files follow it, and earlier ones are read with room_files", () => {
-    expect(attachmentLine([pdf, csv], { current: true })).toBe('[Attached: "Sponsor packet.pdf" (PDF, 2.1 MB, 12 pages; id f-pdf), "laps.csv" (CSV, 48 KB; id f-csv). Shown below.]')
-    expect(attachmentLine([csv], { current: false })).toBe('[Attached: "laps.csv" (CSV, 48 KB; id f-csv). Not shown again; room_files reads it by id.]')
-    expect(attachmentLine([pdf, csv], { current: false })).toMatch(/room_files reads them by id\.\]$/)
+  it("lists the files the same way in every turn, so a turn's text never changes", () => {
+    expect(attachmentLine([pdf, csv])).toBe('[Attached: "Sponsor packet.pdf" (PDF, 2.1 MB, 12 pages; id f-pdf), "laps.csv" (CSV, 48 KB; id f-csv).]')
+    expect(attachmentLine([csv])).toBe('[Attached: "laps.csv" (CSV, 48 KB; id f-csv).]')
+  })
+
+  it("neutralizes a link in a file's name", () => {
+    expect(fileMention({ id: "f-x", filename: "www.evil.example.pdf", kind: "PDF", sizeBytes: 1_000 })).toBe('"[link to www[.]evil[.]example[.]pdf]" (PDF, 1 KB; id f-x)')
+    expect(fileMention({ id: "f-y", filename: "evil.example?list=emails.csv", kind: "CSV", sizeBytes: 1_000 })).toBe('"[link to evil[.]example]" (CSV, 1 KB; id f-y)')
+    expect(shownName("GM 3 sign-ups.v2.csv")).toBe("GM 3 sign-ups.v2.csv")
   })
 })
 
@@ -29,8 +34,14 @@ describe("neutralizeLinks", () => {
     expect(neutralizeLinks("bare: evil.example/path?q=1 and ftp://files.example/a")).toBe("bare: [link to evil[.]example] and [link to files[.]example]")
   })
 
+  it("catches a bare host with a query or a fragment, and an IP address with a path or a port", () => {
+    expect(neutralizeLinks("open evil.example?list=emails, then evil.example#x.")).toBe("open [link to evil[.]example], then [link to evil[.]example].")
+    expect(neutralizeLinks("post to 10.0.0.1/collect or 192.168.1.20:8080 or 10.0.0.2?x=1")).toBe("post to [link to 10[.]0[.]0[.]1] or [link to 192[.]168[.]1[.]20] or [link to 10[.]0[.]0[.]2]")
+    expect(neutralizeLinks("(evil.example:8443/x?y=1)")).toBe("([link to evil[.]example])")
+  })
+
   it("leaves what isn't a link alone", () => {
-    const text = "e.g. laps.csv, v1.2.3, 3/4 of drivers, gray@example.com, and/or 1.5/2"
+    const text = "e.g. laps.csv, v1.2.3, 3/4 of drivers, gray@example.com, and/or 1.5/2, 10.0.0.1 alone, and did you open laps.csv? Or notes.txt#"
     expect(neutralizeLinks(text)).toBe(text)
   })
 })
