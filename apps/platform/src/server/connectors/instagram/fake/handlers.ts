@@ -93,6 +93,7 @@ export const instagramFake: FakeService = {
       ...(type === "CAROUSEL_ALBUM" ? { children: [`179000000000000${i}1`, `179000000000000${i}2`] } : {}),
     }))
     const deleted = new Set<string>()
+    const fewViewers = new Set<string>()
     let followers: number = INSTAGRAM_FAKE.followers
     let throttleNext = 0
     let issued = 0
@@ -167,6 +168,7 @@ export const instagramFake: FakeService = {
       const known = findMedia(mediaId)
       const looksReal = /^\d{15,}$/.test(mediaId)
       if (deleted.has(mediaId) || (!known && !looksReal)) return graphError(`Unsupported get request. Object with ID '${mediaId}' does not exist, cannot be loaded due to missing permissions, or does not support this operation.`, 100, 33, "GraphMethodException")
+      if (fewViewers.has(mediaId)) return graphError("(#10) Not enough viewers for the media to show insights", 10)
       const allowed = known?.media_type === "VIDEO" ? REEL_METRICS : FEED_METRICS
       const metrics = (url.searchParams.get("metric") ?? "").split(",").filter(Boolean)
       const bad = metrics.find((m) => !allowed.includes(m))
@@ -179,7 +181,7 @@ export const instagramFake: FakeService = {
 
     return [
       {
-        // Test hooks: { expire: true } kills every token (190/463); { passwordChanged: true } (190/460); { throttle: N }; { followers: N }; { deleteMedia: [ids] }; { addMedia: { id, type, caption, daysAgo } }
+        // Test hooks: { expire: true } kills every token (190/463); { passwordChanged: true } (190/460); { throttle: N }; { followers: N }; { deleteMedia: [ids] }; { fewViewers: [ids] } (code 10, "Not enough viewers"); { addMedia: { id, type, caption, daysAgo } }
         method: "POST",
         path: "/_fake/state",
         async handle(request) {
@@ -189,6 +191,7 @@ export const instagramFake: FakeService = {
           if (typeof body.throttle === "number") throttleNext = body.throttle
           if (typeof body.followers === "number") followers = body.followers
           if (Array.isArray(body.deleteMedia)) for (const id of body.deleteMedia) deleted.add(String(id))
+          if (Array.isArray(body.fewViewers)) for (const id of body.fewViewers) fewViewers.add(String(id))
           const add = body.addMedia as { id?: string; type?: FakeMedia["media_type"]; caption?: string; daysAgo?: number } | undefined
           if (add?.id) media.push({ id: add.id, media_type: add.type ?? "IMAGE", caption: add.caption ?? "", timestamp: Date.now() - (add.daysAgo ?? 0) * DAY })
           return Response.json({ followers, throttleNext, media: media.length, deleted: [...deleted] })

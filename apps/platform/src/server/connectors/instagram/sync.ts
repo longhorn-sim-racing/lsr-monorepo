@@ -77,7 +77,7 @@ export async function postsDueForInsights(now: Date, limit = POSTS_PER_RUN): Pro
   return [...never, ...again]
 }
 
-/** Every hour: the numbers of the posts that are due. A post Instagram no longer has is marked read and skipped; a dead token or a missing permission stops the run */
+/** Every hour: the numbers of the posts that are due. A post Instagram has no numbers for (deleted, or too few viewers) is marked read and skipped; a dead token or a missing permission stops the run */
 export async function runInstagramPostInsights({ client, now = new Date(), signal, log }: RunOptions): Promise<JobResult> {
   const posts = await postsDueForInsights(now)
   let updated = 0
@@ -92,15 +92,16 @@ export async function runInstagramPostInsights({ client, now = new Date(), signa
       await prisma.instagramPost.updateMany({ where: { id: post.id }, data: { ...numbers, insightsAt: now } })
       updated++
     } catch (error) {
-      if (!(error instanceof InstagramGraphError && error.code === 100 && error.subcode === MISSING_OBJECT_SUBCODE)) throw error
-      // Deleted on Instagram (the feed sync removes it soon) or not readable: don't ask again every hour
+      const gone = error instanceof InstagramGraphError && ((error.code === 100 && error.subcode === MISSING_OBJECT_SUBCODE) || error.tooFewViewers)
+      if (!gone) throw error
+      // Deleted on Instagram (the feed sync removes it soon), not readable, or too few viewers to show: don't ask again every hour
       await prisma.instagramPost.updateMany({ where: { id: post.id }, data: { insightsAt: now } })
       missing++
     }
   }
   await recordConnectorSync(INSTAGRAM_INSIGHTS_ID)
   return {
-    summary: posts.length ? `Read the numbers of ${plural(updated, "post")}${missing ? `; ${plural(missing, "post")} Instagram no longer has` : ""}` : "No posts due",
+    summary: posts.length ? `Read the numbers of ${plural(updated, "post")}${missing ? `; Instagram had no numbers for ${plural(missing, "post")} (deleted, or too few viewers)` : ""}` : "No posts due",
     counts: { updated, missing },
   }
 }

@@ -36,9 +36,14 @@ export class InstagramGraphError extends Error {
     return this.code === 190
   }
 
+  /** Too few viewers for Instagram to show a media's numbers: code 10 too, but nothing's wrong with the token */
+  get tooFewViewers() {
+    return this.code === 10 && /not enough viewers/i.test(this.message)
+  }
+
   /** The token lacks a permission this call needs */
   get missingPermission() {
-    return this.code === 10 || (this.code !== null && this.code >= 200 && this.code <= 299)
+    return (this.code === 10 && !this.tooFewViewers) || (this.code !== null && this.code >= 200 && this.code <= 299)
   }
 
   /** Meta is rate limiting the app or the account */

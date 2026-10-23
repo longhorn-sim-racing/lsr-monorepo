@@ -114,6 +114,15 @@ describe("post insights", () => {
     expect(await runInstagramPostInsights({ client: await client(), now: new Date(NOW + 5 * 60_000) })).toMatchObject({ summary: "No posts due" })
   })
 
+  it("skips a post with too few viewers to show numbers (code 10), without calling it a missing permission", async () => {
+    await tables.instagramPost.createMany({ data: [post("18012345678900010", NOW - DAY), post("18012345678900011", NOW - 2 * DAY)] })
+    await fakeState({ fewViewers: ["18012345678900010"] })
+    const result = await runInstagramPostInsights({ client: await client(), now: new Date(NOW) })
+    expect(result).toMatchObject({ counts: { updated: 1, missing: 1 } })
+    expect(result.summary).toBe("Read the numbers of 1 post; Instagram had no numbers for 1 post (deleted, or too few viewers)")
+    expect(tables.instagramPost.rows.get("18012345678900010")).toMatchObject({ reach: null, insightsAt: new Date(NOW) })
+  })
+
   it("stops at the time limit", async () => {
     await tables.instagramPost.createMany({ data: [post("18012345678900010", NOW - DAY), post("18012345678900011", NOW - 2 * DAY)] })
     const controller = new AbortController()
