@@ -7,7 +7,7 @@ export const SCHEMA_NOTES: SchemaNotesSlot = {
 - "SponsorActivity" is a prospect's timeline, newest by occurredAt: type email_sent, reply, meeting, call or note, plus stage_change rows written when the stage changes. byId is the officer who did it.
 - Quiet prospect: stage contacted or talking with nothing logged for 21 days (counted from the newest activity, else lastContactAt, else createdAt).
 - "Meeting": its type is in the column kind (board, tech, general, department, other). heldAt is the start time; a meeting recorded without a time sits at midnight Central. agendaMd and summaryMd are Markdown. transcriptFileId is the room file it was recorded from.
-- "MeetingDecision" is one decision (decidedAt = when the meeting was held). knowledgeEntryId links its decision-log entry: a "KnowledgeEntry" tagged decision.
+- "MeetingDecision" is one decision (decidedAt = when the meeting was held). knowledgeEntryId links its decision-log entry: a "KnowledgeEntry" tagged decision (sourceType JACK, not reviewed until an officer marks it, when it came from a meeting.record proposal; MANUAL and reviewed when typed on the meeting page).
 - "ActionItem": status open, done or dropped; doneAt is set when it's marked done. dueAt is the start of its Central due date. Overdue = open and due before today (Central). meetingId when it came from a meeting; roomId when Jack proposed it.`,
   tableNotes: {
     SponsorProspect: "A company the club is courting for sponsorship (not the website's sponsors). Personal data in the contact fields.",

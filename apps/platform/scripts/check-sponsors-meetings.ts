@@ -65,6 +65,7 @@ async function main() {
 
   const users: string[] = []
   const roomId = `room-${MARK}`
+  const room2Id = `room2-${MARK}`
   const deps = { ...proposals.defaultProposalDeps, broadcast: async () => {}, findKind: findProposalKind }
   const now = new Date()
   const ago = (days: number) => new Date(now.getTime() - days * 86_400_000)
@@ -186,24 +187,52 @@ async function main() {
       check("goes stale when the stage changed meanwhile, logging nothing", !outcome.ok && row?.status === "STALE" && (await prisma.sponsorActivity.count({ where: { prospectId: apex.prospect.id, summary: "Follow-up call" } })) === 0, row?.status)
     }
 
-    const record = await proposals.createProposal(
-      {
-        kind: "meeting.record",
-        payload: { title: `Tech ${MARK}`, type: "tech", date: centralDate(now), decisions: [{ text: `Launch the bot in November ${MARK}.` }, { text: `Skip the poll ${MARK}.` }], actionItems: [{ text: `Write the privacy note ${MARK}`, owner: ben.handle, due: centralDate(ago(-4)) }] },
-        roomId,
-        proposedFor: ask,
-      },
-      deps,
-    )
+    const techPayload = (title: string) => ({
+      title,
+      type: "tech",
+      date: centralDate(now),
+      decisions: [{ text: `Launch the bot in November ${MARK}.` }, { text: `Skip the poll ${MARK}.` }],
+      actionItems: [{ text: `Write the privacy note ${MARK}`, owner: ben.handle, due: centralDate(ago(-4)) }],
+    })
+    const draft = await proposals.createProposal({ kind: "meeting.record", payload: techPayload(`Tech draft ${MARK}`), roomId, proposedFor: ask }, deps)
+    const record = await proposals.createProposal({ kind: "meeting.record", payload: techPayload(`Tech ${MARK}`), roomId, proposedFor: ask }, deps)
     check("meeting.record proposes", record.ok, record)
-    if (record.ok) {
-      const applied = await proposals.applyProposal(record.proposal.proposalId, gray, { selectedRows: ["d1", "a1"] }, deps)
-      const tech = await prisma.meeting.findFirst({ where: { title: `Tech ${MARK}` }, include: { decisions: true, actionItems: true } })
+    check("a corrected new meeting (same day and type) supersedes the earlier card", draft.ok && record.ok && record.superseded.includes(draft.proposal.proposalId), record.ok ? record.superseded : record)
+    // The same meeting proposed in another room before either is applied: both cards stand
+    await prisma.jackRoom.create({ data: { id: room2Id, title: `Check 2 ${MARK}`, createdById: ana.id } })
+    const twin = await proposals.createProposal({ kind: "meeting.record", payload: techPayload(`tech ${MARK}`), roomId: room2Id, proposedFor: ask }, deps)
+    if (record.ok && twin.ok) {
+      const picks = { selectedRows: ["m", "d1", "a1"] }
+      const raced = await Promise.all([proposals.applyProposal(record.proposal.proposalId, gray, picks, deps), proposals.applyProposal(twin.proposal.proposalId, gray, picks, deps)])
+      const states = await prisma.jackProposal.findMany({ where: { id: { in: [record.proposal.proposalId, twin.proposal.proposalId] } }, select: { status: true } })
+      const techs = await prisma.meeting.findMany({ where: { title: { equals: `Tech ${MARK}`, mode: "insensitive" } }, include: { decisions: true, actionItems: true } })
       check(
-        "applies the meeting with the picked decision and item, in its room",
-        applied.ok && tech?.roomId === roomId && tech.decisions.length === 1 && Boolean(tech.decisions[0].knowledgeEntryId) && tech.actionItems.length === 1 && tech.actionItems[0].ownerId === ben.id && tech.actionItems[0].roomId === roomId,
+        "two applies of the same new meeting: one records it, the other goes stale (lock and check at apply)",
+        techs.length === 1 && states.filter((s) => s.status === "APPLIED").length === 1 && states.filter((s) => s.status === "STALE").length === 1,
+        { states, meetings: techs.length, raced: raced.map((r) => (r.ok ? "ok" : r.error)) },
+      )
+      const tech = techs[0]
+      check(
+        "applies the meeting with the picked decision and item",
+        Boolean(tech) && tech.decisions.length === 1 && Boolean(tech.decisions[0].knowledgeEntryId) && tech.actionItems.length === 1 && tech.actionItems[0].ownerId === ben.id && [roomId, room2Id].includes(tech.actionItems[0].roomId ?? ""),
         tech,
       )
+      const entry = tech?.decisions[0]?.knowledgeEntryId ? await prisma.knowledgeEntry.findUnique({ where: { id: tech.decisions[0].knowledgeEntryId } }) : null
+      const provenance = entry?.provenance as { roomId?: string; tools?: { name: string; input: string }[] } | null
+      check(
+        "its decision-log entry is Jack's: not reviewed, with the proposal in its provenance",
+        entry?.sourceType === "JACK" && entry.reviewedAt === null && [roomId, room2Id].includes(provenance?.roomId ?? "") && Boolean(provenance?.tools?.some((t) => t.name === "propose_meeting")),
+        entry && { sourceType: entry.sourceType, reviewedAt: entry.reviewedAt, provenance },
+      )
+      if (tech) {
+        const again = await proposals.createProposal(
+          { kind: "meeting.record", payload: { meetingId: tech.id, decisions: [{ text: `launch the bot in november ${MARK}` }, { text: `Use the new logo ${MARK}.` }] }, roomId, proposedFor: ask },
+          deps,
+        )
+        const added = again.ok ? await proposals.applyProposal(again.proposal.proposalId, gray, {}, deps) : again
+        const decisions = await prisma.meetingDecision.findMany({ where: { meetingId: tech.id } })
+        check("a decision the meeting already has is left out", added.ok && decisions.length === 2, { decisions: decisions.map((d) => d.text), added })
+      }
     }
 
     const markDone = await proposals.createProposal({ kind: "action_item.update", payload: { items: [{ id: overdue.item.id, status: "done" }] }, roomId, proposedFor: ask }, deps)
@@ -232,9 +261,11 @@ async function main() {
     await prisma.meeting.deleteMany({ where: { id: { in: meetingIds } } })
     await prisma.sponsorProspect.deleteMany({ where: { id: { in: prospectIds } } })
     await prisma.knowledgeEntry.deleteMany({ where: { id: { in: entryIds } } })
-    await prisma.jackRoom.deleteMany({ where: { id: roomId } })
+    await prisma.jackRoom.deleteMany({ where: { id: { in: [roomId, room2Id] } } })
     const ids = [...prospectIds, ...meetingIds, ...itemIds, ...entryIds]
-    await prisma.auditLog.deleteMany({ where: { OR: [{ entityId: { in: ids } }, { actorUserId: { in: users } }, { metadata: { path: ["roomId"], equals: roomId } }] } })
+    await prisma.auditLog.deleteMany({
+      where: { OR: [{ entityId: { in: ids } }, { actorUserId: { in: users } }, { metadata: { path: ["roomId"], equals: roomId } }, { metadata: { path: ["roomId"], equals: room2Id } }] },
+    })
     await prisma.userRole.deleteMany({ where: { userId: { in: users } } })
     await prisma.user.deleteMany({ where: { id: { in: users } } })
     const left = (await prisma.sponsorProspect.count({ where: { company: { contains: MARK } } })) + (await prisma.meeting.count({ where: { title: { contains: MARK } } })) + (await prisma.actionItem.count({ where: { text: { contains: MARK } } }))

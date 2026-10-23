@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest"
-import { agendaText, daysOverdue, decisionBody, decisionTitle, dueDateValue, formatMeetingTime, isOverdue, meetingTimeInput, meetingTimeKnown, meetingTimeValue, weekdayDate } from "./meetings"
+import {
+  agendaText,
+  centralDaySpan,
+  daysOverdue,
+  decisionBody,
+  decisionTitle,
+  dueDateValue,
+  formatMeetingTime,
+  isOverdue,
+  meetingTimeInput,
+  meetingTimeKnown,
+  meetingTimeValue,
+  sameMeetingTitle,
+  textKey,
+  weekdayDate,
+} from "./meetings"
 
 const NOW = new Date("2026-10-22T17:00:00Z") // Thu Oct 22, noon Central
 
@@ -38,6 +53,20 @@ describe("meeting times", () => {
     expect(evening).toEqual(new Date("2026-10-19T23:30:00Z"))
     expect(formatMeetingTime(evening)).toBe("Mon, Oct 19, 2026, 6:30 PM")
     expect(meetingTimeInput(evening)).toBe("18:30")
+  })
+
+  it("spans a Central day from midnight to midnight, 25 hours when daylight time ends", () => {
+    expect(centralDaySpan(meetingTimeValue("2026-10-19", "18:30"))).toEqual({ gte: new Date("2026-10-19T05:00:00Z"), lt: new Date("2026-10-20T05:00:00Z") })
+    expect(centralDaySpan(meetingTimeValue("2026-11-01", "12:00"))).toEqual({ gte: new Date("2026-11-01T05:00:00Z"), lt: new Date("2026-11-02T06:00:00Z") })
+    // Across the new year (11 PM Central is already Jan 1 in UTC)
+    expect(centralDaySpan(meetingTimeValue("2026-12-31", "23:00"))).toEqual({ gte: new Date("2026-12-31T06:00:00Z"), lt: new Date("2027-01-01T06:00:00Z") })
+  })
+
+  it("compares titles and texts for repeats, case, spacing and closing punctuation aside", () => {
+    expect(sameMeetingTitle(" Board Meeting", "board meeting")).toBe(true)
+    expect(sameMeetingTitle("Board meeting", "Board meeting 2")).toBe(false)
+    expect(textKey("Keep the  four tiers.")).toBe(textKey("keep the four tiers"))
+    expect(textKey("Keep the four tiers")).not.toBe(textKey("Keep the five tiers"))
   })
 })
 

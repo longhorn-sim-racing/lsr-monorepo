@@ -120,6 +120,24 @@ export function decisionTitle(text: string, max = MEETING_LIMITS.decisionTitleMa
   return `${(space > max / 2 ? cut.slice(0, space) : cut).trim()}…`
 }
 
+/** A decision's or action item's text as compared for repeats on one meeting: case, spacing and closing punctuation aside */
+export function textKey(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, " ").trim().replace(/[.!?]+$/, "")
+}
+
+/** Two meeting titles that are the same, case and outer spacing aside */
+export function sameMeetingTitle(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase()
+}
+
+/** A Central day's span, from its midnight to the next (23 or 25 hours on clock-change days) */
+export function centralDaySpan(at: Date): { gte: Date; lt: Date } {
+  const day = centralDay(at)
+  const [y, m, d] = day.split("-").map(Number)
+  const next = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
+  return { gte: meetingTimeValue(day), lt: meetingTimeValue(next) }
+}
+
 /** The decision log entry's text: the decision, then where it was made */
 export function decisionBody(text: string, meeting: { title: string; heldAt: Date }): string {
   return `${text.trim()}\n\nDecided at ${meeting.title}, ${formatInTimeZone(meeting.heldAt, DEFAULT_TIMEZONE, "MMM d, yyyy")}.`

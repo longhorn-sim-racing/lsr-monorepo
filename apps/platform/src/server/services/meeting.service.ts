@@ -1,5 +1,6 @@
 import { Prisma, type ActionItem, type Meeting, type MeetingDecision } from "@prisma/client"
-import { ACTION_ITEMS_PAGE, DECISION_TAG, decisionBody, decisionTitle, MEETINGS_PAGE, meetingPath } from "@/lib/meetings"
+import type { KnowledgeProvenance } from "@/lib/jack/knowledge"
+import { ACTION_ITEMS_PAGE, centralDay, centralDaySpan, DECISION_TAG, decisionBody, decisionTitle, MEETINGS_PAGE, meetingPath, textKey } from "@/lib/meetings"
 import {
   actionItemChangesSchema,
   actionItemFieldsSchema,
@@ -25,7 +26,8 @@ import { officerIdSet } from "./officers"
  *   read, so a stale proposal never overwrites an officer's edit.
  * - A decision is also written to the knowledge base's decision log: an entry tagged "decision", linked
  *   from MeetingDecision.knowledgeEntryId. That goes through the knowledge service (its own transaction,
- *   versions and audit), after the meeting's own writes.
+ *   versions and audit), after the meeting's own writes. One typed on the meeting page is the officer's
+ *   (reviewed); one from Jack's proposal is Jack's (not reviewed, with where it came from).
  * - Action item owners must be officers. Marking one done stamps doneAt; reopening clears it.
  * - Audit entries name what changed, never an agenda's or summary's text.
  * Callers revalidate (meetingPaths, actionItemPaths): revalidatePath only works inside a request.
@@ -100,6 +102,32 @@ export function createMeeting(input: unknown, actor: ServiceActor, links: Meetin
   return prisma.$transaction((tx) => createMeetingTx(tx, input, actor, links))
 }
 
+/** The meetings recorded on an instant's Central day (a handful at most) */
+export function meetingsOnDay(db: Db | typeof prisma, at: Date): Promise<Pick<Meeting, "id" | "title" | "kind" | "heldAt">[]> {
+  return db.meeting.findMany({ where: { heldAt: centralDaySpan(at) }, select: { id: true, title: true, kind: true, heldAt: true }, orderBy: { heldAt: "asc" } })
+}
+
+/**
+ * Locks a title on a Central day for the rest of the transaction, so two applies recording the same new
+ * meeting take turns: the second then finds the first's meeting (meetingsOnDay) instead of adding another
+ */
+export async function lockMeetingDayTx(tx: Db, title: string, heldAt: Date): Promise<void> {
+  const key = `meeting:${title.trim().toLowerCase()}:${centralDay(heldAt)}`
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`
+}
+
+/**
+ * What a meeting already has, by textKey: its decisions and action items. Read after its row is locked
+ * (or in the transaction that created it), so a proposal can leave out what another one already added
+ */
+export async function meetingTextKeysTx(tx: Db, meetingId: string): Promise<{ decisions: Set<string>; actionItems: Set<string> }> {
+  const [decisions, items] = await Promise.all([
+    tx.meetingDecision.findMany({ where: { meetingId }, select: { text: true } }),
+    tx.actionItem.findMany({ where: { meetingId }, select: { text: true } }),
+  ])
+  return { decisions: new Set(decisions.map((d) => textKey(d.text))), actionItems: new Set(items.map((item) => textKey(item.text))) }
+}
+
 /**
  * Changes a meeting: only the fields given (and the transcript file, when given). With `expected`
  * (column values as they were read, by change key), it refuses if any moved on
@@ -166,6 +194,11 @@ export async function deleteMeeting(id: string, actor: ServiceActor): Promise<{ 
 export type DecisionOptions = {
   /** The room a proposal came from: kept on the decision-log entry's version, like Jack's saves */
   roomId?: string | null
+  /**
+   * Decisions from Jack's proposal: where they came from (the reply, its tools, the proposal and file).
+   * Their entries are then Jack's (sourceType JACK) and stay not reviewed until an officer marks them
+   */
+  provenance?: KnowledgeProvenance
   now?: Date
 }
 
@@ -215,10 +248,12 @@ export async function createDecisionsTx(tx: Db, meeting: Pick<Meeting, "id" | "t
 
 /**
  * Writes each decision to the decision log: a knowledge entry tagged "decision" (and the meeting's
- * type), dated when the meeting was held, linked back to the meeting, written by the officer who
- * recorded it and marked reviewed (they picked each decision). The duplicate check is skipped: a
- * decision log has one entry per decision, and the card or form already showed similar entries. An
- * entry that can't be written leaves its decision unlinked, with the reason
+ * type), dated when the meeting was held and linked back to the meeting. From the meeting page it's the
+ * officer's own (reviewed: they typed it); from a proposal (`provenance`) it's Jack's, applied by the
+ * officer: sourceType JACK, not reviewed, with its provenance. The duplicate check is skipped: a decision
+ * log has one entry per decision, the card or form already showed similar entries, and a meeting never
+ * gets the same decision twice from a proposal (meetingTextKeysTx). An entry that can't be written leaves
+ * its decision unlinked, with the reason
  */
 export async function linkDecisionsToLog(
   meeting: Pick<Meeting, "id" | "title" | "heldAt" | "kind">,
@@ -240,8 +275,8 @@ export async function linkDecisionsToLog(
           sourceUrl: meetingPath(meeting.id),
           ownerId: null,
         },
-        { userId: actor.userId, via: "admin", roomId: options.roomId ?? null },
-        { skipDuplicateCheck: true, reviewedAt: options.now ?? new Date() },
+        { userId: actor.userId, via: options.provenance ? "jack" : "admin", roomId: options.roomId ?? null },
+        options.provenance ? { skipDuplicateCheck: true, provenance: options.provenance } : { skipDuplicateCheck: true, reviewedAt: options.now ?? new Date() },
       )
       if (saved.ok) {
         await prisma.meetingDecision.update({ where: { id: decision.id }, data: { knowledgeEntryId: saved.entry.id } })

@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const db = vi.hoisted(() => ({
   $transaction: vi.fn(),
   $queryRaw: vi.fn(),
-  meeting: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
-  meetingDecision: { create: vi.fn(), update: vi.fn(), findUnique: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
-  actionItem: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+  $executeRaw: vi.fn(),
+  meeting: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  meetingDecision: { create: vi.fn(), update: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
+  actionItem: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() },
   user: { findMany: vi.fn() },
 }))
 const audit = vi.hoisted(() => ({ createAuditLog: vi.fn() }))
@@ -14,7 +15,19 @@ vi.mock("@/server/db", () => ({ prisma: db }))
 vi.mock("@/server/audit/log", () => audit)
 vi.mock("@/server/jack/knowledge/service", () => knowledge)
 
-import { addDecision, createMeeting, decisionProblem, deleteMeeting, linkDecisionsToLog, updateActionItem, updateMeeting, createActionItem } from "./meeting.service"
+import {
+  addDecision,
+  createActionItem,
+  createMeeting,
+  decisionProblem,
+  deleteMeeting,
+  linkDecisionsToLog,
+  lockMeetingDayTx,
+  meetingsOnDay,
+  meetingTextKeysTx,
+  updateActionItem,
+  updateMeeting,
+} from "./meeting.service"
 
 const NOW = new Date("2026-10-22T17:00:00Z")
 const HELD = new Date("2026-10-19T23:30:00Z")
@@ -95,6 +108,26 @@ describe("meetings", () => {
     expect(db.meetingDecision.deleteMany).toHaveBeenCalledWith({ where: { meetingId: "m-1" } })
     expect(db.meeting.delete).toHaveBeenCalledWith({ where: { id: "m-1" } })
   })
+
+  it("finds the meetings on a Central day, and locks a title on a day for a transaction", async () => {
+    db.meeting.findMany.mockResolvedValue([{ id: "m-1", title: "Board meeting", kind: "board", heldAt: HELD }])
+    expect(await meetingsOnDay(db as never, HELD)).toHaveLength(1)
+    expect(db.meeting.findMany.mock.calls[0][0].where).toEqual({ heldAt: { gte: new Date("2026-10-19T05:00:00Z"), lt: new Date("2026-10-20T05:00:00Z") } })
+
+    await lockMeetingDayTx(db as never, " Board Meeting ", HELD)
+    const [sql, key] = db.$executeRaw.mock.calls[0]
+    expect(sql.join("?")).toBe("SELECT pg_advisory_xact_lock(hashtext(?))")
+    expect(key).toBe("meeting:board meeting:2026-10-19")
+  })
+
+  it("lists what a meeting already has, for leaving out repeats", async () => {
+    db.meetingDecision.findMany.mockResolvedValue([{ text: "Keep the four tiers." }])
+    db.actionItem.findMany.mockResolvedValue([{ text: "Book the  lounge" }])
+    const has = await meetingTextKeysTx(db as never, "m-1")
+    expect(has.decisions.has("keep the four tiers")).toBe(true)
+    expect(has.actionItems.has("book the lounge")).toBe(true)
+    expect(db.meetingDecision.findMany).toHaveBeenCalledWith({ where: { meetingId: "m-1" }, select: { text: true } })
+  })
 })
 
 describe("decisions and the decision log", () => {
@@ -115,6 +148,17 @@ describe("decisions and the decision log", () => {
     expect(writer).toEqual({ userId: "officer-1", via: "admin", roomId: "room-1" })
     expect(options).toEqual({ skipDuplicateCheck: true, reviewedAt: NOW })
     expect(db.meetingDecision.update).toHaveBeenCalledWith({ where: { id: expect.any(String) }, data: { knowledgeEntryId: "k-1" } })
+  })
+
+  it("writes a proposal's decisions as Jack's: not reviewed, with where they came from", async () => {
+    const provenance = { roomId: "room-1", replyId: "reply-1", messageIds: ["msg-1"], askedBy: { userId: "officer-2", name: "Ana" }, tools: [], at: NOW.toISOString() }
+    const decision = { id: "d-1", text: "Keep the four sponsor tiers.", meetingId: "m-1", decidedAt: HELD, knowledgeEntryId: null, createdAt: NOW }
+    const [result] = await linkDecisionsToLog(meeting(), [{ decision }], actor, { roomId: "room-1", provenance, now: NOW })
+    expect(result.knowledge).toEqual({ ok: true, entryId: "k-1" })
+    const [, writer, options] = knowledge.createKnowledgeEntry.mock.calls[0]
+    // via "jack": the knowledge service makes it sourceType JACK and leaves it not reviewed
+    expect(writer).toEqual({ userId: "officer-1", via: "jack", roomId: "room-1" })
+    expect(options).toEqual({ skipDuplicateCheck: true, provenance })
   })
 
   it("keeps the decision when its log entry can't be written, saying why", async () => {
