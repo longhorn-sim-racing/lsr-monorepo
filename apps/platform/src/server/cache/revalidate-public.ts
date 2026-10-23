@@ -58,9 +58,3 @@ export function resultsIngestionPaths(opts: { eventSlug?: string | null }): stri
     publicPaths.series,
   ];
 }
-
-export function revalidateAfterResultsIngestion(opts: {
-  eventSlug?: string | null;
-}) {
-  revalidatePaths(resultsIngestionPaths(opts));
-}
