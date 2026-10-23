@@ -1,10 +1,43 @@
 import { describe, expect, it, vi } from "vitest"
 
-const { findMany, count } = vi.hoisted(() => ({ findMany: vi.fn(async (): Promise<unknown[]> => []), count: vi.fn(async () => 0) }))
-vi.mock("@/server/db", () => ({ prisma: { jackRoom: { findMany, count } } }))
+const { findMany, findFirst, count, userFindUnique, create } = vi.hoisted(() => ({
+  findMany: vi.fn(async (): Promise<unknown[]> => []),
+  findFirst: vi.fn(),
+  count: vi.fn(async () => 0),
+  userFindUnique: vi.fn(),
+  create: vi.fn(),
+}))
+vi.mock("@/server/db", () => {
+  const tx = {
+    jackMessage: {
+      create,
+      findUniqueOrThrow: vi.fn(async () => ({
+        id: "msg-1",
+        roomId: "room-1",
+        kind: "user",
+        authorUserId: "user-1",
+        authorLabel: create.mock.calls.at(-1)?.[0].data.authorLabel ?? null,
+        content: "Hi",
+        toolCalls: null,
+        status: "done",
+        streamSeq: 0,
+        answeredById: null,
+        continues: false,
+        expectsAnswer: true,
+        createdAt: new Date("2026-10-22T20:00:00Z"),
+        author: { displayName: "Gray", avatarUrl: null },
+        files: [],
+      })),
+    },
+    jackRoom: { update: vi.fn() },
+  }
+  return { prisma: { jackRoom: { findMany, findFirst, count }, user: { findUnique: userFindUnique }, $transaction: (work: (t: typeof tx) => unknown) => work(tx) } }
+})
+// The run after the response isn't part of this
+vi.mock("@/server/after-response", () => ({ runAfterResponse: vi.fn() }))
 
 import { EVAL_ROOM_PREFIX } from "./eval-support"
-import { countArchivedRooms, listRooms } from "./rooms"
+import { countArchivedRooms, listRooms, postOfficerMessage } from "./rooms"
 
 const at = (iso: string) => new Date(iso)
 const row = (id: string, fields: Record<string, unknown> = {}) => ({
@@ -57,5 +90,18 @@ describe("listRooms", () => {
     count.mockResolvedValueOnce(3)
     expect(await countArchivedRooms()).toBe(3)
     expect(count).toHaveBeenCalledWith({ where: { archivedAt: { not: null }, NOT: { id: { startsWith: EVAL_ROOM_PREFIX } } } })
+  })
+})
+
+describe("postOfficerMessage", () => {
+  it("saves who's asking with the message, from the officer's profile as it is now", async () => {
+    findFirst.mockResolvedValueOnce({ id: "room-1" })
+    create.mockResolvedValueOnce({ id: "msg-1" })
+    userFindUnique.mockResolvedValueOnce({ displayName: "Gray", handle: "gray-marshall", officerTitle: "Technology Director", department: "technology", major: "CS" })
+    const message = await postOfficerMessage("room-1", "user-1", "Hi")
+    expect(create).toHaveBeenCalledWith({
+      data: { roomId: "room-1", kind: "user", authorUserId: "user-1", content: "Hi", expectsAnswer: true, authorLabel: "Gray (Technology Director · Technology · CS) [@gray-marshall]" },
+    })
+    expect(message?.author).toMatchObject({ kind: "user", displayName: "Gray", label: "Gray (Technology Director · Technology · CS) [@gray-marshall]" })
   })
 })

@@ -37,13 +37,13 @@ beforeEach(() => {
 describe("a proposal's link from the Proposals page", () => {
   it("opens its room at the reply that proposed it", async () => {
     const page = await open(roomMessageUrl(ROOM, REPLY))
-    expect(rooms.getRoomSnapshot).toHaveBeenCalledWith(ROOM, { around: REPLY })
+    expect(rooms.getRoomSnapshot).toHaveBeenCalledWith(ROOM, { around: REPLY, viewerId: "officer-1" })
     expect(page.props.anchorId).toBe(REPLY)
   })
 
   it("opens the room at the latest messages for a proposal with no reply, or one no longer in the room", async () => {
     expect((await open(roomMessageUrl(ROOM, null))).props.anchorId).toBeUndefined()
-    expect(rooms.getRoomSnapshot).toHaveBeenLastCalledWith(ROOM, { around: undefined })
+    expect(rooms.getRoomSnapshot).toHaveBeenLastCalledWith(ROOM, { around: undefined, viewerId: "officer-1" })
 
     rooms.getRoomSnapshot.mockResolvedValue({ room: { id: ROOM }, messages: [{ id: "earlier" }], proposals: {} })
     expect((await open(roomMessageUrl(ROOM, REPLY))).props.anchorId).toBeUndefined()

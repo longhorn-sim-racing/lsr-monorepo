@@ -532,6 +532,15 @@ describe("resultContent", () => {
     expect(content.filter((block) => block.type === "image")).toHaveLength(MAX_TOOL_RESULT_IMAGES)
     expect(content.at(-1)).toEqual({ type: "text", text: "(2 more images left out; ask for fewer at a time.)" })
   })
+
+  it("sends an image by its Claude Files id in an image block", () => {
+    const content = resultContent("A photo.", [{ caption: "Photo:", fileId: "file_fake_image_1" }])
+    expect(content).toEqual([
+      { type: "text", text: "A photo." },
+      { type: "text", text: "Photo:" },
+      { type: "image", source: { type: "file", file_id: "file_fake_image_1" } },
+    ])
+  })
 })
 
 describe("toolDefinitions", () => {

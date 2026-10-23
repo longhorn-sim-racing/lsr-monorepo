@@ -7,7 +7,8 @@ import { prisma } from "@/server/db"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
 import { savedUsage, UsageTally } from "./cost"
 import { DeltaStream } from "./delta-stream"
-import { buildHistory } from "./history"
+import { attachTurnFiles } from "./files/turn"
+import { buildConversation } from "./history"
 import { FORMER_OFFICER, jackMessageInclude, toMessageView, type JackMessageRow } from "./messages"
 import { anthropicJackClient, REPLY_LIMITS, runModelReply, type JackModelClient, type ReplyLimits, type ReplyOutcome } from "./model-loop"
 import { JACK_MODELS } from "./models"
@@ -412,7 +413,9 @@ async function produce(
     take: HISTORY_ROWS,
     include: jackMessageInclude,
   })
-  const history = buildHistory(rows.reverse(), reply.id)
+  const conversation = buildConversation(rows.reverse(), reply.id)
+  // The files posted in this turn go with it: photos and PDFs as images and documents, others summarized
+  const history = await attachTurnFiles(conversation.history, conversation.attached, { signal: run.signal })
   const latest = waiting[waiting.length - 1]
 
   const out = await runModelReply({

@@ -189,6 +189,14 @@ export function createFakeJackDb() {
       return state.rooms.find((r) => r.id === id)!
     },
 
+    // Posting labels the officer from their profile (author-label.ts); these tests have no profiles, so
+    // messages posted here carry no label and history shows the name, as for messages from before labels
+    user: {
+      async findUnique() {
+        return null
+      },
+    },
+
     jackRoom: {
       async updateMany({ where, data }: { where: Where; data: Row }) {
         await step("jackRoom.updateMany", { where, data })

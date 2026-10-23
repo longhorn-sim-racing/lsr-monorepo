@@ -21,7 +21,13 @@ export const FORMER_OFFICER = "Former officer"
 function authorOf(row: JackMessageRow): JackAuthor {
   if (row.kind === "assistant") return { kind: "assistant", persona: row.persona ?? "jack" }
   if (row.kind === "system") return { kind: "system" }
-  return { kind: "user", userId: row.authorUserId, displayName: row.author?.displayName ?? FORMER_OFFICER, avatarUrl: row.author?.avatarUrl ?? null }
+  return {
+    kind: "user",
+    userId: row.authorUserId,
+    displayName: row.author?.displayName ?? FORMER_OFFICER,
+    avatarUrl: row.author?.avatarUrl ?? null,
+    ...(row.author && row.authorLabel ? { label: row.authorLabel } : {}),
+  }
 }
 
 export function toMessageView(row: JackMessageRow): JackMessageView {

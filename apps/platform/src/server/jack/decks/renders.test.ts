@@ -3,6 +3,9 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+const { findFirst } = vi.hoisted(() => ({ findFirst: vi.fn() }))
+vi.mock("@/server/db", () => ({ prisma: { jackFile: { findFirst } } }))
+
 vi.mock("./renderer", () => ({
   renderSlide: vi.fn(async () => ({
     png: Buffer.from("png"),
@@ -102,6 +105,38 @@ describe("resolveJackAsset", () => {
     expect(await resolveJackAsset(new URL("https://jack.assets/qr"))).toBeNull()
     expect(await resolveJackAsset(new URL(`https://jack.assets/qr?text=${"a".repeat(700)}`))).toBeNull()
     expect(await resolveJackAsset(new URL("https://jack.assets/other"))).toBeNull()
+  })
+
+  describe("room photos", () => {
+    const FILE = "11111111-2222-4333-8444-555555555555"
+    const url = new URL(`https://jack.assets/room/${FILE}`)
+
+    it("serves a photo posted in the deck's room as its model copy, checking the room", async () => {
+      await fileStore(root).put(`rooms/room-1/${FILE}/derived/model.jpg`, Buffer.from("jpeg"), "image/jpeg")
+      findFirst.mockResolvedValueOnce({ modelCopyPath: `rooms/room-1/${FILE}/derived/model.jpg` })
+      expect(await resolveJackAsset(url, { roomId: "room-1" })).toEqual({ body: Buffer.from("jpeg"), contentType: "image/jpeg" })
+      expect(findFirst).toHaveBeenCalledWith({
+        where: { id: FILE, roomId: "room-1", kind: "IMAGE", status: "READY", messageId: { not: null } },
+        select: { modelCopyPath: true },
+      })
+    })
+
+    it("finds nothing for another room's photo, with no room, or for anything that isn't a file id", async () => {
+      findFirst.mockResolvedValueOnce(null)
+      expect(await resolveJackAsset(url, { roomId: "room-2" })).toBeNull()
+      expect(await resolveJackAsset(url)).toBeNull()
+      expect(await resolveJackAsset(new URL("https://jack.assets/room/../files/x.png"), { roomId: "room-1" })).toBeNull()
+      expect(await resolveJackAsset(new URL("https://jack.assets/room/not-an-id"), { roomId: "room-1" })).toBeNull()
+      expect(findFirst).toHaveBeenCalledTimes(1)
+    })
+
+    it("are answered for the room the slide is rendered for", async () => {
+      await ensureRender({ ...source, html: `<section><img src="${url}"></section>`, roomId: "room-7" })
+      const { assets } = vi.mocked(renderSlide).mock.calls.at(-1)![1]!
+      findFirst.mockResolvedValueOnce(null)
+      await assets!(url)
+      expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ roomId: "room-7" }) }))
+    })
   })
 })
 

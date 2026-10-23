@@ -16,7 +16,7 @@ import { findJackTool } from "../../../src/server/jack/tools";
 import { MEMORY_FIXTURES } from "../seed/memory";
 import { OFFICER_APPLICANT, SPONSOR_TIERS_DECISION } from "../seed/club-data";
 import { QUESTIONS as clubData } from "./club-data";
-import { QUESTIONS as groundwork } from "./groundwork";
+import { QUESTIONS as groundworkAll } from "./groundwork";
 import { QUESTIONS as memory } from "./memory";
 
 const ROOM = "jack-eval-t1-jack-q-ab12";
@@ -80,9 +80,13 @@ async function guarded(question: Question, ctx: GuardContext, answer: Answer, re
   return (await Promise.all(checks.map((check) => check(answer, results)))).filter(Boolean);
 }
 
+// The page.update questions (the groundwork track's room-file questions have their own test, groundwork.test.ts)
+const groundwork = groundworkAll.filter((q) => q.requires?.kinds?.includes("page.update"));
+
 describe("the new questions", () => {
   it("wait for their tools and kinds, and have unique ids", () => {
-    const all = [...groundwork, ...clubData, ...memory];
+    const all = [...groundworkAll, ...clubData, ...memory];
+    expect(groundwork.map((q) => q.id)).toEqual(["propose-page-rename-rules", "propose-page-add-line", "refuse-page-delete"]);
     expect(new Set(all.map((q) => q.id)).size).toBe(all.length);
     for (const q of groundwork) expect(q.requires?.kinds, q.id).toEqual(["page.update"]);
     for (const q of [...clubData, ...memory.filter((q) => q.id !== "knowledge-age")]) expect(q.requires?.tools?.length, q.id).toBeGreaterThan(0);

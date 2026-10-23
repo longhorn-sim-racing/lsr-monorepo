@@ -69,7 +69,7 @@ async function main() {
     mkdirSync(dir, { recursive: true })
     console.log(`\nDeck "${deck.title}" ${deck.id}, version ${deck.version}, ${deck.content.slides.length} slides -> ${dir}`)
     for (const [i, slide] of deck.content.slides.entries()) {
-      const source = { size: deck.size, css: deck.content.css, html: slide.html }
+      const source = { size: deck.size, css: deck.content.css, html: slide.html, roomId: deck.roomId }
       const { issues } = await ensureRender(source)
       writeFileSync(resolve(dir, `${String(i + 1).padStart(2, "0")}.png`), (await getRenderFile(source, "png")).body)
       writeFileSync(resolve(dir, `${String(i + 1).padStart(2, "0")}.view.jpg`), (await getRenderFile(source, "view")).body)

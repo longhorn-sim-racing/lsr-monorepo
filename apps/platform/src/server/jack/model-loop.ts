@@ -675,7 +675,7 @@ export function resultContent(forModel: string, images: JackModelImage[] = [], d
   if (documents.length > MAX_TOOL_RESULT_DOCUMENTS) blocks.push({ type: "text", text: `(${documents.length - MAX_TOOL_RESULT_DOCUMENTS} more documents left out; ask for fewer at a time.)` })
   for (const image of images.slice(0, MAX_TOOL_RESULT_IMAGES)) {
     blocks.push({ type: "text", text: image.caption })
-    blocks.push({ type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } })
+    blocks.push({ type: "image", source: "fileId" in image ? { type: "file", file_id: image.fileId } : { type: "base64", media_type: image.mediaType, data: image.data } })
   }
   if (images.length > MAX_TOOL_RESULT_IMAGES) blocks.push({ type: "text", text: `(${images.length - MAX_TOOL_RESULT_IMAGES} more images left out; ask for fewer at a time.)` })
   return blocks
