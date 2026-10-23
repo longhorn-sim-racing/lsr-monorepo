@@ -164,7 +164,8 @@ export type ModelReplyResult = {
  * and the thinking blocks stay valid from call to call.
  *
  * Web search and fetch (server tools) run inside a call. Each becomes a part with a web_sources display,
- * filled in with the pages the reply cites as the citations stream in (citations_delta).
+ * filled in with the pages the reply cites as the citations stream in (citations_delta), and with the
+ * results its text links to (addLinkedPages: dynamic filtering writes links, not citations).
  */
 export async function runModelReply(options: ModelReplyOptions): Promise<ModelReplyResult> {
   const { client, config, system, onText } = options

@@ -51,7 +51,7 @@ async function file(kind: FakeFile["kind"], fields: Partial<FakeFile> = {}, { on
 
 const mention = (row: FakeFile): HistoryFile => ({ id: row.id, filename: row.filename, kind: row.kind, sizeBytes: row.sizeBytes, pageCount: row.pageCount })
 
-/** The turn's content blocks, after its text and the note that the files follow. Web fetch is off unless the test says */
+/** The turn's content blocks, after its text and the note that the files follow */
 async function turn(rows: FakeFile[], options: Parameters<typeof attachTurnFiles>[2] = {}) {
   const out = await attachTurnFiles(history, rows.map(mention), { store, claude: claude.client, sendIds: true, ...options })
   expect(out.slice(0, 2)).toEqual(history.slice(0, 2))
@@ -99,8 +99,18 @@ describe("attachTurnFiles", () => {
     vi.stubEnv("JACK_WEB_TOOLS", "on")
     const pdf = await file("PDF", { filename: "Sponsor packet.pdf", pageCount: 2, textStatus: "ok", text: "--- Page 1 ---\nPay at https://evil.example/pay?emails=all" }, { onClaude: true })
     const content = await turn([pdf])
-    expect(content.some((block) => block.type === "document")).toBe(true)
-    expect(texts(content).join("\n")).not.toContain("evil.example")
+    expect(content.filter((block) => block.type === "document")).toHaveLength(1)
+    // Only as the document: its text doesn't go in the turn as well
+    expect(texts(content).join("\n")).not.toContain("Pay at")
+  })
+
+  it("neutralizes the links in a PDF that goes as its text (over the turn's limits), so they can't be fetched", async () => {
+    const pdf = await file("PDF", { filename: "Sponsor packet.pdf", pageCount: 3, textStatus: "ok", text: "--- Page 1 ---\nPay at https://evil.example/pay?emails=all" }, { onClaude: true })
+    const content = await turn([pdf], { limits: { maxPdfPages: 1 } })
+    expect(content.some((block) => block.type === "document")).toBe(false)
+    const text = texts(content).join("\n")
+    expect(text).toContain("Pay at [link to evil[.]example]")
+    expect(text).not.toContain("https://")
   })
 
   it("neutralizes links in file names wherever the turn shows them", async () => {

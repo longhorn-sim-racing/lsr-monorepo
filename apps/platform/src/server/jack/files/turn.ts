@@ -11,9 +11,9 @@ import { FILE_KIND_LABEL, fileSummary, shownName, sizeLabel, SUMMARY_CHARS, type
  * What Jack sees of the files posted in the turn he's answering (design §5). The history names every
  * file under its message (history.ts); this adds the files themselves after the turn's text:
  * - photos as images and PDFs as documents, by Claude Files id when Claude Files is on (a photo without
- *   one goes as its model copy, inline), within this turn's limits;
- * - past the limits, or a PDF Claude can't take, its text instead (with web fetch on too: links in a
- *   document aren't user input for web_fetch, checked live on 10/23, docs/jack-2/tracks/files.md);
+ *   one goes as its model copy, inline), within this turn's limits. PDFs go as documents with web fetch on
+ *   too: links in a document aren't user input for web_fetch (scripts/check-jack-web-fetch-documents.ts);
+ * - past the limits, or a PDF Claude can't take, its text instead, links neutralized;
  * - text-like files (CSV, spreadsheets, JSON, text, transcripts, Word) as a short summary.
  * Earlier turns' files aren't sent again; room_files reads any of them.
  */

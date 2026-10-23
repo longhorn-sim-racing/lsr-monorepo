@@ -173,27 +173,56 @@ export function addCitations(cited: Map<string, string | null>, content: readonl
 /**
  * Search results the reply's text links to count as cited too. With dynamic filtering (web_search_20260209)
  * Claude reads the results in code execution, and its text carries its own links instead of citations
- * (checked live on Sonnet and Haiku 5.5, 10/23), so without this a search would never list its pages
+ * (checked live on Sonnet and Haiku 5.5, 10/23), so without this a search would never list its pages.
+ * Each result's own URL is looked for in the text, so only real results are ever listed, under their own link
  */
 export function addLinkedPages(cited: Map<string, string | null>, text: string, calls: Iterable<WebCall>) {
-  const linked = new Set([...text.matchAll(/https?:\/\/[^\s<>()[\]"'`]+/g)].map((match) => comparableUrl(match[0])))
-  if (!linked.size) return
-  for (const call of calls) {
-    if (call.name !== WEB_SEARCH || !call.found) continue
-    for (const page of call.found) if (!cited.has(page.url) && linked.has(comparableUrl(page.url))) cited.set(page.url, page.title)
+  const pages = [...calls].flatMap((call) => (call.name === WEB_SEARCH && call.found ? call.found : []))
+  if (!pages.length || !text.includes("://")) return
+  const lower = text.toLowerCase()
+  for (const page of pages) {
+    if (!cited.has(page.url) && linksTo(lower, page.url)) cited.set(page.url, page.title)
   }
 }
 
-/** A link as it compares to another to the same page: no fragment, no trailing slash or punctuation, host in lowercase */
-function comparableUrl(url: string): string {
-  const trimmed = url.replace(/[.,;:!?*_]+$/, "")
+/** Characters that carry a URL on: one right after a match means the text links somewhere longer */
+const URL_CHAR = /[a-z0-9\-~%=&+@$_/]/
+
+/**
+ * Whether the text (lowercased) links to this URL: http or https, with or without "www.", a trailing slash
+ * or not, a fragment or not; not when the link goes on (another path, a query) or is part of another host
+ */
+function linksTo(lower: string, url: string): boolean {
+  let key: string
   try {
-    const parsed = new URL(trimmed)
+    const parsed = new URL(url)
     // Forums put the page in the query ("index.php?threads/x.123/"), so the slash goes from its end too
-    return `${parsed.protocol}//${parsed.host.toLowerCase()}${(parsed.pathname + parsed.search).replace(/\/+$/, "")}`
+    key = `${parsed.host.replace(/^www\./, "")}${(parsed.pathname + parsed.search).replace(/\/+$/, "")}`.toLowerCase()
   } catch {
-    return trimmed
+    return false
   }
+  if (key.length > 2_048) return false
+  // A result's link is percent-encoded; the text may show it as typed ("…/Café"), so either counts
+  let typed = key
+  try {
+    typed = decodeURI(key)
+  } catch {
+    // Not valid percent-encoding: only the link as it is
+  }
+  return [...new Set([key, typed])].some((form) => linkedAs(lower, form))
+}
+
+function linkedAs(lower: string, key: string): boolean {
+  for (let at = lower.indexOf(key); at !== -1; at = lower.indexOf(key, at + 1)) {
+    const before = lower.slice(Math.max(0, at - 7), at)
+    if (!before.endsWith("://") && !before.endsWith("://www.")) continue
+    let end = at + key.length
+    if (lower[end] === "/") end++
+    const next = lower[end]
+    // A fragment is the same page; sentence punctuation ends the link unless more of a URL follows it
+    if (next === undefined || next === "#" || (!URL_CHAR.test(next) && !(/[.,;:!?*]/.test(next) && URL_CHAR.test(lower[end + 1] ?? "")))) return true
+  }
+  return false
 }
 
 /** Most pages one part lists */

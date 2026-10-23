@@ -256,6 +256,23 @@ describe("web search and fetch", () => {
     expect(result.usage.costUsd).toBeCloseTo((100 * 2 + 20 * 10) / 1e6 + 0.01, 6)
   })
 
+  it("lists the results an answer links to when it has no citations (dynamic filtering writes its own links)", async () => {
+    const { run } = setup([
+      {
+        blocks: [
+          ...fakeWebSearch("college sim racing sponsors", [IRACING, FIA, BLOG], { id: "srvtoolu_s1" }),
+          { type: "text", text: `iRacing runs a [college program](${IRACING.url}).`, citations: null } as BetaContentBlock,
+        ],
+      },
+    ])
+
+    const result = await run()
+
+    const [part] = result.parts
+    expect(part).toMatchObject({ id: "srvtoolu_s1", label: "Searched the web (3 results, 1 cited)" })
+    expect(sourcesOf(part)?.sources).toEqual([{ title: "iRacing college program", url: IRACING.url, host: "iracing.com" }])
+  })
+
   it("records searches in the history's tool note, with the sites the answer cited", async () => {
     const { run } = setup([{ blocks: [...fakeWebSearch("college sim racing sponsors", [IRACING, BLOG]), fakeCitedText("iRacing runs one.", [IRACING])] }])
     const result = await run()

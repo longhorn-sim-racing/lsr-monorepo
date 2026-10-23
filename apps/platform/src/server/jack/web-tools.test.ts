@@ -80,6 +80,30 @@ describe("addLinkedPages", () => {
     expect([...cited]).toEqual([[news.url, "As cited"]])
   })
 
+  it("matches a link with parentheses, http for https, no www, or written out as typed", () => {
+    const wiki = { url: "https://en.wikipedia.org/wiki/Assetto_Corsa_(video_game)", title: "Assetto Corsa" }
+    const plain = { url: "https://en.wikipedia.org/wiki/Assetto_Corsa", title: "Not this one" }
+    const accents = { url: "https://www.example.com/caf%C3%A9-racing", title: "Café racing" }
+    const found = [call({ id: "s1", name: "web_search", found: [wiki, plain, accents, acc] })]
+    const cited = new Map<string, string | null>()
+    addLinkedPages(cited, "See [Wikipedia](https://en.wikipedia.org/wiki/Assetto_Corsa_(video_game)), http://example.com/café-racing and http://assettocorsa.net/forum/index.php?threads/acc-v1-10-4.123", found)
+    expect([...cited.keys()].sort()).toEqual([acc.url, accents.url, wiki.url].sort())
+  })
+
+  it("doesn't count a longer link, another host ending the same way, or a link with no scheme", () => {
+    const cited = new Map<string, string | null>()
+    addLinkedPages(cited, "https://traxion.gg/acc-update.html, https://traxion.gg/acc-update/more, https://traxion.gg/acc-update?page=2, https://not-traxion.gg/acc-update/ and traxion.gg/acc-update", searches)
+    expect(cited.size).toBe(0)
+  })
+
+  it("stays quick on a long run of punctuation, and does nothing without a search", () => {
+    const text = `https://traxion.gg/${".".repeat(100_000)}x`
+    const started = performance.now()
+    addLinkedPages(new Map(), text, searches)
+    addLinkedPages(new Map(), text, [])
+    expect(performance.now() - started).toBeLessThan(200)
+  })
+
   it("only looks at searches: a fetched page shows as read already", () => {
     const cited = new Map<string, string | null>()
     addLinkedPages(cited, "From https://traxion.gg/acc-update/", [call({ id: "f1", name: "web_fetch", input: { url: news.url }, found: [news] })])
