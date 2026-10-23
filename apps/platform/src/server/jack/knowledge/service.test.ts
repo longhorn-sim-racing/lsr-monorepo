@@ -147,7 +147,7 @@ describe("createKnowledgeEntry", () => {
   })
 
   it("marks Jack's saves as his and never reviewed, with where they came from", async () => {
-    const provenance = { roomId: "room-1", replyId: "reply-1", messageIds: [], askedBy: { userId: "officer-2", name: "Dylan" }, tools: [], at: "2026-10-22T17:00:00.000Z" }
+    const provenance = { roomId: "room-1", replyId: "reply-1", messageIds: [], askedBy: { userId: "officer-2" }, tools: [], at: "2026-10-22T17:00:00.000Z" }
     const result = await createKnowledgeEntry({ title: "Dues policy", body: "No dues this semester." }, jack, { reviewedAt: new Date(), provenance })
 
     expect(result).toMatchObject({ ok: true, entry: { sourceType: "JACK", reviewedAt: null, reviewedById: null, provenance } })
@@ -164,7 +164,7 @@ describe("createKnowledgeEntry", () => {
   })
 
   it("keeps the ids of Jack's room notes with the entry, from one change to the next", async () => {
-    const provenance = (replyId: string) => ({ roomId: "room-1", replyId, messageIds: [], askedBy: { userId: "officer-2", name: "Dylan" }, tools: [], at: "2026-10-22T17:00:00.000Z" })
+    const provenance = (replyId: string) => ({ roomId: "room-1", replyId, messageIds: [], askedBy: { userId: "officer-2" }, tools: [], at: "2026-10-22T17:00:00.000Z" })
     const saved = await createKnowledgeEntry({ title: "Dues policy", body: "No dues this semester." }, jack, { provenance: provenance("reply-1"), noteId: "note-1" })
     if (!saved.ok) throw new Error(saved.error)
     expect(saved.entry.provenance).toMatchObject({ replyId: "reply-1", noteIds: ["note-1"] })
@@ -357,7 +357,7 @@ describe("review, archive and delete", () => {
   })
 
   it("clears Jack's room notes and tool calls that held the text, and nothing else", async () => {
-    const provenance = { roomId: "room-1", replyId: "reply-1", messageIds: [], askedBy: { userId: "officer-2", name: "Dylan" }, tools: [], at: "2026-10-22T17:00:00.000Z" }
+    const provenance = { roomId: "room-1", replyId: "reply-1", messageIds: [], askedBy: { userId: "officer-2" }, tools: [], at: "2026-10-22T17:00:00.000Z" }
     const { entry } = await seedEntry({ body: "Private details nobody should keep." }, jack)
     await updateKnowledgeEntry(entry.id, { body: "Private details, changed." }, jack, { baseVersionId: await latestKnowledgeVersionId(entry.id), provenance, noteId: "note-1" })
     const savePart = { id: "t1", name: "knowledge", label: "Saved “LSC entry fee” to knowledge", status: "done", at: 0, input: { action: "save", title: "LSC entry fee", body: "Private details nobody should keep." }, displays: [{ kind: "links", items: [{ title: "LSC entry fee", url: `/admin/knowledge/${entry.id}`, snippet: "Private details" }] }] }

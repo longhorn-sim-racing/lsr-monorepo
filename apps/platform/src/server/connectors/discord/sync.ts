@@ -4,7 +4,7 @@ import { DISCORD_ERROR, DiscordApiError, DiscordRateLimitError, type DiscordClie
 import { keepMessage, messageRow, type MessageRow, type PurgedList } from "./metadata"
 import { compareSnowflakes, snowflakeAt, snowflakeTime } from "./snowflake"
 import type { ChannelInput, DiscordStore, MemberInput, StoredChannel, StoredMessage } from "./store"
-import { CHANNEL_TYPE, MESSAGE_CHANNEL_TYPES, SYNCABLE_CHANNEL_TYPES, SYNCED_THREAD_TYPES, THREAD_PARENT_TYPES, type DiscordMessage } from "./types"
+import { CHANNEL_TYPE, MESSAGE_CHANNEL_TYPES, SYNCABLE_CHANNEL_TYPES, SYNCED_THREAD_TYPES, THREAD_PARENT_TYPES, type DiscordChannel, type DiscordMessage } from "./types"
 
 /**
  * The Discord sync (design §12.1, research §3 and §6), REST only: metadata of the channels admins opted
@@ -18,6 +18,8 @@ import { CHANNEL_TYPE, MESSAGE_CHANNEL_TYPES, SYNCABLE_CHANNEL_TYPES, SYNCED_THR
  * - `syncMembers` (hourly): the member list, diffed against the last one for joins and leaves.
  * A thread Discord deleted is dropped with its messages; a channel Discord deleted is switched off.
  * Daily stats (DiscordDailyStat, DiscordGuildDaily) are rebuilt for every Central day a run touched.
+ * Members purged on request are left out with the list read when a run starts, and the store checks the
+ * list again in every write, so a purge that lands mid-run isn't undone by the rest of the run.
  */
 
 const DAY_MS = 86_400_000
@@ -104,11 +106,18 @@ function syncedTop(channels: StoredChannel[]): Map<string, StoredChannel> {
   return new Map(channels.filter((c) => !c.parentId && c.synced).map((c) => [c.id, c]))
 }
 
+/** A thread in an opted-in channel, as saveChannels takes it */
+function threadInput(thread: DiscordChannel, parentId: string, parentName: string | null): ChannelInput {
+  return { id: thread.id, name: thread.name ?? thread.id, type: thread.type, parentId, parentName, ownerId: thread.owner_id ?? null }
+}
+
 /**
  * Reads the server's channels into DiscordChannel (new ones arrive switched off), and the active public
- * threads of the channels that are opted in, with the channel as their parent. Thread titles are written
- * by members, so none are kept from channels that aren't synced. A channel missing from the list stays
- * (since 2026-11-16 Discord leaves out channels the bot can't see, which isn't deletion)
+ * threads of the channels that are opted in, with the channel as their parent and who started them.
+ * Thread titles are written by members, so none are kept from channels that aren't synced, and a thread
+ * a purged member started is stored untitled (the store does that, against the list as it is then). A
+ * channel missing from the list stays (since 2026-11-16 Discord leaves out channels the bot can't see,
+ * which isn't deletion)
  */
 export async function refreshChannels(ctx: SyncContext): Promise<{ channels: StoredChannel[]; activeThreads: Set<string> }> {
   const [listed, active, stored] = await Promise.all([ctx.client.channels(ctx.signal), ctx.client.activeThreads(ctx.signal), ctx.store.channels()])
@@ -118,8 +127,8 @@ export async function refreshChannels(ctx: SyncContext): Promise<{ channels: Sto
   const opted = syncedTop(stored)
   const threads = active.threads.filter((t) => SYNCED_THREAD_TYPES.includes(t.type) && t.parent_id && names.has(t.parent_id) && opted.has(t.parent_id))
   const inputs: ChannelInput[] = [
-    ...top.map((c) => ({ id: c.id, name: c.name ?? c.id, type: c.type, parentId: null, parentName: (c.parent_id && categories.get(c.parent_id)) || null })),
-    ...threads.map((t) => ({ id: t.id, name: t.name ?? t.id, type: t.type, parentId: t.parent_id!, parentName: names.get(t.parent_id!) ?? null })),
+    ...top.map((c) => ({ id: c.id, name: c.name ?? c.id, type: c.type, parentId: null, parentName: (c.parent_id && categories.get(c.parent_id)) || null, ownerId: null })),
+    ...threads.map((t) => threadInput(t, t.parent_id!, names.get(t.parent_id!) ?? null)),
   ]
   await ctx.store.saveChannels(inputs)
   return { channels: await ctx.store.channels(), activeThreads: new Set(threads.map((t) => t.id)) }
@@ -357,7 +366,7 @@ export async function rescan(ctx: SyncContext): Promise<RescanResult> {
       const { threads } = await ctx.client.archivedThreads(parent.id, { limit: 50 }, ctx.signal)
       for (const thread of threads) {
         const at = thread.thread_metadata?.archive_timestamp
-        if (at && new Date(at) >= windowStart && SYNCED_THREAD_TYPES.includes(thread.type)) archived.push({ id: thread.id, name: thread.name ?? thread.id, type: thread.type, parentId: parent.id, parentName: parent.name })
+        if (at && new Date(at) >= windowStart && SYNCED_THREAD_TYPES.includes(thread.type)) archived.push(threadInput(thread, parent.id, parent.name))
       }
     } catch (error) {
       await failed(ctx, parent, channels, error, run)
@@ -443,11 +452,12 @@ export class DiscordMembersIntentError extends Error {
 /**
  * The member list (needs the Server Members intent), a page of 1,000 at a time. New members are added,
  * names, roles and links updated; anyone missing from a complete list has left. Bots and purged members
- * are left out. Then today's DiscordGuildDaily row
+ * are left out (purges since the run started too: saveMembers checks the list again as it writes). Then
+ * today's DiscordGuildDaily row
  */
 export async function syncMembers(ctx: SyncContext): Promise<MemberSyncResult> {
   const now = clock(ctx)
-  const [purged, linked] = await Promise.all([ctx.store.purgedAuthors(), ctx.store.linkedAccounts()])
+  const purged = await ctx.store.purgedAuthors()
   const seen: MemberInput[] = []
   let after = "0"
   let complete = false
@@ -478,7 +488,7 @@ export async function syncMembers(ctx: SyncContext): Promise<MemberSyncResult> {
       break
     }
   }
-  const { joined } = await ctx.store.saveMembers(seen, now, linked)
+  const { joined } = await ctx.store.saveMembers(seen, now)
   let left = 0
   if (complete) {
     const here = new Set(seen.map((m) => m.id))

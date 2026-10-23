@@ -35,7 +35,7 @@ import {
   meetingTextKeysTx,
   updateMeetingTx,
 } from "@/server/services/meeting.service"
-import { userNames, type OfficerRef } from "@/server/services/officers"
+import type { OfficerRef } from "@/server/services/officers"
 import { centralDateInput } from "../../tools/time"
 import { ProposalInputError, StaleProposalError } from "../errors"
 import type { ProposalApplyContext, ProposalDiffRow, ProposalKind, ProposalLink, ProposalPerson, ProposalRow } from "../types"
@@ -212,17 +212,16 @@ function isNew(seen: Set<string>, text: string): boolean {
 /**
  * Where a proposal's decisions came from, kept on their decision-log entries (the Knowledge page shows
  * it): the reply that proposed them, the tools it used first (a transcript read, a page fetched), the
- * officer messages it answered and who asked, then the proposal itself, its transcript (a room file or a
- * synced document) and who applied it
+ * officer messages it answered and who asked (by id), then the proposal itself and its transcript (a room
+ * file or a synced document). No names: the page looks them up, so a deleted account shows as "Former
+ * officer" (who applied it is the version's editor, also by id)
  */
 async function proposalProvenance(ctx: ProposalApplyContext, { fileId, documentId }: Pick<MeetingRecord, "fileId" | "documentId">, now: Date): Promise<KnowledgeProvenance> {
   const proposal = await prisma.jackProposal.findUnique({ where: { id: ctx.proposalId }, select: { messageId: true, proposedForId: true } })
   const replyId = proposal?.messageId ?? null
-  const askedById = proposal?.proposedForId ?? null
-  const [reply, asked, names, file, doc] = await Promise.all([
+  const [reply, asked, file, doc] = await Promise.all([
     replyId ? prisma.jackMessage.findUnique({ where: { id: replyId }, select: { toolCalls: true } }) : null,
     replyId ? prisma.jackMessage.findMany({ where: { answeredById: replyId, kind: "user" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } }) : [],
-    userNames([askedById]),
     fileId ? prisma.jackFile.findUnique({ where: { id: fileId }, select: { filename: true } }) : null,
     documentId ? prisma.externalDocument.findUnique({ where: { id: documentId }, select: { name: true } }) : null,
   ])
@@ -235,13 +234,13 @@ async function proposalProvenance(ctx: ProposalApplyContext, { fileId, documentI
     roomId: ctx.roomId,
     replyId,
     messageIds: asked.map((m) => m.id),
-    askedBy: { userId: askedById, name: (askedById && names.get(askedById)?.displayName) || "An officer" },
+    askedBy: { userId: proposal?.proposedForId ?? null },
     tools: [
       ...tools,
       {
         name: "propose_meeting",
         input: JSON.stringify({ proposalId: ctx.proposalId, ...(fileId ? { fileId } : {}), ...(documentId ? { documentId } : {}) }),
-        label: `Meeting record applied by ${ctx.officer.displayName}${from ? `, from ${from}` : ""}`,
+        label: `Meeting record applied${from ? `, from ${from}` : ""}`,
       },
     ],
     at: now.toISOString(),

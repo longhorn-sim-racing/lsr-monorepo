@@ -4,10 +4,12 @@ import { Prisma } from "@prisma/client"
 const db = vi.hoisted(() => {
   const db = {
     $transaction: vi.fn(),
+    $executeRaw: vi.fn(),
     connectorState: { findUnique: vi.fn() },
     user: { findUnique: vi.fn(), updateMany: vi.fn(), update: vi.fn() },
     discordMember: { updateMany: vi.fn(), deleteMany: vi.fn() },
     discordMessage: { updateMany: vi.fn(), deleteMany: vi.fn(), aggregate: vi.fn() },
+    discordChannel: { updateMany: vi.fn() },
     systemSetting: { findUnique: vi.fn(), upsert: vi.fn() },
   }
   return db
@@ -201,12 +203,13 @@ describe("purgeDiscordData", () => {
     db.discordMessage.aggregate.mockResolvedValue({ _min: { createdAt: new Date("2026-09-01") }, _max: { createdAt: new Date("2026-10-20") } })
     db.discordMessage.deleteMany.mockResolvedValue({ count: 57 })
     db.discordMember.deleteMany.mockResolvedValue({ count: 1 })
+    db.discordChannel.updateMany.mockResolvedValue({ count: 2 })
     db.user.findUnique.mockResolvedValue({ id: "user-9" })
     db.systemSetting.findUnique.mockResolvedValue({ key: "discord_purged", value: JSON.stringify({ authors: ["earlier"] }) })
   })
 
   it("deletes the account's metadata, member row and link, lists it (keyed hash) so it's never collected again, and rebuilds the stats", async () => {
-    expect(await purgeDiscordData(DISCORD_ID, { userId: "admin-1" })).toEqual({ messages: 57, member: true, unlinkedUserId: "user-9", reference: expect.stringMatching(/^[0-9a-f]{16}$/) })
+    expect(await purgeDiscordData(DISCORD_ID, { userId: "admin-1" })).toEqual({ messages: 57, member: true, threads: 2, unlinkedUserId: "user-9", reference: expect.stringMatching(/^[0-9a-f]{16}$/) })
     expect(db.discordMessage.deleteMany).toHaveBeenCalledWith({ where: { authorId: DISCORD_ID } })
     expect(db.discordMember.deleteMany).toHaveBeenCalledWith({ where: { id: DISCORD_ID } })
     expect(db.user.update).toHaveBeenCalledWith({ where: { id: "user-9" }, data: { discordUserId: null, discordUsername: null, discordLinkedAt: null } })
@@ -217,6 +220,28 @@ describe("purgeDiscordData", () => {
     expect(purgedFrom(JSON.stringify(value)).has(DISCORD_ID)).toBe(true)
     expect(JSON.stringify(value)).not.toContain(DISCORD_ID)
     expect(stats.rebuildDailyStats).toHaveBeenCalledWith(expect.anything(), ["days"])
+  })
+
+  it("removes the titles of the threads they started, keeping the threads (others' replies still count) with no owner", async () => {
+    await purgeDiscordData(DISCORD_ID, { userId: "admin-1" })
+    expect(db.discordChannel.updateMany).toHaveBeenCalledWith({ where: { ownerId: DISCORD_ID }, data: { name: "a thread", ownerId: null } })
+    const entry = audit.createAuditLog.mock.calls[0][0]
+    expect(entry.summary).toContain("the titles of 2 threads they started")
+    expect(entry.metadata).toMatchObject({ threads: 2 })
+  })
+
+  it("takes the purge lock before touching anything, and waits long enough for a sync write to finish", async () => {
+    const order: string[] = []
+    db.$executeRaw.mockImplementation(async (sql: TemplateStringsArray) => order.push(sql.join("?")))
+    db.discordMessage.aggregate.mockImplementation(async () => (order.push("read"), { _min: { createdAt: null }, _max: { createdAt: null } }))
+    db.discordMessage.deleteMany.mockImplementation(async () => (order.push("delete"), { count: 0 }))
+    await purgeDiscordData(DISCORD_ID, { userId: "admin-1" })
+    // Exclusive: the sync's writes take the same lock shared, and re-read the list under it
+    expect(order[0]).toMatch(/^SELECT pg_advisory_xact_lock\(hashtext\(\?\)\)$/)
+    expect(db.$executeRaw.mock.calls[0][1]).toBe("lsr:discord_purged")
+    expect(order.slice(1)).toEqual(["read", "delete"])
+    expect(db.$transaction.mock.calls[0][1]).toMatchObject({ timeout: expect.any(Number) })
+    expect(db.$transaction.mock.calls[0][1].timeout).toBeGreaterThanOrEqual(30_000)
   })
 
   it("keeps the list's key, so earlier purges still match", async () => {

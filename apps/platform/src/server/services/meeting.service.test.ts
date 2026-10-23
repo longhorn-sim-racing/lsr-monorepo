@@ -165,7 +165,7 @@ describe("decisions and the decision log", () => {
   })
 
   it("writes a proposal's decisions as Jack's: not reviewed, with where they came from", async () => {
-    const provenance = { roomId: "room-1", replyId: "reply-1", messageIds: ["msg-1"], askedBy: { userId: "officer-2", name: "Ana" }, tools: [], at: NOW.toISOString() }
+    const provenance = { roomId: "room-1", replyId: "reply-1", messageIds: ["msg-1"], askedBy: { userId: "officer-2" }, tools: [], at: NOW.toISOString() }
     const decision = { id: "d-1", text: "Keep the four sponsor tiers.", meetingId: "m-1", decidedAt: HELD, knowledgeEntryId: null, createdAt: NOW }
     const [result] = await linkDecisionsToLog(meeting(), [{ decision }], actor, { roomId: "room-1", provenance, now: NOW })
     expect(result.knowledge).toEqual({ ok: true, entryId: "k-1" })

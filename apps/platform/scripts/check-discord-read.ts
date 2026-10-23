@@ -3,7 +3,8 @@
  * the unit tests only see an in-memory store: the real sync runs against the Discord HTTP fake (answered
  * in this process, no server needed) into the real tables, then the queries the page, the Overview card
  * and Jack's tools read, the SQL behind them (threads counted in their channel, deleted rows left out,
- * open polls), a deletion noticed by the re-scan, and a purge that sticks.
+ * open polls), a deletion noticed by the re-scan, and a purge that sticks: thread titles included, and
+ * against sync writes in progress (the purge lock, both ways), with two purges at once keeping both.
  *
  *   pnpm --filter @lsr/platform exec tsx scripts/check-discord-read.ts
  *
@@ -59,7 +60,9 @@ async function main() {
   const { discordFake } = await import("../src/server/connectors/discord/fake/handlers");
   const { FAKE_CHANNELS, FAKE_DISCORD } = await import("../src/server/connectors/discord/fake/data");
   const { discordClient } = await import("../src/server/connectors/discord/client");
-  const { prismaDiscordStore, PURGED_SETTING } = await import("../src/server/connectors/discord/store");
+  const { lockPurgedListTx, prismaDiscordStore, PURGE_LOCK, PURGED_SETTING, purgedFrom, readPurged } = await import("../src/server/connectors/discord/store");
+  const { purgedHash } = await import("../src/server/connectors/discord/metadata");
+  const { randomBytes } = await import("node:crypto");
   const sync = await import("../src/server/connectors/discord/sync");
   const queries = await import("../src/server/queries/discord");
   const { purgeDiscordData } = await import("../src/server/services/discord-link.service");
@@ -110,6 +113,8 @@ async function main() {
     const first = await sync.syncMessages(ctx, { backfillDays: 60 });
     const thread = await prisma.discordChannel.findFirst({ where: { parentId: FAKE_CHANNELS.setups } });
     check("an active thread is stored under its channel once that's opted in", thread?.id === FAKE_CHANNELS.monzaThread, JSON.stringify(thread));
+    const monzaOwner = (await client.activeThreads()).threads.find((t) => t.id === FAKE_CHANNELS.monzaThread)?.owner_id;
+    check("with who started it", Boolean(monzaOwner) && thread?.ownerId === monzaOwner, JSON.stringify({ monzaOwner, ownerId: thread?.ownerId }));
     const stored = await prisma.discordMessage.count({ where: { channelId: { in: channelIds } } });
     check("the sync stores the opted-in channels' messages", first.added > 50 && first.added === stored && first.problems.length === 0, JSON.stringify(first));
     const columns = await prisma.$queryRaw<{ column_name: string }[]>`SELECT column_name FROM information_schema.columns WHERE table_name = 'DiscordMessage'`;
@@ -184,6 +189,97 @@ async function main() {
       await sync.syncMembers(ctx);
       check("and a fresh sync never collects them again", (await prisma.discordMessage.count({ where: { authorId: author.authorId } })) === 0 && !(await prisma.discordMember.findUnique({ where: { id: author.authorId } })));
     } else check("a purge (needs a user to act as)", false, "no user in the local database");
+
+    // Fake accounts no local user has linked (a purge unlinks), and not purged above
+    const free: string[] = [];
+    for (const id of memberIds) {
+      if (id === FAKE_DISCORD.botUserId || id === author?.authorId) continue;
+      if (!(await prisma.user.findUnique({ where: { discordUserId: id }, select: { id: true } }))) free.push(id);
+    }
+
+    // A thread's starter purged: the thread stays (others' replies still count) as "a thread", and later syncs keep it so
+    const spa = await prisma.discordChannel.findUnique({ where: { id: FAKE_CHANNELS.spaThread } });
+    const spaOwner = (await client.archivedThreads(FAKE_CHANNELS.setups)).threads.find((t) => t.id === FAKE_CHANNELS.spaThread)?.owner_id ?? null;
+    check("an archived thread is stored with who started it", Boolean(spa && spaOwner && spa.ownerId === spaOwner && spa.name === "Spa wet setup"), JSON.stringify({ spa, spaOwner }));
+    if (spaOwner && free.includes(spaOwner) && actor) {
+      const result = await purgeDiscordData(spaOwner, { userId: actor.id });
+      purgeReferences.push(result.reference);
+      const renamed = await prisma.discordChannel.findUnique({ where: { id: FAKE_CHANNELS.spaThread } });
+      check("a purge removes the titles of threads they started and keeps the threads", result.threads === 1 && renamed?.name === "a thread" && renamed.ownerId === null, JSON.stringify({ result, renamed }));
+      await sync.syncMessages(ctx, { backfillDays: 60 });
+      await sync.rescan(ctx);
+      const after = await prisma.discordChannel.findUnique({ where: { id: FAKE_CHANNELS.spaThread } });
+      check("and the sync and re-scan never write the title back", after?.name === "a thread" && after.ownerId === null, JSON.stringify(after));
+    } else console.log("SKIP  a purge of a thread's starter  (no user to act as, or the starter is linked to a local account)");
+
+    // The purge lock, in Postgres. A purge in progress (holding it exclusively, the account deleted and listed but not
+    // committed yet): a page, a member list and a thread written meanwhile wait for it, then leave the account out
+    const [late, both1, both2] = free.filter((id) => id !== spaOwner).slice(-3);
+    if (late && both1 && both2 && actor) {
+      let held!: () => void;
+      const holding = new Promise<void>((resolve) => (held = resolve));
+      let committedAt = 0;
+      const purge = prisma.$transaction(
+        async (tx) => {
+          await lockPurgedListTx(tx);
+          await tx.discordMessage.deleteMany({ where: { authorId: late } });
+          await tx.discordMember.deleteMany({ where: { id: late } });
+          const purged = readPurged((await tx.systemSetting.findUnique({ where: { key: PURGED_SETTING } }))?.value);
+          const key = purged.key ?? randomBytes(32).toString("base64url");
+          const value = JSON.stringify({ key, authors: [...purged.authors, purgedHash(key, late)] });
+          await tx.systemSetting.upsert({ where: { key: PURGED_SETTING }, update: { value }, create: { key: PURGED_SETTING, value } });
+          held();
+          await new Promise((resolve) => setTimeout(resolve, 1_500));
+          committedAt = Date.now();
+        },
+        { timeout: 20_000 },
+      );
+      await holding;
+      const timed = async <T>(write: Promise<T>) => ({ value: await write, at: Date.now() });
+      const lateRow = { ...sample, id: "1300000000000000011", channelId: FAKE_CHANNELS.general, authorId: late };
+      const lateThread = { id: "1300000000000000012", name: "Late thread title", type: 11, parentId: FAKE_CHANNELS.setups, parentName: "setups", ownerId: late };
+      const [page, members, threads] = await Promise.all([
+        timed(prismaDiscordStore.savePage(FAKE_CHANNELS.general, { insert: [lateRow] })),
+        timed(prismaDiscordStore.saveMembers([{ id: late, username: "late.member", displayName: null, joinedAt: null, roles: [] }], now)),
+        timed(prismaDiscordStore.saveChannels([lateThread])),
+      ]);
+      await purge;
+      const waited = [page.at, members.at, threads.at].every((at) => at >= committedAt);
+      check("sync writes wait for a purge in progress", waited, JSON.stringify({ committedAt, page: page.at, members: members.at, threads: threads.at }));
+      const lateThreadRow = await prisma.discordChannel.findUnique({ where: { id: lateThread.id } });
+      check(
+        "then leave the purged account out: no message, no member row, and its thread untitled",
+        page.value?.added === 0 &&
+          !(await prisma.discordMessage.findUnique({ where: { id: lateRow.id } })) &&
+          members.value.joined === 0 &&
+          !(await prisma.discordMember.findUnique({ where: { id: late } })) &&
+          lateThreadRow?.name === "a thread" &&
+          lateThreadRow.ownerId === null,
+        JSON.stringify({ page: page.value, members: members.value, lateThreadRow }),
+      );
+
+      // The other way: a sync write in progress (holding it shared); two purges wait for it, and for each other, keeping both on the list
+      let entered!: () => void;
+      const inside = new Promise<void>((resolve) => (entered = resolve));
+      let writeDoneAt = 0;
+      const write = prisma.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${PURGE_LOCK}))`;
+          entered();
+          await new Promise((resolve) => setTimeout(resolve, 1_500));
+          writeDoneAt = Date.now();
+        },
+        { timeout: 20_000 },
+      );
+      await inside;
+      const purges = await Promise.all([both1, both2].map((id) => purgeDiscordData(id, { userId: actor.id })));
+      const purgedAt = Date.now();
+      await write;
+      purgeReferences.push(...purges.map((p) => p.reference));
+      check("a purge waits for a sync write in progress", writeDoneAt > 0 && purgedAt >= writeDoneAt, JSON.stringify({ writeDoneAt, purgedAt }));
+      const list = purgedFrom((await prisma.systemSetting.findUnique({ where: { key: PURGED_SETTING } }))?.value);
+      check("two purges at once both stay on the list (with the ones before)", list.has(both1) && list.has(both2) && list.has(late), `size ${list.size}`);
+    } else console.log("SKIP  the purge lock  (no user to act as, or not enough unlinked fake accounts)");
 
     // Switching a channel off: everything stored from it goes, its threads included
     const lscStored = await prisma.discordMessage.count({ where: { channelId: FAKE_CHANNELS.lscChat } });

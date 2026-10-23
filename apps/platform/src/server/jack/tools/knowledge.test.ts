@@ -170,7 +170,7 @@ describe("save", () => {
           roomId: "room-1",
           replyId: "reply-1",
           messageIds: ["msg-1"],
-          askedBy: { userId: "officer-dylan", name: "Dylan" },
+          askedBy: { userId: "officer-dylan" },
           // The knowledge call itself isn't a source
           tools: [{ name: "search", input: '{"query":"dues"}', label: "Searched knowledge (0 results)" }],
           at: NOW.toISOString(),
@@ -335,7 +335,7 @@ describe("replyProvenance", () => {
       roomId: "local",
       replyId: null,
       messageIds: [],
-      askedBy: { userId: null, name: "Script" },
+      askedBy: { userId: null },
       tools: [],
       at: NOW.toISOString(),
     })

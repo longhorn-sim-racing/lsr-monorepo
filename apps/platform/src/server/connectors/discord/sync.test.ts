@@ -36,6 +36,21 @@ async function fakeHistory(ctx: SyncContext, channelId: string): Promise<Discord
   return (await ctx.client.messages(channelId, { limit: 100 })).reverse()
 }
 
+/** A member who posts in #general */
+async function poster(ctx: SyncContext): Promise<string> {
+  return (await fakeHistory(ctx, FAKE_CHANNELS.general)).find((m) => !m.author.bot)!.author.id
+}
+
+/** The client's message reads, with `purge` run just before page number `page` (counting from 0) is handed back */
+function purgeAfterPage(ctx: SyncContext, purge: () => void, page: number): SyncContext["client"]["messages"] {
+  let read = 0
+  return async (...args) => {
+    const result = await ctx.client.messages(...args)
+    if (read++ === page) purge()
+    return result
+  }
+}
+
 describe("refreshChannels", () => {
   it("keeps the channels that can hold messages (switched off), with their category, and no thread of a channel that isn't opted in", async () => {
     const { memory, ctx } = setup()
@@ -68,7 +83,60 @@ describe("refreshChannels", () => {
     await refreshChannels(ctx)
     expect(memory.channels.get(FAKE_CHANNELS.general)).toMatchObject({ synced: true, name: "general" })
   })
+
+  it("keeps who started a thread, and only that for a channel", async () => {
+    const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.setups] })
+    const owner = await threadOwner(ctx, FAKE_CHANNELS.monzaThread)
+    await refreshChannels(ctx)
+    expect(memory.channels.get(FAKE_CHANNELS.monzaThread)).toMatchObject({ name: "Monza setup help", ownerId: owner })
+    expect(memory.channels.get(FAKE_CHANNELS.setups)?.ownerId).toBeNull()
+  })
+
+  it("stores a thread a purged member started as “a thread”, without their title or id, and still counts the replies in it", async () => {
+    const owner = await threadOwner(setup().ctx, FAKE_CHANNELS.monzaThread)
+    vi.unstubAllGlobals()
+    const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.setups], purged: [owner] })
+    await syncMessages(ctx)
+    expect(memory.channels.get(FAKE_CHANNELS.monzaThread)).toMatchObject({ name: "a thread", ownerId: null, parentId: FAKE_CHANNELS.setups })
+    expect(JSON.stringify([...memory.channels.values()])).not.toContain("Monza setup help")
+    const replies = [...memory.messages.values()].filter((m) => m.channelId === FAKE_CHANNELS.monzaThread)
+    expect(replies.length).toBeGreaterThan(0)
+    expect(replies.some((m) => m.authorId === owner)).toBe(false)
+    expect([...memory.daily.values()].some((s) => s.channelId === FAKE_CHANNELS.setups)).toBe(true)
+  })
+
+  it("never writes a title back once its starter is purged: a purge renames it, and later syncs keep it so", async () => {
+    const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.setups] })
+    const owner = await threadOwner(ctx, FAKE_CHANNELS.monzaThread)
+    await syncMessages(ctx)
+    memory.purge(owner)
+    await syncMessages(ctx)
+    await rescan(ctx)
+    expect(memory.channels.get(FAKE_CHANNELS.monzaThread)).toMatchObject({ name: "a thread", ownerId: null })
+  })
+
+  it("keeps a thread untitled when its starter is purged after the run read the list, before it saved the channels", async () => {
+    const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.setups] })
+    const owner = await threadOwner(ctx, FAKE_CHANNELS.monzaThread)
+    const client = {
+      ...ctx.client,
+      activeThreads: async (signal?: AbortSignal) => {
+        const list = await ctx.client.activeThreads(signal)
+        memory.purge(owner)
+        return list
+      },
+    }
+    await syncMessages({ ...ctx, client } as SyncContext)
+    expect(memory.channels.get(FAKE_CHANNELS.monzaThread)).toMatchObject({ name: "a thread", ownerId: null })
+  })
 })
+
+/** Who started a thread in the fake server */
+async function threadOwner(ctx: SyncContext, threadId: string): Promise<string> {
+  const active = (await ctx.client.activeThreads()).threads
+  const archived = (await ctx.client.archivedThreads(FAKE_CHANNELS.setups)).threads
+  return [...active, ...archived].find((t) => t.id === threadId)!.owner_id!
+}
 
 describe("syncMessages", () => {
   it("stores metadata only, for opted-in channels and their threads, and builds daily stats with threads counted in their channel", async () => {
@@ -143,10 +211,22 @@ describe("syncMessages", () => {
     expect([...memory.messages.values()].some((r) => r.authorId === someone)).toBe(false)
   })
 
+  it("stores none of a member's messages once they're purged in the middle of the run", async () => {
+    const { fakes, memory, ctx } = setup({ synced: [FAKE_CHANNELS.general] })
+    const someone = await poster(ctx)
+    // More than a page from them
+    for (let i = 0; i < 120; i++) await hook(fakes, "POST", "messages", { channelId: FAKE_CHANNELS.general, content: `lap ${i}`, authorId: someone })
+    // The purge lands after the first page is read, before it's written
+    const client = { ...ctx.client, messages: purgeAfterPage(ctx, () => memory.purge(someone), 1) }
+    await syncMessages({ ...ctx, client } as SyncContext, { backfillDays: 60 })
+    expect(memory.messages.size).toBeGreaterThan(0)
+    expect([...memory.messages.values()].some((m) => m.authorId === someone)).toBe(false)
+  })
+
   it("reports a channel it can't read and carries on with the rest", async () => {
     const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.general] })
     // An opted-in channel the bot lost access to
-    memory.channels.set(FAKE_CHANNELS.officers, { id: FAKE_CHANNELS.officers, name: "officers", type: 0, parentId: null, parentName: null, synced: true, lastMessageId: null, lastSyncedAt: null, rescanFrom: null })
+    memory.channels.set(FAKE_CHANNELS.officers, { id: FAKE_CHANNELS.officers, name: "officers", type: 0, parentId: null, parentName: null, ownerId: null, synced: true, lastMessageId: null, lastSyncedAt: null, rescanFrom: null })
     const result = await syncMessages(ctx)
     expect(result.problems).toEqual([{ channel: "#officers", error: "Discord answered 403 (code 50001 Missing Access) on GET /channels/:id/messages" }])
     expect([...memory.messages.values()].some((r) => r.channelId === FAKE_CHANNELS.general)).toBe(true)
@@ -305,11 +385,43 @@ describe("rescan", () => {
 
   it("picks up threads archived in the window under their channel", async () => {
     const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.setups] })
+    const owner = await threadOwner(ctx, FAKE_CHANNELS.spaThread)
     await syncMessages(ctx)
     await rescan(ctx)
     const spa = [...memory.channels.values()].find((c) => c.name === "Spa wet setup")
-    expect(spa).toMatchObject({ parentId: FAKE_CHANNELS.setups, synced: false })
+    expect(spa).toMatchObject({ parentId: FAKE_CHANNELS.setups, synced: false, ownerId: owner })
     expect(spa?.lastMessageId).toBeTruthy()
+  })
+
+  it("picks up an archived thread a purged member started without its title", async () => {
+    const owner = await threadOwner(setup().ctx, FAKE_CHANNELS.spaThread)
+    vi.unstubAllGlobals()
+    const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.setups], purged: [owner] })
+    await syncMessages(ctx)
+    await rescan(ctx)
+    expect(memory.channels.get(FAKE_CHANNELS.spaThread)).toMatchObject({ name: "a thread", ownerId: null, parentId: FAKE_CHANNELS.setups })
+    expect(JSON.stringify([...memory.channels.values()])).not.toContain("Spa wet setup")
+  })
+
+  it("never writes back what a purge deleted while the re-scan was reading, in that channel or the next", async () => {
+    const { fakes, memory, ctx } = setup({ synced: [FAKE_CHANNELS.general, FAKE_CHANNELS.lscChat] })
+    const someone = await poster(ctx)
+    for (let i = 0; i < 120; i++) await hook(fakes, "POST", "messages", { channelId: FAKE_CHANNELS.general, content: `lap ${i}`, authorId: someone })
+    await hook(fakes, "POST", "messages", { channelId: FAKE_CHANNELS.lscChat, content: "see you at practice", authorId: someone })
+    await syncMessages(ctx)
+    expect([...memory.messages.values()].filter((m) => m.authorId === someone).length).toBeGreaterThan(120)
+
+    // The re-scan reads the last 7 days again; the purge lands after its first page
+    const client = { ...ctx.client, messages: purgeAfterPage(ctx, () => memory.purge(someone), 0) }
+    const result = await rescan({ ...ctx, client } as SyncContext)
+    expect(result).toMatchObject({ unfinished: 0, problems: [] })
+    expect([...memory.messages.values()].some((m) => m.authorId === someone)).toBe(false)
+    // Everyone else's are still there, and today's count (their 120 laps) is rebuilt without them
+    expect([...memory.messages.values()].some((m) => m.channelId === FAKE_CHANNELS.lscChat)).toBe(true)
+    const today = chicagoDay(new Date()).getTime()
+    const stat = [...memory.daily.values()].find((s) => s.date.getTime() === today && s.channelId === FAKE_CHANNELS.general)
+    const live = [...memory.messages.values()].filter((m) => m.channelId === FAKE_CHANNELS.general && !m.deletedAt && chicagoDay(m.createdAt).getTime() === today)
+    expect(stat?.messages ?? 0).toBe(live.length)
   })
 
   it("drops a thread Discord deleted with its messages, and rebuilds its channel's days, without failing the run", async () => {
@@ -431,6 +543,50 @@ describe("syncMembers", () => {
     await syncMembers(ctx)
     expect(memory.members.has(someone)).toBe(false)
     expect(memory.members.size).toBe(39)
+  })
+
+  it("doesn't add back, or link, a member purged between reading the list and saving it", async () => {
+    const someone = (await (async () => {
+      const { ctx } = setup()
+      return (await ctx.client.members({ limit: 5 })).find((m) => !m.user.bot)!.user.id
+    })())!
+    vi.unstubAllGlobals()
+    const { memory, ctx } = setup({ linked: { [someone]: "user-1" } })
+    await syncMembers(ctx)
+    expect(memory.members.get(someone)?.userId).toBe("user-1")
+
+    const client = {
+      ...ctx.client,
+      members: async (...args: Parameters<SyncContext["client"]["members"]>) => {
+        const page = await ctx.client.members(...args)
+        memory.purge(someone)
+        return page
+      },
+    }
+    const result = await syncMembers({ ...ctx, client } as SyncContext)
+    expect(memory.members.has(someone)).toBe(false)
+    expect([...memory.members.values()].some((m) => m.userId === "user-1")).toBe(false)
+    expect(result).toMatchObject({ members: 40, joined: 0, left: 0, memberCount: 39 })
+  })
+
+  it("links members as their accounts are linked when it saves, not when the run started", async () => {
+    const someone = (await (async () => {
+      const { ctx } = setup()
+      return (await ctx.client.members({ limit: 5 })).find((m) => !m.user.bot)!.user.id
+    })())!
+    vi.unstubAllGlobals()
+    const { memory, ctx } = setup({ linked: { [someone]: "user-1" } })
+    const client = {
+      ...ctx.client,
+      members: async (...args: Parameters<SyncContext["client"]["members"]>) => {
+        const page = await ctx.client.members(...args)
+        // The member unlinks while the list is on its way
+        memory.linked.delete(someone)
+        return page
+      },
+    }
+    await syncMembers({ ...ctx, client } as SyncContext)
+    expect(memory.members.get(someone)?.userId).toBeNull()
   })
 
   it("says to switch on the Server Members intent when Discord refuses the list", async () => {

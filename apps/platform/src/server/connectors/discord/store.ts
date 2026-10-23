@@ -1,12 +1,16 @@
 import { Prisma } from "@prisma/client"
 import { prisma } from "@/server/db"
-import { purgedList, readStoredPoll, type MessageRow, type PurgedList, type StoredPoll } from "./metadata"
+import { purgedList, readStoredPoll, withoutPurgedOwner, type MessageRow, type PurgedList, type StoredPoll } from "./metadata"
 
 /**
  * Where the Discord sync keeps what it reads (design §3.3): DiscordChannel, DiscordMessage, DiscordMember,
  * DiscordDailyStat and DiscordGuildDaily. The sync talks to this interface rather than Prisma, so its
  * tests run against an in-memory copy (memory-store.ts) and the HTTP fake; scripts/check-discord-read.ts
  * runs it against the database.
+ *
+ * Every write of someone's data (channels with thread owners, message pages, the member list) re-reads
+ * the purged list inside its transaction, under the purge lock (purgedForWrite), so a purge that lands
+ * while a run is going is never undone by that run.
  */
 
 export type StoredChannel = {
@@ -15,13 +19,15 @@ export type StoredChannel = {
   type: number
   parentId: string | null
   parentName: string | null
+  /** A thread's starter (Discord user id); null for channels, and for a thread whose starter was purged */
+  ownerId: string | null
   synced: boolean
   lastMessageId: string | null
   lastSyncedAt: Date | null
   rescanFrom: Date | null
 }
 
-export type ChannelInput = Pick<StoredChannel, "id" | "name" | "type" | "parentId" | "parentName">
+export type ChannelInput = Pick<StoredChannel, "id" | "name" | "type" | "parentId" | "parentName" | "ownerId">
 
 export type StoredMessage = { id: string; contentLength: number; poll: StoredPoll | null; editedAt: Date | null; attachments: number; deletedAt: Date | null }
 
@@ -44,12 +50,16 @@ export type PageWrite = {
 
 export type DiscordStore = {
   channels(): Promise<StoredChannel[]>
-  /** Adds new channels (not synced) and updates the names and parents of known ones; never changes `synced` */
+  /**
+   * Adds new channels (not synced) and updates the names, parents and owners of known ones; never
+   * changes `synced`. A thread a purged member started is saved as "a thread", with no owner
+   */
   saveChannels(channels: ChannelInput[]): Promise<void>
   /**
    * Writes a page read from a channel or thread, only while it's opted in (a thread: while its channel
-   * is), in step with switching it off. Returns how many rows it added, or null, writing nothing, once
-   * it isn't opted in or a thread's row is gone
+   * is), in step with switching it off. Rows of purged members are left out, against the list as it is
+   * at the write. Returns how many rows it added, or null, writing nothing, once it isn't opted in or a
+   * thread's row is gone
    */
   savePage(channelId: string, page: PageWrite): Promise<{ added: number } | null>
   /** The stored rows among these ids */
@@ -73,12 +83,14 @@ export type DiscordStore = {
   dropThread(threadId: string): Promise<{ from: Date; to: Date } | null>
   /** Members who haven't left */
   currentMemberIds(): Promise<string[]>
-  saveMembers(members: MemberInput[], now: Date, linked: ReadonlyMap<string, string>): Promise<{ joined: number }>
+  /**
+   * Adds new members and updates known ones, linked to the site member who has the account linked now.
+   * Purged members are left out, against the list as it is at the write
+   */
+  saveMembers(members: MemberInput[], now: Date): Promise<{ joined: number }>
   markLeft(ids: string[], at: Date): Promise<number>
   /** DiscordGuildDaily for a day: members now, and joins and leaves that day */
   writeGuildDay(day: Date, dayStart: Date, dayEnd: Date): Promise<{ memberCount: number; joinedCount: number; leftCount: number }>
-  /** Discord user id → site user id, for linked accounts */
-  linkedAccounts(): Promise<Map<string, string>>
   /** Members whose Discord data was purged (never collected again) */
   purgedAuthors(): Promise<PurgedList>
 }
@@ -121,6 +133,28 @@ export function purgedFrom(value: string | null | undefined): PurgedList {
   return purgedList(key, authors)
 }
 
+/** The advisory lock between a purge (exclusive) and the sync's writes (shared), keyed by hashtext() of this */
+export const PURGE_LOCK = "lsr:discord_purged"
+
+/**
+ * Takes the purge lock for the rest of a purge's transaction: it waits for every sync write in progress,
+ * and every write after it waits for the purge and then reads the list with the account on it. An
+ * advisory lock rather than a row lock on the setting, which doesn't exist before the first purge
+ */
+export async function lockPurgedListTx(tx: Prisma.TransactionClient): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${PURGE_LOCK}))`
+}
+
+/**
+ * The purged list as it is now, read inside a sync write's transaction under the purge lock (shared), so
+ * a purge that commits while a run is going is seen by the run's next write. Taken before any row lock,
+ * as the purge takes it, so the two never wait on each other in a circle
+ */
+async function purgedForWrite(tx: Prisma.TransactionClient): Promise<PurgedList> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${PURGE_LOCK}))`
+  return purgedFrom((await tx.systemSetting.findUnique({ where: { key: PURGED_SETTING } }))?.value)
+}
+
 /** A page's or a switch-off's transaction: room for a page of updates, or for deleting a busy channel's rows, against the hosted database */
 const WRITE_TIMEOUT_MS = 30_000
 
@@ -131,28 +165,39 @@ export const prismaDiscordStore: DiscordStore = {
 
   async saveChannels(channels) {
     if (!channels.length) return
-    const known = new Map((await prisma.discordChannel.findMany({ where: { id: { in: channels.map((c) => c.id) } }, select: { id: true, name: true, type: true, parentId: true, parentName: true } })).map((c) => [c.id, c]))
-    const fresh = channels.filter((c) => !known.has(c.id))
-    if (fresh.length) await prisma.discordChannel.createMany({ data: fresh.map((c) => ({ ...c, synced: false })), skipDuplicates: true })
-    for (const channel of channels) {
-      const was = known.get(channel.id)
-      if (!was || (was.name === channel.name && was.type === channel.type && was.parentId === channel.parentId && was.parentName === channel.parentName)) continue
-      await prisma.discordChannel.updateMany({ where: { id: channel.id }, data: { name: channel.name, type: channel.type, parentId: channel.parentId, parentName: channel.parentName } })
-    }
+    await prisma.$transaction(
+      async (tx) => {
+        const purged = await purgedForWrite(tx)
+        const rows = channels.map((c) => withoutPurgedOwner(c, purged))
+        const known = new Map(
+          (await tx.discordChannel.findMany({ where: { id: { in: rows.map((c) => c.id) } }, select: { id: true, name: true, type: true, parentId: true, parentName: true, ownerId: true } })).map((c) => [c.id, c]),
+        )
+        const fresh = rows.filter((c) => !known.has(c.id))
+        if (fresh.length) await tx.discordChannel.createMany({ data: fresh.map((c) => ({ ...c, synced: false })), skipDuplicates: true })
+        for (const channel of rows) {
+          const was = known.get(channel.id)
+          if (!was || (was.name === channel.name && was.type === channel.type && was.parentId === channel.parentId && was.parentName === channel.parentName && was.ownerId === channel.ownerId)) continue
+          await tx.discordChannel.updateMany({ where: { id: channel.id }, data: { name: channel.name, type: channel.type, parentId: channel.parentId, parentName: channel.parentName, ownerId: channel.ownerId } })
+        }
+      },
+      { timeout: WRITE_TIMEOUT_MS },
+    )
   },
 
   async savePage(channelId, page) {
     return prisma.$transaction(
       async (tx) => {
+        const purged = await purgedForWrite(tx)
         // The opted-in channel's row (a thread's channel), locked: switching it off updates that row first, so it waits for this page, or this page sees it off
         const [owner] = await tx.$queryRaw<{ synced: boolean }[]>(Prisma.sql`
           SELECT o.synced FROM "DiscordChannel" c JOIN "DiscordChannel" o ON o.id = coalesce(c."parentId", c.id)
           WHERE c.id = ${channelId}
           FOR SHARE OF o`)
         if (!owner?.synced) return null
+        const kept = (row: MessageRow) => !purged.has(row.authorId)
         let added = 0
-        for (const part of chunks(page.insert ?? [])) added += (await tx.discordMessage.createMany({ data: part.map((row) => ({ ...row, poll: pollJson(row.poll) })), skipDuplicates: true })).count
-        for (const row of page.update ?? []) {
+        for (const part of chunks((page.insert ?? []).filter(kept))) added += (await tx.discordMessage.createMany({ data: part.map((row) => ({ ...row, poll: pollJson(row.poll) })), skipDuplicates: true })).count
+        for (const row of (page.update ?? []).filter(kept)) {
           await tx.discordMessage.updateMany({
             where: { id: row.id },
             data: { editedAt: row.editedAt, contentLength: row.contentLength, attachments: row.attachments, isReply: row.isReply, poll: pollJson(row.poll), lastSeenAt: row.lastSeenAt, deletedAt: null },
@@ -248,34 +293,43 @@ export const prismaDiscordStore: DiscordStore = {
     return (await prisma.discordMember.findMany({ where: { leftAt: null }, select: { id: true } })).map((m) => m.id)
   },
 
-  async saveMembers(members, now, linked) {
-    const known = new Map(
-      (await prisma.discordMember.findMany({ select: { id: true, username: true, displayName: true, joinedAt: true, roles: true, userId: true, leftAt: true } })).map((m) => [m.id, m]),
+  async saveMembers(members, now) {
+    return prisma.$transaction(
+      async (tx) => {
+        const purged = await purgedForWrite(tx)
+        const list = members.filter((m) => !purged.has(m.id))
+        // Read here, not when the run started: a purge or an unlink since then is already in them
+        const known = new Map(
+          (await tx.discordMember.findMany({ select: { id: true, username: true, displayName: true, joinedAt: true, roles: true, userId: true, leftAt: true } })).map((m) => [m.id, m]),
+        )
+        const linked = new Map((await tx.user.findMany({ where: { discordUserId: { not: null } }, select: { id: true, discordUserId: true } })).map((u) => [u.discordUserId!, u.id]))
+        const fresh = list.filter((m) => !known.has(m.id))
+        for (const part of chunks(fresh)) {
+          await tx.discordMember.createMany({ data: part.map((m) => ({ ...m, userId: linked.get(m.id) ?? null, firstSeenAt: now, lastSeenAt: now })), skipDuplicates: true })
+        }
+        for (const member of list) {
+          const was = known.get(member.id)
+          if (!was) continue
+          const userId = linked.get(member.id) ?? null
+          const same =
+            was.username === member.username &&
+            was.displayName === member.displayName &&
+            was.joinedAt?.getTime() === member.joinedAt?.getTime() &&
+            was.roles.join(",") === member.roles.join(",") &&
+            was.userId === userId &&
+            was.leftAt === null
+          if (!same) {
+            await tx.discordMember.updateMany({
+              where: { id: member.id },
+              data: { username: member.username, displayName: member.displayName, joinedAt: member.joinedAt, roles: member.roles, userId, leftAt: null },
+            })
+          }
+        }
+        for (const part of chunks(list.map((m) => m.id))) await tx.discordMember.updateMany({ where: { id: { in: part } }, data: { lastSeenAt: now } })
+        return { joined: fresh.length }
+      },
+      { timeout: WRITE_TIMEOUT_MS },
     )
-    const fresh = members.filter((m) => !known.has(m.id))
-    for (const part of chunks(fresh)) {
-      await prisma.discordMember.createMany({ data: part.map((m) => ({ ...m, userId: linked.get(m.id) ?? null, firstSeenAt: now, lastSeenAt: now })), skipDuplicates: true })
-    }
-    for (const member of members) {
-      const was = known.get(member.id)
-      if (!was) continue
-      const userId = linked.get(member.id) ?? null
-      const same =
-        was.username === member.username &&
-        was.displayName === member.displayName &&
-        was.joinedAt?.getTime() === member.joinedAt?.getTime() &&
-        was.roles.join(",") === member.roles.join(",") &&
-        was.userId === userId &&
-        was.leftAt === null
-      if (!same) {
-        await prisma.discordMember.update({
-          where: { id: member.id },
-          data: { username: member.username, displayName: member.displayName, joinedAt: member.joinedAt, roles: member.roles, userId, leftAt: null },
-        })
-      }
-    }
-    for (const part of chunks(members.map((m) => m.id))) await prisma.discordMember.updateMany({ where: { id: { in: part } }, data: { lastSeenAt: now } })
-    return { joined: fresh.length }
   },
 
   async markLeft(ids, at) {
@@ -292,11 +346,6 @@ export const prismaDiscordStore: DiscordStore = {
     ])
     await prisma.discordGuildDaily.upsert({ where: { date: day }, update: { memberCount, joinedCount, leftCount }, create: { date: day, memberCount, joinedCount, leftCount } })
     return { memberCount, joinedCount, leftCount }
-  },
-
-  async linkedAccounts() {
-    const users = await prisma.user.findMany({ where: { discordUserId: { not: null } }, select: { id: true, discordUserId: true } })
-    return new Map(users.map((u) => [u.discordUserId!, u.id]))
   },
 
   async purgedAuthors() {

@@ -219,7 +219,8 @@ export default function PrivacyPage() {
                 </li>
                 <li>
                   For each public thread or forum post in those channels: its title, so its activity
-                  can be counted under its channel.
+                  can be counted under its channel, and who started it (their Discord user ID), so the
+                  title can be deleted if they ask us to delete their data.
                 </li>
                 <li>
                   For the member list: each member&apos;s Discord user ID, username, display name, roles
@@ -255,9 +256,11 @@ export default function PrivacyPage() {
                   {CONTACT_EMAIL}
                 </a>{" "}
                 with &ldquo;Discord Deletion Request&rdquo; in the subject and your Discord username. We
-                delete your message records, member record and account link, and the bot stops
-                recording your activity. Discord&apos;s own handling of your data is covered by
-                Discord&apos;s privacy policy.
+                delete your message records, your member record, your account link and the titles of
+                threads and forum posts you started (other members&apos; replies in them still count),
+                and the bot stops recording your activity, including the titles of threads you start
+                later. Discord&apos;s own handling of your data is covered by Discord&apos;s privacy
+                policy.
               </P>
             </SubSection>
           </Section>
@@ -536,6 +539,10 @@ export default function PrivacyPage() {
                 </li>
                 <li>Your Discord account link, if you made one, is removed</li>
                 <li>
+                  Our records of whether the emails we sent you were delivered (see Section 10) are
+                  deleted
+                </li>
+                <li>
                   You will be permanently signed out and unable to log in to the deleted account
                 </li>
               </UL>
@@ -682,15 +689,19 @@ export default function PrivacyPage() {
                   </tr>
                   <tr>
                     <td className="p-4 font-bold text-white">Email delivery logs</td>
-                    <td className="p-4">Up to 1 year (Resend manages its own retention)</td>
+                    <td className="p-4">
+                      Our record of each email&apos;s delivery (the address it went to and whether it was
+                      delivered, bounced or marked as spam): 12 months, and deleted with your account.
+                      Resend manages the retention of its own logs
+                    </td>
                   </tr>
                   <tr>
                     <td className="p-4 font-bold text-white">Discord activity records</td>
                     <td className="p-4">
-                      12 months (message records; thread titles, 12 months after the thread was last
-                      active; members who left, 12 months after leaving). Daily totals, which identify
-                      no one, are kept. A channel&apos;s records, totals included, are deleted when it
-                      stops being synced
+                      12 months (message records; thread titles and who started them, 12 months after
+                      the thread was last active; members who left, 12 months after leaving). Daily
+                      totals, which identify no one, are kept. A channel&apos;s records, totals
+                      included, are deleted when it stops being synced
                     </td>
                   </tr>
                   <tr>
