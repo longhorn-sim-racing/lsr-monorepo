@@ -15,10 +15,11 @@ The working record for Jack 2.0 (#188): what's done, what's next, and every call
 | Area | Status | PR |
 |---|---|---|
 | Design (`docs/jack-2/design.md`) | v2 done (research + six-lens review folded in) | |
-| G1: schema, migrations, RLS, scheduler SQL | Reviewed, fixes in | #192 |
-| G1: interfaces, plug-in slots, display kinds | Built, in review | #193 |
-| G1: 2.0 prompt, run_sql hardening, CI, dependencies | Built, in review | #194 |
-| Wave 1: refactors, connectors, scheduler, proposals, files, model loop, eval harness, club data, memory | Briefs ready; starts when G1 merges | |
+| G1: schema, migrations, RLS, scheduler SQL | Merged | #192 |
+| G1: interfaces, plug-in slots, display kinds | Merged | #193 |
+| G1: 2.0 prompt, run_sql hardening, CI, dependencies | Merged | #194 |
+| G1 follow-ups (search index revoke, typed prompt slots) | Merged | #196 |
+| Wave 1: refactors, connectors, scheduler, proposals, files, model loop, eval harness, club data, memory | Building (workflow: build, review, fix) | |
 | Club data: recruiting, race performance, site content, room search | Not started | |
 | Memory: knowledge base, seed drafts, officer profiles | Not started | |
 | Outside sources: Stripe, Resend, Vercel analytics, Instagram, Twitch, web search | Not started | |
@@ -72,6 +73,10 @@ Calls made during the build, for Gray to review. Newest last.
 - **Standing Discord rules post fixed templates:** public events only, no pings unless an officer names one (§12.1).
 - **Search index is one side table (`JackSearchDoc`)** kept current by triggers, instead of tsvector columns: Prisma can't read tsvector, so a column would break Jack's `SELECT *` queries, including today's Jack once migrations reach production (G1-data review).
 - **The audit log hides recruiting entries about officers' own applications** from Jack (RLS policy plus the `audit_log` tool). Those entries carry review scores and decisions (G1-data review).
+- **Knowledge seed content never goes in the repo** (it's public). Drafts live in `~/.lsr/jack-knowledge-seed/`, and the load script reads them from there.
+- **Jack's SQL role has no grant on the search index** (`JackSearchDoc`). `run_sql` reports it off-limits, like `SystemSetting`.
+- **`run_sql` refuses `ts_rewrite`** (it runs a query from a string). Found in the G1-prompt review; also live on main, so it's fixed there in #195.
+- **The `propose_*` tools are generic:** each builds its input from the kinds registered for it (`kindsForTool`), so tracks add kinds without editing each other's tool files.
 - **For Gray to sign off, two key exceptions to "read-only or restricted":**
   - Vercel offers no read-only analytics token. A project-scoped, read-write token is used only by a daily snapshot job, with a short expiry (§12.5).
   - Resend's production key stays send-only, and delivery data arrives by webhook instead.
@@ -102,3 +107,12 @@ Calls made during the build, for Gray to review. Newest last.
     - the audit log leaked officer-applicant review scores.
   - Verified locally as `jack_readonly` with temporary data.
   - Wave-1 briefs written (9 builders); a shared build lock keeps parallel Next builds from exhausting memory.
+- **10/23 (early):**
+  - #193 and #194 reviewed independently: 12 and 15 findings, all fixed.
+  - Merged #192, #193, #194 and follow-up #196. The combined branch passes lint, typecheck and 1,044 tests.
+  - **Found on main, fixed separately:** `run_sql`'s name check could be bypassed with `ts_rewrite()`. PR #195 (P1, for Gray).
+  - Knowledge seed drafting started (an agent reads Teams and Drive; output stays in the private folder).
+  - Wave 1 launched as a workflow: 9 builders in worktrees, each PR then independently reviewed and fixed.
+  - **Knowledge seed drafted:** 99 entries plus an index in the private seed folder (not the repo). Topics: the club 5, who does what 27, decisions 14, policies 7, brand 5, sponsors 6, events playbook 7, recruiting 3, services and access 20, calendar 5.
+    - **Waiting on Gray:** 26 questions at the end of `_index.md` (conflicts between sources, facts not found, judgment calls).
+    - **Note for the memory PR:** the seed's `owner` is a department name. The loader maps it to a person when one clearly owns it, otherwise leaves `ownerId` empty and keeps the department as a tag.
