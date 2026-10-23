@@ -269,6 +269,8 @@ describe("payments_summary shaping", () => {
 
   it("names productless payments as event fees", () => {
     expect(itemName({ product: null, eventRegistration: null })).toBe("Event fee")
+    expect(itemName({ product: null, eventRegistration: null }, "GM 2")).toBe("Event fee: GM 2")
+    expect(itemName({ product: null, eventRegistration: { event: { title: "Karting Night" } } }, "GM 2")).toBe("Event fee: Karting Night")
   })
 })
 

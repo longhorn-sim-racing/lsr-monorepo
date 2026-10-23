@@ -1106,7 +1106,12 @@ function summarize(all: Row[], personas: JackRoomPersonaKey[], models: Record<st
   return lines.join("\n") + "\n";
 }
 
-main().catch(async (error) => {
-  console.error(error);
-  process.exit(1);
-});
+// Exits explicitly: an open handle (a keep-alive socket or a client the run left open) otherwise
+// keeps the process alive after the summary, which stalls a loop over several tracks.
+main().then(
+  () => process.exit(process.exitCode ?? 0),
+  (error) => {
+    console.error(error);
+    process.exit(1);
+  }
+);

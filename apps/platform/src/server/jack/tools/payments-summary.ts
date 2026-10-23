@@ -27,11 +27,14 @@ export type PaymentRow = {
   user: { displayName: string; email: string }
 }
 
-/** The name of what was bought: the product, or the event for a paid registration */
-export function itemName(p: Pick<PaymentRow, "product" | "eventRegistration">): string {
+/**
+ * The name of what was bought: the product, or the event for a paid registration. `eventTitle` names
+ * an event fee whose seat is gone (a checkout that never paid keeps its event only in its metadata).
+ */
+export function itemName(p: { product: { name: string } | null; eventRegistration: { event: { title: string } } | null }, eventTitle?: string): string {
   if (p.product) return p.product.name
   if (p.eventRegistration) return `Event fee: ${p.eventRegistration.event.title}`
-  return "Event fee"
+  return eventTitle ? `Event fee: ${eventTitle}` : "Event fee"
 }
 
 export function summarizePayments(payments: PaymentRow[]) {
@@ -226,10 +229,19 @@ async function runUnpaidCheckouts({ from, to, now }: { from?: string; to?: strin
     prisma.payment.findMany({ where: { status: "succeeded" }, select: { userId: true, productId: true, metadata: true, eventRegistration: { select: { eventId: true } } } }),
   ])
   const open = unpaidCheckouts(attempts, succeeded)
+  // Event fees without a seat name their event from the checkout's metadata, so two of them don't read as one item
+  const metaEventId = (p: (typeof open)[number]) => {
+    const id = !p.product && !p.eventRegistration ? (p.metadata as Record<string, unknown> | null)?.eventId : null
+    return typeof id === "string" ? id : null
+  }
+  const eventIds = [...new Set(open.flatMap((p) => metaEventId(p) ?? []))]
+  const titles = new Map(
+    (eventIds.length ? await prisma.event.findMany({ where: { id: { in: eventIds } }, select: { id: true, title: true } }) : []).map((e) => [e.id, e.title])
+  )
   const rows = open.map((p) => ({
     name: p.user.displayName,
     email: p.user.email,
-    item: p.product?.name ?? (p.eventRegistration ? `Event fee: ${p.eventRegistration.event.title}` : "Event fee"),
+    item: itemName(p, titles.get(metaEventId(p) ?? "")),
     dollars: dollars(p.amountCents),
     lastTry: ct(p.createdAt),
     status: p.status,

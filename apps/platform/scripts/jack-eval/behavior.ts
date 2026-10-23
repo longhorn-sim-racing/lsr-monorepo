@@ -156,7 +156,7 @@ export const BEHAVIOR: Question[] = [
     id: "analysis-gm-trend",
     group: "analysis",
     ask: "Chart how many people registered for each general meeting this year.",
-    expect: "One chart with every general meeting this year and its registration count. If only one meeting has data, saying so instead of charting a single bar is fine.",
+    expect: "One chart with every general meeting this year and its registration count. If only one meeting has data, or none does, saying so instead of charting is fine.",
     truth: async ({ prisma, now }) => {
       const events = await prisma.event.findMany({
         where: { ...COUNTED_EVENT, startsAtUtc: { gte: yearStart(now) } },
@@ -168,7 +168,8 @@ export const BEHAVIOR: Question[] = [
       return judged(`General meetings this year and how many registered: ${listed(gms.map((e) => `${e.title}, ${day(e.startsAtUtc)}: ${e._count.registrations}`))}.`, {
         judgeOnly: false,
         needsModel: true,
-        check: (answer) => (gms.length < 2 || charts(answer).length ? null : "no chart"),
+        // A chart only once two meetings have registrations: one bar, or bars that are all zero, say nothing a sentence doesn't
+        check: (answer) => (gms.filter((e) => e._count.registrations > 0).length < 2 || charts(answer).length ? null : "no chart"),
       });
     },
   },
