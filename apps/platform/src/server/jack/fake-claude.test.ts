@@ -1,6 +1,6 @@
 import type { BetaContentBlockParam, BetaMessageStreamParams } from "@anthropic-ai/sdk/resources/beta/messages/messages"
 import { describe, expect, it } from "vitest"
-import { fakeCitedText, fakeClaude, fakeFileId, fakeToolSearch, fakeWebFetch, fakeWebSearch, requestProblem, searchDeferredTools } from "./fake-claude"
+import { enforceServerTools, fakeCitedText, fakeClaude, fakeFileId, fakeToolSearch, fakeWebFetch, fakeWebSearch, fetchableUrl, requestProblem, searchDeferredTools } from "./fake-claude"
 
 /** The fake's stand-ins for the API's request checks, so the model loop's tests can trust a pass */
 
@@ -92,6 +92,76 @@ describe("requestProblem", () => {
     const stream = fake.client.stream(request({ tools: [tool("a", { defer_loading: true })] }))
     await expect(stream[Symbol.asyncIterator]().next()).rejects.toMatchObject({ status: 400 })
     expect(fake.calls).toHaveLength(1)
+  })
+})
+
+describe("what web_fetch may open (fetchableUrl and enforceServerTools)", () => {
+  const link = "https://b.example/page"
+  const fetchTool = (url_sources?: Record<string, unknown>, max_uses?: number) => ({ type: "web_fetch_20260209", name: "web_fetch", ...(max_uses ? { max_uses } : {}), ...(url_sources ? { url_sources } : {}) })
+  const sqlTurn = (text: string) => [
+    assistant([{ type: "tool_use", id: "toolu_sql", name: "run_sql", input: {} }]),
+    user([{ type: "tool_result", tool_use_id: "toolu_sql", content: text }]),
+  ]
+  const linksTurn = (text: string) => [
+    assistant([{ type: "tool_use", id: "toolu_links", name: "web_links", input: {} }]),
+    user([{ type: "tool_result", tool_use_id: "toolu_links", content: [{ type: "text", text }] }]),
+  ]
+  const jackOnly = { client_tool_results: { type: "only", tools: [{ type: "tool_reference", name: "web_links" }] } }
+
+  it("follows officers' messages, and earlier search and fetch results", () => {
+    expect(fetchableUrl(request({ messages: [{ role: "user", content: `Open ${link}` }] }), link)).toBe(true)
+    expect(fetchableUrl(request({ messages: [user([{ type: "text", text: `Open ${link}` }])] }), link)).toBe(true)
+    const [call, result] = fakeWebSearch("q", [{ url: link }])
+    expect(fetchableUrl(request({ messages: [user([{ type: "text", text: "hi" }]), assistant([call, result])] }), link)).toBe(true)
+    // Earlier in the same response
+    expect(fetchableUrl(request({}), link, [call, result])).toBe(true)
+  })
+
+  it("never follows the model's own text, its tool inputs, or a tool search result", () => {
+    const [searchCall] = fakeWebSearch(link, [])
+    const messages = [
+      user([{ type: "text", text: "hi" }]),
+      assistant([{ type: "text", text: `See ${link}` }, searchCall, ...fakeToolSearch(link, [])]),
+      user([{ type: "text", text: "and?" }]),
+    ]
+    expect(fetchableUrl(request({ messages }), link)).toBe(false)
+  })
+
+  it("follows client tool results only as url_sources says", () => {
+    const sql = request({ messages: [user([{ type: "text", text: "hi" }]), ...sqlTurn(`{"url":"${link}"}`)] })
+    const links = request({ messages: [user([{ type: "text", text: "hi" }]), ...linksTurn(`{"url":"${link}"}`)] })
+    const withFetch = (params: BetaMessageStreamParams, url_sources?: Record<string, unknown>) => ({ ...params, tools: [fetchTool(url_sources)] as never })
+
+    // The API's default: every client tool's results
+    expect(fetchableUrl(withFetch(sql), link)).toBe(true)
+    expect(fetchableUrl(withFetch(sql, { client_tool_results: { type: "none" } }), link)).toBe(false)
+    expect(fetchableUrl(withFetch(sql, jackOnly), link)).toBe(false)
+    expect(fetchableUrl(withFetch(links, jackOnly), link)).toBe(true)
+    expect(fetchableUrl(withFetch(sql, { client_tool_results: { type: "except", tools: [{ type: "tool_reference", name: "run_sql" }] } }), link)).toBe(false)
+    expect(fetchableUrl(withFetch(links, { client_tool_results: { type: "except", tools: [{ type: "tool_reference", name: "run_sql" }] } }), link)).toBe(true)
+  })
+
+  it("answers a fetch it may not open with url_not_in_prior_context, and a call past max_uses with max_uses_exceeded", () => {
+    const params = request({ tools: [fetchTool(jackOnly, 2)] as never, messages: [user([{ type: "text", text: "Open https://a.example/ and https://c.example/" }]), ...sqlTurn(link)] })
+    const blocks = [...fakeWebFetch("https://a.example/", {}), ...fakeWebFetch(link, {}), ...fakeWebFetch("https://c.example/", {})]
+
+    const out = enforceServerTools(params, blocks) as unknown as { type: string; content?: { type?: string; error_code?: string } }[]
+
+    expect(out.filter((block) => block.type === "web_fetch_tool_result").map((block) => block.content?.error_code ?? block.content?.type)).toEqual([
+      "web_fetch_result",
+      "url_not_in_prior_context",
+      "max_uses_exceeded",
+    ])
+    expect(out[3].content).toEqual({ type: "web_fetch_tool_result_error", error_code: "url_not_in_prior_context" })
+  })
+
+  it("checks a result that finishes a call from the turn before (a mixed turn)", () => {
+    const [call, result] = fakeWebFetch(link, {}, { id: "srvtoolu_mixed" })
+    const turn = (text: string) =>
+      request({ messages: [user([{ type: "text", text }]), assistant([call, { type: "tool_use", id: "toolu_a", name: "a", input: {} }]), user([{ type: "tool_result", tool_use_id: "toolu_a", content: "ok" }])] })
+    const codeOf = (params: BetaMessageStreamParams) => (enforceServerTools(params, [result])[0] as unknown as { content: { type: string; error_code?: string } }).content
+    expect(codeOf(turn(`Open ${link}`))).toMatchObject({ type: "web_fetch_result" })
+    expect(codeOf(turn("Open the page"))).toEqual({ type: "web_fetch_tool_result_error", error_code: "url_not_in_prior_context" })
   })
 })
 

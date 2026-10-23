@@ -6,7 +6,9 @@
  * with input_json_delta, message_delta (with usage.server_tool_use), message_stop; finalMessage()
  * resolves with the assembled message. An aborted signal stops it the way the SDK does
  * (APIUserAbortError). A request the real API would reject (see requestProblem) fails with a 400 the
- * same way. No network. Not used by the app; scripts use it for dry runs.
+ * same way, and a scripted web call gets the error result the API would give it instead of its scripted
+ * one: a fetch of a link that isn't in the prior context, or a call past max_uses (see
+ * enforceServerTools). No network. Not used by the app; scripts use it for dry runs.
  */
 import Anthropic from "@anthropic-ai/sdk"
 import type {
@@ -71,11 +73,11 @@ export function fakeClaude(script: Script, createScript: Script = () => ({ text:
   }
 
   const build = (turn: FakeTurn, params: BetaMessageStreamParams): { message: BetaMessage; events: BetaRawMessageStreamEvent[] } => {
-    const content: BetaContentBlock[] = [
+    const content: BetaContentBlock[] = enforceServerTools(params, [
       ...(turn.leading ?? []),
       { type: "thinking", thinking: "", signature: `sig-${toolIds}` } as BetaContentBlock,
       ...(turn.blocks ?? []),
-    ]
+    ])
     if (turn.text) content.push({ type: "text", text: turn.text, citations: null } as BetaContentBlock)
     for (const tool of turn.tools ?? []) {
       content.push({ type: "tool_use", id: tool.id ?? `toolu_${++toolIds}`, name: tool.name, input: tool.input } as BetaContentBlock)
@@ -291,6 +293,88 @@ export function requestProblem(params: BetaMessageStreamParams): string | null {
     running = content.flatMap((block) => (block.type === "server_tool_use" && !answered.has(block.id) ? [block.id] : []))
   }
   return null
+}
+
+type UrlSource = { type?: "all" | "none" | "only" | "except"; tools?: { name: string }[] }
+type ServerToolDef = { name?: string; max_uses?: number; url_sources?: { user_input?: UrlSource; client_tool_results?: UrlSource; server_tool_results?: UrlSource } }
+
+const serverToolDef = (params: Pick<BetaMessageStreamParams, "tools">, name: string) => ((params.tools ?? []) as ServerToolDef[]).find((tool) => tool.name === name)
+const isWebResult = (block: AnyBlock) => block.type === "web_search_tool_result" || block.type === "web_fetch_tool_result"
+const textOf = (content: unknown): string =>
+  typeof content === "string" ? content : Array.isArray(content) ? content.map((block) => (block?.type === "text" ? block.text : JSON.stringify(block))).join("\n") : JSON.stringify(content ?? "")
+
+/**
+ * Whether web_fetch may open `url` in this request, as the API decides (url_not_in_prior_context
+ * otherwise): it's in an officer's turn, in a client tool's result that url_sources lets it follow, or
+ * in an earlier web search or fetch result (in the conversation, or earlier in this response). Never
+ * from the model's own text or another server tool's result. url_sources' keys default to "all", as the
+ * API's do. A substring match: the real API's matching rules aren't documented
+ */
+export function fetchableUrl(params: Pick<BetaMessageStreamParams, "tools" | "messages">, url: string, earlier: readonly AnyBlock[] = []): boolean {
+  const sources = serverToolDef(params, "web_fetch")?.url_sources ?? {}
+  const allows = (source: UrlSource | undefined, toolName?: string) => {
+    const type = source?.type ?? "all"
+    if (type === "all" || type === "none") return type === "all"
+    const named = (source?.tools ?? []).some((tool) => tool.name === toolName)
+    return type === "only" ? named : !named
+  }
+  const toolNames = new Map<string, string>()
+  const texts: string[] = []
+  for (const message of params.messages) {
+    if (typeof message.content === "string") {
+      if (message.role === "user" && allows(sources.user_input)) texts.push(message.content)
+      continue
+    }
+    for (const block of message.content) {
+      if (message.role === "assistant") {
+        if (block.type === "tool_use") toolNames.set(block.id, block.name)
+        else if (isWebResult(block) && allows(sources.server_tool_results)) texts.push(textOf((block as { content?: unknown }).content))
+      } else if (block.type === "text") {
+        if (allows(sources.user_input)) texts.push(block.text)
+      } else if (block.type === "tool_result" && allows(sources.client_tool_results, toolNames.get(block.tool_use_id))) {
+        texts.push(textOf(block.content))
+      }
+    }
+  }
+  for (const block of earlier) if (isWebResult(block) && allows(sources.server_tool_results)) texts.push(textOf((block as { content?: unknown }).content))
+  return texts.some((text) => text.includes(url))
+}
+
+/**
+ * A scripted response's web calls as the API would answer them: a call past its tool's max_uses (counted
+ * per response; failed calls count too) gets max_uses_exceeded, and a fetch of a link web_fetch may not
+ * open (fetchableUrl) gets url_not_in_prior_context, each in place of the scripted result
+ */
+export function enforceServerTools(params: Pick<BetaMessageStreamParams, "tools" | "messages">, content: BetaContentBlock[]): BetaContentBlock[] {
+  // Every server call so far, by id: a result can answer a call from the turn before (a mixed turn)
+  const calls = new Map<string, { name: string; input: unknown }>()
+  for (const message of params.messages) {
+    if (message.role !== "assistant" || typeof message.content === "string") continue
+    for (const block of message.content) if (block.type === "server_tool_use") calls.set(block.id, { name: block.name, input: block.input })
+  }
+  const uses = new Map<string, number>()
+  const overLimit = new Set<string>()
+  const earlier: BetaContentBlock[] = []
+  for (const block of content) {
+    let out = block
+    if (block.type === "server_tool_use") {
+      calls.set(block.id, { name: block.name, input: block.input })
+      const count = (uses.get(block.name) ?? 0) + 1
+      uses.set(block.name, count)
+      const max = serverToolDef(params, block.name)?.max_uses
+      if (max !== undefined && count > max) overLimit.add(block.id)
+    } else if (block.type === "web_search_tool_result" || block.type === "web_fetch_tool_result") {
+      const url = (calls.get(block.tool_use_id)?.input as { url?: unknown } | undefined)?.url
+      const code = overLimit.has(block.tool_use_id)
+        ? "max_uses_exceeded"
+        : block.type === "web_fetch_tool_result" && !(typeof url === "string" && fetchableUrl(params, url, earlier))
+          ? "url_not_in_prior_context"
+          : null
+      if (code) out = { ...block, content: { type: `${block.type}_error`, error_code: code } } as BetaContentBlock
+    }
+    earlier.push(out)
+  }
+  return earlier
 }
 
 /*
