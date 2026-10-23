@@ -82,9 +82,10 @@ describe("buildHistory", () => {
     expect(history[1].content).toBe(
       "iRacing and the FIA.\n\n[Tools used: " +
         'web_search {"query":"college sim racing sponsors"} → Searched the web (5 results, 3 cited) (cited: iracing.com, fia.com); ' +
-        'web_fetch {"url":"https://fia.com/esports"} → Read fia.com; ' +
+        "web_fetch → Read fia.com; " +
         'web_search {"query":"x"} → failed: Web search failed: too many requests right now; try again in a minute]'
     )
+    expect(history[1].content).not.toContain("https://")
   })
 
   it("puts a persona switch note in the turn it came before", () => {

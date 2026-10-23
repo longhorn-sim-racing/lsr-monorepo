@@ -3,7 +3,7 @@ import { linkHost } from "@/lib/jack/links"
 import { parseToolParts, type JackToolPart } from "@/lib/jack/parts"
 import type { JackPersonaKey } from "@/lib/jack/types"
 import { FORMER_OFFICER } from "./messages"
-import { WEB_SEARCH } from "./web-tools"
+import { WEB_FETCH, WEB_SEARCH } from "./web-tools"
 
 /** The fields of a JackMessage row the history needs (a JackMessageRow fits) */
 export type HistoryRow = {
@@ -160,13 +160,14 @@ function clip(text: string, max: number) {
 
 /**
  * One line per reply: which tools ran, with what input, and what came back (as labelled). Web searches
- * and fetches are in it too (parts named web_search and web_fetch, with the query or the page's site),
- * and a search adds the sites of the pages the reply cited, so a later turn knows the reply used the
- * web and where it looked. The links themselves aren't: web_links returns them, where web_fetch may open them
+ * and fetches are in it too (parts named web_search and web_fetch): a search with its query and the sites
+ * of the pages the reply cited, a fetch with only its label ("Read fia.com"), so a later turn knows the
+ * reply used the web and where it looked. The links themselves aren't: web_fetch couldn't open a link
+ * from here anyway, so web_links returns them instead
  */
 export function toolNote(parts: JackToolPart[]): string {
   const used = parts.map((part) => {
-    const input = part.input === null || part.input === undefined ? "" : ` ${clip(JSON.stringify(part.input), 300)}`
+    const input = part.input === null || part.input === undefined || part.name === WEB_FETCH ? "" : ` ${clip(JSON.stringify(part.input), 300)}`
     const outcome = part.status === "error" ? `failed: ${part.error ?? part.label}` : part.label
     const hosts = [...new Set(citedPages(part).map((source) => linkHost(source.url) ?? "").filter(Boolean))]
     const sites = hosts.length ? ` (cited: ${hosts.slice(0, 5).join(", ")}${hosts.length > 5 ? ", …" : ""})` : ""
