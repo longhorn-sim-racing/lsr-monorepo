@@ -40,9 +40,27 @@ describe("neutralizeLinks", () => {
     expect(neutralizeLinks("(evil.example:8443/x?y=1)")).toBe("([link to evil[.]example])")
   })
 
+  it("catches hosts in other scripts, punycode and underscores, as a URL parser would read them", () => {
+    expect(neutralizeLinks("пример.com/collect?d=1")).toBe("[link to xn--e1afmkfd[.]com]")
+    expect(neutralizeLinks("例え.com/x and evil.みんな/x")).toBe("[link to xn--r8jz45g[.]com] and [link to evil[.]xn--q9jyb4c]")
+    expect(neutralizeLinks("пример.рф/collect?d=1, мир.рф/a")).toBe("[link to xn--e1afmkfd[.]xn--p1ai], [link to xn--h1ahn[.]xn--p1ai]")
+    expect(neutralizeLinks("evil.xn--p1ai/collect?d=1")).toBe("[link to evil[.]xn--p1ai]")
+    expect(neutralizeLinks("example.भारत/x")).toBe("[link to example[.]xn--h2brj9c]")
+    expect(neutralizeLinks("x_evil.example/collect?d=1")).toBe("[link to x_evil[.]example]")
+  })
+
+  it("catches hosts written with other dots, a trailing dot, invisible characters, or a scheme without slashes", () => {
+    expect(neutralizeLinks("evil。example/x, evil．example/x, 10。0。0。1/x")).toBe("[link to evil[.]example], [link to evil[.]example], [link to 10[.]0[.]0[.]1]")
+    expect(neutralizeLinks("evil.example./collect")).toBe("[link to evil[.]example[.]]")
+    expect(neutralizeLinks("evil.exam­ple/x")).toBe("[link to evil[.]example]")
+    expect(neutralizeLinks("open https:evil.example now")).toBe("open [link to evil[.]example] now")
+  })
+
   it("leaves what isn't a link alone", () => {
     const text = "e.g. laps.csv, v1.2.3, 3/4 of drivers, gray@example.com, and/or 1.5/2, 10.0.0.1 alone, and did you open laps.csv? Or notes.txt#"
     expect(neutralizeLinks(text)).toBe(text)
+    const accented = "résumé.pdf, naïve/approach, describe.ts:68, $10.00/month, 2026/27, use https: always, пример.com alone"
+    expect(neutralizeLinks(accented)).toBe(accented)
   })
 })
 
