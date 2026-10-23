@@ -94,6 +94,8 @@ export type DiscordClientOptions = {
   timeoutMs?: number
   /** The longest a rate limit is waited out before the call fails with DiscordRateLimitError */
   maxWaitMs?: number
+  /** How many times a 429 is retried (and a GET's 5xx, one fewer) */
+  maxRetries?: number
   limiter?: DiscordRateLimiter
 }
 
@@ -141,6 +143,7 @@ export function discordRest(options: Omit<DiscordClientOptions, "guildId">) {
   const base = serviceBaseUrl("discord", DISCORD_API_URL, options.env)
   const timeoutMs = options.timeoutMs ?? DISCORD_TIMEOUT_MS
   const maxWaitMs = options.maxWaitMs ?? DISCORD_MAX_WAIT_MS
+  const maxRetries = options.maxRetries ?? MAX_RETRIES
   const limiter = options.limiter ?? discordRateLimiter
   let unauthorized: DiscordApiError | null = null
 
@@ -175,7 +178,7 @@ export function discordRest(options: Omit<DiscordClientOptions, "guildId">) {
         const retryAfterMs = Math.ceil((info.retryAfter ?? (Number.isFinite(header) ? header : 1)) * 1000)
         const global = info.global || response.headers.get("x-ratelimit-global") === "true"
         limiter.limited(route, retryAfterMs, global)
-        if (attempt >= MAX_RETRIES || retryAfterMs > maxWaitMs) throw new DiscordRateLimitError(route.route, retryAfterMs)
+        if (attempt >= maxRetries || retryAfterMs > maxWaitMs) throw new DiscordRateLimitError(route.route, retryAfterMs)
         continue
       }
       if (response.status === 401) {
@@ -183,7 +186,7 @@ export function discordRest(options: Omit<DiscordClientOptions, "guildId">) {
         unauthorized = new DiscordApiError(401, info.code, route.route, "the bot token was rejected")
         throw unauthorized
       }
-      if (response.status >= 500 && method === "GET" && attempt < MAX_RETRIES - 1) {
+      if (response.status >= 500 && method === "GET" && attempt < maxRetries - 1) {
         await sleep(500 * (attempt + 1), signal)
         continue
       }

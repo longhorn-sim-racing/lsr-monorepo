@@ -2,7 +2,7 @@ import { getSiteUrl } from "@/lib/site-url"
 import { prisma } from "@/server/db"
 import { defineConnector, missingEnv } from "../define"
 import type { ConnectorEnv } from "../types"
-import { discordClient, type DiscordClient } from "./client"
+import { discordClient, type DiscordClient, type DiscordClientOptions } from "./client"
 import type { DiscordApp } from "./oauth"
 import { APP_FLAG } from "./types"
 
@@ -32,9 +32,9 @@ export function discordApp(env: ConnectorEnv = process.env): DiscordApp | null {
   return clientId && clientSecret ? { clientId, clientSecret } : null
 }
 
-/** A bot client straight from env, whether or not the connector is on (smoke tests, the eval's seeder) */
-export function discordClientFromEnv(env: ConnectorEnv = process.env): DiscordClient {
-  return discordClient({ token: env.DISCORD_BOT_TOKEN?.trim() ?? "", guildId: env.DISCORD_GUILD_ID?.trim() ?? "", env })
+/** A bot client straight from env, whether or not the connector is on (smoke tests, the eval's seeder); `budget` tightens its timeout, rate-limit waits and retries */
+export function discordClientFromEnv(env: ConnectorEnv = process.env, budget: Pick<DiscordClientOptions, "timeoutMs" | "maxWaitMs" | "maxRetries"> = {}): DiscordClient {
+  return discordClient({ token: env.DISCORD_BOT_TOKEN?.trim() ?? "", guildId: env.DISCORD_GUILD_ID?.trim() ?? "", env, ...budget })
 }
 
 /** Which privileged intents the app has switched on, from its flags (research §3 H1) */
