@@ -78,7 +78,7 @@ export default async function JackUsagePage({ searchParams }: { searchParams: Pr
       <Panel>
         <PanelHeader
           title={`Common questions · ${month.label}`}
-          description={`Words that come up in the first message of the most rooms opened this month (${usage.rooms} ${usage.rooms === 1 ? "room" : "rooms"} with a question). Everyday words are left out, and words aren't merged: "event" and "events" count apart.`}
+          description={`Words that come up in the first question to Jack in the most rooms opened this month (${usage.rooms} ${usage.rooms === 1 ? "room" : "rooms"} with a question). Everyday words are left out, and words aren't merged: "event" and "events" count apart.`}
         />
         {usage.words.length ? (
           <Table minWidth={560} className="rounded-none border-0">
@@ -110,7 +110,7 @@ export default async function JackUsagePage({ searchParams }: { searchParams: Pr
         ) : (
           <EmptyState
             title={usage.rooms ? "No word comes up in two rooms yet" : "No rooms opened this month"}
-            description="A word shows here once it's in the first message of at least two rooms."
+            description="A word shows here once it's in the first question of at least two rooms."
           />
         )}
       </Panel>

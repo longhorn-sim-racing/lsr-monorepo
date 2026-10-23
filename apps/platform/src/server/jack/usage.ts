@@ -306,13 +306,16 @@ export function commonWords(rooms: { id: string; title: string | null; question:
     .slice(0, limit)
 }
 
-/** The rooms opened in the month (newest first, not the eval's) with each one's first officer message */
+/**
+ * The rooms opened in the month (newest first, not the eval's) with each one's first officer message to Jack:
+ * in a mention-mode room, the first that mentions him, not what officers said among themselves before it
+ */
 export async function firstQuestions(month: UsageMonth, limit = 500): Promise<{ id: string; title: string | null; question: string }[]> {
   const rooms = await prisma.jackRoom.findMany({
     where: { createdAt: { gte: month.start, lt: month.end }, NOT: { id: { startsWith: EVAL_ROOM_PREFIX } } },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     take: limit,
-    select: { id: true, title: true, messages: { where: { kind: "user" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1, select: { content: true } } },
+    select: { id: true, title: true, messages: { where: { kind: "user", expectsAnswer: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1, select: { content: true } } },
   })
   return rooms.filter((room) => room.messages[0]?.content.trim()).map((room) => ({ id: room.id, title: room.title, question: room.messages[0].content }))
 }

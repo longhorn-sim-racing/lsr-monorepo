@@ -199,7 +199,7 @@ describe("common questions", () => {
     expect(commonWords([])).toEqual([])
   })
 
-  it("loads each room's first officer message, skipping the eval's rooms and rooms with none", async () => {
+  it("loads each room's first officer message to Jack (not an aside in a mention-mode room), skipping the eval's rooms and rooms with none", async () => {
     db.jackRoom.findMany.mockResolvedValue([
       { id: "r1", title: "GM 2", messages: [{ content: "When is GM 2?" }] },
       { id: "r2", title: null, messages: [] },
@@ -209,7 +209,7 @@ describe("common questions", () => {
     expect(await firstQuestions(month)).toEqual([{ id: "r1", title: "GM 2", question: "When is GM 2?" }])
     const args = db.jackRoom.findMany.mock.calls[0][0]
     expect(args.where).toEqual({ createdAt: { gte: month.start, lt: month.end }, NOT: { id: { startsWith: "jack-eval-" } } })
-    expect(args.select.messages).toMatchObject({ where: { kind: "user" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1 })
+    expect(args.select.messages).toMatchObject({ where: { kind: "user", expectsAnswer: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 1 })
   })
 })
 
