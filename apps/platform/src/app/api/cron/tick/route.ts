@@ -55,8 +55,12 @@ export async function POST(request: Request) {
 
 /**
  * Where hand-off jobs are posted: production's canonical address (the tick's own URL), and elsewhere the
- * address this request came in on, so a local dev server on any port hands off to itself
+ * address this request came in on, so a local dev server on any port hands off to itself. Local pg_cron
+ * reaches the dev server as host.docker.internal, a name only containers can be sure to resolve
  */
 function handoffBaseUrl(request: Request): string {
-  return process.env.VERCEL_ENV === "production" ? getSiteUrl() : new URL(request.url).origin
+  if (process.env.VERCEL_ENV === "production") return getSiteUrl()
+  const url = new URL(request.url)
+  if (url.hostname === "host.docker.internal") url.hostname = "localhost"
+  return url.origin
 }

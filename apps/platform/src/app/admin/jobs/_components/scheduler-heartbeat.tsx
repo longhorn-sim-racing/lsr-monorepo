@@ -49,7 +49,8 @@ export function SchedulerHeartbeatPanel({
     },
   ]
   if (health.cron) items.push({ label: "pg_cron", value: <CronLine cron={health.cron} /> })
-  if (health.delivery) items.push({ label: "Site's answers (6 h)", value: <DeliveryLine delivery={health.delivery} now={now} /> })
+  // pg_net keeps no request URLs, so this is every pg_net call; the tick is its only caller here
+  if (health.delivery) items.push({ label: "pg_net calls (6 h)", value: <DeliveryLine delivery={health.delivery} now={now} /> })
 
   return (
     <Panel className={className}>
@@ -116,7 +117,10 @@ function DeliveryLine({ delivery, now }: { delivery: NonNullable<SchedulerHealth
         <span className="text-xs text-admin-subtle">
           Last failure {relative(failure.at, now)}: {failure.status ? `HTTP ${failure.status}` : "no answer"}
           {failure.error ? ` (${failure.error})` : ""}
-          {failure.status === 401 ? ". A 401 means the Vault secret and SCHEDULER_SIGNING_SECRET don't match" : ""}
+          {failure.status === 401 ? ". A 401 from the tick means the Vault secret and SCHEDULER_SIGNING_SECRET don't match" : ""}
+          {failure.status === 405 || (failure.status && failure.status >= 300 && failure.status < 400)
+            ? ". A redirect (which turns pg_net's POST into a GET, answered 405) means lsr_scheduler_url isn't the exact canonical address"
+            : ""}
         </span>
       )}
     </span>

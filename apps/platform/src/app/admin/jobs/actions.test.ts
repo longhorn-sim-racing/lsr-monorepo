@@ -44,13 +44,20 @@ beforeEach(() => {
 
 describe("scheduled job actions", () => {
   it("are for admins only: officers get an answer, not a change", async () => {
-    guards.requireRole.mockRejectedValue(new Error("Requires one of the following roles: admin"))
+    const notAdmin = Object.assign(new Error("Requires one of the following roles: admin"), { name: "NotAuthorizedError" })
+    guards.requireRole.mockRejectedValue(notAdmin)
     for (const result of [await setScheduledJobEnabled("job-1", true), await runScheduledJobNow("job-1"), await changeScheduledJobSchedule("job-1", "0 5 * * *")]) {
       expect(result).toEqual({ ok: false, error: "Only admins can change scheduled jobs." })
     }
     expect(guards.requireRole).toHaveBeenCalledWith("admin")
     expect(db.scheduledJob.update).not.toHaveBeenCalled()
     expect(audit.createAuditLog).not.toHaveBeenCalled()
+  })
+
+  it("don't mistake a failed session lookup for 'not an admin'", async () => {
+    guards.requireRole.mockRejectedValue(new Error("Can't reach database server"))
+    await expect(setScheduledJobEnabled("job-1", true)).rejects.toThrow("Can't reach database server")
+    expect(db.scheduledJob.update).not.toHaveBeenCalled()
   })
 
   describe("setScheduledJobEnabled", () => {

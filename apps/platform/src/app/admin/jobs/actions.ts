@@ -19,11 +19,13 @@ const NOT_ADMIN = "Only admins can change scheduled jobs."
 const GONE = "That job doesn't exist any more. Reload the page."
 const UNKNOWN = "This version of the site doesn't know this job, so it can't run. It may come from a newer or an older deploy."
 
+/** The admin's id, or null for someone who isn't one. Anything else (the database being down) is thrown, not mistaken for "not an admin" */
 async function adminId(): Promise<string | null> {
   try {
     return (await requireRole("admin")).id
-  } catch {
-    return null
+  } catch (error) {
+    if (error instanceof Error && (error.name === "NotAuthorizedError" || error.name === "NotAuthenticatedError")) return null
+    throw error
   }
 }
 

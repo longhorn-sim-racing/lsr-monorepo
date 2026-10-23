@@ -107,10 +107,15 @@ export function describeSchedule(schedule: string): string | null {
   const [minute, hour, dayOfMonth, month, dayOfWeek] = normalizeSchedule(schedule).split(" ")
   const anyDay = dayOfMonth === "*" && month === "*" && dayOfWeek === "*"
 
+  // A step starts over each hour (minutes) or each day (hours), so only one that divides it evenly is "every N"
   if (anyDay && hour === "*") {
     if (minute === "*") return "Every minute"
     const step = STEP.exec(minute)
-    if (step) return Number(step[1]) === 1 ? "Every minute" : `Every ${Number(step[1])} minutes`
+    if (step) {
+      const n = Number(step[1])
+      if (n === 0 || 60 % n !== 0) return null
+      return n === 1 ? "Every minute" : `Every ${n} minutes`
+    }
     if (NUMBER.test(minute)) return Number(minute) === 0 ? "Every hour, on the hour" : `Every hour at :${minute.padStart(2, "0")}`
     return null
   }
@@ -118,7 +123,10 @@ export function describeSchedule(schedule: string): string | null {
   const m = Number(minute)
   if (anyDay) {
     const step = STEP.exec(hour)
-    if (step) return `Every ${Number(step[1])} hours at :${String(m).padStart(2, "0")}`
+    if (step) {
+      const n = Number(step[1])
+      return n > 0 && 24 % n === 0 ? `Every ${n} hours at :${String(m).padStart(2, "0")}` : null
+    }
   }
 
   const hours = hour.split(",")

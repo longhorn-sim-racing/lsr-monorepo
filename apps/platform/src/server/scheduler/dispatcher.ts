@@ -17,7 +17,8 @@ import type { JobKind, JobResult } from "./types"
  *   computed from now, so runs missed while the scheduler was down don't pile up.
  * - At most 3 jobs run at once. Claiming stops 200 s into the request, and a job is only claimed when its
  *   budget fits the time the function has left; the rest wait for the next tick.
- * - Kinds this code doesn't know (a newer deploy's, or a removed one's) are skipped: never claimed, never failed.
+ * - Kinds this code doesn't know (a newer deploy's, or a removed one's) are skipped: never claimed, never
+ *   failed; only their next run moves on, so they don't keep the tick calling every minute.
  * - `handoff` jobs (Jack runs, backfills) get their own invocation: a signed POST to /api/admin/jack/run.
  * - Every run is a ScheduledJobRun row. A run still "running" when its job is next claimed was cut off
  *   with its function and is marked failed then. Errors and summaries go through redactSecrets().
@@ -244,8 +245,41 @@ async function handOff(job: DueJob, claim: Claim, options: DispatchOptions, cloc
         : `${HANDOFF_PATH} answered ${response.status}`
     )
   } catch (error) {
-    await finishRun(job.id, claim, { status: "error", error: `Couldn't hand the job off: ${errorText(error)}` }, clock)
+    // The answer may be lost after the route already took the job over (a timeout, a dropped connection).
+    // Cancel only while the lock is still ours: the route takes over by swapping that same value, so
+    // exactly one side wins
+    const failure = redactSecrets(`Couldn't hand the job off: ${errorText(error)}`)
+    try {
+      const { count } = await prisma.scheduledJob.updateMany({
+        where: { id: job.id, lockedUntil: claim.lockedUntil },
+        data: { lockedUntil: null, lastRunAt: claim.startedAt, lastStatus: "error", lastError: failure },
+      })
+      if (count === 0) return true
+      await prisma.scheduledJobRun.update({ where: { id: claim.runId }, data: { status: "error", error: failure, finishedAt: new Date(clock()) } })
+    } catch (recording) {
+      console.error(`[scheduler] Couldn't record the failed hand-off of ${job.key}:`, recording)
+    }
     return false
+  }
+}
+
+/**
+ * A job whose kind this code doesn't know is never claimed or failed (newer or older code may know it),
+ * but its next run moves to its next scheduled time: left due, it would make scheduler.tick() call the
+ * site every minute for nothing.
+ */
+async function postponeUnknown(job: DueJob, nowMs: number): Promise<void> {
+  const at = new Date(nowMs)
+  let nextRunAt: Date
+  try {
+    nextRunAt = nextRunAfter(job.schedule, at)
+  } catch {
+    nextRunAt = new Date(nowMs + BAD_SCHEDULE_RETRY_MS)
+  }
+  try {
+    await prisma.scheduledJob.updateMany({ where: { id: job.id, ...dueWhere(at) }, data: { nextRunAt } })
+  } catch (error) {
+    console.error(`[scheduler] Couldn't postpone ${job.key}:`, error)
   }
 }
 
@@ -259,8 +293,12 @@ export async function dispatchDueJobs(options: DispatchOptions = {}): Promise<Di
   const queue: { job: DueJob; kind: JobKind }[] = []
   for (const job of due) {
     const kind = findJobKind(job.kind)
-    if (kind) queue.push({ job, kind })
-    else result.unknown.push(job.key)
+    if (kind) {
+      queue.push({ job, kind })
+    } else {
+      result.unknown.push(job.key)
+      await postponeUnknown(job, clock())
+    }
   }
 
   const worker = async () => {

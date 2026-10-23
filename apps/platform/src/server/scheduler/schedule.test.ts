@@ -55,6 +55,10 @@ describe("job schedules", () => {
       ["0 * * * *", "Every hour, on the hour"],
       ["5 * * * *", "Every hour at :05"],
       ["15 */6 * * *", "Every 6 hours at :15"],
+      // Steps start over each day or hour: */5 hours runs 20:00 then midnight, so it isn't "every 5 hours"
+      ["0 */5 * * *", null],
+      ["*/7 * * * *", null],
+      ["*/15 * * * *", "Every 15 minutes"],
       ["0 6 * * *", "Daily at 6:00 AM CT"],
       ["30 18 * * *", "Daily at 6:30 PM CT"],
       ["0 0 * * *", "Daily at 12:00 AM CT"],

@@ -17,12 +17,20 @@ export const SCHEDULER_STALE_MS = 10 * 60_000
 /** The pg_cron job setup creates (scripts/jack-scheduler-setup.ts) */
 export const TICK_CRON_JOB = "lsr-scheduler-tick"
 
-/** Records a dispatch; `tick` also counts it as a tick (pnpm jack:tick, which stands in for pg_cron locally) */
+/**
+ * Records a dispatch. `tick` also counts it as a tick (pnpm jack:tick, which stands in for pg_cron
+ * locally). Without it only an existing row is updated: scheduler.tick() makes the row before it calls,
+ * so a missing row means pg_cron never ticked, and a tick time made up here would hide that.
+ */
 export async function recordDispatch(at: Date, { tick = false }: { tick?: boolean } = {}): Promise<void> {
+  if (!tick) {
+    await prisma.schedulerHeartbeat.updateMany({ where: { id: HEARTBEAT_ID }, data: { lastDispatchAt: at } })
+    return
+  }
   await prisma.schedulerHeartbeat.upsert({
     where: { id: HEARTBEAT_ID },
     create: { id: HEARTBEAT_ID, lastTickAt: at, lastDispatchAt: at },
-    update: tick ? { lastTickAt: at, lastDispatchAt: at } : { lastDispatchAt: at },
+    update: { lastTickAt: at, lastDispatchAt: at },
   })
 }
 

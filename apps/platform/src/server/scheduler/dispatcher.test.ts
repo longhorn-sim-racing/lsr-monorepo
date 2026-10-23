@@ -84,14 +84,15 @@ describe("dispatchDueJobs", () => {
 
   it("skips kinds it doesn't know: never claimed, never failed, and the rest still run", async () => {
     kind("known", ok())
-    const unknown = store.addJob({ kind: "from.a.newer.deploy", nextRunAt: dueAt })
+    const unknown = store.addJob({ kind: "from.a.newer.deploy", schedule: "0 6 * * *", nextRunAt: dueAt })
     store.addJob({ kind: "known", nextRunAt: dueAt })
 
     const result = await dispatchDueJobs({ startedAt: START, clock: () => START })
 
     expect(result.unknown).toEqual(["from.a.newer.deploy"])
     expect(result.started).toEqual([{ key: "known", status: "ok" }])
-    expect(unknown).toMatchObject({ lockedUntil: null, nextRunAt: dueAt, lastStatus: null })
+    // Only its next run moves on (6 AM CT tomorrow), so it doesn't keep the tick calling every minute
+    expect(unknown).toMatchObject({ lockedUntil: null, lastStatus: null, lastRunAt: null, nextRunAt: new Date("2026-10-23T11:00:00Z") })
     expect(store.runs.some((r) => r.jobId === unknown.id)).toBe(false)
   })
 
@@ -336,6 +337,22 @@ describe("hand-offs", () => {
       expect(job).toMatchObject({ lockedUntil: null, lastStatus: "error" })
     }
     expect(store.runs[0].error).toContain("ECONNREFUSED")
+  })
+
+  it("treats a hand-off whose answer was lost after the route took it over as handed off, leaving the run to the route", async () => {
+    kind("long", ok(), { handoff: true })
+    const job = store.addJob({ kind: "long", nextRunAt: dueAt })
+    const fetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async (_url, init) => {
+      // The route swaps the lock, then the connection drops before its 202 arrives
+      await acceptHandoff(parseHandoffRequest(String(init.body))!, START + 1_000)
+      throw new Error("The operation was aborted due to timeout")
+    })
+
+    const result = await dispatchDueJobs({ startedAt: START, clock: () => START, fetch: fetch as unknown as typeof globalThis.fetch, baseUrl: BASE })
+
+    expect(result.started).toEqual([{ key: "long", status: "handed_off" }])
+    expect(store.runs[0].status).toBe("running")
+    expect(job).toMatchObject({ lockedUntil: new Date(START + 1_000 + LOCK_MS), lastStatus: null })
   })
 
   it("runs handoff jobs in place with handoff: 'inline' (pnpm jack:tick)", async () => {

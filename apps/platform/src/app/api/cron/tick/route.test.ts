@@ -58,6 +58,14 @@ describe("POST /api/cron/tick", () => {
     expect(dispatcher.dispatchDueJobs).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://www.longhornsimracing.org" }))
   })
 
+  it("hands off to localhost when local pg_cron called in through host.docker.internal", async () => {
+    const signed = tick()
+    const fromDocker = new Request("http://host.docker.internal:3113/api/cron/tick", { method: "POST", headers: signed.headers, body: await signed.text() })
+    expect((await route.POST(fromDocker)).status).toBe(202)
+    await after.tasks[0]()
+    expect(dispatcher.dispatchDueJobs).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "http://localhost:3113" }))
+  })
+
   it("doesn't dispatch when nothing is due", async () => {
     dispatcher.countDueJobs.mockResolvedValue(0)
     const res = await route.POST(tick())
