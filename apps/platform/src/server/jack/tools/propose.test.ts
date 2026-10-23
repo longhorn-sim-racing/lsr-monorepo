@@ -118,6 +118,8 @@ describe("the tools Jack gets", () => {
     expect(tool?.description).toContain("- page.update: change a content page")
     expect(JACK_TOOLS.indexOf(tool!)).toBeGreaterThanOrEqual(CORE_JACK_TOOLS.length)
     // Only tools with kinds are sent
-    expect(findJackTool("propose_recurring")).toBeUndefined()
+    const { kindsForTool } = await import("@/server/jack/proposals/registry")
+    const { PROPOSE_TOOLS } = await import("@/server/jack/proposals/types")
+    for (const name of PROPOSE_TOOLS) expect(Boolean(findJackTool(name)), name).toBe(kindsForTool(name).length > 0)
   })
 })
