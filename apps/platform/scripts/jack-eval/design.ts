@@ -24,7 +24,7 @@ export function decksIn(answer: Answer): { deckId: string; version: number }[] {
 }
 
 /** Checks the one deck a reply made: its size, how many slides, a fresh render of each, and anything else the question needs */
-function deckCheck(want: { size: JackDeckSizeKey; min: number; max: number; html?: (html: string) => string | null }): Pick<Expectation, "check" | "verify" | "needsModel"> {
+export function deckCheck(want: { size: JackDeckSizeKey; min: number; max: number; html?: (html: string) => string | null }): Pick<Expectation, "check" | "verify" | "needsModel"> {
   let made: { deckId: string; version: number }[] = [];
   return {
     needsModel: true,

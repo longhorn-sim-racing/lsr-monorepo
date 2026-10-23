@@ -75,7 +75,6 @@ export const anthropicFake: FakeService = {
           const file = form?.get("file")
           if (!form || !(file instanceof Blob)) return error(400, "invalid_request_error", "file: Field required")
           const filename = (file instanceof File ? file.name : "").split(/[\\/]/).pop() ?? ""
-          // eslint-disable-next-line no-control-regex
           if (!filename || filename.length > 255 || BAD_NAME.test(filename) || /[\u0000-\u001f\u007f]/.test(filename)) {
             return error(400, "invalid_request_error", "Invalid filename")
           }

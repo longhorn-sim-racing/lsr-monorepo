@@ -222,7 +222,9 @@ type Ctx = {
 
 async function loadModules() {
   const [
-    { buildHistory },
+    { buildConversation },
+    { officerAuthorLabel },
+    { attachTurnFiles },
     { runModelReply, anthropicJackClient, toolDefinitions },
     { JACK_MODELS },
     { buildSystemPrompt },
@@ -233,6 +235,8 @@ async function loadModules() {
     { PROPOSE_TOOLS },
   ] = await Promise.all([
     import("../src/server/jack/history"),
+    import("../src/server/jack/author-label"),
+    import("../src/server/jack/files/turn"),
     import("../src/server/jack/model-loop"),
     import("../src/server/jack/models"),
     import("../src/server/jack/prompt"),
@@ -242,7 +246,23 @@ async function loadModules() {
     import("../src/server/jack/proposals/registry"),
     import("../src/server/jack/proposals/types"),
   ]);
-  return { buildHistory, runModelReply, anthropicJackClient, toolDefinitions, JACK_MODELS, buildSystemPrompt, JACK_TOOLS, findJackTool, fakeClaude, UsageTally, costUsd, findProposalKind, PROPOSE_TOOLS };
+  return { buildConversation, officerAuthorLabel, attachTurnFiles, runModelReply, anthropicJackClient, toolDefinitions, JACK_MODELS, buildSystemPrompt, JACK_TOOLS, findJackTool, fakeClaude, UsageTally, costUsd, findProposalKind, PROPOSE_TOOLS };
+}
+
+/**
+ * How the cleanup deletes room files' copies on Claude Files: with the API key, switched on or not,
+ * like the files.cleanup job. Without a key they're listed as left behind
+ */
+async function claudeFileCleanup(): Promise<Pick<CleanupOptions, "deleteClaudeFile">> {
+  const { claudeFilesForCleanup, deleteClaudeFiles } = await import("../src/server/jack/files/claude");
+  const client = claudeFilesForCleanup();
+  if (!client) return {};
+  return {
+    deleteClaudeFile: async (id) => {
+      const { failed } = await deleteClaudeFiles([id], { client });
+      if (failed.length) throw new Error("the Files API didn't delete it (the log above says why)");
+    },
+  };
 }
 
 /**
@@ -300,18 +320,26 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
   async function answerAndGrade(roomId: string, guards: GuardCheck[]): Promise<{ row: Row; trace: unknown[] } | { error: string; usage?: unknown }> {
     if (!truth || !officer) return { error: "no expectation" }; // checked above; this keeps TypeScript's narrowing inside the function
 
-    // The room so far: any earlier exchanges, then this question and the reply being written
+    // The room so far: any earlier exchanges, then this question and the reply being written. Officers'
+    // lines carry their label the way posting saves it, and the question carries the files its setup posted
     const replyId = "eval-reply";
     const t = c.now.getTime();
+    const authorLabel = await mods.officerAuthorLabel(officer.id);
+    const files = await c.prisma.jackFile.findMany({
+      where: { roomId, status: "READY", messageId: { not: null } },
+      orderBy: [{ createdAt: "asc" }, { position: "asc" }],
+      select: { id: true, filename: true, kind: true, sizeBytes: true, pageCount: true },
+    });
     const messages = [
       ...before.flatMap((ex, i) => [
-        { id: `eval-before-${i}`, kind: "user" as const, persona: null, content: ex.ask, toolCalls: null, status: "done" as const, answeredById: `eval-before-reply-${i}`, model: null, createdAt: new Date(t - 60_000 * (before.length - i) - 1), author: { displayName: officer.displayName } },
+        { id: `eval-before-${i}`, kind: "user" as const, persona: null, content: ex.ask, toolCalls: null, status: "done" as const, answeredById: `eval-before-reply-${i}`, model: null, createdAt: new Date(t - 60_000 * (before.length - i) - 1), author: { displayName: officer.displayName }, authorLabel },
         { id: `eval-before-reply-${i}`, kind: "assistant" as const, persona, content: ex.answer, toolCalls: null, status: "done" as const, answeredById: null, model: null, createdAt: new Date(t - 60_000 * (before.length - i)), author: null },
       ]),
-      { id: "eval-ask", kind: "user" as const, persona: null, content: ask, toolCalls: null, status: "done" as const, answeredById: replyId, model: null, createdAt: c.now, author: { displayName: officer.displayName } },
+      { id: "eval-ask", kind: "user" as const, persona: null, content: ask, toolCalls: null, status: "done" as const, answeredById: replyId, model: null, createdAt: c.now, author: { displayName: officer.displayName }, authorLabel, files },
       { id: replyId, kind: "assistant" as const, persona, content: "", toolCalls: null, status: "streaming" as const, answeredById: null, model: null, createdAt: new Date(t + 1), author: null },
     ];
-    const history = mods.buildHistory(messages, replyId);
+    const conversation = mods.buildConversation(messages, replyId);
+    const history = await mods.attachTurnFiles(conversation.history, conversation.attached);
     const system = mods.buildSystemPrompt(persona);
 
     // The tools, wrapped to keep what each call returned to the model (the parts only keep what the room shows)
@@ -753,7 +781,7 @@ async function main() {
   const questions = QUESTIONS.filter((q) => selected(q) && (!GROUP || (q.group ?? "everyday") === GROUP));
   const now = new Date();
   const startedAt = new Date();
-  const cleanup = await cleanupOptions();
+  const cleanup: CleanupOptions = { ...(await cleanupOptions()), ...(await claudeFileCleanup()) };
 
   const judge = NO_JUDGE ? null : new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!.trim(), maxRetries: 4 });
   const base = { prisma, officer, now, startedAt, judge, judgeSystem: judgeSystemFor(mods), mods, run: runTag(startedAt), planted: new Set<string>(), cleanup };

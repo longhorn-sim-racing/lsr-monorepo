@@ -23,7 +23,6 @@ const NAME_CHARS = 60
 
 /** One line: no line breaks or other control characters (a name can't start a second officer's line), clipped */
 function clean(text: string | null | undefined, max: number): string {
-  // eslint-disable-next-line no-control-regex
   const line = (text ?? "").replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim()
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line
 }
