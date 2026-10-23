@@ -10,7 +10,10 @@ import { isRoomLockHeld } from "@/server/jack/room-lock"
  * officers to continue, like an unanswered message.
  */
 
-export { RETRY_AFTER_MS, RETRY_WINDOW_MS } from "./timing"
+/** How long after finding the room busy the job looks again */
+export const RETRY_AFTER_MS = 3 * 60_000
+/** How long after its note was posted the job keeps looking again */
+export const RETRY_WINDOW_MS = 45 * 60_000
 
 export type RunRoom = (roomId: string, options: { startedAt: number }) => Promise<void>
 

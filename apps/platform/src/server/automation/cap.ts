@@ -6,7 +6,6 @@ import { roundUsd } from "@/server/jack/cost"
 import { chicagoMonth, getMonthSpend } from "@/server/jack/spend"
 import { NAME_ROOM_JOB } from "@/server/jack/stand"
 import { typicalRunUsd } from "./recurring/estimate"
-import { RETRY_WINDOW_MS } from "./timing"
 
 /**
  * The automation cap (design §1, principle 10): recurring questions and the weekly digest's Jack-written
@@ -50,13 +49,16 @@ const typicalRun = (persona: string | null | undefined) => typicalRunUsd(persona
 
 /**
  * What runs already started will likely add, at a typical run's cost each (recurring/estimate.ts): a
- * scheduled note still waiting for its answer (while its job keeps looking, RETRY_WINDOW_MS), and an answer
- * to one still being written, less what that answer has cost so far (already counted as spent). A digest
- * summary is Jack's; a recurring question's is its persona's
+ * scheduled note still waiting for its answer, and an answer to one still being written, less what that
+ * answer has cost so far (already counted as spent). A waiting note counts however old it is: its job stops
+ * looking after RETRY_WINDOW_MS, but the next reply in its room (a post, Continue) still answers it, as a
+ * scheduled reply of its own that checks no cap, and that reply's cost lands in the month it's written. Only
+ * a note in an archived room can't be answered. A digest summary is Jack's; a recurring question's is its
+ * persona's
  */
 export async function automationInFlightUsd(now = new Date(), db: Db = prisma): Promise<number> {
   const [waiting, answering] = await Promise.all([
-    db.jackMessage.findMany({ where: { kind: "system", scheduled: true, answeredById: null, createdAt: { gte: new Date(now.getTime() - RETRY_WINDOW_MS) } }, select: { jobKey: true }, take: 500 }),
+    db.jackMessage.findMany({ where: { kind: "system", scheduled: true, answeredById: null, room: { archivedAt: null } }, select: { jobKey: true }, take: 500 }),
     db.jackMessage.findMany({
       where: { kind: "assistant", status: "streaming", createdAt: { gte: chicagoMonth(now).start }, answers: { some: { kind: "system", scheduled: true } } },
       select: { persona: true, costUsd: true },

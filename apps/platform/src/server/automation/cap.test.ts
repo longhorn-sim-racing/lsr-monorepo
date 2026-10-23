@@ -83,9 +83,23 @@ describe("runs under way", () => {
     const expected = 3 * JACK_RUN + STAND_RUN + (JACK_RUN - 0.02)
     expect(await automationInFlightUsd(NOW)).toBeCloseTo(expected, 5)
     const [waiting, answering] = db.jackMessage.findMany.mock.calls.map(([args]) => args.where)
-    expect(waiting).toEqual({ kind: "system", scheduled: true, answeredById: null, createdAt: { gte: new Date(NOW.getTime() - 45 * 60_000) } })
+    expect(waiting).toEqual({ kind: "system", scheduled: true, answeredById: null, room: { archivedAt: null } })
     expect(answering).toEqual({ kind: "assistant", status: "streaming", createdAt: { gte: OCTOBER.gte }, answers: { some: { kind: "system", scheduled: true } } })
     expect(db.recurringQuestion.findMany).toHaveBeenCalledWith({ where: { id: { in: ["q-jack", "q-stand", "q-deleted"] } }, select: { id: true, persona: true } })
+  })
+
+  it("keeps counting a note its job stopped looking after: the next reply in its room still answers it, and checks no cap", async () => {
+    // Asked a day ago and never answered (the run was cut off): one in a room that's still open, one in a room archived since
+    const dayAgo = new Date(NOW.getTime() - 24 * 60 * 60_000)
+    const notes = [{ jobKey: "recurring:q-jack", createdAt: dayAgo, archived: false }, { jobKey: "recurring:q-jack", createdAt: dayAgo, archived: true }]
+    db.jackMessage.findMany.mockImplementation(async ({ where }) =>
+      where.kind === "system" ? notes.filter((note) => !(where.room?.archivedAt === null && note.archived) && !(where.createdAt && note.createdAt < where.createdAt.gte)) : [],
+    )
+    db.recurringQuestion.findMany.mockResolvedValue([{ id: "q-jack", persona: "jack" }])
+    expect(await automationInFlightUsd(NOW)).toBeCloseTo(JACK_RUN, 5)
+    db.jackMessage.aggregate.mockResolvedValue({ _sum: { costUsd: String(10 - JACK_RUN / 2) } })
+    db.jackUsage.aggregate.mockResolvedValue({ _sum: { costUsd: null } })
+    expect(await automationBudget(NOW)).toMatchObject({ reservedUsd: JACK_RUN, stopped: "automation_cap" })
   })
 
   it("stops automations once what's spent plus what's under way reaches the cap, and says so", async () => {
