@@ -700,9 +700,8 @@ export default function PrivacyPage() {
                     <td className="p-4">
                       12 months (message records; thread titles and who started them, 12 months after
                       the thread was last active; members who left, 12 months after leaving). Daily
-                      totals, which identify
-                      no one, are kept. A channel&apos;s records, totals included, are deleted when it
-                      stops being synced
+                      totals, which identify no one, are kept. A channel&apos;s records, totals
+                      included, are deleted when it stops being synced
                     </td>
                   </tr>
                   <tr>
