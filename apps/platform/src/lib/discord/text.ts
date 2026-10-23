@@ -185,7 +185,8 @@ const BARE_HELD = /https?:\/\/[^\s<>\uE000\uE001]+/gi
  * club's site or an officer's message has it, and a Discord invite only when an officer's message has
  * it. Everything else comes out (a masked link keeps its words). Links that stay are set aside while the
  * rest is checked, so the bare-link pass skips exactly those, never text that only looks like a masked
- * link. The Discord-side guard is separate: a post pings nobody unless it names a ping
+ * link. The checks run again until nothing changes, so taking something out can't join the text around it
+ * into a link or a mention that stays. The Discord-side guard is separate: a post pings nobody unless it names a ping
  * (allowed_mentions), whatever its text says.
  */
 export function cleanPostText(text: string, { officerTexts, siteHosts }: { officerTexts: string[]; siteHosts: string[] }): CleanedText {
@@ -204,42 +205,42 @@ export function cleanPostText(text: string, { officerTexts, siteHosts }: { offic
   }
   const held: string[] = []
   const hold = (kept: string) => `\uE000${held.push(kept) - 1}\uE001`
-  const restore = (part: string) => part.replace(HELD, (_, i: string) => held[Number(i)] ?? "")
-  /** Bare links and invites: the ones that stay set aside, the rest taken out, until none is left (taking one out can join another) */
-  const checkBare = (text: string) =>
-    untilSettled(text, (part) =>
-      part
-        .replace(BARE_HELD, (m) => {
-          const url = trimLink(m)
-          if (keepLink(url)) return hold(url) + m.slice(url.length)
-          removed.links.push(url)
-          return m.slice(url.length)
-        })
-        .replace(INVITE, (m, code: string) => {
-          if (officerInvites.has(code)) return hold(m)
-          removed.links.push(inviteLink(code))
-          return ""
-        }),
-    )
+  // A kept link can hold one set aside before it (they only point back, so this ends)
+  const restore = (part: string) => untilSettled(part, (p) => p.replace(HELD, (_, i: string) => held[Number(i)] ?? ""))
+  /** Every check once: mentions, then masked, <angle> and bare links and invites (the ones that stay set aside) */
+  const checkOnce = (part: string): string =>
+    part
+      .replace(MENTION, (m) => {
+        if (officerLower.includes(m.toLowerCase())) return m
+        removed.mentions.push(m)
+        return m.startsWith("@") ? m.slice(1) : ""
+      })
+      .replace(MASKED_LINK, (whole, label: string, url: string) => {
+        // A kept link's words are checked too, so they can't carry a link or a mention of their own
+        if (keepLink(trimLink(url))) return hold(`[${restore(check(label))}]${whole.slice(label.length + 2)}`)
+        removed.links.push(trimLink(url))
+        return label
+      })
+      .replace(ANGLE_LINK, (whole, url: string) => {
+        if (keepLink(url)) return hold(whole)
+        removed.links.push(url)
+        return ""
+      })
+      .replace(BARE_HELD, (m) => {
+        const url = trimLink(m)
+        if (keepLink(url)) return hold(url) + m.slice(url.length)
+        removed.links.push(url)
+        return m.slice(url.length)
+      })
+      .replace(INVITE, (m, code: string) => {
+        if (officerInvites.has(code)) return hold(m)
+        removed.links.push(inviteLink(code))
+        return ""
+      })
+  /** Until nothing changes: taking a link out can join the text around it into another link, or a mention ("<@&1<https://\u2026>>") */
+  const check = (part: string): string => untilSettled(part, checkOnce)
 
-  let out = text.replace(/[\uE000\uE001]/g, "")
-  out = out.replace(MENTION, (m) => {
-    if (officerLower.includes(m.toLowerCase())) return m
-    removed.mentions.push(m)
-    return m.startsWith("@") ? m.slice(1) : ""
-  })
-  out = out.replace(MASKED_LINK, (whole, label: string, url: string) => {
-    // A kept link's words are checked too, so they can't carry a link of their own
-    if (keepLink(trimLink(url))) return hold(`[${restore(checkBare(label))}]${whole.slice(label.length + 2)}`)
-    removed.links.push(trimLink(url))
-    return label
-  })
-  out = out.replace(ANGLE_LINK, (whole, url: string) => {
-    if (keepLink(url)) return hold(whole)
-    removed.links.push(url)
-    return ""
-  })
-  return { text: tidy(restore(checkBare(out))), removed }
+  return { text: tidy(restore(check(text.replace(/[\uE000\uE001]/g, "")))), removed }
 }
 
 /** The hosts that count as the club's own site: the canonical address and this deployment's */

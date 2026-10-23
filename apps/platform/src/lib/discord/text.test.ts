@@ -143,6 +143,22 @@ describe("links glued to a word, or joined by taking another out", () => {
     expect(cleanPostText("Rules:https://longhornsimracing.org/rules", gm).text).toBe("Rules:https://longhornsimracing.org/rules")
   })
 
+  it("can't join the text around them into a mention that stays in a post", () => {
+    const role = "<@&123456789012345678>"
+    expect(cleanPostText("GM <@&123456789012345678<https://x.example>> tonight", gm)).toEqual({ text: "GM tonight", removed: { mentions: [role], links: ["https://x.example"] } })
+    expect(cleanPostText("@every<https://x.example>one GM", gm)).toEqual({ text: "everyone GM", removed: { mentions: ["@everyone"], links: ["https://x.example"] } })
+    expect(cleanPostText("<@&123456789012345678https://x.example>", gm)).toEqual({ text: "", removed: { mentions: [role], links: ["https://x.example"] } })
+    // Nor inside a kept link's words
+    expect(cleanPostText("[<@&123456789012345678https://x.example>](https://longhornsimracing.org/gm)", gm)).toEqual({ text: "[](https://longhornsimracing.org/gm)", removed: { mentions: [role], links: ["https://x.example"] } })
+    // A mention an officer wrote still stays when it forms
+    const asked = { officerTexts: ["Post about GM tonight and ping @everyone"], siteHosts: SITE }
+    expect(cleanPostText("@every<https://x.example>one GM", asked)).toEqual({ text: "@everyone GM", removed: { mentions: [], links: ["https://x.example"] } })
+  })
+
+  it("keep a kept link inside another kept link whole", () => {
+    expect(cleanPostText("<https://longhornsimracing.org/a[rules](https://longhornsimracing.org/r)>", gm).text).toBe("<https://longhornsimracing.org/a[rules](https://longhornsimracing.org/r)>")
+  })
+
   it("never count as an officer's invite just because one is in their path or query", () => {
     const asked = { officerTexts: ["Add our invite discord.gg/abc to the post"], siteHosts: SITE }
     expect(cleanPostText("Join https://evil.example/?r=discord.gg/abc now", asked)).toEqual({ text: "Join now", removed: { mentions: [], links: ["https://evil.example/?r=discord.gg/abc"] } })
