@@ -314,9 +314,6 @@ export async function processScheduledNotifications(): Promise<number> {
   return processNotifications(notifications.filter((n) => !held.has(n.id)));
 }
 
-const HELD_OVER_LIMIT =
-  "Not sent: announcements had used up today's email limit, and the rest is kept for confirmations and receipts. Retry it after the limit resets at 7 pm Central (6 pm in winter).";
-
 /**
  * Marks the announcement emails in this batch that today's limit can't take (after what's sent today
  * and the TRANSACTIONAL_HEADROOM) as failed, in the batch's order. Returns their ids.
@@ -334,7 +331,10 @@ async function holdAnnouncementEmailsOverLimit(notifications: NotificationWithUs
   const ids = over.map((n) => n.id);
   await prisma.notification.updateMany({
     where: { id: { in: ids }, status: "PENDING" },
-    data: { status: "FAILED", emailError: HELD_OVER_LIMIT },
+    data: {
+      status: "FAILED",
+      emailError: `Not sent: today's email limit had no room left for announcements (the last ${TRANSACTIONAL_HEADROOM} are kept for confirmations and receipts). Retry it after the limit resets at 7 pm Central (6 pm in winter).`,
+    },
   });
   console.warn(`[Notification] Held back ${over.length} scheduled announcement emails over today's limit`);
   return new Set(ids);

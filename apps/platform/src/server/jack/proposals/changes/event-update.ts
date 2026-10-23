@@ -560,8 +560,8 @@ export const eventUpdateKind: ProposalKind<EventUpdate> = {
     }
     const problem = eventProblem(event, saved.next)
     if (problem) return `With this change the event no longer passes the event form's checks: ${problem}`
-    // Applying promotes and emails whoever is waitlisted then: never more people than the card said. The
-    // event as it is now, since the waitlist and auto-promotion may have changed even where the touched columns didn't
+    // Applying moves whoever is waitlisted then and emails each one, so it's stale when that's more than the card
+    // said. Worked out on the event as it is now: the waitlist and moving up on its own change outside the touched columns
     const moves = expectedPromotions(merge(event, saved.next), event, saved.next, await registrationCounts(event.id))
     const said = saved.promoted ?? 0
     if (moves > said) {

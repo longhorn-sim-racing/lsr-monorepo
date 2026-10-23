@@ -380,7 +380,7 @@ describe("processing pending notifications", () => {
     await expect(processScheduledNotifications()).resolves.toBe(8)
 
     const held = db.notification.updateMany.mock.calls.filter(([args]) => args.data.status === "FAILED").map(([args]) => args)
-    expect(held).toEqual([{ where: { id: { in: ["a7", "a8"] }, status: "PENDING" }, data: { status: "FAILED", emailError: expect.stringContaining("used up today's email limit") } }])
+    expect(held).toEqual([{ where: { id: { in: ["a7", "a8"] }, status: "PENDING" }, data: { status: "FAILED", emailError: expect.stringContaining("today's email limit had no room left for announcements (the last 10 are kept") } }])
     expect(held[0].data.emailError).toContain("Retry it after the limit resets")
     const claimed = db.notification.updateMany.mock.calls.filter(([args]) => args.data.status === "SENT").map(([args]) => args.where.id)
     expect(claimed).not.toContain("a7")
