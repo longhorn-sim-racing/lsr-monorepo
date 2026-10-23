@@ -65,6 +65,29 @@ describe("buildHistory", () => {
     )
   })
 
+  it("records an earlier reply's web searches and pages in its tool note, with the cited sites but not the links", () => {
+    const sources = ["https://www.iracing.com/college", "https://fia.com/esports", "https://iracing.com/other"].map((url) => ({ title: "Page", url, host: "" }))
+    const tools = [
+      { id: "srvtoolu_1", name: "web_search", label: "Searched the web (5 results, 3 cited)", status: "done", at: 0, input: { query: "college sim racing sponsors" }, displays: [{ kind: "web_sources", queries: ["college sim racing sponsors"], sources }] },
+      { id: "srvtoolu_2", name: "web_fetch", label: "Read fia.com", status: "done", at: 0, input: { url: "https://fia.com/esports" }, displays: [{ kind: "web_sources", queries: [], sources: sources.slice(1, 2) }] },
+      { id: "srvtoolu_3", name: "web_search", label: "Web search failed", status: "error", at: 0, input: { query: "x" }, displays: [], error: "Web search failed: too many requests right now; try again in a minute" },
+    ]
+    const rows = room([
+      { ask: [["Gray", "Who sponsors college clubs?"]], reply: { content: "iRacing and the FIA.", toolCalls: tools } },
+      { ask: [["Gray", "Open the second link"]], reply: { status: "streaming", content: "" } },
+    ])
+
+    const history = buildHistory(rows, rows.at(-1)!.id)
+
+    expect(history[1].content).toBe(
+      "iRacing and the FIA.\n\n[Tools used: " +
+        'web_search {"query":"college sim racing sponsors"} → Searched the web (5 results, 3 cited) (cited: iracing.com, fia.com); ' +
+        "web_fetch → Read fia.com; " +
+        'web_search {"query":"x"} → failed: Web search failed: too many requests right now; try again in a minute]'
+    )
+    expect(history[1].content).not.toContain("https://")
+  })
+
   it("puts a persona switch note in the turn it came before", () => {
     const rows = room([{ ask: [["Gray", "Members?"]], reply: { content: "42." } }])
     rows.push(row({ kind: "system", content: "Gray switched this room to Lift" }))

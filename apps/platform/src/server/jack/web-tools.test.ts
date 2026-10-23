@@ -1,0 +1,125 @@
+import type { BetaContentBlock } from "@anthropic-ai/sdk/resources/beta/messages/messages"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { fakeCitedText, fakeWebFetch, fakeWebSearch } from "./fake-claude"
+import { addCitations, pendingServerCalls, recordWebResult, webErrorText, webPartFields, webServerTools, webToolsOn, type WebCall } from "./web-tools"
+
+const call = (fields: Partial<WebCall> & Pick<WebCall, "id" | "name">): WebCall => ({ input: null, found: null, error: null, startedAt: 1_000, ...fields })
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
+
+describe("webToolsOn", () => {
+  it("is on only for JACK_WEB_TOOLS=on", () => {
+    expect(webToolsOn()).toBe(false)
+    vi.stubEnv("JACK_WEB_TOOLS", " ON ")
+    expect(webToolsOn()).toBe(true)
+    vi.stubEnv("JACK_WEB_TOOLS", "true")
+    expect(webToolsOn()).toBe(false)
+  })
+})
+
+describe("webServerTools", () => {
+  it("never lets web_fetch follow a client tool's results, except web_links' when it's there", () => {
+    const [, without] = webServerTools(["run_sql", "club_members"])
+    expect(without.url_sources).toEqual({ user_input: { type: "all" }, server_tool_results: { type: "all" }, client_tool_results: { type: "none" } })
+    const [, withLinks] = webServerTools(["run_sql", "web_links"])
+    expect(withLinks.url_sources?.client_tool_results).toEqual({ type: "only", tools: [{ type: "tool_reference", name: "web_links" }] })
+  })
+})
+
+describe("recordWebResult", () => {
+  it("reads search results, fetched pages and error objects, and times the call", () => {
+    const [, searchResult] = fakeWebSearch("q", [{ url: "https://a.example/1", title: "A" }, { url: "https://b.example/2" }])
+    const search = call({ id: "s", name: "web_search" })
+    recordWebResult(search, searchResult, 1_250)
+    expect(search).toMatchObject({ found: [{ url: "https://a.example/1", title: "A" }, { url: "https://b.example/2", title: "https://b.example/2" }], error: null, ms: 250 })
+
+    const [, failed] = fakeWebSearch("q", { error: "max_uses_exceeded" })
+    const busy = call({ id: "s2", name: "web_search" })
+    recordWebResult(busy, failed, 1_000)
+    expect(busy).toMatchObject({ found: [], error: "max_uses_exceeded" })
+
+    const [, page] = fakeWebFetch("https://c.example/page", { title: "C" })
+    const fetch = call({ id: "f", name: "web_fetch" })
+    recordWebResult(fetch, page, 1_000)
+    expect(fetch.found).toEqual([{ url: "https://c.example/page", title: "C" }])
+  })
+
+  it("treats a result shaped in a way it doesn't expect as a failure, without throwing", () => {
+    const odd = call({ id: "f", name: "web_fetch" })
+    recordWebResult(odd, { type: "web_fetch_tool_result", tool_use_id: "f", content: null } as unknown as BetaContentBlock, 1_000)
+    expect(odd).toMatchObject({ found: [], error: "unknown" })
+  })
+})
+
+describe("webPartFields", () => {
+  it("lists only cited results, each page under the first search that found it, in search order", () => {
+    const a = { url: "https://a.example/", title: "A" }
+    const b = { url: "https://b.example/", title: "B" }
+    const c = { url: "https://c.example/", title: null }
+    const cited = new Map<string, string | null>()
+    addCitations(cited, [fakeCitedText("x", [{ url: b.url }, { url: c.url, title: "C as cited" }]), fakeCitedText("y", [{ url: a.url }])])
+    const calls = [
+      call({ id: "s1", name: "web_search", input: { query: "first" }, found: [b, c], ms: 900 }),
+      call({ id: "s2", name: "web_search", input: { query: "second" }, found: [a, b] }),
+      call({ id: "s3", name: "web_search", input: { query: "third" } }),
+    ]
+
+    const fields = webPartFields(calls, cited)
+
+    expect(fields.get("s1")).toEqual({
+      name: "web_search",
+      input: { query: "first" },
+      ms: 900,
+      label: "Searched the web (2 results, 2 cited)",
+      status: "done",
+      displays: [
+        {
+          kind: "web_sources",
+          queries: ["first"],
+          sources: [
+            { title: "B", url: b.url, host: "b.example" },
+            { title: "C as cited", url: c.url, host: "c.example" },
+          ],
+        },
+      ],
+    })
+    expect(fields.get("s2")).toMatchObject({ label: "Searched the web (2 results, 1 cited)", displays: [{ sources: [{ url: a.url }] }] })
+    expect(fields.get("s3")).toMatchObject({ label: "Searching the web", status: "running", displays: [{ queries: ["third"], sources: [] }] })
+  })
+
+  it("shows a search whose input hasn't arrived without a display, and a fetch by the page's host", () => {
+    const fields = webPartFields(
+      [
+        call({ id: "s", name: "web_search" }),
+        call({ id: "f1", name: "web_fetch", input: { url: "https://www.fia.com/x" } }),
+        call({ id: "f2", name: "web_fetch", input: { url: "https://www.fia.com/x" }, found: [{ url: "https://www.fia.com/x", title: null }] }),
+        call({ id: "f3", name: "web_fetch", input: { url: "not a url" }, found: [], error: "url_not_in_prior_context" }),
+      ],
+      new Map()
+    )
+    expect(fields.get("s")).toMatchObject({ label: "Searching the web", displays: [] })
+    expect(fields.get("f1")).toMatchObject({ label: "Opening fia.com", status: "running" })
+    expect(fields.get("f2")).toMatchObject({ label: "Read fia.com", status: "done", displays: [{ kind: "web_sources", queries: [], sources: [{ title: "https://www.fia.com/x", host: "fia.com" }] }] })
+    expect(fields.get("f3")).toMatchObject({
+      label: "Couldn't open a web page",
+      status: "error",
+      error: "Couldn't open the page: only links an officer posted or a web search found can be opened",
+    })
+  })
+
+  it("names an error code it doesn't know", () => {
+    expect(webErrorText("something_new")).toBe("error something_new")
+  })
+})
+
+describe("pendingServerCalls", () => {
+  it("finds the server calls in a turn without their results", () => {
+    const [searchCall, searchResult] = fakeWebSearch("q", [], { id: "srvtoolu_a" })
+    const [fetchCall] = fakeWebFetch("https://a.example", {}, { id: "srvtoolu_b" })
+    const toolUse = { type: "tool_use", id: "toolu_c", name: "run_sql", input: {} } as BetaContentBlock
+    expect(pendingServerCalls([searchCall, searchResult, fetchCall, toolUse])).toEqual(["srvtoolu_b"])
+    expect(pendingServerCalls([searchCall, searchResult])).toEqual([])
+  })
+})
