@@ -102,6 +102,10 @@ export const attendanceCheckinKind: ProposalKind<AttendanceCheckin> = {
       }
     }
     if (!rows.length) throw new ProposalInputError(`Everyone named is already checked in at “${event.title}”.`)
+    if (!matched && !ambiguous) {
+      const names = rows.map((r) => r.label)
+      throw new ProposalInputError(`No member matches ${names.length === 1 ? "this name" : "these names"}: ${names.join(", ")}. Check the spelling, or give their handles or emails.`)
+    }
 
     const sentences = [
       `Applying it checks in the people left ticked below at “${event.title}”, as manual check-ins by the officer who applies it.`,

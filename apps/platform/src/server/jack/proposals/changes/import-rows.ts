@@ -148,6 +148,11 @@ export const importRowsKind: ProposalKind<ImportRows> = {
       view.push({ id: row.id, label: `Row ${row.number}: ${check.label}`, ...(check.detail ? { detail: check.detail } : {}), status: check.status ?? "matched" })
     }
 
+    if (!ready) {
+      const reasons = view.slice(0, 5).map((r) => `${r.label}: ${r.detail ?? "can't go in"}`)
+      throw new ProposalInputError(`None of the ${plural(rows.length, "row")} can go in, so there's nothing to propose. ${reasons.join("; ")}${view.length > 5 ? "; …" : ""}`)
+    }
+
     const last = from + rows.length - 1
     const where = `${file.filename}${table.sheet ? ` (sheet “${table.sheet}”)` : ""}`
     const sentences = [

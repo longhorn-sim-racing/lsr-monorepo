@@ -68,6 +68,11 @@ describe("import.rows: prepare", () => {
     await expect(importRowsKind.prepare(payload(), ctx)).rejects.toThrow("contacts.csv's rows couldn't be read when it was attached.")
   })
 
+  it("proposes nothing when no row can go in, and says why", async () => {
+    target.validateRow.mockResolvedValue({ ok: false, label: "Someone", error: "No account." })
+    await expect(importRowsKind.prepare(payload(), ctx)).rejects.toThrow("None of the 4 rows can go in, so there's nothing to propose. Row 1: Someone: No account.; Row 2: Someone: No account.")
+  })
+
   it("takes a slice of a long file, and says what's left", async () => {
     const prepared = await importRowsKind.prepare(payload({ fromRow: 3 }), ctx)
     expect(prepared.view.rows?.map((r) => r.id)).toEqual(["r3", "r4"])

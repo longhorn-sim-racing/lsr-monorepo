@@ -64,6 +64,7 @@ describe("attendance.checkin: prepare", () => {
     const prepared = await attendanceCheckinKind.prepare(checkin(["Wanda Walker", "@wanda-walker"]), ctx)
     expect(prepared.view.rows?.[1]).toEqual({ id: "1:w", label: "@wanda-walker", detail: "Wanda Walker (@wanda-walker) · not registered. Same member as “Wanda Walker”", status: "ambiguous" })
     await expect(attendanceCheckinKind.prepare(checkin(["Ana Torres"]), ctx)).rejects.toThrow("Everyone named is already checked in at “GM 2”.")
+    await expect(attendanceCheckinKind.prepare(checkin(["Ana Torres", "Zed Nobody", "Q"]), ctx)).rejects.toThrow("No member matches these names: Zed Nobody, Q. Check the spelling, or give their handles or emails.")
     db.event.findUnique.mockResolvedValue(null)
     await expect(attendanceCheckinKind.prepare(checkin(["x"]), ctx)).rejects.toBeInstanceOf(ProposalInputError)
   })
