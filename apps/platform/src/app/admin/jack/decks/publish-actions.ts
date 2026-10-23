@@ -66,8 +66,9 @@ export async function publishDeckToInstagram(input: z.input<typeof publishSchema
   if (!parsed.success) return { ok: false, error: "Pick the slides and type again; something didn't come through." }
   const p = parsed.data
   const count = p.slideIds.length
-  if (p.type !== "carousel" && count !== 1) return { ok: false, error: `A ${p.type} is one slide; ${count} are picked.` }
-  if (p.type === "carousel" && (count < CAROUSEL_MIN || count > CAROUSEL_MAX)) return { ok: false, error: `A carousel takes ${CAROUSEL_MIN} to ${CAROUSEL_MAX} slides; ${count} are picked.` }
+  const pickedText = count === 1 ? "1 is picked" : `${count} are picked`
+  if (p.type !== "carousel" && count !== 1) return { ok: false, error: `A ${p.type} is one slide; ${pickedText}.` }
+  if (p.type === "carousel" && (count < CAROUSEL_MIN || count > CAROUSEL_MAX)) return { ok: false, error: `A carousel takes ${CAROUSEL_MIN} to ${CAROUSEL_MAX} slides; ${pickedText}.` }
   const caption = p.type === "story" ? "" : p.caption
   const problem = caption ? captionProblem(caption) : null
   if (problem) return { ok: false, error: problem }

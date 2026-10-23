@@ -253,9 +253,33 @@ const previewKind: AnyProposalKind = {
   },
 }
 
+/* Pictures on the card (an Instagram post's slides, a gallery add's images): only this site's officer image routes load */
+const SLIDE_THUMB = "/api/admin/jack/decks/11111111-1111-4111-8111-111111111111/slides/slide-a?v=3&kind=thumb"
+const picturesKind: AnyProposalKind = {
+  ...fileKind,
+  kind: "test.pictures",
+  schema: z.object({}),
+  async prepare() {
+    return {
+      before: null,
+      view: {
+        title: "Post it",
+        summary: "Posts it.",
+        diff: [],
+        images: [{ url: SLIDE_THUMB, alt: "Slide 1", label: "Slide 1" }, { url: "https://evil.example/pixel.gif", alt: "x" }],
+        rows: [
+          { id: "a", label: "Slide 1", thumbUrl: SLIDE_THUMB },
+          { id: "b", label: "Photo", thumbUrl: "//evil.example/x.jpg" },
+        ],
+      },
+    }
+  },
+}
+
 const KINDS: Record<string, AnyProposalKind> = {
   "test.change": thingKind("test.change"),
   "test.preview": previewKind,
+  "test.pictures": picturesKind,
   "test.admin": thingKind("test.admin", { permission: "admin" }),
   "test.list": listKind,
   "test.file": fileKind,
@@ -610,6 +634,17 @@ describe("reading proposals", () => {
   it("gives the card the preview the kind built when proposing", async () => {
     const { proposal } = await propose("test.preview", { text: "Hello" })
     expect((await getProposalDetail(proposal.proposalId, gray.id, deps))?.preview).toEqual({ label: "How it reads", title: "Post", blocks: [{ t: "p", c: [{ t: "text", v: "Hello" }] }] })
+    expect((await getProposalDetail(proposal.proposalId, gray.id, deps))?.images).toEqual([])
+  })
+
+  it("gives the card pictures and row thumbnails from this site's officer image routes only", async () => {
+    const { proposal } = await propose("test.pictures", {})
+    const detail = await getProposalDetail(proposal.proposalId, gray.id, deps)
+    expect(detail?.images).toEqual([{ url: SLIDE_THUMB, alt: "Slide 1", label: "Slide 1" }])
+    expect(detail?.rows).toEqual([
+      { id: "a", label: "Slide 1", thumbUrl: SLIDE_THUMB },
+      { id: "b", label: "Photo" },
+    ])
   })
 
   it("gives the card the rows Apply honours: saved ones, list.rows() ones, or none", async () => {
