@@ -79,7 +79,7 @@ describe("the room's copy", () => {
         "",
         "Couldn't check: Twitch connection",
         "",
-        "Jack: sum this up for the officers in two to four sentences, most urgent first, picking what matters most, using only what's listed here.",
+        "Jack: sum this up for the officers in at most four sentences, most urgent first: pick what matters most rather than going through every line, and use only what's listed here.",
       ].join("\n"),
     )
     // Every item line opens its page in the room

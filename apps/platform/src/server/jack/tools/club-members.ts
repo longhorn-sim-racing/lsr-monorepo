@@ -175,14 +175,24 @@ export function membersForModel(
     : []
   const newest: ModelList = { key: "newest", items: opts.newest }
   const periods: ModelList = { key: "signupPeriods", items: opts.signups, keep: "last" }
-  // Counted here, so "how many have an EID" doesn't mean counting a long list by hand (rows leave out empty fields)
-  const has = (key: string) => (opts.roster?.rows ?? []).filter((row) => Boolean((row as Record<string, unknown>)[key])).length
-  const base = opts.roster
-    ? { ...result, rosterDefinitions: opts.roster.definitions, rosterCounts: { people: opts.roster.rows.length, withEmail: has("email"), withEid: has("eid") } }
-    : result
+  const base = opts.roster ? { ...result, rosterDefinitions: opts.roster.definitions, rosterCounts: rosterCounts(opts.roster) } : result
   if (!opts.roster || !opts.wholeClub) return forModelWithLists(base, [...rosterList, newest, periods])
   const whole = forModelWithLists({ ...base, newest: "left out: the roster has everyone, oldest first" }, [...rosterList, periods])
   return (JSON.parse(whole) as Record<string, unknown>).rosterNote ? forModelWithLists(base, [newest, ...rosterList, periods]) : whole
+}
+
+/**
+ * Counts over the whole roster, so "how many have an EID" or "how many are form only" doesn't mean
+ * counting a long list by hand. Rows leave out empty fields, so a field that's there is one that's set
+ */
+export function rosterCounts(roster: { rows: unknown[]; kind: "officers" | "members" }) {
+  const rows = roster.rows as Record<string, unknown>[]
+  const has = (key: string) => rows.filter((row) => Boolean(row[key])).length
+  const counts: Record<string, unknown> = { people: rows.length, withEmail: has("email"), withEid: has("eid") }
+  if (roster.kind === "officers") return counts
+  const lsc: Record<string, number> = {}
+  for (const row of rows) if (typeof row.lsc === "string") lsc[row.lsc] = (lsc[row.lsc] ?? 0) + 1
+  return { ...counts, registeredForAnEvent: has("eventsRegistered"), checkedIn: has("checkIns"), drove: has("racesDriven"), paidSomething: has("paidDollars"), lscThisSeason: lsc }
 }
 
 /** Officers and admins with titles, or every member (optionally by join date) with what they've done */

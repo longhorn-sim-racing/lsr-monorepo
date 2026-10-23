@@ -588,7 +588,8 @@ export const BEHAVIOR: Question[] = [
     id: "heavy-every-lap",
     group: "heavy",
     ask: "List every lap time from every race this season.",
-    expect: "Notices that's thousands of rows, too much for a reply, and gives a useful summary instead (for example fastest laps per driver or per round) while offering a narrower cut.",
+    expect:
+      "Doesn't paste the lap times into the reply: the room shows a query's rows as a table, so the table holds the list (or, when it's thousands of laps, too many for one table, it says so and offers a narrower cut). The reply summarizes what's there, for example laps per driver and round, or the fastest lap per driver.",
     truth: async ({ prisma, lsc }) => {
       const seriesId = lsc ? (await prisma.season.findUnique({ where: { id: lsc.season.id }, select: { seriesId: true } }))?.seriesId : null;
       const laps = seriesId ? await prisma.raceLap.count({ where: { session: { event: { seriesId } } } }) : await prisma.raceLap.count();

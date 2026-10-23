@@ -7,7 +7,7 @@ vi.mock("@/server/jack/sql-client", () => ({ getJackSqlClient: () => null, JACK_
 
 import type { SeasonEntrant } from "@/server/services/league-entry.service"
 import { auditWhere } from "./audit-log"
-import { bucketSignups, compactRow, membersForModel, monthsBefore, tierCounts } from "./club-members"
+import { bucketSignups, compactRow, membersForModel, monthsBefore, rosterCounts, tierCounts } from "./club-members"
 import { forModelWithList, forModelWithLists, MAX_MODEL_CHARS } from "./display"
 import { formatSchema, parseConstraints, typeName } from "./describe-schema"
 import { summarizeEvent, searchWhere, type EventRow } from "./events-overview"
@@ -576,11 +576,30 @@ describe("club_members: the roster and the newest members", () => {
   const signups = [{ period: "2026-10", signups: 3 }]
   const member = (i: number, pad = 0) => ({ name: `Member ${i}`, email: `m${i}@utexas.edu`, joined: "2026-02-14", ...(pad ? { note: "x".repeat(pad) } : {}) })
 
+  it("counts the roster's columns for the reply, members and officers", () => {
+    const rows = [
+      { name: "A", email: "a@utexas.edu", eid: "a1", eventsRegistered: 2, checkIns: 1, lsc: "paid", paidDollars: 10 },
+      { name: "B", email: "b@utexas.edu", lsc: "form only" },
+      { name: "C", email: "c@utexas.edu", lsc: "form only", racesDriven: 3 },
+    ]
+    expect(rosterCounts({ rows, kind: "members" })).toEqual({
+      people: 3,
+      withEmail: 3,
+      withEid: 1,
+      registeredForAnEvent: 1,
+      checkedIn: 1,
+      drove: 1,
+      paidSomething: 1,
+      lscThisSeason: { paid: 1, "form only": 2 },
+    })
+    expect(rosterCounts({ rows: rows.slice(0, 1), kind: "officers" })).toEqual({ people: 1, withEmail: 1, withEid: 1 })
+  })
+
   it("leaves the newest list out when the whole club fits, and says why", () => {
     const body = JSON.parse(membersForModel({}, { roster: { rows: [member(1), { ...member(2), eid: "ab123" }], definitions: "defs", kind: "members" }, wholeClub: true, newest, signups }))
     expect(body.roster).toHaveLength(2)
     expect(body.newest).toBe("left out: the roster has everyone, oldest first")
-    expect(body.rosterCounts).toEqual({ people: 2, withEmail: 2, withEid: 1 })
+    expect(body.rosterCounts).toEqual({ people: 2, withEmail: 2, withEid: 1, registeredForAnEvent: 0, checkedIn: 0, drove: 0, paidSomething: 0, lscThisSeason: {} })
   })
 
   it("puts the newest members first when the roster is cut short (its newest rows are the ones cut)", () => {

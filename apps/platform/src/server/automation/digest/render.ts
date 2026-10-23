@@ -57,7 +57,7 @@ export function roomDigestText(report: DigestReport, { setUpBy, askSummary }: { 
     }
   }
   if (failed.length) lines.push("", `Couldn't check: ${failed.map((outcome) => outcome.check.label).join(", ")}`)
-  if (askSummary && total) lines.push("", "Jack: sum this up for the officers in two to four sentences, most urgent first, picking what matters most, using only what's listed here.")
+  if (askSummary && total) lines.push("", "Jack: sum this up for the officers in at most four sentences, most urgent first: pick what matters most rather than going through every line, and use only what's listed here.")
   return lines.join("\n")
 }
 
