@@ -13,5 +13,8 @@ export default defineConfig({
     mockReset: true,
     restoreMocks: true,
     unstubEnvs: true,
+    // Some tests import whole module graphs (the tool and job registries, the room's actions), which can
+    // take longer than the 5 s default while the full suite runs in parallel
+    testTimeout: 20_000,
   },
 })

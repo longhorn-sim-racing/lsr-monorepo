@@ -5,6 +5,8 @@ import { seasonLabel } from "@/lib/seasons"
 import { DEFAULT_TIMEZONE } from "@/lib/dates"
 import { getRosterDrivers } from "@/server/queries/roster"
 import { roundOf } from "@/server/queries/schedule"
+import { loadRaceData } from "@/server/queries/race-performance"
+import { driverTrend, formatLap, personalBests } from "@/lib/race-performance"
 
 /**
  * Everything on a driver's public page. Career numbers come from the same roster calculation as
@@ -36,7 +38,7 @@ export const getDriverProfile = cache(async (handle: string) => {
   })
   if (!user || user.status === "deleted") return null
 
-  const [roster, entries, results, attended] = await Promise.all([
+  const [roster, entries, results, attended, raceData] = await Promise.all([
     getRosterDrivers(now),
     prisma.entry.findMany({
       where: { userId: user.id, season: { visibility: "public" } },
@@ -79,6 +81,8 @@ export const getDriverProfile = cache(async (handle: string) => {
       orderBy: { event: { startsAtUtc: "desc" } },
       select: { event: { select: { slug: true, title: true, startsAtUtc: true, timezone: true, series: { select: { title: true } } } } },
     }),
+    // Every public session they drove in (practice and qualifying too), for best laps and form
+    loadRaceData({ publicOnly: true, userId: user.id }, now),
   ])
 
   const driver = roster.find((d) => d.id === user.id) ?? null
@@ -140,7 +144,36 @@ export const getDriverProfile = cache(async (handle: string) => {
     date: event.startsAtUtc.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: event.timezone || DEFAULT_TIMEZONE }),
   }))
 
-  return { user, driver, seasons, races, cars, events }
+  const day = (date: Date) => date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: DEFAULT_TIMEZONE })
+
+  // Best lap at each track, from any public session (as the event pages show them)
+  const bestLaps = personalBests(raceData, user.id).map((best) => ({
+    track: best.track,
+    lap: formatLap(best.bestLapMs),
+    session: best.sessionType === "RACE" ? "Race" : best.sessionType === "QUALIFYING" ? "Qualifying" : "Practice",
+    event: best.event ? { title: best.event.title, slug: best.event.slug } : null,
+    date: day(best.event?.startsAt ?? best.date),
+  }))
+
+  // The last five races, oldest first, with positions gained where qualifying was uploaded too
+  const formRaces = driverTrend(raceData, user.id).slice(-5)
+  const gains = formRaces.flatMap((race) => (race.gained === null ? [] : [race.gained]))
+  const form = formRaces.length
+    ? {
+        races: formRaces.map((race) => ({
+          position: race.position,
+          field: race.field,
+          dsq: race.dsq,
+          title: race.event?.title ?? race.track,
+          eventSlug: race.event?.slug ?? null,
+          date: day(race.event?.startsAt ?? race.date),
+        })),
+        averageFinish: formRaces.reduce((sum, race) => sum + race.position, 0) / formRaces.length,
+        gained: gains.length ? gains.reduce((a, b) => a + b, 0) : null,
+      }
+    : null
+
+  return { user, driver, seasons, races, cars, events, bestLaps, form }
 })
 
 export type DriverProfile = NonNullable<Awaited<ReturnType<typeof getDriverProfile>>>
