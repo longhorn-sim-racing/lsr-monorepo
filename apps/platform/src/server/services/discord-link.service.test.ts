@@ -19,6 +19,8 @@ const stats = vi.hoisted(() => ({ rebuildDailyStats: vi.fn(), daysBetween: vi.fn
 vi.mock("@/server/db", () => ({ prisma: db }))
 vi.mock("@/server/audit/log", () => audit)
 vi.mock("@/server/connectors/discord/sync", () => stats)
+const takeback = vi.hoisted(() => ({ queueRoleTakeBack: vi.fn(), takeBackAfterUnlink: vi.fn() }))
+vi.mock("@/server/discord-post/role-takeback", () => takeback)
 
 import { mountFakes, type MountedFakes } from "@/server/connectors/fakes/testing"
 import { FAKE_DISCORD } from "@/server/connectors/discord/fake/data"
@@ -195,6 +197,34 @@ describe("unlinkDiscord", () => {
     db.user.update.mockClear()
     expect(await unlinkDiscord("user-1")).toBe(false)
     expect(db.user.update).not.toHaveBeenCalled()
+  })
+
+  it("takes back the roles role sync gave (from the profile, and before an account is deleted): queued with the unlink, tried before it returns", async () => {
+    const order: string[] = []
+    let inTransaction = false
+    db.$transaction.mockImplementation(async (fn: (tx: typeof db) => unknown) => {
+      inTransaction = true
+      try {
+        return await fn(db)
+      } finally {
+        inTransaction = false
+      }
+    })
+    db.user.findUnique.mockResolvedValue({ discordUserId: DISCORD_ID })
+    takeback.queueRoleTakeBack.mockImplementation(async () => (order.push(`queue${inTransaction ? " (in)" : ""}`), true))
+    takeback.takeBackAfterUnlink.mockImplementation(async () => void order.push(`take back${inTransaction ? " (in)" : ""}`))
+    const done = unlinkDiscord("user-1").then(() => order.push("returned"))
+    await done
+    // Queued in the unlink's own transaction, so it can't be lost; deleteAccount awaits this before the account goes
+    expect(order).toEqual(["queue (in)", "take back", "returned"])
+    expect(takeback.queueRoleTakeBack).toHaveBeenCalledWith(DISCORD_ID, db)
+    expect(takeback.takeBackAfterUnlink).toHaveBeenCalledWith(DISCORD_ID, "user-1")
+
+    // No role sync rule on: nothing queued, nothing to try
+    order.length = 0
+    takeback.queueRoleTakeBack.mockResolvedValue(false)
+    expect(await unlinkDiscord("user-1")).toBe(true)
+    expect(order).toEqual([])
   })
 })
 

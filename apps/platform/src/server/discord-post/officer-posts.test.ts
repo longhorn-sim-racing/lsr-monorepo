@@ -104,4 +104,14 @@ describe("what any officer can do to a post", () => {
     expect(posts.rows[1]).toMatchObject({ status: "CANCELLED", dedupeKey: null })
     expect(sent()).toHaveLength(0)
   })
+
+  it("act on one post only: a filter in place of an id cancels or resends nothing", async () => {
+    posts.rows.push(postRow({ id: "s1", dedupeKey: "k1", scheduledFor: new Date(Date.now() + 60_000) }), postRow({ id: "s2", dedupeKey: "k2", scheduledFor: new Date(Date.now() + 60_000) }))
+    posts.rows.push(postRow({ id: "f1", channelId: CHANNEL, status: "FAILED", error: "old" }), postRow({ id: "f2", channelId: CHANNEL, status: "FAILED", error: "old" }))
+    const filter = { not: "" } as unknown as string
+    expect(await cancelScheduledPost(filter, actor)).toMatchObject({ ok: false })
+    expect(await retryFailedPost(filter, actor, posting)).toMatchObject({ ok: false })
+    expect(posts.rows.map((r) => r.status)).toEqual(["SCHEDULED", "SCHEDULED", "FAILED", "FAILED"])
+    expect(sent()).toHaveLength(0)
+  })
 })

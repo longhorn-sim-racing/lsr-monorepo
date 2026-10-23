@@ -6,6 +6,7 @@ import { discordEventUrl, roleSyncRefusal, type DiscordRole, type RoleSafety } f
 import { postableChannels, postingChannels, type PostingChannel } from "./channels"
 import { postUrl, readBody } from "./outbox"
 import { isRoleCondition, linkedMembers, qualifying, ROLE_CONDITIONS } from "./role-sync"
+import { waitingTakeBacks } from "./role-takeback"
 import { describeRule, isRuleKind, readRuleConfig, RULE_INFO } from "./rules"
 import { when } from "./time"
 
@@ -248,11 +249,15 @@ export type RoleRuleView = {
   qualifying: number | null
   /** Linked members who hold the role, as of the last member sync */
   holders: number
+  /** Members in the server who hold it but aren't linked now: never linked (role sync leaves them alone), or unlinked and still waiting for the take-back */
+  others: number
 }
 
 export type RoleSyncView = {
   rules: RoleRuleView[]
   linked: number
+  /** Unlinked accounts still holding a rule's role; each run tries again to take them back */
+  waitingTakeBacks: number
   /** The server's roles role sync may hand out (read live; empty while Discord is off or can't be read) */
   safeRoles: { id: string; name: string }[]
   /** Discord could be read just now */
@@ -261,14 +266,17 @@ export type RoleSyncView = {
 }
 
 export async function roleSyncView(live: (RoleSafety & { roles: DiscordRole[] }) | null): Promise<RoleSyncView> {
-  const [rules, members, job] = await Promise.all([
+  const [rules, members, job, waiting] = await Promise.all([
     prisma.discordRoleRule.findMany({ orderBy: { roleId: "asc" } }),
     linkedMembers(),
     prisma.scheduledJob.findUnique({ where: { key: "discord.role-sync" }, select: { lastRunAt: true, lastStatus: true, runs: { orderBy: { startedAt: "desc" }, take: 1, select: { summary: true } } } }),
+    waitingTakeBacks(),
   ])
-  const inServer = await prisma.discordMember.findMany({ where: { id: { in: members.map((m) => m.discordUserId) }, leftAt: null }, select: { roles: true } })
+  const linkedIds = members.map((m) => m.discordUserId)
+  const inServer = await prisma.discordMember.findMany({ where: { id: { in: linkedIds }, leftAt: null }, select: { roles: true } })
+  const others = await Promise.all(rules.map((rule) => prisma.discordMember.count({ where: { id: { notIn: linkedIds }, leftAt: null, roles: { has: rule.roleId } } })))
   const views: RoleRuleView[] = []
-  for (const rule of rules) {
+  for (const [i, rule] of rules.entries()) {
     const role = live?.roles.find((r) => r.id === rule.roleId)
     const want = isRoleCondition(rule.condition) ? await qualifying(rule.condition, members).catch(() => null) : null
     views.push({
@@ -281,6 +289,7 @@ export async function roleSyncView(live: (RoleSafety & { roles: DiscordRole[] })
       refusal: live ? roleSyncRefusal(role, live) : null,
       qualifying: want ? want.size : null,
       holders: inServer.filter((m) => m.roles.includes(rule.roleId)).length,
+      others: others[i],
     })
   }
   const taken = new Set(rules.map((r) => r.roleId))
@@ -293,6 +302,7 @@ export async function roleSyncView(live: (RoleSafety & { roles: DiscordRole[] })
   return {
     rules: views,
     linked: members.length,
+    waitingTakeBacks: waiting,
     safeRoles,
     live: Boolean(live),
     lastRun: job?.lastRunAt ? { at: when(job.lastRunAt), status: job.lastStatus, summary: job.runs[0]?.summary ?? null } : null,

@@ -3,24 +3,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const state = vi.hoisted(() => ({
   rules: [] as { id: string; roleId: string; condition: string; enabled: boolean; createdById: string | null }[],
   users: [] as { id: string; displayName: string; discordUserId: string | null; roles: { role: { key: string } }[] }[],
+  /** Users who unlinked after the run read who's linked (the link check says so; the run's list doesn't) */
+  unlinkedMidRun: new Set<string>(),
   members: new Map<string, { id: string; roles: string[]; leftAt: Date | null }>(),
-  purged: null as string | null,
+  settings: new Map<string, string>(),
   audits: [] as Record<string, unknown>[],
   season: { ok: true, open: true, season: { id: "s3" } } as unknown,
   entrants: [] as { status: string; user: { id: string } }[],
 }))
-vi.mock("@/server/db", () => ({
-  prisma: {
+vi.mock("@/server/db", () => {
+  const prisma = {
+    $executeRaw: async () => 0,
+    $transaction: async (fn: (tx: unknown) => unknown) => fn(prisma),
     discordRoleRule: {
       findMany: async ({ where }: { where?: { enabled?: boolean } } = {}) => state.rules.filter((r) => where?.enabled === undefined || r.enabled === where.enabled),
-      count: async ({ where }: { where: { roleId: string } }) => state.rules.filter((r) => r.roleId === where.roleId).length,
+      count: async ({ where }: { where: { roleId?: string; enabled?: boolean } }) => state.rules.filter((r) => (where.roleId === undefined || r.roleId === where.roleId) && (where.enabled === undefined || r.enabled === where.enabled)).length,
       create: async ({ data }: { data: Omit<(typeof state.rules)[number], "id"> }) => {
         const rule = { id: `rr-${state.rules.length + 1}`, ...data, createdById: data.createdById ?? null }
         state.rules.push(rule)
         return rule
       },
     },
-    user: { findMany: async () => state.users.filter((u) => u.discordUserId) },
+    user: {
+      findMany: async ({ where }: { where?: { discordUserId?: { in?: string[] } } } = {}) => state.users.filter((u) => u.discordUserId && (!where?.discordUserId?.in || where.discordUserId.in.includes(u.discordUserId))),
+      count: async ({ where }: { where: { id: string; discordUserId: string } }) => state.users.filter((u) => u.id === where.id && u.discordUserId === where.discordUserId && !state.unlinkedMidRun.has(u.id)).length,
+    },
     discordMember: {
       findMany: async ({ where }: { where: { id: { in: string[] } } }) => [...state.members.values()].filter((m) => where.id.in.includes(m.id) && !m.leftAt),
       updateMany: async ({ where, data }: { where: { id: string }; data: { roles: string[] } }) => {
@@ -29,15 +36,20 @@ vi.mock("@/server/db", () => ({
         return { count: m ? 1 : 0 }
       },
     },
-    systemSetting: { findUnique: async () => (state.purged ? { value: state.purged } : null) },
+    systemSetting: {
+      findUnique: async ({ where }: { where: { key: string } }) => (state.settings.has(where.key) ? { key: where.key, value: state.settings.get(where.key)! } : null),
+      upsert: async ({ where, update }: { where: { key: string }; update: { value: string } }) => void state.settings.set(where.key, update.value),
+      deleteMany: async ({ where }: { where: { key: string } }) => ({ count: Number(state.settings.delete(where.key)) }),
+    },
     auditLog: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
         state.audits.push(data)
         return data
       },
     },
-  },
-}))
+  }
+  return { prisma }
+})
 vi.mock("@/server/jack/tools/seasons", () => ({ DEFAULT_LEAGUE: "lone-star-cup", resolveLeagueSeason: async () => state.season }))
 vi.mock("@/server/services/league-entry.service", () => ({ listSeasonEntrants: async () => ({ entrants: state.entrants }) }))
 
@@ -69,7 +81,7 @@ beforeEach(async () => {
   state.users = humans.slice(0, 5).map((discordUserId, i) => ({ id: `u${i}`, displayName: `Member ${i}`, discordUserId, roles: i < 2 ? [{ role: { key: "lsc_driver" } }] : i === 2 ? [{ role: { key: "officer" } }] : [] }))
   state.members = new Map()
   for (const id of humans.slice(0, 4)) state.members.set(id, { id, roles: (await posting.writer.member(id)).roles.slice().sort(), leftAt: null })
-  Object.assign(state, { rules: [], purged: null, audits: [], season: { ok: true, open: true, season: { id: "s3" } }, entrants: [] })
+  Object.assign(state, { rules: [], settings: new Map(), unlinkedMidRun: new Set(), audits: [], season: { ok: true, open: true, season: { id: "s3" } }, entrants: [] })
 })
 
 const memberRoles = async (i: number) => (await posting.writer.member(humans[i])).roles
@@ -93,15 +105,59 @@ describe("role sync", () => {
     expect((await run())).toMatchObject({ added: 0, removed: 0 })
   })
 
-  it("never touches anyone on the purged list", async () => {
+  it("never touches anyone on the purged list in its runs (a purge takes back their roles itself, when it happens)", async () => {
     const key = Buffer.from("k".repeat(32)).toString("base64url")
-    state.purged = JSON.stringify({ key, authors: [purgedHash(key, humans[0])] })
+    state.settings.set("discord_purged", JSON.stringify({ key, authors: [purgedHash(key, humans[0])] }))
     state.rules = [{ id: "rr-1", roleId: R.lscDriver, condition: "linked", enabled: true, createdById: null }]
     const before = await memberRoles(0)
     await run()
     expect(await memberRoles(0)).toEqual(before)
     expect(await memberRoles(1)).toContain(R.lscDriver)
     expect(state.audits.some((a) => a.targetUserId === "u0")).toBe(false)
+  })
+
+  it("first takes back the roles of accounts an unlink left queued, and never touches members who never linked", async () => {
+    state.rules = [{ id: "rr-1", roleId: R.member, condition: "officer", enabled: true, createdById: null }]
+    // Two members who aren't linked hold the role: one unlinked while Discord couldn't be reached (queued), one was given it in Discord
+    const [unlinked, handGiven] = [humans[6], humans[7]]
+    for (const id of [unlinked, handGiven]) {
+      await posting.writer.addRole(id, R.member, "test")
+      state.members.set(id, { id, roles: (await posting.writer.member(id)).roles.slice().sort(), leftAt: null })
+    }
+    state.settings.set("discord_role_takeback", JSON.stringify({ accounts: [unlinked] }))
+    const result = await run()
+    expect(result.takenBack).toBe(1)
+    expect((await posting.writer.member(unlinked)).roles).not.toContain(R.member)
+    expect(state.members.get(unlinked)!.roles).not.toContain(R.member)
+    expect((await posting.writer.member(handGiven)).roles).toContain(R.member)
+    expect(state.settings.has("discord_role_takeback")).toBe(false)
+    expect(state.audits).toContainEqual(expect.objectContaining({ actorUserId: null, actionType: "ROLE_REMOVE", entityType: "DISCORD_ROLE", entityId: R.member, targetUserId: null, summary: expect.stringMatching(/^Role sync took back the Discord role @Member: the account was unlinked/) }))
+    expect(JSON.stringify(state.audits)).not.toContain(unlinked)
+  })
+
+  it("works through the queued take-backs while no rule is switched on, taking a paused rule's role too", async () => {
+    state.rules = [{ id: "rr-1", roleId: R.member, condition: "officer", enabled: false, createdById: null }]
+    const unlinked = humans[6]
+    expect((await posting.writer.member(unlinked)).roles).toContain(R.member)
+    state.settings.set("discord_role_takeback", JSON.stringify({ accounts: [unlinked] }))
+    expect(await run()).toMatchObject({ rules: 0, takenBack: 1, added: 0, removed: 0, waiting: 0 })
+    expect((await posting.writer.member(unlinked)).roles).not.toContain(R.member)
+    expect(state.settings.has("discord_role_takeback")).toBe(false)
+  })
+
+  it("takes back at once a role it just gave someone who unlinked while the run was going", async () => {
+    state.rules = [{ id: "rr-1", roleId: R.lscDriver, condition: "lsc_driver", enabled: true, createdById: null }]
+    // Member 0 has the badge and not the role; they unlink after the run read who's linked (their own take-back found nothing yet)
+    await posting.writer.removeRole(humans[0], R.lscDriver, "test")
+    state.members.get(humans[0])!.roles = (await posting.writer.member(humans[0])).roles.slice().sort()
+    state.unlinkedMidRun.add("u0")
+    await run()
+    expect(await memberRoles(0)).not.toContain(R.lscDriver)
+    const writes = fakes.requests.filter((r) => r.path.endsWith(`/members/${humans[0]}/roles/${R.lscDriver}`)).map((r) => r.method)
+    expect(writes.slice(-2)).toEqual(["PUT", "DELETE"])
+    expect(state.audits.some((a) => a.targetUserId === "u0")).toBe(false)
+    // Member 1, still linked, keeps it
+    expect(await memberRoles(1)).toContain(R.lscDriver)
   })
 
   it("refuses roles with moderation permissions or above the bot's, live every run", async () => {

@@ -6,10 +6,14 @@ const db = vi.hoisted(() => ({
   user: { findMany: vi.fn() },
   discordRule: { findMany: vi.fn() },
   jackProposal: { findMany: vi.fn() },
+  discordRoleRule: { findMany: vi.fn() },
+  discordMember: { findMany: vi.fn(), count: vi.fn() },
+  scheduledJob: { findUnique: vi.fn() },
+  systemSetting: { findUnique: vi.fn() },
 }))
 vi.mock("@/server/db", () => ({ prisma: db }))
 
-import { readableText, toPostViews } from "./queries"
+import { readableText, roleSyncView, toPostViews } from "./queries"
 
 const CHANNEL = "1100000000000000001"
 const ROLE = "1100000000000000011"
@@ -50,5 +54,20 @@ describe("the outbox as the page shows it", () => {
     expect(views[0].text).toBe("@LSC Driver Reminder")
     expect(views[1].fromHref).toBe("/admin/jack/room-1?m=msg-1")
     expect(views[2].error).toMatch(/isn't allowed/)
+  })
+})
+
+describe("role sync on the Discord page", () => {
+  it("counts the linked members who hold a rule's role, the members who hold it without being linked, and the accounts waiting to have it taken back", async () => {
+    const linked = "1200000000000000001"
+    db.discordRoleRule.findMany.mockResolvedValue([{ id: "rr-1", roleId: ROLE, condition: "linked", enabled: true }])
+    db.user.findMany.mockResolvedValue([{ id: "u1", displayName: "Ana", discordUserId: linked, roles: [] }])
+    db.scheduledJob.findUnique.mockResolvedValue(null)
+    db.systemSetting.findUnique.mockImplementation(async ({ where }: { where: { key: string } }) => (where.key === "discord_role_takeback" ? { value: JSON.stringify({ accounts: ["1200000000000000002", "1200000000000000003"] }) } : null))
+    db.discordMember.findMany.mockResolvedValue([{ roles: [ROLE] }])
+    db.discordMember.count.mockResolvedValue(4)
+    const view = await roleSyncView(null)
+    expect(view).toMatchObject({ linked: 1, waitingTakeBacks: 2, rules: [{ qualifying: 1, holders: 1, others: 4 }] })
+    expect(db.discordMember.count).toHaveBeenCalledWith({ where: { id: { notIn: [linked] }, leftAt: null, roles: { has: ROLE } } })
   })
 })

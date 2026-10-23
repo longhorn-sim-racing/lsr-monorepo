@@ -112,6 +112,60 @@ describe("invites", () => {
   })
 })
 
+describe("links glued to a word, or joined by taking another out", () => {
+  const gm = { officerTexts: ["Post about GM tonight"], siteHosts: SITE }
+
+  it("come out of template values, whatever is right before them", () => {
+    expect(templateValue("Win1https://evil.example/x", 60)).toBe("Win1")
+    expect(templateValue("up_https://evil.example", 60)).toBe("up\\_")
+    expect(templateValue("Bob\\_https://evil.example", 60)).toBe("Bob\\\\\\_")
+    expect(templateValue("Xdiscord.gg/abc", 60)).toBe("X")
+    expect(tidy(stripLinks("Sign up_https://evil.example/form now"))).toBe("Sign up_ now")
+  })
+
+  it("can't be joined back together by taking out an invite, a masked link or a mention", () => {
+    for (const name of ["https:discord.gg/a//evil.example", "https:discord.gg/abc//evil.example/x", "https:<@123456789012345678>//evil.example/x", "https:<https://a.example>//evil.example"]) {
+      expect(templateValue(name, 60)).not.toMatch(/https?:\/\//)
+      expect(stripLinks(stripMentions(name))).not.toMatch(/https?:\/\//)
+    }
+  })
+
+  it("break up any other scheme left in a template value, so it can't link", () => {
+    expect(templateValue("Join steam://run/123 tonight")).toBe("Join steam:\u200B//run/123 tonight")
+  })
+
+  it("are found and taken out of a post unless an officer gave them; the site's own stay", () => {
+    expect(linksIn("Sign up_https://evil.example/form and x1https://b.example")).toEqual(["https://evil.example/form", "https://b.example"])
+    const glued = cleanPostText("GM tonight! Sign up_https://evil.example/form and bring friends", gm)
+    expect(glued).toEqual({ text: "GM tonight! Sign up_ and bring friends", removed: { mentions: [], links: ["https://evil.example/form"] } })
+    const joined = cleanPostText("see https:discord.gg/abc//evil.example/x now", gm)
+    expect(joined).toEqual({ text: "see now", removed: { mentions: [], links: ["https://discord.gg/abc", "https://evil.example/x"] } })
+    expect(cleanPostText("Rules:https://longhornsimracing.org/rules", gm).text).toBe("Rules:https://longhornsimracing.org/rules")
+  })
+
+  it("can't join the text around them into a mention that stays in a post", () => {
+    const role = "<@&123456789012345678>"
+    expect(cleanPostText("GM <@&123456789012345678<https://x.example>> tonight", gm)).toEqual({ text: "GM tonight", removed: { mentions: [role], links: ["https://x.example"] } })
+    expect(cleanPostText("@every<https://x.example>one GM", gm)).toEqual({ text: "everyone GM", removed: { mentions: ["@everyone"], links: ["https://x.example"] } })
+    expect(cleanPostText("<@&123456789012345678https://x.example>", gm)).toEqual({ text: "", removed: { mentions: [role], links: ["https://x.example"] } })
+    // Nor inside a kept link's words
+    expect(cleanPostText("[<@&123456789012345678https://x.example>](https://longhornsimracing.org/gm)", gm)).toEqual({ text: "[](https://longhornsimracing.org/gm)", removed: { mentions: [role], links: ["https://x.example"] } })
+    // A mention an officer wrote still stays when it forms
+    const asked = { officerTexts: ["Post about GM tonight and ping @everyone"], siteHosts: SITE }
+    expect(cleanPostText("@every<https://x.example>one GM", asked)).toEqual({ text: "@everyone GM", removed: { mentions: [], links: ["https://x.example"] } })
+  })
+
+  it("keep a kept link inside another kept link whole", () => {
+    expect(cleanPostText("<https://longhornsimracing.org/a[rules](https://longhornsimracing.org/r)>", gm).text).toBe("<https://longhornsimracing.org/a[rules](https://longhornsimracing.org/r)>")
+  })
+
+  it("never count as an officer's invite just because one is in their path or query", () => {
+    const asked = { officerTexts: ["Add our invite discord.gg/abc to the post"], siteHosts: SITE }
+    expect(cleanPostText("Join https://evil.example/?r=discord.gg/abc now", asked)).toEqual({ text: "Join now", removed: { mentions: [], links: ["https://evil.example/?r=discord.gg/abc"] } })
+    expect(cleanPostText("Join https://discord.gg/abc now", asked).removed.links).toEqual([])
+  })
+})
+
 describe("template values", () => {
   it("escape Markdown so outside text shows as written", () => {
     expect(escapeMarkdown("**bold** _x_ ~~s~~ `c` ||spoiler|| [a](b) <@1>")).toBe("\\*\\*bold\\*\\* \\_x\\_ \\~\\~s\\~\\~ \\`c\\` \\|\\|spoiler\\|\\| \\[a\\](b) \\<@1\\>")

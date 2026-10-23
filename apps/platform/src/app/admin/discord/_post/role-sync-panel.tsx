@@ -45,7 +45,7 @@ function AddRuleDialog({ roles, conditions, onClose }: { roles: { id: string; na
       open
       onOpenChange={(open) => !open && onClose()}
       title="New role sync rule"
-      description="Linked members get the role while they meet the condition, and lose it when they stop. Members who didn't link their account are never touched."
+      description="Linked members get the role while they meet the condition, and lose it when they stop, unlink their account, delete it, or have their Discord data deleted. Members who never linked their account are never touched."
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
@@ -108,11 +108,14 @@ export function RoleSyncPanel({ view, conditions, isAdmin }: { view: RoleSyncVie
   }
 
   const lastRun = view.lastRun ? `Last run ${view.lastRun.at}${view.lastRun.summary ? `: ${view.lastRun.summary}` : ""}` : "Hasn't run yet (Scheduled jobs → discord.role-sync)"
+  const waiting = view.waitingTakeBacks
+    ? ` ${view.waitingTakeBacks} unlinked ${view.waitingTakeBacks === 1 ? "account still holds roles" : "accounts still hold roles"} it gave: each run tries again to take them back (the run's log in Scheduled jobs → discord.role-sync says why it couldn't).`
+    : ""
   return (
     <Panel>
       <PanelHeader
         title="Role sync"
-        description={`Discord roles for the ${view.linked} linked ${view.linked === 1 ? "member" : "members"}, kept in step hourly. ${lastRun}.`}
+        description={`Discord roles for the ${view.linked} linked ${view.linked === 1 ? "member" : "members"}, kept in step hourly, and taken back when a member unlinks, deletes their account or has their Discord data deleted.${waiting} ${lastRun}.`}
         actions={
           isAdmin ? (
             <Button size="sm" disabled={!view.safeRoles.length} onClick={() => setAdding(true)} title={view.live ? undefined : "Discord isn't connected"}>
@@ -135,6 +138,7 @@ export function RoleSyncPanel({ view, conditions, isAdmin }: { view: RoleSyncVie
                   </div>
                   <p className="text-xs text-muted-foreground">
                     For {rule.conditionLabel.toLowerCase()}: {rule.qualifying === null ? "can't tell who right now" : `${rule.qualifying} qualify`}, {rule.holders} hold it
+                    {rule.others > 0 && `, and ${rule.others} more who ${rule.others === 1 ? "isn't" : "aren't"} linked now (role sync changes only linked members' roles, and takes its roles back when someone unlinks)`}
                   </p>
                   {rule.refusal && <p className="text-xs text-tone-danger-foreground">{rule.refusal}</p>}
                 </div>

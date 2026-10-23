@@ -50,6 +50,17 @@ describe("standing rules", () => {
     expect(rules.setRuleEnabled).not.toHaveBeenCalled()
   })
 
+  it("take one rule's id and a real on/off", async () => {
+    const filter = { not: "" } as unknown as string
+    expect(await updateRuleAction(filter, form)).toEqual({ ok: false, error: expect.stringMatching(/isn't in the list/) })
+    expect(await setRuleEnabledAction(filter, false)).toEqual({ ok: false, error: expect.stringMatching(/isn't in the list/) })
+    expect(await setRuleEnabledAction("r1", "yes" as unknown as boolean)).toEqual({ ok: false, error: expect.stringMatching(/isn't in the list/) })
+    expect(await deleteRuleAction(filter)).toEqual({ ok: false, error: expect.stringMatching(/isn't in the list/) })
+    expect(rules.updateRule).not.toHaveBeenCalled()
+    expect(rules.setRuleEnabled).not.toHaveBeenCalled()
+    expect(rules.deleteRule).not.toHaveBeenCalled()
+  })
+
   it("can be paused by any officer", async () => {
     db.userRole.count.mockResolvedValue(0)
     expect(await setRuleEnabledAction("r1", false)).toEqual({ ok: true })
@@ -92,6 +103,15 @@ describe("posts", () => {
     expect(posts.createOfficerPost).toHaveBeenCalledWith({ channelId: CHANNEL, text: "Hi" }, { userId: "admin-1", displayName: "Gray" }, expect.anything())
     expect(await cancelPostAction("p1")).toEqual({ ok: true })
     expect(await retryPostAction("p1")).toEqual({ ok: true, data: { summary: "Posted.", url: null } })
+  })
+
+  it("take one post's id, never a filter object (it would cancel or resend every post at once)", async () => {
+    for (const id of [{ not: "" }, ["p1"], 42, "", "p".repeat(65)] as unknown as string[]) {
+      expect(await cancelPostAction(id)).toEqual({ ok: false, error: expect.stringMatching(/isn't in the list/) })
+      expect(await retryPostAction(id)).toEqual({ ok: false, error: expect.stringMatching(/isn't in the list/) })
+    }
+    expect(posts.cancelScheduledPost).not.toHaveBeenCalled()
+    expect(posts.retryFailedPost).not.toHaveBeenCalled()
   })
 
   it("won't post while Discord is off", async () => {

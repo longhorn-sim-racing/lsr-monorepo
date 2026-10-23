@@ -97,6 +97,17 @@ describe("results, standings and Twitch templates", () => {
     expect(twitchLiveBody({ title: "", gameName: null, channelUrl: "https://www.twitch.tv/x" }, {}).content).toBe("Longhorn Sim Racing is live on Twitch.\nhttps://www.twitch.tv/x")
   })
 
+  it("never let a member's name or a stream title carry a link, however it's glued or joined", () => {
+    const names = ["P1https://evil.example/x", "Bob_https://evil.example", "https:discord.gg/a//evil.example"]
+    const results = resultsBody({ event: { slug: "lsc-r3", title: "LSC Round 3" }, trackName: null, podium: names }, { siteUrl: SITE })
+    expect(results.content!.split("\n").slice(2, 5)).toEqual(["1. P1", "2. Bob\\_", "3. "])
+    expect(results.content!.match(/https?:\/\/\S+/g)).toEqual([`${SITE}/events/lsc-r3#results`])
+    const standings = standingsBody({ seasonName: "LSC Season 3", rows: names.map((name, i) => ({ name, points: 10 - i })), url: `${SITE}/lone-star-cup` }, {})
+    expect(standings.content!.match(/https?:\/\/\S+/g)).toEqual([`${SITE}/lone-star-cup`])
+    const live = twitchLiveBody({ title: "Live2https://evil.example", gameName: null, channelUrl: "https://www.twitch.tv/x" }, {})
+    expect(live.content!.match(/https?:\/\/\S+/g)).toEqual(["https://www.twitch.tv/x"])
+  })
+
   it("name reminder offsets in words", () => {
     expect([1440, 60, 30, 90, 10_080].map(offsetLabel)).toEqual(["1 day", "1 hour", "30 minutes", "1 hour 30 minutes", "7 days"])
   })
