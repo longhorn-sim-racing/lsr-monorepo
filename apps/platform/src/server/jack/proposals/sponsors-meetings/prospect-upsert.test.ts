@@ -35,10 +35,11 @@ const apex = {
   createdAt: new Date("2026-09-01T17:00:00Z"),
   updatedAt: new Date("2026-09-01T17:00:00Z"),
 }
+const crest = { ...apex, id: "pr-crest", company: "Crest Wheels", contactName: "Sam Rivera" }
 
 beforeEach(() => {
   db.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(db))
-  db.sponsorProspect.findMany.mockResolvedValue([apex])
+  db.sponsorProspect.findMany.mockResolvedValue([apex, crest])
   officers.officersByHandle.mockImplementation(async (handles: string[]) => new Map(handles.includes("dylan") ? [["dylan", DYLAN]] : []))
   officers.userNames.mockImplementation(async (ids: (string | null)[]) => new Map(ids.includes("u-dylan") ? [["u-dylan", DYLAN]] : []))
   service.createProspectTx.mockImplementation(async (_tx, fields: { company: string }) => ({ ok: true, prospect: { id: `new-${fields.company}`, company: fields.company }, changed: [] }))
@@ -61,7 +62,7 @@ describe("prospect.upsert", () => {
         prospects: [
           { company: "Bolt Energy", stage: "talking", tierInterest: "gold", owner: "@Dylan", nextStep: "Send the packet", nextStepDue: "2026-10-30" },
           { prospectId: "pr-apex", stage: "talking", owner: "dylan" },
-          { company: "apex sim rigs", contactName: "Jordan Lee", notes: "Met at the expo" },
+          { company: "crest wheels", contactName: "Sam Rivera", notes: "Met at the expo" },
         ],
       },
       ctx,
@@ -70,19 +71,51 @@ describe("prospect.upsert", () => {
     expect(prepared.view.rows).toEqual([
       { id: "p1", label: "Bolt Energy", detail: "New · Talking · Gold interest · Dylan · next: Send the packet (Fri Oct 30)" },
       { id: "p2", label: "Apex Sim Rigs", detail: "Stage: Contacted → Talking; Owner: none → Dylan" },
-      { id: "p3", label: "Apex Sim Rigs", detail: "Already a prospect: applying changes it. Notes changed", status: "ambiguous" },
+      { id: "p3", label: "Crest Wheels", detail: "Already a prospect: applying changes it. Notes changed", status: "ambiguous" },
     ])
-    expect(prepared.view.diff.map((row) => row.label)).toEqual(["Apex Sim Rigs: Stage", "Apex Sim Rigs: Owner", "Apex Sim Rigs: Notes"])
+    expect(prepared.view.diff.map((row) => row.label)).toEqual([
+      "Bolt Energy: Stage",
+      "Bolt Energy: Tier interest",
+      "Bolt Energy: Owner",
+      "Bolt Energy: Next step",
+      "Bolt Energy: Next step due",
+      "Apex Sim Rigs: Stage",
+      "Apex Sim Rigs: Owner",
+      "Crest Wheels: Notes",
+    ])
     expect(prepared.view.people).toEqual([{ name: "Dylan", detail: "Owner" }])
     expect(prepared.before).toEqual({
       rows: {
         p1: { action: "create", company: "Bolt Energy" },
         p2: { action: "update", prospectId: "pr-apex", company: "Apex Sim Rigs", fields: { stage: "contacted", ownerId: null } },
-        p3: { action: "update", prospectId: "pr-apex", company: "Apex Sim Rigs", fields: { notes: null } },
+        p3: { action: "update", prospectId: "pr-crest", company: "Crest Wheels", fields: { notes: null } },
       },
     })
     // Several prospects: nothing for a newer proposal to supersede by target
     expect(prepared.targetId).toBeUndefined()
+  })
+
+  it("shows everything a new prospect gets on the card, its contact email and notes included", async () => {
+    const prepared = await prospectUpsertKind.prepare(
+      { prospects: [{ company: "Bolt Energy", website: "bolt.example", contactName: "Sam Lee", contactRole: "Partnerships", contactEmail: "Sam@Bolt.example", notes: "Met at the expo.\nWants the Gold packet." }] },
+      ctx,
+    )
+    expect(prepared.view.rows).toEqual([{ id: "p1", label: "Bolt Energy", detail: "New · Idea · no owner · contact Sam Lee (Partnerships), sam@bolt.example · with notes" }])
+    expect(prepared.view.diff).toEqual([
+      { field: "p1.website", label: "Bolt Energy: Website", before: null, after: "https://bolt.example/", format: "text" },
+      { field: "p1.contactName", label: "Bolt Energy: Contact", before: null, after: "Sam Lee", format: "text" },
+      { field: "p1.contactRole", label: "Bolt Energy: Contact's role", before: null, after: "Partnerships", format: "text" },
+      { field: "p1.contactEmail", label: "Bolt Energy: Contact email", before: null, after: "sam@bolt.example", format: "text" },
+      { field: "p1.stage", label: "Bolt Energy: Stage", before: null, after: "Idea", format: "value" },
+      { field: "p1.notes", label: "Bolt Energy: Notes", before: null, after: "Met at the expo.\nWants the Gold packet.", format: "markdown" },
+    ])
+  })
+
+  it("refuses two rows for one prospect, by id or by its company's name", async () => {
+    await expect(prospectUpsertKind.prepare({ prospects: [{ prospectId: "pr-apex", stage: "talking" }, { company: "APEX Sim Rigs, Inc.", notes: "Met at the expo" }] }, ctx)).rejects.toThrow(
+      "Prospects 1 and 2 are both Apex Sim Rigs; put its changes in one row.",
+    )
+    await expect(prospectUpsertKind.prepare({ prospects: [{ company: "Bolt" }, { company: "Crest Wheels", stage: "talking" }, { company: "crest wheels", notes: "x" }] }, ctx)).rejects.toThrow(/Prospects 2 and 3 are both Crest Wheels/)
   })
 
   it("targets the prospect when it changes one", async () => {
@@ -105,7 +138,7 @@ describe("prospect.upsert", () => {
   })
 
   it("applies only the picked rows, all in one transaction, with the applying officer and the proposal on the audit", async () => {
-    const p = { prospects: [{ company: "Bolt Energy", owner: "dylan" }, { prospectId: "pr-apex", stage: "talking" as const }, { company: "Crest Wheels" }] }
+    const p = { prospects: [{ company: "Bolt Energy", owner: "dylan" }, { prospectId: "pr-apex", stage: "talking" as const }, { company: "Delta Pedals" }] }
     const { before } = await prospectUpsertKind.prepare(p, ctx)
     expect(await prospectUpsertKind.checkStale(p, before)).toBeNull()
     const result = await prospectUpsertKind.apply(p, applyCtx(before, ["p1", "p2"]))

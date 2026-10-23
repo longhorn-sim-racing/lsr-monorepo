@@ -113,18 +113,28 @@ function changedFields(current: SponsorProspect, changes: ProspectChanges): Pros
   return (Object.keys(changes) as ProspectFieldKey[]).filter((key) => changes[key] !== undefined && prospectValue(changes[key]) !== prospectValue(current[key]))
 }
 
-/** A new prospect's row detail: "New · Talking · Gold · Dylan · next: send the packet (Fri Oct 30)" */
+/** How the card shows a field's change: notes diff line by line, single values as values */
+function fieldFormat(key: ProspectFieldKey): ProposalDiffRow["format"] {
+  return key === "notes" ? "markdown" : key === "nextStepDue" || key === "stage" || key === "tierInterest" ? "value" : "text"
+}
+
+/** A new prospect's row detail: "New · Talking · Gold · Dylan · contact Sam Lee (Partnerships), sam@… · next: send the packet (Fri Oct 30)" */
 function createDetail(fields: ProspectChanges, names: Names): string {
+  const contact = [fields.contactName ? `${fields.contactName}${fields.contactRole ? ` (${fields.contactRole})` : ""}` : null, fields.contactEmail].filter(Boolean).join(", ")
   const parts = [
     "New",
     show("stage", fields.stage ?? "idea", names),
     fields.tierInterest ? `${show("tierInterest", fields.tierInterest, names)} interest` : null,
     fields.ownerId ? show("ownerId", fields.ownerId, names) : "no owner",
-    fields.contactName ? `contact ${fields.contactName}${fields.contactRole ? ` (${fields.contactRole})` : ""}` : null,
+    contact ? `contact ${contact}` : null,
     fields.nextStep ? `next: ${clip(fields.nextStep, 80)}${fields.nextStepDue ? ` (${cardDay(fields.nextStepDue)})` : ""}` : null,
+    fields.notes ? "with notes" : null,
   ]
   return parts.filter(Boolean).join(" · ")
 }
+
+/** Every field a new prospect gets, in the card's diff (the company is the row and the label): what Apply writes, all of it */
+const CREATE_SHOWN: ProspectFieldKey[] = ["website", "contactName", "contactRole", "contactEmail", "stage", "tierInterest", "ownerId", "nextStep", "nextStepDue", "notes"]
 
 function updateDetail(current: SponsorProspect, changes: ProspectChanges, keys: ProspectFieldKey[], names: Names): string {
   return keys
@@ -151,6 +161,8 @@ async function plan(p: ProspectUpsert, owners: Map<string, OfficerRef>): Promise
   const byKey = new Map<string, SponsorProspect>()
   for (const row of all) if (!byKey.has(companyKey(row.company))) byKey.set(companyKey(row.company), row)
   const newKeys = new Set<string>()
+  /** The row (1-based) each existing prospect was matched by, by id or by company name */
+  const matched = new Map<string, number>()
 
   return p.prospects.map((row, i) => {
     const id = rowId(i)
@@ -162,6 +174,10 @@ async function plan(p: ProspectUpsert, owners: Map<string, OfficerRef>): Promise
       newKeys.add(key)
       return { rowId: id, action: "create", company: row.company!, fields: checkRow(row, owners, true, label) }
     }
+    // Two rows for one prospect (by id, or by its company's name) would apply against each other: one row each
+    const first = matched.get(existing.id)
+    if (first) throw new ProposalInputError(`Prospects ${first} and ${i + 1} are both ${existing.company}; put its changes in one row.`)
+    matched.set(existing.id, i + 1)
     const fields = checkRow(row, owners, false, label)
     // A "new" row for a company that's already there: it only changes what it gives that differs
     if (!row.prospectId && fields.company !== undefined && companyKey(fields.company) === companyKey(existing.company)) delete fields.company
@@ -210,6 +226,10 @@ export const prospectUpsertKind: ProposalKind<ProspectUpsert> = {
     for (const row of planned) {
       if (row.action === "create") {
         rows.push({ id: row.rowId, label: row.company, detail: createDetail(row.fields, names) })
+        for (const key of CREATE_SHOWN) {
+          const after = show(key, row.fields[key], names)
+          if (after !== null) diff.push({ field: `${row.rowId}.${key}`, label: `${row.company}: ${PROSPECT_FIELD_LABEL[key]}`, before: null, after, format: fieldFormat(key) })
+        }
         before.rows[row.rowId] = { action: "create", company: row.company }
       } else if (row.action === "update") {
         const detail = updateDetail(row.current, row.fields, row.keys, names)
@@ -224,7 +244,7 @@ export const prospectUpsertKind: ProposalKind<ProspectUpsert> = {
             label: `${row.current.company}: ${PROSPECT_FIELD_LABEL[key]}`,
             before: show(key, row.current[key], names),
             after: show(key, row.fields[key], names),
-            format: key === "notes" ? "markdown" : key === "nextStepDue" || key === "stage" || key === "tierInterest" ? "value" : "text",
+            format: fieldFormat(key),
           })
         }
         before.rows[row.rowId] = { action: "update", prospectId: row.current.id, company: row.current.company, fields: Object.fromEntries(row.keys.map((key) => [key, prospectValue(row.current[key])])) }
