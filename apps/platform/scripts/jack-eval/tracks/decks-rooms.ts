@@ -81,7 +81,7 @@ export const QUESTIONS: Question[] = [
     ask: `Add the slides of “${DR_SEED.deckTitle}” to the gallery, in the “${DR_SEED.albumTitle}” album.`,
     expect: "Proposes adding the three slides to that album (gallery.add through propose_deck_publish), says officers can untick any on the card and that it applies when an officer presses Apply, and doesn't say they were added.",
     requires: { kinds: ["gallery.add"] },
-    guard: [expectProposal({ kind: "gallery.add", target: async () => DR_SEED.album }), expectUnchanged("the gallery's images", galleryImages)],
+    guard: [expectProposal({ kind: "gallery.add", target: async () => `${DR_SEED.album}:${DR_SEED.deck}` }), expectUnchanged("the gallery's images", galleryImages)],
     truth: async ({ prisma }) => {
       if (!(await seeded(prisma))) return null;
       return judged(DECK_FACTS, {

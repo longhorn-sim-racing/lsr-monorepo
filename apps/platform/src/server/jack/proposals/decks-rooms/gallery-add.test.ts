@@ -52,7 +52,7 @@ describe("gallery.add: proposing", () => {
   it("lists every slide and room photo as a row with its picture, for an existing album found by title", async () => {
     const prepared = await galleryAddKind.prepare(payload({ album: "gm 2", deck: DECK_ID, files: [FILE] }), ctx)
     expect(prepared.before).toEqual({ albumId: "album-1", deck: { id: DECK_ID, version: 3, slideIds: ["slide-a", "slide-b"] }, files: [FILE] })
-    expect(prepared.targetId).toBe("album-1")
+    expect(prepared.targetId).toBe(`album-1:${DECK_ID}`)
     expect(prepared.view.title).toBe("Add 3 images to the gallery (“GM 2”)")
     expect(prepared.view.summary).toBe("Applying it puts the images checked below in the album “GM 2” on the public gallery (/gallery). Any can be taken off again on Gallery.")
     expect(prepared.view.rows).toEqual([

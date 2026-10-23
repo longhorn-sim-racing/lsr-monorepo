@@ -49,6 +49,11 @@ const savedBefore = z.object({
 
 type SavedBefore = z.infer<typeof savedBefore>
 
+/** What a gallery.add proposal is for (JackProposal.targetId): an album and where its images come from */
+export function galleryTarget(albumId: string, deckId: string | null): string {
+  return `${albumId}:${deckId ?? "photos"}`
+}
+
 /** An existing album by id, slug or title (case doesn't matter), or the error for Jack with a few to pick from */
 async function findAlbum(name: string): Promise<{ id: string; title: string; slug: string }> {
   const select = { id: true, title: true, slug: true } as const
@@ -116,7 +121,8 @@ export const galleryAddKind: ProposalKind<GalleryAddPayload> = {
     const links: ProposalLink[] = [...(deckPinned ? [{ title: "The deck", url: deckPageUrl(deckPinned.id) }] : []), { title: "Gallery", url: "/admin/gallery" }]
     return {
       before: { albumId: album?.id ?? null, deck: deckPinned, files: photos.map((f) => f.id) } satisfies SavedBefore,
-      ...(album ? { targetId: album.id } : {}),
+      // A newer add of the same deck (or of room photos) into the same album replaces this one; adds from other sources don't
+      ...(album ? { targetId: galleryTarget(album.id, deckPinned?.id ?? null) } : {}),
       view: {
         title: `Add ${plural(items.length, "image")} to the gallery (${album ? `“${album.title}”` : `new album “${p.newAlbum!.title}”`})`.slice(0, 200),
         summary: `Applying it puts the images checked below in ${where} on the public gallery (/gallery). Any can be taken off again on Gallery.`,

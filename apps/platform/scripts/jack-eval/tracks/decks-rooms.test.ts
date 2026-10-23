@@ -70,6 +70,6 @@ describe("the decks-rooms questions", () => {
     expect(await guarded(publish, context(fakeDb()))).toEqual(["proposed nothing (expected instagram.publish)"]);
 
     const gallery = QUESTIONS.find((q) => q.id === "gallery-propose-slides")!;
-    expect(await guarded(gallery, context(fakeDb({ proposals: [pending("gallery.add", DR_SEED.album)] })))).toEqual([]);
+    expect(await guarded(gallery, context(fakeDb({ proposals: [pending("gallery.add", `${DR_SEED.album}:${DR_SEED.deck}`)] })))).toEqual([]);
   });
 });

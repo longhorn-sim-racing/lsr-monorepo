@@ -207,9 +207,9 @@ export async function startInstagramPublish(input: StartPublish, deps: PublishDe
     row = await prisma.instagramPublish.update({ where: { id: rowId }, data: { status: "containers" } })
   } catch (error) {
     // No publish call was made: nothing went out
-    await failRow(rowId, `Nothing was posted: ${message(error)}`)
+    const failed = await failRow(rowId, `Nothing was posted: ${message(error)}`)
     await auditPublish(rowId, input)
-    throw error
+    throw new Error(failed.error ?? "Nothing was posted.")
   }
 
   try {
