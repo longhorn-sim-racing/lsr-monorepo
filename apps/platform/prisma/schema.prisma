@@ -1049,8 +1049,9 @@ model JackMessage {
   /// A room note a scheduled run posted (a recurring question, design §11.1). It's answered as the officer
   /// it names, in a reply of its own (never together with officer messages) that gets no web tools
   scheduled     Boolean           @default(false)
-  /// Officer messages (Jack 2.0): the author's profile when they posted it, e.g. "Technology Director ·
-  /// Technology · CS". Snapshotted so history never changes when a profile does
+  /// Officer messages (Jack 2.0): who posted it as Jack reads it, from their profile when they posted it,
+  /// e.g. "Gray (Technology Director · Technology · CS) [@gray-marshall]". Snapshotted so history never
+  /// changes when a profile does
   authorLabel   String?
   /// False for officer messages in a mention-mode room that don't mention Jack: context, not questions
   expectsAnswer Boolean           @default(true)

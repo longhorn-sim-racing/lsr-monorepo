@@ -1,4 +1,5 @@
 import { PAGE_PUBLIC_PATHS } from "@/app/admin/pages/_components/public-paths"
+import { knowledgeEntryPath } from "@/lib/jack/knowledge"
 
 /** Where search results link to. Console paths for officer-only things, site paths for public ones */
 
@@ -7,9 +8,9 @@ export function roomMessageHref(roomId: string, messageId: string): string {
   return `/admin/jack/${roomId}?m=${messageId}`
 }
 
-/** A knowledge entry on the Knowledge page (memory track) */
+/** A knowledge entry's own page (memory track: /admin/knowledge/<id>) */
 export function knowledgeHref(entryId: string): string {
-  return `/admin/knowledge?entry=${entryId}`
+  return knowledgeEntryPath(entryId)
 }
 
 export function postHref(slug: string): string {

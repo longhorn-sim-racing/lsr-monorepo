@@ -1,3 +1,5 @@
+import { Prisma } from "@prisma/client"
+
 /**
  * Test helper: an in-memory stand-in for the Prisma calls the room-file code makes (JackFile and
  * JackRoom), with conditional updates and deletes that only touch rows their `where` matches at that
@@ -139,10 +141,10 @@ export function createFakeFileDb() {
         for (const file of hits) Object.assign(file, data, { updatedAt: new Date(clock) })
         return { count: hits.length }
       },
-      async delete({ where }: { where: { id: string } }) {
-        const index = state.files.findIndex((f) => f.id === where.id)
-        if (index < 0) throw new Error("Record to delete does not exist")
-        return state.files.splice(index, 1)[0]
+      async delete({ where }: { where: Where & { id: string } }) {
+        const index = state.files.findIndex((f) => matches(f, where))
+        if (index < 0) throw new Prisma.PrismaClientKnownRequestError("Record to delete does not exist", { code: "P2025", clientVersion: "test" })
+        return { ...state.files.splice(index, 1)[0] }
       },
       async deleteMany({ where }: { where: Where }) {
         const before = state.files.length

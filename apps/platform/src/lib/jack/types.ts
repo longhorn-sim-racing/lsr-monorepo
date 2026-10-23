@@ -36,7 +36,10 @@ export type JackAuthor =
       userId: string | null
       displayName: string
       avatarUrl: string | null
-      /** The officer's profile as it was when they posted (JackMessage.authorLabel), e.g. "Technology Director · Technology · CS" (G5) */
+      /**
+       * How Jack reads who posted it, as it was when they posted (JackMessage.authorLabel), e.g.
+       * "Gray (Technology Director · Technology · CS) [@gray-marshall]" (G6). Absent on older messages
+       */
       label?: string
     }
   | { kind: "assistant"; persona: JackPersonaKey }

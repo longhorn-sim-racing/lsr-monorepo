@@ -376,6 +376,7 @@ export async function getProposalDetail(id: string, viewerId: string, deps: Prop
     people: view.people ?? [],
     links: view.links ?? [],
     rows,
+    preview: view.preview ?? null,
     permission,
     destructive: kind?.destructive ?? false,
     canApply: Boolean(kind) && state.status === "PENDING" && mayApply(permission, roles),
@@ -574,6 +575,7 @@ function savedView(row: Pick<JackProposal, "title" | "summary" | "view">): Propo
     ...(Array.isArray(view.people) ? { people: view.people } : {}),
     ...(Array.isArray(view.links) ? { links: view.links } : {}),
     ...(Array.isArray(view.rows) ? { rows: view.rows } : {}),
+    ...(view.preview && typeof view.preview === "object" && Array.isArray(view.preview.blocks) ? { preview: view.preview } : {}),
   }
 }
 
