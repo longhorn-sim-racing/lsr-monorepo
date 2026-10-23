@@ -66,11 +66,21 @@ describe("gallery.add: proposing", () => {
     expect(galleryAddKind.destructive).toBeUndefined()
   })
 
-  it("starts images already in the gallery unticked, and refuses when they all are", async () => {
+  it("leaves images already in the gallery off the card and out of what applying adds, saying so, and refuses when they all are", async () => {
     gallery.inGallery.mockImplementation(async (ids: string[]) => new Map([[ids[0], "Older album"]]))
-    const prepared = await galleryAddKind.prepare(payload({ album: "gm-2", deck: DECK_ID }), ctx)
-    expect(prepared.view.rows![0]).toMatchObject({ status: "unmatched", detail: "Already in the gallery (“Older album”); it won't be added again" })
-    expect(prepared.view.rows![1].status).toBeUndefined()
+    const prepared = await galleryAddKind.prepare(payload({ album: "gm-2", deck: DECK_ID, files: [FILE] }), ctx)
+    expect(prepared.view.rows!.map((row) => row.id)).toEqual(["slide:slide-b", `file:${FILE}`])
+    expect(prepared.view.rows!.every((row) => row.status === undefined)).toBe(true)
+    expect(prepared.view.title).toBe("Add 2 images to the gallery (“GM 2”)")
+    expect(prepared.view.summary).toMatch(/Any can be taken off again on Gallery\. 1 more is already in the gallery \(in “Older album”\) and isn't added again\.$/)
+    expect(prepared.before).toEqual({ albumId: "album-1", deck: { id: DECK_ID, version: 3, slideIds: ["slide-b"] }, files: [FILE] })
+    expect(prepared.targetId).toBe(`album-1:${DECK_ID}`)
+
+    // Every slide there: only the photo is left, and the deck isn't pinned
+    gallery.inGallery.mockImplementation(async (ids: string[]) => new Map(ids.filter((id) => !id.includes("file-")).map((id) => [id, null])))
+    const photoOnly = await galleryAddKind.prepare(payload({ album: "gm-2", deck: DECK_ID, files: [FILE] }), ctx)
+    expect(photoOnly.before).toEqual({ albumId: "album-1", deck: null, files: [FILE] })
+    expect(photoOnly.view.summary).toMatch(/ 2 more are already in the gallery and aren't added again\.$/)
 
     gallery.inGallery.mockImplementation(async (ids: string[]) => new Map(ids.map((id) => [id, null])))
     await expect(galleryAddKind.prepare(payload({ album: "gm-2", deck: DECK_ID }), ctx)).rejects.toThrow("Those images are already in the gallery.")

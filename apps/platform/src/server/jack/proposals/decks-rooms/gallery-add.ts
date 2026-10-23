@@ -65,6 +65,14 @@ async function findAlbum(name: string): Promise<{ id: string; title: string; slu
   throw new ProposalInputError(`There's no gallery album called “${name}”. ${recent.length ? `Recent albums: ${recent.map((a) => `“${a.title}”`).join(", ")}. ` : ""}Ask which one, or use newAlbum if the officer wants a new album.`)
 }
 
+/** "2 more are already in the gallery (in “GM 2”) and aren't added again." for the images left off the card, by the album each is in */
+function alreadyNote(albums: (string | null)[]): string | null {
+  if (!albums.length) return null
+  const named = [...new Set(albums.filter((title): title is string => Boolean(title)))]
+  const where = named.length ? ` (in ${listed(named.map((title) => `“${title}”`))})` : ""
+  return albums.length === 1 ? `1 more is already in the gallery${where} and isn't added again.` : `${albums.length} more are already in the gallery${where} and aren't added again.`
+}
+
 /** The room's posted, ready photos by id, or the error for Jack */
 async function roomPhotos(roomId: string, ids: string[]) {
   const unique = [...new Set(ids)]
@@ -91,11 +99,11 @@ export const galleryAddKind: ProposalKind<GalleryAddPayload> = {
 
     const items: GalleryItem[] = []
     const rows: ProposalRow[] = []
-    let deckPinned: SavedBefore["deck"] = null
+    let deckPicked: { id: string; version: number } | null = null
     if (p.deck) {
       const picked = await pickSlides(p.deck, { version: p.version, numbers: p.slides })
       if ("error" in picked) throw new ProposalInputError(picked.error)
-      deckPinned = { id: picked.deck.id, version: picked.deck.version, slideIds: picked.slides.map((s) => s.id) }
+      deckPicked = { id: picked.deck.id, version: picked.deck.version }
       for (const slide of picked.slides) {
         const alt = p.alt ?? `${picked.deck.title}, slide ${slide.n}`
         items.push({ rowId: `slide:${slide.id}`, kind: "slide", deck: picked.deck, slide, alt })
@@ -109,25 +117,26 @@ export const galleryAddKind: ProposalKind<GalleryAddPayload> = {
       rows.push({ id: `file:${photo.id}`, label: photo.filename, detail: `Alt text: ${alt}`, thumbUrl: jackFileUrl(photo.id, "thumb") })
     }
 
-    // Already in the gallery: still listed (the card says so), skipped when applied
+    // Already in the gallery: left off the card (and out of what applying adds), and the summary says so
     const there = await inGallery(items.map(galleryPublicId))
-    items.forEach((item, i) => {
-      const albumTitle = there.get(galleryPublicId(item))
-      if (albumTitle !== undefined) rows[i] = { ...rows[i], detail: `Already in the gallery${albumTitle ? ` (“${albumTitle}”)` : ""}; it won't be added again`, status: "unmatched" }
-    })
-    if (rows.every((row) => row.status === "unmatched")) throw new ProposalInputError(`${items.length === 1 ? "That image is" : "Those images are"} already in the gallery.`)
+    const fresh = items.flatMap((item, i) => (there.has(galleryPublicId(item)) ? [] : [{ item, row: rows[i] }]))
+    if (!fresh.length) throw new ProposalInputError(`${items.length === 1 ? "That image is" : "Those images are"} already in the gallery.`)
+    const already = alreadyNote(items.flatMap((item) => (there.has(galleryPublicId(item)) ? [there.get(galleryPublicId(item)) ?? null] : [])))
+    const slideIds = fresh.flatMap(({ item }) => (item.kind === "slide" ? [item.slide.id] : []))
+    const fileIds = fresh.flatMap(({ item }) => (item.kind === "file" ? [item.fileId] : []))
+    const deckPinned: SavedBefore["deck"] = deckPicked && slideIds.length ? { ...deckPicked, slideIds } : null
 
     const where = album ? `the album “${album.title}”` : `a new album “${p.newAlbum!.title}”${p.newAlbum!.date ? ` (${p.newAlbum!.date})` : ""}`
-    const links: ProposalLink[] = [...(deckPinned ? [{ title: "The deck", url: deckPageUrl(deckPinned.id) }] : []), { title: "Gallery", url: "/admin/gallery" }]
+    const links: ProposalLink[] = [...(deckPicked ? [{ title: "The deck", url: deckPageUrl(deckPicked.id) }] : []), { title: "Gallery", url: "/admin/gallery" }]
     return {
-      before: { albumId: album?.id ?? null, deck: deckPinned, files: photos.map((f) => f.id) } satisfies SavedBefore,
+      before: { albumId: album?.id ?? null, deck: deckPinned, files: fileIds } satisfies SavedBefore,
       // A newer add of the same deck (or of room photos) into the same album replaces this one; adds from other sources don't
-      ...(album ? { targetId: galleryTarget(album.id, deckPinned?.id ?? null) } : {}),
+      ...(album ? { targetId: galleryTarget(album.id, deckPicked?.id ?? null) } : {}),
       view: {
-        title: `Add ${plural(items.length, "image")} to the gallery (${album ? `“${album.title}”` : `new album “${p.newAlbum!.title}”`})`.slice(0, 200),
-        summary: `Applying it puts the images checked below in ${where} on the public gallery (/gallery). Any can be taken off again on Gallery.`,
+        title: `Add ${plural(fresh.length, "image")} to the gallery (${album ? `“${album.title}”` : `new album “${p.newAlbum!.title}”`})`.slice(0, 200),
+        summary: `Applying it puts the images checked below in ${where} on the public gallery (/gallery). Any can be taken off again on Gallery.${already ? ` ${already}` : ""}`,
         diff: [],
-        rows,
+        rows: fresh.map(({ row }) => row),
         links,
       },
     }
