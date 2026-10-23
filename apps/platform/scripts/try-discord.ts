@@ -64,8 +64,11 @@ async function main() {
   try {
     // Remove what an earlier run left, then recount the days it covered without it
     const days = sync.daysBetween(new Date(Date.now() - 70 * 86_400_000), new Date());
-    await prisma.discordMessage.deleteMany({ where: { channelId: { in: channelIds } } });
-    await prisma.discordChannel.deleteMany({ where: { id: { in: channelIds } } });
+    // Threads under the fake's channels too, whatever their ids
+    const threads = (await prisma.discordChannel.findMany({ where: { parentId: { in: channelIds } }, select: { id: true } })).map((t) => t.id);
+    const ids = [...new Set([...channelIds, ...threads])];
+    await prisma.discordMessage.deleteMany({ where: { channelId: { in: ids } } });
+    await prisma.discordChannel.deleteMany({ where: { id: { in: ids } } });
     await prisma.discordMember.deleteMany({ where: { id: { in: memberIds } } });
     await prisma.discordDailyStat.deleteMany({ where: { channelId: { in: channelIds } } });
     if (CLEAN) {
