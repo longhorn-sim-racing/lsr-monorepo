@@ -87,6 +87,15 @@ async function main() {
     check("the Documents tab finds it by a word of its text (the ::text[] source filter binds)", listed.rows.some((row) => row.id === saved?.id), `${listed.total} found`);
     check("…and by part of its name", (await listDocuments({ q: `budget ${tag.slice(0, 4)}`, sources: [docSource] })).rows.length === 1);
     check("…and not under another source", (await listDocuments({ q: `${tag}word`, sources: ["drive-none"] })).total === 0);
+    let sourceSql = true;
+    try {
+      // Jack's search source: the same ::text[] filter, over Drive and SharePoint whatever their switches say
+      await documentsSource.search({ query: `${tag}word`, limit: 3, includeJackReplies: false });
+    } catch (error) {
+      sourceSql = false;
+      console.error(error);
+    }
+    check("the documents search source's SQL runs", sourceSql);
     check("the per-source count", (await listDocuments({ sources: [docSource] })).counts[docSource] === 1);
 
     await store.touch({ ...meta, name: `Budget ${tag} renamed.xlsx`, path: "/Money" }, new Date());

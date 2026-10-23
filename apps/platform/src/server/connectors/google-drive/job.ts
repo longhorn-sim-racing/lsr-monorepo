@@ -29,7 +29,14 @@ export function driveSummary({ counts, cursor, more }: Pick<DriveSyncResult, "co
 }
 
 export async function runDriveSyncJob({ signal, deadline, log }: Pick<JobContext, "signal" | "deadline" | "log">): Promise<JobResult> {
-  const connection = await googleDriveConnector.client()
+  let connection: Awaited<ReturnType<typeof googleDriveConnector.client>>
+  try {
+    // A key file that isn't one throws here: Connections shows it as the connector's error
+    connection = await googleDriveConnector.client()
+  } catch (error) {
+    await recordConnectorError(DRIVE_CONNECTOR_ID, error)
+    throw error
+  }
   if (!connection) return { status: "skipped", summary: "Google Drive isn't connected (set it up and switch it on in Connections)." }
   try {
     const state = await readConnectorState(DRIVE_CONNECTOR_ID)
