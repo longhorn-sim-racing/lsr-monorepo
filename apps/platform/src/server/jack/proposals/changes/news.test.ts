@@ -145,6 +145,20 @@ describe("news.update", () => {
     expect(prepared.view.preview).toBeUndefined()
   })
 
+  it("says a live post scheduled for later comes off the site until then", async () => {
+    const later = update({ publish: "schedule", publishAt: "2026-10-26T10:00" })
+    const prepared = await newsUpdateKind.prepare(later, ctx)
+    expect(prepared.view.diff).toEqual([{ field: "publishedAt", label: "Publishing", before: "Published Tue Oct 20, 10:00 AM CT", after: "Scheduled for Mon Oct 26, 10:00 AM CT", format: "value" }])
+    expect(prepared.view.summary).toBe("Applying it saves the changes below. It comes off the site now and goes live again at /news/round-3-at-spa Mon Oct 26, 10:00 AM CT; links to it already shared stop working until then.")
+    // With a new link too, the old one stops working for good
+    expect((await newsUpdateKind.prepare(update({ slug: "spa-recap", publish: "schedule", publishAt: "2026-10-26T10:00" }), ctx)).view.summary).toBe(
+      "Applying it saves the changes below. It comes off the site now and goes live again at /news/spa-recap Mon Oct 26, 10:00 AM CT. Links to /news/round-3-at-spa already shared stop working.",
+    )
+    // A draft scheduled for later just goes live then
+    db.post.findUnique.mockResolvedValue({ ...POST, publishedAt: null })
+    expect((await newsUpdateKind.prepare(later, ctx)).view.summary).toBe("Applying it saves the changes below. It goes live at /news/round-3-at-spa Mon Oct 26, 10:00 AM CT.")
+  })
+
   it("edits around an officer's own HTML, without adding any", async () => {
     const withEmbed = `${BODY}\n\n<iframe src="https://www.youtube.com/embed/x"></iframe>`
     db.post.findUnique.mockResolvedValue({ ...POST, bodyMd: withEmbed })

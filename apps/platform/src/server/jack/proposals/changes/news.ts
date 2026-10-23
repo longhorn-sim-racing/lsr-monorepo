@@ -351,8 +351,14 @@ export const newsUpdateKind: ProposalKind<NewsUpdate> = {
       })
     }
     const live = (value: string | null) => value === NOW || (value !== null && new Date(value) <= now)
+    const publishChange = (value: string | null): string => {
+      if (value === null) return `It goes back to a draft: only officers can see it until it's published again.`
+      // A live post scheduled for later is off the site until then
+      if (live(post.publishedAt) && !live(value)) return `It comes off the site now and goes live again at /news/${after.slug} ${when(new Date(value))}${next.slug === undefined ? "; links to it already shared stop working until then" : ""}.`
+      return publishSentence(value, after.slug)
+    }
     const sentences = [
-      next.publishedAt !== undefined ? (next.publishedAt === null ? `It goes back to a draft: only officers can see it until it's published again.` : publishSentence(next.publishedAt, after.slug)) : null,
+      next.publishedAt !== undefined ? publishChange(next.publishedAt) : null,
       next.slug !== undefined && live(post.publishedAt) ? `Links to /news/${post.slug} already shared stop working.` : null,
       // The form needs an author; the service saves every field
       !after.authorId ? "Its author's account is gone, so the officer who applies it becomes its author." : null,
