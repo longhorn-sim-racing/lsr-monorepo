@@ -83,9 +83,23 @@ describe("meetings", () => {
   it("records a meeting, keeping its type in kind, its room and transcript, and audits without its text", async () => {
     const result = await createMeeting({ title: "Board meeting", type: "board", heldAt: HELD, agendaMd: "1. Sponsors", summaryMd: "" }, actor, { transcriptFileId: "f-1", roomId: "room-1" })
     expect(result).toMatchObject({ ok: true, meeting: { id: "m-new" } })
-    expect(db.meeting.create.mock.calls[0][0].data).toEqual({ title: "Board meeting", kind: "board", heldAt: HELD, agendaMd: "1. Sponsors", summaryMd: null, transcriptFileId: "f-1", roomId: "room-1", createdById: "officer-1" })
+    expect(db.meeting.create.mock.calls[0][0].data).toEqual({ title: "Board meeting", kind: "board", heldAt: HELD, agendaMd: "1. Sponsors", summaryMd: null, transcriptFileId: "f-1", transcriptDocumentId: null, roomId: "room-1", createdById: "officer-1" })
     expect(audit.createAuditLog.mock.calls[0][0].after).toMatchObject({ agenda: true, summary: false })
     expect(JSON.stringify(audit.createAuditLog.mock.calls[0][0])).not.toContain("1. Sponsors")
+  })
+
+  it("keeps a synced document as the transcript, when the meeting was recorded from one", async () => {
+    await createMeeting({ title: "GM 2", type: "general", heldAt: HELD }, actor, { transcriptDocumentId: "doc-1", roomId: "room-1" })
+    expect(db.meeting.create.mock.calls[0][0].data).toMatchObject({ transcriptFileId: null, transcriptDocumentId: "doc-1" })
+    expect(audit.createAuditLog.mock.calls[0][0].after).toMatchObject({ transcriptFileId: null, transcriptDocumentId: "doc-1" })
+
+    // Switching a recorded meeting's transcript from a room file to a document, checked against what was read
+    db.meeting.findUnique.mockResolvedValue(meeting({ transcriptFileId: "f-1" }))
+    const { updateMeetingTx } = await import("./meeting.service")
+    const result = await updateMeetingTx(db as never, "m-1", {}, actor, { transcriptFileId: null, transcriptDocumentId: "doc-1", expected: { transcriptFileId: "f-1", transcriptDocumentId: null } })
+    expect(result).toMatchObject({ ok: true, changed: ["transcriptFileId", "transcriptDocumentId"] })
+    expect(db.meeting.update.mock.calls[0][0].data).toEqual({ transcriptFileId: null, transcriptDocumentId: "doc-1" })
+    expect(await updateMeetingTx(db as never, "m-1", {}, actor, { transcriptDocumentId: "doc-2", expected: { transcriptDocumentId: "doc-9" } })).toMatchObject({ ok: false, reason: "changed" })
   })
 
   it("refuses a meeting without a title or type", async () => {

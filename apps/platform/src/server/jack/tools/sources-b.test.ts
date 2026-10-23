@@ -14,7 +14,6 @@ vi.mock("@/server/connectors/instagram/connector", () => ({ instagramInsightsCon
 
 import { instagramInsightsTool } from "./instagram-insights"
 import { TOOLS } from "./registry/sources-b"
-import { sourceStatus } from "./source-status"
 import { twitchStatsTool } from "./twitch-stats"
 import type { JackToolContext } from "./types"
 
@@ -69,17 +68,6 @@ beforeEach(() => {
   return () => vi.useRealTimers()
 })
 
-describe("sourceStatus", () => {
-  const connector = (s: ConnectorStatus) => ({ id: "twitch", label: "Twitch", requiredEnv: [], configured: () => true, enabled: async () => true, client: async () => null, status: async () => s })
-
-  it("says nothing extra when connected, and how fresh otherwise", async () => {
-    expect(await sourceStatus(connector(status("connected")))).toEqual({ connected: true, lastSync: "Thu 2026-10-22 18:29 CT" })
-    expect((await sourceStatus(connector(status("off")))).note).toBe("Twitch isn't connected: it's switched off on System → Connections, so the stored numbers stop at its last sync (Thu 2026-10-22 18:29 CT).")
-    expect((await sourceStatus(connector(status("not_configured", { lastSyncAt: null })))).note).toBe("Twitch isn't connected yet (set up on System → Connections), and nothing has been synced yet.")
-    expect(await sourceStatus(connector(status("error", { lastErrorAt: "2026-10-22T23:00:00.000Z" })))).toMatchObject({ connected: true, note: expect.stringContaining("last sync failed (Thu 2026-10-22 18:00 CT)") })
-  })
-})
-
 describe("twitch_stats", () => {
   it("leads with live now, the last stream, the last 30 days and followers", async () => {
     twitchQueries.twitchOverview.mockResolvedValue({
@@ -99,11 +87,24 @@ describe("twitch_stats", () => {
   })
 
   it("says Twitch isn't connected when nothing is stored", async () => {
-    statuses.twitch = status("not_configured", { lastSyncAt: null })
+    statuses.twitch = status("not_configured", { lastSyncAt: null, missingEnv: ["TWITCH_CLIENT_ID"] })
     twitchQueries.twitchOverview.mockResolvedValue({ live: null, lastStream: null, last30: { streams: 0, hours: 0, peakViewers: null, avgViewers: null }, followers: { latest: null, change7: null, change30: null } })
     const result = await twitchStatsTool.run(twitchStatsTool.input.parse({}), ctx)
-    expect(model(result.forModel).connection).toMatchObject({ connected: false, note: expect.stringContaining("isn't connected yet") })
-    expect(result.displays).toContainEqual({ kind: "note", text: expect.stringContaining("isn't connected yet") })
+    // Said the way every synced source says it (sourceConnection)
+    expect(model(result.forModel).connection).toBe("Twitch is not set up (missing: TWITCH_CLIENT_ID); it never synced.")
+    expect(result.displays).toContainEqual({ kind: "note", text: "Twitch is not set up (missing: TWITCH_CLIENT_ID); it never synced." })
+  })
+
+  it("says how fresh the numbers are, and when the last sync failed", async () => {
+    twitchQueries.listStreams.mockResolvedValue([])
+    const fresh = await twitchStatsTool.run(twitchStatsTool.input.parse({ view: "streams" }), ctx)
+    expect(model(fresh.forModel).connection).toBe("Twitch: connected, last synced Thu 2026-10-22 18:29 CT.")
+    expect(fresh.displays).toEqual([{ kind: "note", text: "No streams in this range." }])
+
+    statuses.twitch = status("error", { lastErrorAt: "2026-10-22T23:00:00.000Z" })
+    const failing = await twitchStatsTool.run(twitchStatsTool.input.parse({ view: "streams" }), ctx)
+    expect(model(failing.forModel).connection).toBe("Twitch: its last sync failed (System → Connections has why); last synced Thu 2026-10-22 18:29 CT.")
+    expect(failing.displays).toEqual([{ kind: "note", text: "Twitch: its last sync failed (System → Connections has why); last synced Thu 2026-10-22 18:29 CT." }])
   })
 
   it("lists streams in a Central date range, marking ones whose viewers weren't counted", async () => {

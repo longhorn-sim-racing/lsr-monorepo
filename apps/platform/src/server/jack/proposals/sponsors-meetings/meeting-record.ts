@@ -1,4 +1,4 @@
-import type { Meeting } from "@prisma/client"
+import type { Meeting, Prisma } from "@prisma/client"
 import { z } from "zod"
 import type { KnowledgeProvenance } from "@/lib/jack/knowledge"
 import { parseToolParts } from "@/lib/jack/parts"
@@ -19,6 +19,7 @@ import {
   textKey,
 } from "@/lib/meetings"
 import { MEETING_FIELD_LABEL, meetingChangesSchema, meetingFieldsSchema, type MeetingChanges } from "@/schemas/meeting.schema"
+import { DOCUMENT_SOURCE_LABEL, enabledDocumentSources } from "@/server/connectors/documents/sources"
 import { prisma } from "@/server/db"
 import { findKnowledgeDuplicates } from "@/server/jack/knowledge/service"
 import {
@@ -45,7 +46,10 @@ import { cardDay, clip, handleInput, idInput, officerFor, plural, resolveOfficer
  * made (each also written to the decision log: a knowledge entry tagged "decision") and the action items
  * (owners by handle, due dates). It can add to a meeting already recorded (meetingId): an agenda before
  * the meeting, the summary, decisions and items after. Built from a transcript or notes in the room, it
- * names the file as `fileId` (checked unchanged at apply) and the meeting keeps it as its transcript.
+ * names the file as `fileId` (checked unchanged at apply); built from a synced Drive or SharePoint
+ * document (a Transcripts folder, found with search), it names it as `documentId` (checked still there
+ * and unchanged at apply). The meeting keeps either as its transcript, and the card and the meeting page
+ * say where it came from.
  *
  * Decisions and action items are rows on the card, so officers apply the ones that are right. So is the
  * meeting itself (row "m": a new meeting, or the changes to its own fields), so an officer can keep it
@@ -62,6 +66,11 @@ import { cardDay, clip, handleInput, idInput, officerFor, plural, resolveOfficer
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
 /** Files a meeting record can be built from (G5 extracts their text: VTT and DOCX with speakers) */
 const TRANSCRIPT_KINDS = ["TRANSCRIPT", "DOCUMENT", "TEXT", "PDF"]
+/** Synced documents it can be built from: Google Docs, and the same kinds of file (by name, else type), not sheets, decks or pictures */
+const TRANSCRIPT_DOCUMENT_NAME = /\.(vtt|docx|txt|md|markdown|pdf)$/i
+const TRANSCRIPT_DOCUMENT_TYPES = ["application/vnd.google-apps.document", "text/vtt", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "text/plain", "text/markdown", "application/pdf"]
+/** ExternalDocument.textStatus values that keep text (connectors/documents/text.ts) */
+const DOCUMENT_TEXT_KEPT = ["ok", "truncated"]
 /** Most of the proposing reply's earlier tool calls a decision's provenance keeps, and how much of each one's input */
 const PROVENANCE_TOOLS = 12
 const PROVENANCE_INPUT_CHARS = 200
@@ -87,16 +96,18 @@ export const meetingRecordSchema = z
     agenda: z.string().trim().max(MEETING_LIMITS.textMax).optional().describe("Markdown"),
     summary: z.string().trim().max(MEETING_LIMITS.textMax).optional().describe("Markdown: what was discussed"),
     fileId: idInput.optional().describe("The room file it's built from (a transcript or notes)"),
+    documentId: idInput.optional().describe("Or the synced document it's built from (a Drive or SharePoint transcript or notes: a document id from search or read)"),
     decisions: z.array(decisionInput).max(30).optional().describe("Only what was actually decided; each also goes to the decision log"),
     actionItems: z.array(itemInput).max(50).optional(),
   })
   .superRefine((p, ctx) => {
     if (!p.meetingId) {
       for (const field of ["title", "type", "date"] as const) if (p[field] === undefined) ctx.addIssue({ code: "custom", path: [field], message: `a new meeting needs its ${field}` })
-    } else if ([p.title, p.type, p.date, p.agenda, p.summary, p.fileId].every((v) => v === undefined) && !p.decisions?.length && !p.actionItems?.length) {
+    } else if ([p.title, p.type, p.date, p.agenda, p.summary, p.fileId, p.documentId].every((v) => v === undefined) && !p.decisions?.length && !p.actionItems?.length) {
       ctx.addIssue({ code: "custom", path: ["meetingId"], message: "nothing to add to the meeting" })
     }
     if (p.time !== undefined && p.date === undefined) ctx.addIssue({ code: "custom", path: ["time"], message: "give the date with the time" })
+    if (p.fileId !== undefined && p.documentId !== undefined) ctx.addIssue({ code: "custom", path: ["documentId"], message: "give one transcript: a room file (fileId) or a synced document (documentId)" })
   })
 
 export type MeetingRecord = z.infer<typeof meetingRecordSchema>
@@ -105,6 +116,8 @@ const recordBefore = z.object({
   /** Updates: the meeting's fields this changes, as they were (by change key) */
   meetingId: z.string().nullable(),
   fields: z.record(z.string(), z.string().nullable()),
+  /** A synced document it was built from, as it was read (Apply goes stale if it changed or went) */
+  document: z.object({ id: z.string(), name: z.string(), modifiedAt: z.string(), version: z.string().nullable() }).optional(),
 })
 
 /** The meeting's own row: a new meeting, or the changes to a recorded one's fields */
@@ -145,6 +158,46 @@ async function transcriptFile(fileId: string, roomId: string) {
   return file
 }
 
+const documentSelect = { id: true, name: true, path: true, source: true, webUrl: true, mimeType: true, modifiedAt: true, version: true, textStatus: true, deletedAt: true } satisfies Prisma.ExternalDocumentSelect
+type TranscriptDocument = Prisma.ExternalDocumentGetPayload<{ select: typeof documentSelect }>
+
+/**
+ * The synced document the record names: one `search` or `read` found (so its source is switched on),
+ * still in Drive or SharePoint, with its text read, and a transcript or notes
+ */
+async function transcriptDocument(documentId: string): Promise<TranscriptDocument> {
+  const doc = await prisma.externalDocument.findUnique({ where: { id: documentId }, select: documentSelect })
+  if (!doc) throw new ProposalInputError(`There's no synced document ${documentId}. Find the transcript with search (documents) and use its id.`)
+  const from = sourceLabel(doc.source)
+  const on: string[] = await enabledDocumentSources()
+  if (!on.includes(doc.source)) throw new ProposalInputError(`${from} isn't connected, so its documents can't be used.`)
+  if (doc.deletedAt) throw new ProposalInputError(`${doc.name} was removed from ${from}.`)
+  if (!DOCUMENT_TEXT_KEPT.includes(doc.textStatus)) throw new ProposalInputError(`${doc.name} has no text to record a meeting from.`)
+  if (!TRANSCRIPT_DOCUMENT_NAME.test(doc.name) && !TRANSCRIPT_DOCUMENT_TYPES.includes(doc.mimeType.split(";")[0].trim().toLowerCase())) {
+    throw new ProposalInputError(`${doc.name} isn't a transcript or notes (a Google Doc, or a VTT, Word, text or PDF file).`)
+  }
+  return doc
+}
+
+const sourceLabel = (source: string) => DOCUMENT_SOURCE_LABEL[source] ?? source
+
+/** Where a transcript came from, as the card shows it: "board-10-19.vtt (room file)", "GM 2.vtt (Google Drive: Meetings/Transcripts)" */
+const fileLabel = (filename: string) => `${filename} (room file)`
+const documentLabel = (doc: Pick<TranscriptDocument, "name" | "source" | "path">) => `${doc.name} (${sourceLabel(doc.source)}${doc.path ? `: ${doc.path}` : ""})`
+
+/** A recorded meeting's transcript as it is now, for the card's "before" */
+async function currentTranscript(meeting: Pick<Meeting, "transcriptFileId" | "transcriptDocumentId">): Promise<string | null> {
+  if (meeting.transcriptFileId) {
+    const file = await prisma.jackFile.findUnique({ where: { id: meeting.transcriptFileId }, select: { filename: true } })
+    return file ? fileLabel(file.filename) : "A room file"
+  }
+  if (meeting.transcriptDocumentId) {
+    const doc = await prisma.externalDocument.findUnique({ where: { id: meeting.transcriptDocumentId }, select: { name: true, source: true, path: true } })
+    return doc ? documentLabel(doc) : "A synced document"
+  }
+  return null
+}
+
 /** The decision's knowledge entry title: the one given, or made from the text */
 const titleOf = (d: { text: string; title?: string }) => d.title ?? decisionTitle(d.text)
 
@@ -159,18 +212,21 @@ function isNew(seen: Set<string>, text: string): boolean {
 /**
  * Where a proposal's decisions came from, kept on their decision-log entries (the Knowledge page shows
  * it): the reply that proposed them, the tools it used first (a transcript read, a page fetched), the
- * officer messages it answered and who asked, then the proposal itself, its file and who applied it
+ * officer messages it answered and who asked, then the proposal itself, its transcript (a room file or a
+ * synced document) and who applied it
  */
-async function proposalProvenance(ctx: ProposalApplyContext, fileId: string | undefined, now: Date): Promise<KnowledgeProvenance> {
+async function proposalProvenance(ctx: ProposalApplyContext, { fileId, documentId }: Pick<MeetingRecord, "fileId" | "documentId">, now: Date): Promise<KnowledgeProvenance> {
   const proposal = await prisma.jackProposal.findUnique({ where: { id: ctx.proposalId }, select: { messageId: true, proposedForId: true } })
   const replyId = proposal?.messageId ?? null
   const askedById = proposal?.proposedForId ?? null
-  const [reply, asked, names, file] = await Promise.all([
+  const [reply, asked, names, file, doc] = await Promise.all([
     replyId ? prisma.jackMessage.findUnique({ where: { id: replyId }, select: { toolCalls: true } }) : null,
     replyId ? prisma.jackMessage.findMany({ where: { answeredById: replyId, kind: "user" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } }) : [],
     userNames([askedById]),
     fileId ? prisma.jackFile.findUnique({ where: { id: fileId }, select: { filename: true } }) : null,
+    documentId ? prisma.externalDocument.findUnique({ where: { id: documentId }, select: { name: true } }) : null,
   ])
+  const from = file?.filename ?? doc?.name
   const tools = parseToolParts(reply?.toolCalls)
     .filter((part) => !part.name.startsWith("propose_"))
     .slice(-PROVENANCE_TOOLS)
@@ -184,8 +240,8 @@ async function proposalProvenance(ctx: ProposalApplyContext, fileId: string | un
       ...tools,
       {
         name: "propose_meeting",
-        input: JSON.stringify({ proposalId: ctx.proposalId, ...(fileId ? { fileId } : {}) }),
-        label: `Meeting record applied by ${ctx.officer.displayName}${file ? `, from ${file.filename}` : ""}`,
+        input: JSON.stringify({ proposalId: ctx.proposalId, ...(fileId ? { fileId } : {}), ...(documentId ? { documentId } : {}) }),
+        label: `Meeting record applied by ${ctx.officer.displayName}${from ? `, from ${from}` : ""}`,
       },
     ],
     at: now.toISOString(),
@@ -196,7 +252,7 @@ export const meetingRecordKind: ProposalKind<MeetingRecord> = {
   kind: "meeting.record",
   tool: "propose_meeting",
   description:
-    "meeting.record: record a meeting (title, type, date, agenda, summary), its decisions (also written to the decision log in Knowledge) and its action items (owners by handle, due dates), or add any of these to a meeting already recorded (meetingId from meetings_list). From a transcript or notes in the room, name the file as fileId. To fix a new meeting you proposed, propose it again: the newer card replaces it.",
+    "meeting.record: record a meeting (title, type, date, agenda, summary), its decisions (also written to the decision log in Knowledge) and its action items (owners by handle, due dates), or add any of these to a meeting already recorded (meetingId from meetings_list). From a transcript or notes in the room, name the file as fileId; from a synced Drive or SharePoint document, name it as documentId. To fix a new meeting you proposed, propose it again: the newer card replaces it.",
   schema: meetingRecordSchema,
   targetType: "MEETING",
   permission: "officer",
@@ -213,6 +269,13 @@ export const meetingRecordKind: ProposalKind<MeetingRecord> = {
       if (problem) throw new ProposalInputError(`Decision ${i + 1}: ${problem}`)
     })
     const file = p.fileId ? await transcriptFile(p.fileId, ctx.roomId) : null
+    const doc = p.documentId ? await transcriptDocument(p.documentId) : null
+    /** The transcript it names, and where that came from */
+    const transcript = file
+      ? { fileId: file.id, documentId: null, label: fileLabel(file.filename), link: { title: file.filename, url: `/api/admin/jack/files/${file.id}` } }
+      : doc
+        ? { fileId: null, documentId: doc.id, label: documentLabel(doc), link: { title: doc.name, url: doc.webUrl } }
+        : null
     const current = p.meetingId ? await prisma.meeting.findUnique({ where: { id: p.meetingId } }) : null
     if (p.meetingId && !current) throw new ProposalInputError(`There's no meeting with id ${p.meetingId}. Find it with meetings_list.`)
 
@@ -230,12 +293,16 @@ export const meetingRecordKind: ProposalKind<MeetingRecord> = {
       const changes = parsed.data
       const keys = (Object.keys(changes) as (keyof MeetingChanges)[]).filter((key) => changes[key] !== undefined && fieldValue(changes[key]) !== fieldValue(current[COLUMN[key]]))
       for (const key of keys) diff.push({ field: key, label: MEETING_FIELD_LABEL[key], before: showField(key, current[COLUMN[key]]), after: showField(key, changes[key]), format: key === "agendaMd" || key === "summaryMd" ? "markdown" : "text" })
-      const fileChanges = file && file.id !== current.transcriptFileId
-      if (fileChanges) diff.push({ field: "transcriptFileId", label: "Transcript", before: current.transcriptFileId ? "A room file" : null, after: file.filename, format: "text" })
-      if (!keys.length && !fileChanges && !decisions.length && !items.length) throw new ProposalInputError(`Nothing would change: “${current.title}” already has these details.`)
+      // A new transcript replaces the old one, whichever kind each is
+      const transcriptChanges = transcript !== null && (transcript.fileId !== current.transcriptFileId || transcript.documentId !== current.transcriptDocumentId)
+      if (transcriptChanges) diff.push({ field: "transcript", label: "Transcript", before: await currentTranscript(current), after: transcript.label, format: "text" })
+      if (!keys.length && !transcriptChanges && !decisions.length && !items.length) throw new ProposalInputError(`Nothing would change: “${current.title}” already has these details.`)
       before = {
         meetingId: current.id,
-        fields: { ...Object.fromEntries(keys.map((key) => [key, fieldValue(current[COLUMN[key]])])), ...(fileChanges ? { transcriptFileId: current.transcriptFileId } : {}) },
+        fields: {
+          ...Object.fromEntries(keys.map((key) => [key, fieldValue(current[COLUMN[key]])])),
+          ...(transcriptChanges ? { transcriptFileId: current.transcriptFileId, transcriptDocumentId: current.transcriptDocumentId } : {}),
+        },
       }
       meeting = { id: current.id, title: changes.title ?? current.title, heldAt: changes.heldAt ?? current.heldAt }
       meetingDetail = diff.map((row) => row.label).join(", ")
@@ -256,10 +323,10 @@ export const meetingRecordKind: ProposalKind<MeetingRecord> = {
         { field: "heldAt", label: "When", before: null, after: formatMeetingTime(m.heldAt), format: "value" },
         ...(m.agendaMd ? [{ field: "agendaMd", label: "Agenda", before: null, after: m.agendaMd, format: "markdown" as const }] : []),
         ...(m.summaryMd ? [{ field: "summaryMd", label: "Summary", before: null, after: m.summaryMd, format: "markdown" as const }] : []),
-        ...(file ? [{ field: "transcriptFileId", label: "Transcript", before: null, after: file.filename, format: "text" as const }] : []),
+        ...(transcript ? [{ field: "transcript", label: "Transcript", before: null, after: transcript.label, format: "text" as const }] : []),
       )
       meeting = { id: null, title: m.title, heldAt: m.heldAt }
-      meetingDetail = `${["Title, type and time", m.agendaMd ? "agenda" : null, m.summaryMd ? "summary" : null, file ? "transcript" : null].filter(Boolean).join(", ")}. Keep it picked to apply any decision or action item`
+      meetingDetail = `${["Title, type and time", m.agendaMd ? "agenda" : null, m.summaryMd ? "summary" : null, transcript ? "transcript" : null].filter(Boolean).join(", ")}. Keep it picked to apply any decision or action item`
       // A newer new-meeting proposal for the same day and type replaces this one (a corrected title, say)
       targetId = `new:${centralDay(m.heldAt)}:${m.type}`
     }
@@ -296,7 +363,8 @@ export const meetingRecordKind: ProposalKind<MeetingRecord> = {
     ].filter(Boolean)
     const title = meeting.id ? `Add to the meeting “${meeting.title}”` : `Record the meeting “${meeting.title}” (${cardDay(meeting.heldAt)})`
     const summary = `Applying it ${meeting.id ? "updates the meeting" : "records the meeting"}${parts.length ? ` with ${parts.join(" and ")}` : ""}.${decisions.length ? " Each decision also goes to the decision log in Knowledge, as Jack's, not reviewed until an officer marks it." : ""}${rows.length > 1 ? " Pick what to keep." : ""}${sameDayNote}`
-    const links: ProposalLink[] = [...(meeting.id ? [{ title: meeting.title, url: meetingPath(meeting.id) }] : []), ...(file ? [{ title: file.filename, url: `/api/admin/jack/files/${file.id}` }] : [])]
+    const links: ProposalLink[] = [...(meeting.id ? [{ title: meeting.title, url: meetingPath(meeting.id) }] : []), ...(transcript ? [transcript.link] : [])]
+    if (doc) before = { ...before, document: { id: doc.id, name: doc.name, modifiedAt: doc.modifiedAt.toISOString(), version: doc.version } }
 
     return {
       before,
@@ -306,8 +374,16 @@ export const meetingRecordKind: ProposalKind<MeetingRecord> = {
     }
   },
 
-  // The meeting's own fields are checked under its row lock in apply (updateMeetingTx's expected), a new one's title and day under a lock too
-  async checkStale() {
+  // The meeting's own fields are checked under its row lock in apply (updateMeetingTx's expected), a new one's title and day under a lock too.
+  // A synced transcript is checked here: still there, and the version that was read (a room file's sha256 is the framework's)
+  async checkStale(p, before) {
+    if (!p.documentId) return null
+    const pinned = recordBefore.safeParse(before)
+    const was = pinned.success ? pinned.data.document : undefined
+    const doc = await prisma.externalDocument.findUnique({ where: { id: p.documentId }, select: { name: true, source: true, modifiedAt: true, version: true, deletedAt: true } })
+    if (!doc) return `The transcript ${was ? `“${was.name}” ` : ""}is no longer synced.`
+    if (doc.deletedAt) return `The transcript “${doc.name}” was removed from ${sourceLabel(doc.source)} since this was proposed.`
+    if (was && (was.modifiedAt !== doc.modifiedAt.toISOString() || was.version !== doc.version)) return `The transcript “${doc.name}” changed in ${sourceLabel(doc.source)} since this was proposed.`
     return null
   },
 
@@ -330,7 +406,7 @@ export const meetingRecordKind: ProposalKind<MeetingRecord> = {
     }
     const actor = { userId: ctx.officer.userId, auditMetadata: ctx.auditMetadata }
     // Read before anything is written: where the decisions came from, for their decision-log entries
-    const provenance = decisions.length ? await proposalProvenance(ctx, p.fileId, new Date()) : undefined
+    const provenance = decisions.length ? await proposalProvenance(ctx, p, new Date()) : undefined
 
     const written = await prisma.$transaction(
       async (tx) => {
@@ -342,10 +418,9 @@ export const meetingRecordKind: ProposalKind<MeetingRecord> = {
           const own = meetingPicked ? was.data.fields : {}
           const proposedHeldAt = typeof own.heldAt === "string" ? new Date(own.heldAt) : undefined
           const changes = Object.fromEntries(Object.entries(payloadFields(p, proposedHeldAt)).filter(([key]) => key in own))
-          const result = await updateMeetingTx(tx, was.data.meetingId, changes, actor, {
-            ...("transcriptFileId" in own && p.fileId ? { transcriptFileId: p.fileId } : {}),
-            expected: own,
-          })
+          // The new transcript replaces the old one: a room file clears a document, and the other way round
+          const transcript = "transcriptFileId" in own || "transcriptDocumentId" in own ? { transcriptFileId: p.fileId ?? null, transcriptDocumentId: p.documentId ?? null } : {}
+          const result = await updateMeetingTx(tx, was.data.meetingId, changes, actor, { ...transcript, expected: own })
           if (!result.ok) {
             if (result.reason === "changed") throw new StaleProposalError("Someone changed the meeting since this was proposed.")
             if (result.reason === "not_found") throw new StaleProposalError("The meeting was deleted since this was proposed.")
@@ -361,7 +436,7 @@ export const meetingRecordKind: ProposalKind<MeetingRecord> = {
           await lockMeetingDayTx(tx, parsed.data.title, parsed.data.heldAt)
           const same = (await meetingsOnDay(tx, parsed.data.heldAt)).find((other) => sameMeetingTitle(other.title, parsed.data.title))
           if (same) throw new StaleProposalError(`“${same.title}” on ${cardDay(same.heldAt)} is already recorded. Ask Jack to add to it instead.`)
-          const result = await createMeetingTx(tx, fields, actor, { transcriptFileId: p.fileId ?? null, roomId: ctx.roomId })
+          const result = await createMeetingTx(tx, fields, actor, { transcriptFileId: p.fileId ?? null, transcriptDocumentId: p.documentId ?? null, roomId: ctx.roomId })
           if (!result.ok) throw new Error(result.error)
           meeting = result.meeting
           created = true

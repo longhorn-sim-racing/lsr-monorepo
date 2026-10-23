@@ -79,22 +79,41 @@ describe("POST /api/cron/tick", () => {
   })
 
   it("refuses with 401 and does nothing: wrong secret, no signature, stale or future timestamp, a hand-off signature", async () => {
-    const refused = [
-      tick({ secret: "0".repeat(64) }),
-      tick({ headers: { "x-lsr-signature": "" } }),
-      tick({ at: Date.now() - 301_000 }),
-      tick({ at: Date.now() + 301_000 }),
-      tick({ purpose: "run" }),
-      new Request("http://localhost:3113/api/cron/tick", { method: "POST", body: "{}" }),
-    ]
-    for (const request of refused) {
-      const res = await route.POST(request)
-      expect(res.status).toBe(401)
-      expect(await res.json()).toEqual({ ok: false })
+    // The clock stands still at the worst moment, the last millisecond of a second: a timestamp floors to
+    // whole seconds, so a future one is then as close to the window as it gets (300.001 s), and a slow run
+    // can't let time pass between signing and checking
+    vi.useFakeTimers({ now: Date.UTC(2026, 9, 23, 15, 0, 0, 999), toFake: ["Date"] })
+    try {
+      const refused = [
+        tick({ secret: "0".repeat(64) }),
+        tick({ headers: { "x-lsr-signature": "" } }),
+        tick({ at: Date.now() - 301_000 }),
+        tick({ at: Date.now() + 301_000 }),
+        tick({ purpose: "run" }),
+        new Request("http://localhost:3113/api/cron/tick", { method: "POST", body: "{}" }),
+      ]
+      for (const request of refused) {
+        const res = await route.POST(request)
+        expect(res.status).toBe(401)
+        expect(await res.json()).toEqual({ ok: false })
+      }
+    } finally {
+      vi.useRealTimers()
     }
     expect(dispatcher.countDueJobs).not.toHaveBeenCalled()
     expect(heartbeat.recordDispatch).not.toHaveBeenCalled()
     expect(after.tasks).toHaveLength(0)
+  })
+
+  it("takes a timestamp exactly 300 s either side of now (the window's edges)", async () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 9, 23, 15, 0, 0), toFake: ["Date"] })
+    try {
+      expect((await route.POST(tick({ at: Date.now() - 300_000 }))).status).toBe(202)
+      expect((await route.POST(tick({ at: Date.now() + 300_000 }))).status).toBe(202)
+      expect((await route.POST(tick({ at: Date.now() + 301_000 }))).status).toBe(401)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("checks the raw body: the same JSON re-serialized doesn't verify", async () => {

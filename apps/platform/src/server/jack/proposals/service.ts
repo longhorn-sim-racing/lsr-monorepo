@@ -3,7 +3,7 @@ import { Prisma, type JackProposal } from "@prisma/client"
 import type { ZodError } from "zod"
 import { describeLineChanges, diffHunks, diffStats, lineDiff } from "@/lib/jack/line-diff"
 import type { JackProposalDisplay } from "@/lib/jack/parts"
-import { isNotePath, noteWithLink, type JackProposalDetail, type JackProposalDiffRow, type JackProposalRow } from "@/lib/jack/proposals"
+import { isNotePath, noteWithLink, PROPOSAL_ROOM_ARCHIVED, type JackProposalDetail, type JackProposalDiffRow, type JackProposalRow } from "@/lib/jack/proposals"
 import { JACK_EVENT, type JackMessageView, type JackProposalResult, type JackProposalState } from "@/lib/jack/types"
 import { redactSecrets } from "@/lib/redact"
 import { createAuditLog } from "@/server/audit/log"
@@ -26,6 +26,9 @@ import type { AnyProposalKind, ProposalAuditMetadata, ProposalDiffRow, ProposalP
  *   permission and rows can depend on the payload), its file checked, checkStale() run and apply()
  *   called. It ends APPLIED, FAILED or STALE, with an audit entry for APPLIED and FAILED.
  * - discardProposal: PENDING to DISCARDED.
+ * - An archived room is read-only: neither applies nor discards its proposals until an officer
+ *   unarchives it (both claims also require the room not archived, so an archive that lands between
+ *   the check and the claim still stops it; an apply already claimed finishes, like a streaming reply).
  * - Expiry is lazy: a PENDING proposal past expiresAt reads as STALE, and is set so when someone applies
  *   or discards it, or by the sweep job (sweepProposals, which also fails applies that stopped partway).
  *   Reading it (the card's route) never writes.
@@ -200,6 +203,7 @@ export async function applyProposal(
   const permission = permissionOf(kind, payload)
   if (!mayApply(permission, roles)) return { ok: false, error: permission === "admin" ? "Only admins can apply this kind of change." : "Only officers can apply proposals." }
 
+  if (row.status === "PENDING" && (await roomArchived(row.roomId))) return archivedDecision(row, deps)
   if (isExpired(row, deps.now())) return expiredDecision(await expireProposal(row, deps), deps)
   if (row.status !== "PENDING") return { ok: false, error: alreadyDecided(row), proposal: stateWithId(row, deps.now()) }
 
@@ -213,15 +217,16 @@ export async function applyProposal(
     if (selection.some((rowId) => !known.has(rowId))) return { ok: false, error: "Some of the picked rows aren't in this proposal. Reload the room and try again." }
   }
 
-  // The claim: only one Apply gets past this, and only while the proposal is pending and unexpired
+  // The claim: only one Apply gets past this, and only while the proposal is pending and unexpired and its room isn't archived
   const claimedAt = deps.now()
   const { count } = await prisma.jackProposal.updateMany({
-    where: { id, status: "PENDING", expiresAt: { gt: claimedAt } },
+    where: { id, status: "PENDING", expiresAt: { gt: claimedAt }, room: { archivedAt: null } },
     data: { status: "APPLYING", claimedAt, decidedById: officer.id },
   })
   if (!count) {
     const current = await prisma.jackProposal.findUnique({ where: { id } })
     if (!current) return { ok: false, error: "That proposal doesn't exist anymore." }
+    if (current.status === "PENDING" && (await roomArchived(current.roomId))) return archivedDecision(current, deps)
     if (isExpired(current, deps.now())) return expiredDecision(await expireProposal(current, deps), deps)
     return { ok: false, error: alreadyDecided(current), proposal: stateWithId(current, deps.now()) }
   }
@@ -293,20 +298,24 @@ async function finishApply(
   return status === "APPLIED" ? { ok: true, proposal, note } : { ok: false, error: result.summary, proposal, note }
 }
 
-/** Any officer can discard a pending proposal, whatever its kind */
+/** Any officer can discard a pending proposal, whatever its kind, unless its room is archived */
 export async function discardProposal(id: string, officer: ProposalOfficer, deps: ProposalDeps = defaultProposalDeps): Promise<ProposalDecision> {
   const row = await prisma.jackProposal.findUnique({ where: { id } })
   if (!row) return { ok: false, error: "That proposal doesn't exist anymore." }
+  if (row.status === "PENDING" && (await roomArchived(row.roomId))) return archivedDecision(row, deps)
   if (isExpired(row, deps.now())) return expiredDecision(await expireProposal(row, deps), deps)
 
   const now = deps.now()
   const { count } = await prisma.jackProposal.updateMany({
-    where: { id, status: "PENDING" },
+    where: { id, status: "PENDING", room: { archivedAt: null } },
     data: { status: "DISCARDED", decidedById: officer.id, decidedAt: now, result: { summary: `Discarded by ${officer.displayName}.` } },
   })
   const current = await prisma.jackProposal.findUnique({ where: { id } })
   if (!current) return { ok: false, error: "That proposal doesn't exist anymore." }
-  if (!count) return { ok: false, error: alreadyDecided(current), proposal: stateWithId(current, now) }
+  if (!count) {
+    if (current.status === "PENDING" && (await roomArchived(current.roomId))) return archivedDecision(current, deps)
+    return { ok: false, error: alreadyDecided(current), proposal: stateWithId(current, now) }
+  }
 
   await createAuditLog({
     actorUserId: officer.id,
@@ -465,6 +474,17 @@ async function expireProposal(row: JackProposal, deps: ProposalDeps): Promise<{ 
     await broadcastState(current, deps)
   }
   return { row: current, changed: Boolean(count && current) }
+}
+
+/** Whether a proposal's room is archived: read-only, so its proposals wait until an officer unarchives it */
+async function roomArchived(roomId: string): Promise<boolean> {
+  const room = await prisma.jackRoom.findUnique({ where: { id: roomId }, select: { archivedAt: true } })
+  return Boolean(room?.archivedAt)
+}
+
+/** A pending proposal in an archived room: nothing happens to it, and it stays pending (or reads as expired) */
+function archivedDecision(row: JackProposal, deps: ProposalDeps): ProposalDecision {
+  return { ok: false, error: PROPOSAL_ROOM_ARCHIVED, proposal: stateWithId(row, deps.now()) }
 }
 
 function expiredDecision({ row }: { row: JackProposal | null }, deps: ProposalDeps): ProposalDecision {

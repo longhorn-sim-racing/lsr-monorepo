@@ -2,12 +2,12 @@ import { formatInTimeZone } from "date-fns-tz"
 import { z } from "zod"
 import type { JackChartSpec, JackToolDisplay } from "@/lib/jack/parts"
 import { prisma } from "@/server/db"
-import { discordConnector, DISCORD_OFF } from "@/server/connectors/discord/connector"
-import { readConnectorState } from "@/server/connectors/state"
+import { discordConnector } from "@/server/connectors/discord/connector"
 import { discordActivity, discordJoinsByMonth, discordPolls, type DiscordPollView } from "@/server/queries/discord"
 import { forModelWithLists, plural, tableDisplay } from "./display"
+import { notReadWhileOff, sourceConnection } from "./source-connection"
 import { CLUB_TZ, ct } from "./time"
-import type { JackTool, JackToolResult } from "./types"
+import type { JackTool } from "./types"
 
 /**
  * discord_activity and discord_polls (#188, design §7.1 and §12.1): the club Discord from the synced
@@ -21,19 +21,12 @@ const AGGREGATE_ONLY = "Counts only: Discord activity is never broken down by pe
 /** A Central date for the model and tables: "2026-10-19" */
 const day = (date: Date) => date.toISOString().slice(0, 10)
 
-/** Discord off or not set up: the tools say so and nothing else */
-async function notConnected(): Promise<JackToolResult | null> {
-  if (await discordConnector.client()) return null
-  return {
-    forModel: `${DISCORD_OFF} An admin switches it on from System → Connections once it's set up.`,
-    label: "Discord isn't connected",
-    displays: [{ kind: "note", text: "Discord isn't connected." }],
-  }
-}
-
-async function lastSync(): Promise<string | null> {
-  return ct((await readConnectorState("discord"))?.lastSyncAt ?? null)
-}
+/**
+ * Discord's connection, said the way every synced source says it (sourceConnection): off or not set up,
+ * the tools say so and read nothing; otherwise the note says how fresh the counts are, or that the last
+ * sync failed
+ */
+const discordConnection = () => sourceConnection(discordConnector, "Discord")
 
 /** Groups daily counts into weeks (Mondays) or months for a long period */
 function series(daily: { date: Date; messages: number }[], by: "day" | "week" | "month"): { period: string; messages: number }[] {
@@ -58,8 +51,8 @@ export const discordActivityTool: JackTool<z.infer<typeof activityInput>> = {
   input: activityInput,
   deferred: true,
   async run({ days, channel }) {
-    const off = await notConnected()
-    if (off) return off
+    const connection = await discordConnection()
+    if (!connection.connected) return notReadWhileOff(connection, "Discord")
     const now = new Date()
     let channelId: string | undefined
     if (channel) {
@@ -70,7 +63,7 @@ export const discordActivityTool: JackTool<z.infer<typeof activityInput>> = {
       if (!found.synced) return { isError: true, forModel: `#${found.name} isn't synced (an admin opts channels in on Community → Discord), so there's no activity for it.`, label: "Discord lookup failed", displays: [] }
       channelId = found.id
     }
-    const [activity, joins, synced] = await Promise.all([discordActivity({ days, channelId, now }), days > 31 ? discordJoinsByMonth(Math.ceil(days / 30), now) : Promise.resolve(null), lastSync()])
+    const [activity, joins] = await Promise.all([discordActivity({ days, channelId, now }), days > 31 ? discordJoinsByMonth(Math.ceil(days / 30), now) : Promise.resolve(null)])
     const by = days <= 31 ? "day" : days <= 120 ? "week" : "month"
     const overTime = series(activity.daily, by)
     const members = activity.members
@@ -79,7 +72,7 @@ export const discordActivityTool: JackTool<z.infer<typeof activityInput>> = {
     const result = {
       period: { from: day(activity.firstDay), to: day(activity.lastDay), days },
       ...(channel ? { channel: `#${channel.replace(/^#/, "")}` } : {}),
-      lastSynced: synced,
+      connection: connection.note,
       messages: activity.messages,
       activeMembers: activity.activeMembers,
       membersNow: latest?.memberCount ?? null,
@@ -154,12 +147,12 @@ export const discordPollsTool: JackTool<z.infer<typeof pollsInput>> = {
   input: pollsInput,
   deferred: true,
   async run({ status, search, days, limit }) {
-    const off = await notConnected()
-    if (off) return off
+    const connection = await discordConnection()
+    if (!connection.connected) return notReadWhileOff(connection, "Discord")
     const { polls, matched } = await discordPolls({ days, status, search, limit })
     if (!polls.length) {
       const what = `${status === "all" ? "" : `${status} `}polls${search ? ` matching “${search}”` : ""} in the last ${plural(days, "day")}`
-      return { forModel: `No ${what} in the synced Discord channels.`, label: "Looked at Discord polls (none)", displays: [{ kind: "note", text: `No ${what}.` }] }
+      return { forModel: `No ${what} in the synced Discord channels. ${connection.note}`, label: "Looked at Discord polls (none)", displays: [{ kind: "note", text: `No ${what}.` }] }
     }
     const rows = polls.map(pollForModel)
     const displays: JackToolDisplay[] = [
@@ -180,7 +173,7 @@ export const discordPollsTool: JackTool<z.infer<typeof pollsInput>> = {
       displays.push({ kind: "chart", chart: { type: "bar", title: only.poll.question, xKey: "answer", series: [{ key: "votes", label: "Votes" }], rows: only.poll.answers.map((a) => ({ answer: a.text, votes: a.votes })) } })
     }
     return {
-      forModel: forModelWithLists({ matched, filters: { status, search: search ?? null, days }, note: "Vote totals only; Discord's voters are never read." }, [{ key: "polls", items: rows, whenTrimmed: "Narrow it with search or fewer days." }]),
+      forModel: forModelWithLists({ connection: connection.note, matched, filters: { status, search: search ?? null, days }, note: "Vote totals only; Discord's voters are never read." }, [{ key: "polls", items: rows, whenTrimmed: "Narrow it with search or fewer days." }]),
       label: `Looked at Discord polls (${plural(polls.length, "poll")})`,
       displays,
     }

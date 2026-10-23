@@ -3,6 +3,7 @@ import { z } from "zod"
 import { knowledgeEntryPath } from "@/lib/jack/knowledge"
 import type { JackToolDisplay } from "@/lib/jack/parts"
 import { ACTION_ITEM_STATUS_LABEL, ACTION_ITEMS_PAGE, centralDay, daysOverdue, formatMeetingTime, MEETING_TYPES, meetingAgendaPath, meetingPath, meetingTypeLabel, type ActionItemStatus, weekdayDate as ctDay } from "@/lib/meetings"
+import { DOCUMENT_SOURCE_LABEL } from "@/server/connectors/documents/sources"
 import { prisma } from "@/server/db"
 import { getMeetingDetail, listActionItems, listDecisions, listMeetings, searchWords, type ActionItemRow } from "@/server/queries/meetings"
 import { cleanHandle } from "@/server/services/officers"
@@ -18,6 +19,11 @@ import type { JackTool } from "./types"
 
 /** Most of an agenda or summary sent in one result; the meeting page has the rest */
 const TEXT_CHARS = 6_000
+
+/** A synced transcript and where it is: "GM 2 transcript.vtt (Google Drive)" */
+function transcriptDocumentText(doc: { name: string; source: string; deletedAt: Date | null }): string {
+  return `${doc.name} (${DOCUMENT_SOURCE_LABEL[doc.source] ?? doc.source}${doc.deletedAt ? ", removed there since" : ""})`
+}
 
 const input = z.object({
   show: z.enum(["meetings", "decisions", "action_items"]).default("meetings").describe("What to list"),
@@ -68,6 +74,8 @@ async function oneMeeting(meetingId: string, now: Date) {
       agenda: cut(meeting.agendaMd),
       summary: cut(meeting.summaryMd),
       ...(detail.transcript ? { transcript: detail.transcript.filename } : {}),
+      // A synced transcript: read it by its id (type document) while its source is connected
+      ...(detail.transcriptDocument ? { transcript: transcriptDocumentText(detail.transcriptDocument), transcriptDocumentId: detail.transcriptDocument.id } : {}),
       link: meetingPath(meeting.id),
       ...(meeting.agendaMd ? { agendaPage: meetingAgendaPath(meeting.id) } : {}),
     },

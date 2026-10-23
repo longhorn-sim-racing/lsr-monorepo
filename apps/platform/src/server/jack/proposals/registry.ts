@@ -21,7 +21,8 @@ import type { AnyProposalKind, ProposeToolName } from "./types"
  * import targets have their own registry, `./import-targets`, for the import.rows kind to use.
  */
 
-const KIND_SLOTS = {
+/** Each track's kinds, by track: for checks per track (the prompt size budgets) */
+export const KIND_SLOTS = {
   groundwork: groundworkKinds,
   "club-data": clubDataKinds,
   memory: memoryKinds,
