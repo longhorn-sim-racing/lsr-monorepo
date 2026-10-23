@@ -54,11 +54,13 @@ const state = vi.hoisted(() => ({
   seasons: new Map<string, unknown>(),
   streams: [] as unknown[],
   live: null as unknown,
+  /** Each stream's newest viewer sample (streamLastSeen), by id */
+  lastSeen: {} as Record<string, Date>,
   posting: ["1100000000000000001"],
 }))
 const db = vi.hoisted(() => ({ prisma: {} as Record<string, unknown> }))
 vi.mock("@/server/db", () => db)
-vi.mock("@/server/connectors/twitch/streams", () => ({ currentLiveStream: async () => state.live }))
+vi.mock("@/server/connectors/twitch/streams", () => ({ currentLiveStream: async () => state.live, streamLastSeen: async (s: { id: string; startedAt: Date }) => state.lastSeen[s.id] ?? s.startedAt }))
 
 import { LOOK_BACK_MS, MAX_NEW_PER_RUN, MAX_REMINDERS_PER_RUN, parseRuleKey, REMINDER_GRACE_MS, ruleKey, rulePostProblem, runDiscordRules, stableJson } from "./rule-runner"
 
@@ -83,7 +85,7 @@ const run = (now = NOW) => runDiscordRules({ now, log: () => {}, siteUrl: SITE }
 
 beforeEach(() => {
   posts = fakePostTable()
-  Object.assign(state, { events: [], rules: [], audits: [], raceSessions: new Map(), entries: [], league: { id: "league-lsc", visibility: "public" }, seasons: new Map(), streams: [], live: null, posting: [CHANNEL] })
+  Object.assign(state, { events: [], rules: [], audits: [], raceSessions: new Map(), entries: [], league: { id: "league-lsc", visibility: "public" }, seasons: new Map(), streams: [], live: null, lastSeen: {}, posting: [CHANNEL] })
   db.prisma = {
     discordPost: posts,
     systemSetting: { findUnique: async () => ({ value: JSON.stringify({ channels: state.posting }) }) },
@@ -278,10 +280,20 @@ describe("Twitch live", () => {
     state.streams = [stream("s0", { startedAt: new Date(NOW.getTime() - 2 * HOUR), endedAt: new Date(NOW.getTime() - 15 * 60_000) }), stream("s1")]
     state.live = state.streams[1]
     expect((await run()).queued).toBe(0)
+    // Also a reconnect: closed only because this one opened (its end is this one's start), last seen 5 minutes before
+    state.streams = [stream("s0", { startedAt: new Date(NOW.getTime() - 2 * HOUR), endedAt: new Date(NOW.getTime() - 10 * 60_000) }), stream("s1")]
+    state.lastSeen = { s0: new Date(NOW.getTime() - 15 * 60_000) }
+    state.live = state.streams[1]
+    expect((await run()).queued).toBe(0)
     // A VOD row the snapshot added (ended), and nothing live
     state.streams = [stream("old", { endedAt: new Date(NOW.getTime() - 5 * 60_000) })]
     state.live = null
     expect((await run()).queued).toBe(0)
+    // A stale row (left open while the connector was off, then closed when this one opened) isn't a reconnect: posted
+    state.streams = [stream("stale", { startedAt: new Date(NOW.getTime() - 26 * HOUR), endedAt: new Date(NOW.getTime() - 10 * 60_000) }), stream("s2")]
+    state.lastSeen = { stale: new Date(NOW.getTime() - 24 * HOUR) }
+    state.live = state.streams[1]
+    expect((await run()).queued).toBe(1)
     // Live since before the rule was switched on: not news to this rule
     state.streams = [stream("early", { startedAt: new Date(NOW.getTime() - 3 * HOUR) })]
     state.live = state.streams[0]

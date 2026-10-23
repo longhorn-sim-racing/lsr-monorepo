@@ -3,7 +3,7 @@ import { isEventPublic } from "@/lib/events"
 import { getSiteUrl } from "@/lib/site-url"
 import { TWITCH_URL } from "@/lib/socials"
 import { prisma } from "@/server/db"
-import { currentLiveStream } from "@/server/connectors/twitch/streams"
+import { currentLiveStream, streamLastSeen } from "@/server/connectors/twitch/streams"
 import { postingChannelIds } from "./channels"
 import { EVENT_SELECT, eventProblem, forPost, postableEvents } from "./events"
 import { cancelPosts, queueDiscordPost, readBody } from "./outbox"
@@ -34,7 +34,7 @@ export const MAX_NEW_PER_RUN = 3
 export const MAX_REMINDERS_PER_RUN = 20
 /** How far back a rule looks for what's new, at most (still never before its cutoff) */
 export const LOOK_BACK_MS = 3 * 24 * 60 * 60_000
-/** A stream that starts this soon after the previous one ended is a reconnect, not a new broadcast */
+/** A stream that starts this soon after the previous one was last seen live is a reconnect, not a new broadcast */
 export const TWITCH_RECONNECT_MS = 15 * 60_000
 /** A stream's title can be "" for a few seconds after it goes live; wait this long for it */
 export const TWITCH_TITLE_WAIT_MS = 2 * 60_000
@@ -221,11 +221,18 @@ async function runTwitch(rule: DiscordRule, config: RuleConfig, ctx: RuleRunCont
   if (!stream.title && ctx.now.getTime() - stream.startedAt.getTime() < TWITCH_TITLE_WAIT_MS) return counts
   const key = ruleKey.twitch(rule.id, stream.id)
   if (await existing(key)) return counts
-  // A reconnect (an encoder drop gets a new stream id) is the same broadcast: no second post
-  const previous = await prisma.twitchStream.findFirst({ where: { startedAt: { lt: stream.startedAt } }, orderBy: { startedAt: "desc" }, select: { endedAt: true } })
-  if (previous && (!previous.endedAt || previous.endedAt.getTime() > stream.startedAt.getTime() - TWITCH_RECONNECT_MS)) {
-    ctx.log("Twitch: a reconnect of the stream before it, not posted.")
-    return counts
+  // A reconnect (an encoder drop gets a new stream id) is the same broadcast: no second post. It's judged by
+  // when the stream before was last seen live: when it ended, if that was before this one started
+  // (stream.offline, or the live check's last sample); otherwise (still open, or closed only because this
+  // one opened, which sets its end to this one's start) its newest viewer sample, or its start. So a row
+  // left open while the connector was off doesn't make the next real broadcast look like a reconnect
+  const previous = await prisma.twitchStream.findFirst({ where: { startedAt: { lt: stream.startedAt } }, orderBy: { startedAt: "desc" }, select: { id: true, startedAt: true, endedAt: true } })
+  if (previous) {
+    const lastSeen = previous.endedAt && previous.endedAt < stream.startedAt ? previous.endedAt : await streamLastSeen(previous)
+    if (stream.startedAt.getTime() - lastSeen.getTime() < TWITCH_RECONNECT_MS) {
+      ctx.log("Twitch: a reconnect of the stream before it, not posted.")
+      return counts
+    }
   }
   const { created } = await queueDiscordPost({ source: "rule", ruleId: rule.id, channelId: rule.channelId!, body: twitchLiveBody({ title: stream.title, gameName: stream.gameName, channelUrl: TWITCH_URL }, { ping: config.ping }), dedupeKey: key, scheduledFor: ctx.now })
   if (created) counts.queued++
