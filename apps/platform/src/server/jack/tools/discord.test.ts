@@ -1,14 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { z } from "zod"
+import type { ConnectorStatus } from "@/server/connectors/types"
 
-const connector = vi.hoisted(() => ({ client: vi.fn() }))
+const connector = vi.hoisted(() => ({ status: vi.fn() }))
 const queries = vi.hoisted(() => ({ discordActivity: vi.fn(), discordJoinsByMonth: vi.fn(), discordPolls: vi.fn() }))
-const state = vi.hoisted(() => ({ readConnectorState: vi.fn() }))
 const db = vi.hoisted(() => ({ discordChannel: { findMany: vi.fn() } }))
 
-vi.mock("@/server/connectors/discord/connector", () => ({ discordConnector: connector, DISCORD_OFF: "Discord isn't connected." }))
+vi.mock("@/server/connectors/discord/connector", () => ({ discordConnector: connector }))
 vi.mock("@/server/queries/discord", () => queries)
-vi.mock("@/server/connectors/state", () => state)
 vi.mock("@/server/db", () => ({ prisma: db }))
 
 import { discordActivityTool, discordPollsTool } from "./discord"
@@ -16,6 +15,11 @@ import { TOOLS } from "./registry/discord-read"
 
 const ctx = { roomId: "room-1", actor: { userId: "u1", displayName: "Gray" } }
 const day = (iso: string) => new Date(`${iso}T00:00:00.000Z`)
+
+/** The connector's status as the Connections page has it (only what sourceConnection reads) */
+function discordStatus(state: ConnectorStatus["state"], overrides: Partial<ConnectorStatus> = {}): Partial<ConnectorStatus> {
+  return { state, lastSyncAt: "2026-10-22T18:00:00.000Z", missingEnv: [], missingSettings: [], ...overrides }
+}
 
 const activity = {
   firstDay: day("2026-10-16"),
@@ -45,8 +49,7 @@ const poll = (question: string, status: "open" | "final" | "closing", votes: (nu
 })
 
 beforeEach(() => {
-  connector.client.mockResolvedValue({ guildId: "g" })
-  state.readConnectorState.mockResolvedValue({ lastSyncAt: new Date("2026-10-22T18:00:00Z") })
+  connector.status.mockResolvedValue(discordStatus("connected"))
   queries.discordActivity.mockResolvedValue(activity)
   queries.discordJoinsByMonth.mockResolvedValue([{ month: "2026-09", joined: 20 }])
   db.discordChannel.findMany.mockResolvedValue([
@@ -65,12 +68,30 @@ describe("the discord-read tools", () => {
     expect(size).toBeLessThanOrEqual(4_000)
   })
 
-  it("say Discord isn't connected while it's off, without reading anything", async () => {
-    connector.client.mockResolvedValue(null)
+  it("say Discord isn't connected while it's off or not set up, without reading anything (whatever was stored)", async () => {
+    connector.status.mockResolvedValue(discordStatus("off"))
     const outs = [await discordActivityTool.run(discordActivityTool.input.parse({}), ctx), await discordPollsTool.run(discordPollsTool.input.parse({}), ctx)]
-    for (const out of outs) expect(out).toMatchObject({ label: "Discord isn't connected", forModel: expect.stringMatching(/Discord isn't connected/) })
+    for (const out of outs) {
+      expect(out).toEqual({
+        forModel:
+          "Discord is switched off on System → Connections; what's stored was last synced Thu 2026-10-22 13:00 CT. Nothing from Discord is read while it isn't connected. Say it isn't connected; an admin connects it on System → Connections.",
+        label: "Discord isn't connected",
+        displays: [{ kind: "note", text: "Discord isn't connected." }],
+      })
+    }
+    connector.status.mockResolvedValue(discordStatus("not_configured", { lastSyncAt: null, missingEnv: ["DISCORD_BOT_TOKEN"] }))
+    const unset = await discordPollsTool.run(discordPollsTool.input.parse({}), ctx)
+    expect(unset.forModel).toMatch(/^Discord is not set up \(missing: DISCORD_BOT_TOKEN\); it never synced\. Nothing from Discord is read/)
     expect(queries.discordActivity).not.toHaveBeenCalled()
     expect(queries.discordPolls).not.toHaveBeenCalled()
+  })
+
+  it("say how fresh the counts are, and when the last sync failed", async () => {
+    expect(JSON.parse((await discordActivityTool.run(discordActivityTool.input.parse({ days: 7 }), ctx)).forModel).connection).toBe("Discord: connected, last synced Thu 2026-10-22 13:00 CT.")
+    connector.status.mockResolvedValue(discordStatus("error"))
+    expect(JSON.parse((await discordActivityTool.run(discordActivityTool.input.parse({ days: 7 }), ctx)).forModel).connection).toBe(
+      "Discord: its last sync failed (System → Connections has why); last synced Thu 2026-10-22 13:00 CT.",
+    )
   })
 })
 
@@ -145,6 +166,6 @@ describe("discord_polls", () => {
 
     queries.discordPolls.mockResolvedValue({ polls: [], matched: 0 })
     const none = await discordPollsTool.run(discordPollsTool.input.parse({ status: "open", search: "track" }), ctx)
-    expect(none.forModel).toBe("No open polls matching “track” in the last 90 days in the synced Discord channels.")
+    expect(none.forModel).toBe("No open polls matching “track” in the last 90 days in the synced Discord channels. Discord: connected, last synced Thu 2026-10-22 13:00 CT.")
   })
 })
