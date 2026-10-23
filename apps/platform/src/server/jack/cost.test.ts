@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { costUsd, LONG_PROMPT_PRICES, MODEL_PRICES, UsageTally, usageByModel } from "./cost"
+import { costUsd, LONG_PROMPT_PRICES, MODEL_PRICES, UsageTally, usageByModel, WEB_SEARCH_USD } from "./cost"
 
 const M = 1_000_000
 
@@ -84,6 +84,20 @@ describe("UsageTally", () => {
 
   it("reports the requested model before any call", () => {
     expect(new UsageTally("claude-sonnet-5-5").models).toEqual(["claude-sonnet-5-5"])
+  })
+
+  it("adds $0.01 a web search to the tokens, counts searches and fetches, and treats a missing counter as 0", () => {
+    const tally = new UsageTally("claude-sonnet-5-5")
+    const usage = (server_tool_use: unknown) => ({ input_tokens: 1_000, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, iterations: null, server_tool_use }) as never
+    tally.add({ model: "claude-sonnet-5-5", usage: usage({ web_search_requests: 3 }) })
+    tally.add({ model: "claude-sonnet-5-5", usage: usage({ web_fetch_requests: 2 }) })
+    tally.add({ model: "claude-sonnet-5-5", usage: usage(null) })
+
+    expect(WEB_SEARCH_USD).toBe(0.01)
+    expect(tally.webSearches).toBe(3)
+    expect(tally.webFetches).toBe(2)
+    // Fetches cost tokens only
+    expect(tally.costUsd).toBeCloseTo(3 * ((1_000 * 2 + 100 * 10) / M) + 3 * 0.01, 6)
   })
 })
 

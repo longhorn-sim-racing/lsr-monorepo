@@ -4,7 +4,7 @@ import type { BetaMessageStreamParams } from "@anthropic-ai/sdk/resources/beta/m
 import { z } from "zod"
 import type { JackDeltaEvent, JackDoneEvent, JackRoomEvent, JackToolEvent } from "@/lib/jack/types"
 import { parseToolParts } from "@/lib/jack/parts"
-import { fakeClaude, lastUserText, type FakeTurn } from "./fake-claude"
+import { fakeCitedText, fakeClaude, fakeWebSearch, lastUserText, type FakeTurn } from "./fake-claude"
 import type { FakeJackDb } from "./jack-test-db"
 import type { JackTool } from "./tools/types"
 
@@ -61,6 +61,11 @@ let deps: ReplyLoopDeps
 
 function ask(content: string, userId = "officer-gray") {
   return db.addMessage({ roomId: room.id, authorUserId: userId, content })
+}
+
+/** A note a scheduled run posts (a recurring question), answered as the officer who set it up */
+function scheduledNote(content: string, userId = "officer-gray") {
+  return db.addMessage({ roomId: room.id, kind: "system", scheduled: true, authorUserId: userId, content })
 }
 
 const replies = () => db.state.messages.filter((m) => m.kind === "assistant")
@@ -158,6 +163,84 @@ describe("runRoom", () => {
     expect(reply.streamSeq).toBe(deltas.length)
     expect(radio.sent.every((s) => s.roomId === room.id)).toBe(true)
     expect(db.room(room.id).runId).toBeNull()
+  })
+
+  it("gives a reply to officers the web tools when JACK_WEB_TOOLS=on, and a reply to a scheduled note none", async () => {
+    vi.stubEnv("JACK_WEB_TOOLS", "on")
+    ask("Who sponsors other college sim racing clubs?")
+    await onFakeTimers(() => runRoom(room.id, deps))
+    expect(claude.calls[0].tools?.map((tool) => (tool as { name?: string }).name)).toEqual(["web_search", "web_fetch"])
+
+    scheduledNote("Recurring question 'Weekly signups' (set up by Gray): How many signups this week?")
+    await onFakeTimers(() => runRoom(room.id, deps))
+    expect(claude.calls[1].tools).toBeUndefined()
+    expect(replies()).toHaveLength(2)
+  })
+
+  it("answers a scheduled note in a reply of its own, whichever run picks it up, so officers' messages around it keep the web tools", async () => {
+    vi.stubEnv("JACK_WEB_TOOLS", "on")
+    const seen: (string | undefined)[] = []
+    const tool: JackTool<Record<string, never>> = {
+      name: "count_rows",
+      description: "Counts rows.",
+      input: z.object({}),
+      run: async (_input, ctx) => {
+        seen.push(ctx.requestType)
+        return { forModel: "42", label: "Counted" }
+      },
+    }
+    claude = fakeClaude((params: BetaMessageStreamParams): FakeTurn =>
+      params.messages.at(-1)?.role === "user" && typeof params.messages.at(-1)?.content === "string" ? { tools: [{ name: "count_rows", input: {} }] } : { text: `Answered: ${lastUserText(params).slice(0, 40)}` }
+    )
+    const before = ask("Who sponsors other college sim racing clubs?")
+    const note = scheduledNote("Recurring question 'Weekly signups' (set up by Gray): How many signups this week?")
+    const after = ask("And what does the FIA do?", "officer-dylan")
+
+    // An officer's post started this run; the note was waiting when it took the lock
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [tool] }))
+
+    const answers = replies()
+    expect(answers).toHaveLength(3)
+    expect([before, note, after].map((m) => m.answeredById)).toEqual(answers.map((r) => r.id))
+    const offered = (call: BetaMessageStreamParams) => (call.tools ?? []).map((t) => (t as { name?: string }).name)
+    expect(claude.calls.filter((_, i) => i % 2 === 0).map(offered)).toEqual([
+      ["count_rows", "web_search", "web_fetch"],
+      ["count_rows"],
+      ["count_rows", "web_search", "web_fetch"],
+    ])
+    expect(seen).toEqual(["room", "scheduled", "room"])
+    // Each reply's turn holds only what it answers: the note in its own, as the officer who set it up
+    expect(lastUserText(claude.calls[0])).not.toContain("Weekly signups")
+    expect(claude.calls[2].messages.at(-1)!.content).toMatch(/\(Room note: Recurring question 'Weekly signups' \(set up by Gray\): How many signups this week\?\)$/)
+    expect(claude.calls[4].messages.at(-1)!.content).toMatch(/Dylan: And what does the FIA do\?$/)
+  })
+
+  it("never leaves a continue note after a scheduled reply (its answer would get the web tools)", async () => {
+    const deckWrite: JackTool<Record<string, never>> = { name: "deck_write", description: "Writes slides.", input: z.object({}), design: true, run: async () => ({ forModel: "Saved.", label: "Wrote slides" }) }
+    claude = fakeClaude((_params: BetaMessageStreamParams, call: number): FakeTurn => (call % 2 === 0 ? { tools: [{ name: "deck_write", input: {} }] } : { text: "Slides 1-2 are done." }))
+    scheduledNote("Recurring question 'Weekly deck' (set up by Gray): Update the weekly deck")
+
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [deckWrite], limits: { maxDesignToolCalls: 1 } }))
+
+    expect(replies()).toHaveLength(1)
+    expect(db.state.messages.some((m) => m.continues)).toBe(false)
+  })
+
+  it("saves and broadcasts a web search as a part of the reply, and prices the search", async () => {
+    vi.stubEnv("JACK_WEB_TOOLS", "on")
+    const iracing = { url: "https://www.iracing.com/college", title: "iRacing college" }
+    claude = fakeClaude([{ blocks: [...fakeWebSearch("college sim racing sponsors", [iracing], { id: "srvtoolu_w" }), fakeCitedText("iRacing sponsors college clubs.", [iracing])] }])
+    ask("Who sponsors other college sim racing clubs?")
+
+    await onFakeTimers(() => runRoom(room.id, deps))
+
+    const [reply] = replies()
+    expect(reply.content).toBe("iRacing sponsors college clubs.")
+    expect(parseToolParts(reply.toolCalls)).toEqual([
+      expect.objectContaining({ id: "srvtoolu_w", name: "web_search", status: "done", displays: [expect.objectContaining({ kind: "web_sources", sources: [expect.objectContaining({ url: iracing.url })] })] }),
+    ])
+    expect(radio.of("message.tool").map((event) => (event as JackToolEvent).part.id)).toContain("srvtoolu_w")
+    expect(reply.costUsd).toBeCloseTo((100 * 2 + 20 * 10) / 1e6 + 0.01, 6)
   })
 
   it("saves the partial reply about once a second while it streams", async () => {

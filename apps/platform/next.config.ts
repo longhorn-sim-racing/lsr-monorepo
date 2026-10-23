@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const CHROMIUM_BINARY = ["./node_modules/@sparticuz/chromium/bin/**", "../../node_modules/.pnpm/@sparticuz+chromium@*/node_modules/@sparticuz/chromium/bin/**"]
+// Room files (G5): src/server/jack/files/extract.ts imports the worker statically, which file tracing
+// follows; listed here too so a later change to a dynamic import can't quietly drop it
+const PDF_WORKER = ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", "../../node_modules/.pnpm/pdfjs-dist@*/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"]
 
 const nextConfig: NextConfig = {
   // Jack renders slides in headless Chromium (src/server/jack/decks/renderer.ts). The Chromium build
@@ -17,7 +20,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core", "pdfjs-dist"],
   outputFileTracingIncludes: {
     "/admin/jack/**": CHROMIUM_BINARY,
-    "/api/admin/jack/**": CHROMIUM_BINARY,
+    "/api/admin/jack/**": [...CHROMIUM_BINARY, ...PDF_WORKER],
   },
   images: {
     remotePatterns: [

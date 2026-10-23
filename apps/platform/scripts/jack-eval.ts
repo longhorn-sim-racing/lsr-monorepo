@@ -348,6 +348,8 @@ async function runCase(question: Question, persona: JackRoomPersonaKey, c: Ctx):
         onText: () => {},
         onPart: async () => {},
         usage,
+        // Eval cases are officers' questions in a room
+        requestType: "room",
         signal: controller.signal,
       });
     } catch (error) {
