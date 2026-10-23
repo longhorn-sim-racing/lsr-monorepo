@@ -404,16 +404,27 @@ function MessageList({ messages, followSignal, messageActions, renderAttachments
  * while a reply streams only its row re-renders, not every table and chart above it.
  */
 const MessageRow = memo(function MessageRow({ message, messageActions, renderAttachments }: { message: JackMessageView } & MessageExtras) {
-  if (message.author.kind === "system")
+  if (message.author.kind === "system") {
+    // A note's first line is its summary; anything after it (a knowledge entry's saved text) shows under it as is
+    const [lead, ...rest] = message.content.split("\n")
+    const detail = rest.join("\n").trim()
     return (
-      <li className="flex items-center gap-2.5 text-xs text-admin-subtle">
-        <span aria-hidden className="h-px flex-1 bg-admin-row" />
-        <span>
-          {message.content} · {timeOfDay.format(new Date(message.createdAt))}
-        </span>
-        <span aria-hidden className="h-px flex-1 bg-admin-row" />
+      <li className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2.5 text-xs text-admin-subtle">
+          <span aria-hidden className="h-px flex-1 bg-admin-row" />
+          <span>
+            {lead} · {timeOfDay.format(new Date(message.createdAt))}
+          </span>
+          <span aria-hidden className="h-px flex-1 bg-admin-row" />
+        </div>
+        {detail ? (
+          <p className="mx-auto max-h-80 w-full max-w-3xl overflow-y-auto whitespace-pre-wrap break-words rounded-md border bg-admin-surface px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+            {detail}
+          </p>
+        ) : null}
       </li>
     )
+  }
   const isModel = message.author.kind === "assistant"
   const name = message.author.kind === "assistant" ? JACK_PERSONA_NAME[message.author.persona] : message.author.displayName
   const attachments = renderAttachments ? renderAttachments(message) : message.files?.length ? <FilesView files={message.files} /> : null
