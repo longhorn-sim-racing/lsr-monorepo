@@ -55,10 +55,11 @@ src/app/api/admin/jack/files/... upload token, register, serve
 **One file per track for every shared registry.** Each starts empty in G1:
 - `tools/registry/<track>.ts`
 - `prompt-sections/<track>.ts`, exporting `{ section, pages[] }`
-- `tools/schema-notes/<track>.ts`
+- `tools/schema-notes-slots/<track>.ts`
 - `proposals/kinds/<track>.ts`
 - `proposals/import-targets/<track>.ts`
 - `scheduler/jobs/<track>.ts`
+- `connectors/slots/<track>.ts`
 - `automation/checks/<track>.ts` (digest and Overview "needs attention" checks)
 - `app/admin/_overview/cards/<track>.tsx`
 - `scripts/jack-eval/<track>.ts`

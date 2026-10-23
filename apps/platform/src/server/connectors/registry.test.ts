@@ -7,6 +7,7 @@ const fakeConnector = (id: string): AnyConnector => {
     label: id,
     configured: false,
     missingEnv: ["FAKE_TOKEN"],
+    missingSettings: [],
     enabled: false,
     state: "not_configured",
     lastSyncAt: null,
@@ -26,9 +27,9 @@ const fakeConnector = (id: string): AnyConnector => {
 }
 
 afterEach(() => {
-  vi.doUnmock("./registry/groundwork")
-  vi.doUnmock("./registry/sources-b")
-  vi.doUnmock("./registry/discord-read")
+  vi.doUnmock("./slots/groundwork")
+  vi.doUnmock("./slots/sources-b")
+  vi.doUnmock("./slots/discord-read")
   vi.resetModules()
 })
 
@@ -40,16 +41,16 @@ describe("the connector registry", () => {
   })
 
   it("joins the tracks' connectors in track order and finds them by id", async () => {
-    vi.doMock("./registry/discord-read", () => ({ CONNECTORS: [fakeConnector("discord")] }))
-    vi.doMock("./registry/groundwork", () => ({ CONNECTORS: [fakeConnector("storage")] }))
+    vi.doMock("./slots/discord-read", () => ({ CONNECTORS: [fakeConnector("discord")] }))
+    vi.doMock("./slots/groundwork", () => ({ CONNECTORS: [fakeConnector("storage")] }))
     const { CONNECTORS, findConnector } = await import("./registry")
     expect(CONNECTORS.map((c) => c.id)).toEqual(["storage", "discord"])
     expect(findConnector("discord")?.configured({ FAKE_TOKEN: "x" })).toBe(true)
   })
 
   it("throws at load when two tracks register the same id", async () => {
-    vi.doMock("./registry/sources-b", () => ({ CONNECTORS: [fakeConnector("twitch")] }))
-    vi.doMock("./registry/discord-read", () => ({ CONNECTORS: [fakeConnector("twitch")] }))
+    vi.doMock("./slots/sources-b", () => ({ CONNECTORS: [fakeConnector("twitch")] }))
+    vi.doMock("./slots/discord-read", () => ({ CONNECTORS: [fakeConnector("twitch")] }))
     await expect(import("./registry")).rejects.toThrow('Duplicate connector "twitch": registered by sources-b and discord-read')
   })
 })

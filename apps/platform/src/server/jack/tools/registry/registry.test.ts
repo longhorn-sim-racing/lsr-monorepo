@@ -30,6 +30,15 @@ describe("the tool slots", () => {
     expect(findJackTool("draft_text")?.description).toBe("A test tool")
   })
 
+  it("are listed by track too, for per-track checks", async () => {
+    vi.doMock("./memory", () => ({ TOOLS: [fakeTool("knowledge")] }))
+    const { SLOT_TOOLS, TOOL_SLOTS } = await import("./index")
+    const { SLOT_TRACKS } = await import("@/lib/slots")
+    expect(Object.keys(TOOL_SLOTS).sort()).toEqual([...SLOT_TRACKS].sort())
+    expect(TOOL_SLOTS.memory.map((t) => t.name)).toEqual(["knowledge"])
+    expect(SLOT_TRACKS.flatMap((track) => TOOL_SLOTS[track])).toEqual(SLOT_TOOLS)
+  })
+
   it("throw at load when two tracks register the same name", async () => {
     vi.doMock("./memory", () => ({ TOOLS: [fakeTool("knowledge")] }))
     vi.doMock("./sponsors-meetings", () => ({ TOOLS: [fakeTool("knowledge")] }))

@@ -2,7 +2,7 @@ import { z } from "zod"
 import { getJackSqlClient, JACK_SQL_MISSING } from "@/server/jack/sql-client"
 import { describeSqlError } from "./run-sql"
 import { JACK_SCHEMA_NOTES, TABLE_NOTES } from "./schema-notes"
-import { mergeTableNotes, SLOT_SCHEMA_NOTES, SLOT_TABLE_NOTES } from "./schema-notes/registry"
+import { mergeTableNotes, SLOT_SCHEMA_NOTES, SLOT_TABLE_NOTES } from "./schema-notes-slots/registry"
 import type { JackTool } from "./types"
 
 /**
@@ -53,7 +53,7 @@ export function typeName(column: Pick<SchemaColumn, "dt" | "udt">): string {
 
 const unquote = (name: string) => name.trim().replace(/^"|"$/g, "")
 
-/** The core table notes with the Jack 2.0 tracks' notes appended (schema-notes/<track>.ts) */
+/** The core table notes with the Jack 2.0 tracks' notes appended (schema-notes-slots/<track>.ts) */
 const ALL_TABLE_NOTES = mergeTableNotes(TABLE_NOTES, SLOT_TABLE_NOTES)
 
 /** Columns that are the primary key, and where each foreign key points, from pg_get_constraintdef */

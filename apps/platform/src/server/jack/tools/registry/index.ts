@@ -19,7 +19,8 @@ import { TOOLS as sponsorsMeetingsTools } from "./sponsors-meetings"
  * Tracks add to their own slot files, never here.
  */
 
-const TOOL_SLOTS = {
+/** Each track's tools, by track: for checks per track (a size budget on each track's tool definitions) */
+export const TOOL_SLOTS = {
   groundwork: groundworkTools,
   "club-data": clubDataTools,
   memory: memoryTools,
