@@ -15,8 +15,8 @@ const DAY_MS = 86_400_000
 export const SNAPSHOT_WINDOW_DAYS = 29
 /** Groups kept per dimension per day (Vercel folds the rest into "Others") */
 export const TOP_LIMIT = 100
-/** Days fetched at once (five calls each) */
-const PARALLEL_DAYS = 2
+/** Days fetched at once (five calls each). Vercel publishes no rate limit for these queries, so one day at a time; a backfill still takes well under a minute */
+const PARALLEL_DAYS = 1
 
 const DIMENSIONS = Object.keys(TRAFFIC_DIMENSIONS) as TrafficDimension[]
 
