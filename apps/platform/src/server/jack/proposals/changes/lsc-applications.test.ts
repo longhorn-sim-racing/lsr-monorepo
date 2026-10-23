@@ -98,7 +98,12 @@ describe("the LSC applications target: validateRow", () => {
 })
 
 describe("the LSC applications target: applyRows", () => {
-  const value = { userId: "u-ana", seasonId: "s3", seasonName: "LSC Season 3", input: { discordUsername: "ana_t", experience: "SIM_RACER" as const, equipment: ["WHEEL" as const], canCommit: true, utStudent: true } }
+  const value = {
+    userId: "u-ana",
+    seasonId: "s3",
+    seasonName: "LSC Season 3",
+    input: { discordUsername: "ana_t", experience: "SIM_RACER" as const, equipment: ["WHEEL" as const], canCommit: true, utStudent: true, eid: undefined, school: undefined, notes: undefined },
+  }
 
   it("saves each entry form through the league-entry service as the applying officer, source ADMIN", async () => {
     const result = await lscApplicationTarget.applyRows([{ rowId: "r1", value }], applyCtx)
