@@ -3,7 +3,7 @@ import { isEventPublic } from "@/lib/events"
 import { getSiteUrl } from "@/lib/site-url"
 import { TWITCH_URL } from "@/lib/socials"
 import { prisma } from "@/server/db"
-import { currentLiveStream, streamsWentLiveSince } from "@/server/connectors/twitch/streams"
+import { currentLiveStream } from "@/server/connectors/twitch/streams"
 import { postingChannelIds } from "./channels"
 import { EVENT_SELECT, eventProblem, forPost, postableEvents } from "./events"
 import { cancelPosts, queueDiscordPost, readBody } from "./outbox"
@@ -215,12 +215,9 @@ async function runStandings(rule: DiscordRule, config: RuleConfig, ctx: RuleRunC
 
 async function runTwitch(rule: DiscordRule, config: RuleConfig, ctx: RuleRunContext): Promise<RuleRunCounts> {
   const counts: RuleRunCounts = { queued: 0, refreshed: 0, cancelled: 0 }
-  const live = await currentLiveStream(ctx.now)
-  if (!live) return counts
-  // Recent streams only: rows the daily snapshot adds from old VODs are already ended
-  const streams = await streamsWentLiveSince(since(rule, ctx.now), 10)
-  const stream = streams.find((s) => s.id === live.id && s.endedAt === null)
-  if (!stream) return counts
+  // The stream that's live now (open and seen lately), if it went live after the cutoff. Rows the daily snapshot adds from old VODs are ended, so never live
+  const stream = await currentLiveStream(ctx.now)
+  if (!stream || stream.endedAt !== null || stream.startedAt <= since(rule, ctx.now)) return counts
   if (!stream.title && ctx.now.getTime() - stream.startedAt.getTime() < TWITCH_TITLE_WAIT_MS) return counts
   const key = ruleKey.twitch(rule.id, stream.id)
   if (await existing(key)) return counts

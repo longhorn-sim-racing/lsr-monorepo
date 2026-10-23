@@ -58,10 +58,7 @@ const state = vi.hoisted(() => ({
 }))
 const db = vi.hoisted(() => ({ prisma: {} as Record<string, unknown> }))
 vi.mock("@/server/db", () => db)
-vi.mock("@/server/connectors/twitch/streams", () => ({
-  currentLiveStream: async () => state.live,
-  streamsWentLiveSince: async (since: Date, limit: number) => (state.streams as { startedAt: Date }[]).filter((s) => s.startedAt > since).slice(0, limit),
-}))
+vi.mock("@/server/connectors/twitch/streams", () => ({ currentLiveStream: async () => state.live }))
 
 import { LOOK_BACK_MS, MAX_NEW_PER_RUN, MAX_REMINDERS_PER_RUN, parseRuleKey, REMINDER_GRACE_MS, ruleKey, rulePostProblem, runDiscordRules, stableJson } from "./rule-runner"
 
@@ -284,6 +281,10 @@ describe("Twitch live", () => {
     // A VOD row the snapshot added (ended), and nothing live
     state.streams = [stream("old", { endedAt: new Date(NOW.getTime() - 5 * 60_000) })]
     state.live = null
+    expect((await run()).queued).toBe(0)
+    // Live since before the rule was switched on: not news to this rule
+    state.streams = [stream("early", { startedAt: new Date(NOW.getTime() - 3 * HOUR) })]
+    state.live = state.streams[0]
     expect((await run()).queued).toBe(0)
   })
 })
