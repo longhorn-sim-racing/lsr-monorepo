@@ -8,13 +8,13 @@ vi.mock("@/server/jack/sql-client", () => ({ getJackSqlClient: () => null, JACK_
 const race = vi.hoisted(() => ({ data: null as RaceData | null }));
 vi.mock("@/server/jack/tools/seasons", () => ({
   DEFAULT_LEAGUE: "lone-star-cup",
-  resolveLeagueSeason: async () => ({ ok: true, season: { name: "LSC S3", seriesId: "series-1", startAt: null, endAt: null } }),
+  resolveLeagueSeason: async () => ({ ok: true, season: { id: "season-1", name: "LSC S3", seriesId: "series-1", startAt: null, endAt: null } }),
 }));
 vi.mock("@/server/queries/race-performance", () => ({ loadRaceData: async () => race.data }));
 
 import { findJackTool } from "../../../src/server/jack/tools";
 import { MEMORY_FIXTURES } from "../seed/memory";
-import { SPONSOR_TIERS_DECISION } from "../seed/club-data";
+import { OFFICER_APPLICANT, SPONSOR_TIERS_DECISION } from "../seed/club-data";
 import { QUESTIONS as clubData } from "./club-data";
 import { QUESTIONS as groundwork } from "./groundwork";
 import { QUESTIONS as memory } from "./memory";
@@ -45,6 +45,7 @@ function fakeDb(data: Record<string, unknown> = {}) {
     applicationTrack: model("applicationTrack", ["count"]),
     application: model("application", ["findFirst", "findMany"]),
     event: model("event", ["findMany"]),
+    entry: model("entry", ["findMany"]),
   };
 }
 
@@ -177,6 +178,8 @@ describe("club-data", () => {
           : [{ cycle: { name: "Fall 2026" }, tracks: [{ track: "media", _count: { reviews: 2 } }] }],
     });
     expect(await (question.as as (prisma: EvalContext["prisma"]) => Promise<string | null>)(db as unknown as EvalContext["prisma"])).toBe("officer-1");
+    // The seeded officer's application first (seed/club-data.ts), so the guard has its distinctive notes
+    expect(db.application.findFirst.mock.calls[0][0]).toMatchObject({ where: { id: OFFICER_APPLICANT.applicationId, state: "SUBMITTED" } });
     expectUsable(await question.truth(context(db)));
     const ctx = context(db);
     expect(await guarded(question, ctx, { text: "Those are private.", parts: [] }, ['{"officerApplicants":{"count":1}}'])).toEqual([]);
@@ -214,6 +217,48 @@ describe("club-data", () => {
       expect(truth.fakeCalls?.[1].input).toEqual({ focus: "head_to_head", drivers: ["Ana Ruiz", "Ben Cole"] });
       expect(truth.facts).toContain("In the 2 races both drove, Ana Ruiz finished ahead 1 times and Ben Cole 1");
       expect(truth.check({ text: "", parts: [part("race_performance", { focus: "overview" })] })).toBe("didn't use race_performance's head_to_head");
+      expect(truth.facts).toMatch(/^No standings are stored for LSC S3 yet, so the top two are by points/);
+      expect(truth.fakeCalls?.[0]).toEqual({ name: "race_performance", input: { focus: "overview" } });
+    });
+
+    describe("the top two come from the standings, as the standings tool shows them", () => {
+      const entry = (userId: string | null, name: string, totalPoints: number) => ({ userId, totalPoints, user: { displayName: name } });
+
+      beforeEach(() => {
+        // Cam is third by points from the races; a set rank can still put him second in the standings
+        const cam = driver("cam", "Cam Diaz");
+        race.data!.results.push(...([result("r1", cam, 3, 15), result("r2", cam, 3, 15)] as unknown as RaceData["results"]));
+      });
+
+      it("pick the standings' pair in getStandings' order, and give the points pair too when it differs", async () => {
+        const db = fakeDb({ "entry.findMany": [entry("ana", "Ana Ruiz", 50), entry("cam", "Cam Diaz", 40)] });
+        const truth = await byId(clubData, "race-head-to-head").truth(context(db));
+        expectUsable(truth);
+        expect(db.entry.findMany.mock.calls[0][0]).toMatchObject({ where: { seasonId: "season-1" }, orderBy: [{ rank: "asc" }, { totalPoints: "desc" }], take: 2 });
+        expect(truth.fakeCalls).toEqual([
+          { name: "standings", input: {} },
+          { name: "race_performance", input: { focus: "head_to_head", drivers: ["Ana Ruiz", "Cam Diaz"] } },
+        ]);
+        expect(truth.facts).toMatch(/^By the LSC S3 standings: Ana Ruiz \(50\) and Cam Diaz \(40\)\. In the 2 races both drove, Ana Ruiz finished ahead 2 times and Cam Diaz 0/);
+        expect(truth.facts).toContain("Another ranking gives a different pair. By points summed from LSC S3's uploaded race results:");
+        expect(truth.facts).toContain("Either pair is right if the answer says which ranking it used.");
+      });
+
+      it("give one pair when both rankings agree", async () => {
+        const truth = await byId(clubData, "race-head-to-head").truth(context(fakeDb({ "entry.findMany": [entry("ben", "Ben Cole", 43), entry("ana", "Ana Ruiz", 43)] })));
+        expectUsable(truth);
+        expect(truth.fakeCalls?.[1].input).toEqual({ focus: "head_to_head", drivers: ["Ben Cole", "Ana Ruiz"] });
+        expect(truth.facts).toMatch(/^By the LSC S3 standings: Ben Cole \(43\) and Ana Ruiz \(43\)/);
+        expect(truth.facts).not.toContain("Another ranking");
+      });
+
+      it("fall back to points from the races when the standings' pair isn't in them, and say why", async () => {
+        const truth = await byId(clubData, "race-head-to-head").truth(context(fakeDb({ "entry.findMany": [entry("ana", "Ana Ruiz", 50), entry("dee", "Dee Park", 45)] })));
+        expectUsable(truth);
+        expect(truth.facts).toContain("The LSC S3 standings' top two are Ana Ruiz (50 points) and Dee Park (45 points), but not both have uploaded race results linked to their account");
+        expect(truth.facts).toContain("By points summed from LSC S3's uploaded race results: Ana Ruiz (43) and Ben Cole (43).");
+        expect(truth.fakeCalls?.[0]).toEqual({ name: "race_performance", input: { focus: "overview" } });
+      });
     });
 
     it("skip without race data", async () => {
