@@ -197,7 +197,7 @@ export const siteSource: SearchSource = {
   description: "the public website: published news posts, content pages (such as the LSC rules), public events, gallery albums and Instagram posts",
   byDefault: true,
   async search({ query, limit }) {
-    const pages = PUBLIC_PAGE_SLUGS.length ? PUBLIC_PAGE_SLUGS : ["\u0000"]
+    const shownPages = PUBLIC_PAGE_SLUGS.length ? Prisma.sql`g.slug IN (${Prisma.join(PUBLIC_PAGE_SLUGS)})` : Prisma.sql`false`
     const rows = await prisma.$queryRaw<SiteRow[]>(Prisma.sql`
       WITH ${queryCte(query)},
       clock AS (SELECT now() AT TIME ZONE 'UTC' AS now),
@@ -212,7 +212,7 @@ export const siteSource: SearchSource = {
           setweight(to_tsvector('english', g.title), 'A') || setweight(to_tsvector('english', left(g."bodyMd", 100000)), 'C'),
           g."bodyMd"
         FROM "Page" g
-        WHERE g.visibility = 'public' AND g.slug IN (${Prisma.join(pages)})
+        WHERE g.visibility = 'public' AND ${shownPages}
         UNION ALL
         SELECT 'event', e.id, e.title, e.slug, e."startsAtUtc",
           setweight(to_tsvector('english', e.title), 'A') || setweight(to_tsvector('english', concat_ws(' ', e.summary, s.title)), 'B') || setweight(to_tsvector('english', concat_ws(' ', left(e.description, 100000), v.name)), 'C'),

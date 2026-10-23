@@ -59,14 +59,18 @@ export async function searchRoomMessages({
   limit,
   kinds,
   includeArchived = true,
+  replyId,
 }: {
   query: string
   limit: number
   kinds: RoomMessageKind[]
   /** Messages in archived rooms too (the rooms list leaves them out until archived rooms can be opened) */
   includeArchived?: boolean
+  /** Leave out the messages this reply is answering: the question being asked isn't a result */
+  replyId?: string
 }): Promise<RoomMessageHit[]> {
   if (!kinds.length) return []
+  const notAnswering = replyId ? Prisma.sql`AND m."answeredById" IS DISTINCT FROM ${replyId}` : Prisma.empty
   const rows = await prisma.$queryRaw<RoomRow[]>(Prisma.sql`
     WITH ${queryCte(query)},
     hits AS (
@@ -80,6 +84,7 @@ export async function searchRoomMessages({
       LEFT JOIN "User" u ON u.id = m."authorUserId"
       WHERE d.source = 'room_message' AND d.search @@ q.query AND m.kind::text IN (${Prisma.join(kinds)})
         ${includeArchived ? Prisma.empty : Prisma.sql`AND r."archivedAt" IS NULL`}
+        ${notAnswering}
       ORDER BY rank DESC, m."createdAt" DESC
       LIMIT ${limit}
     )
@@ -133,7 +138,7 @@ type ContextMessage = Prisma.JackMessageGetPayload<{ select: typeof messageSelec
 
 /** One message as a transcript line: "Mon 2026-10-19 18:00 CT · Gray: …" */
 export function transcriptLine(message: ContextMessage, { opened = false, maxChars = CONTEXT_CHARS } = {}): string {
-  const who = message.kind === "assistant" ? `${JACK_PERSONA_NAME[message.persona ?? "jack"]} (${JACK_ANSWER_LABEL})` : messageAuthor(message.kind, message.author?.displayName ?? null, null)
+  const who = message.kind === "assistant" ? `${JACK_PERSONA_NAME[message.persona ?? "jack"]} [${JACK_ANSWER_LABEL}]` : messageAuthor(message.kind, message.author?.displayName ?? null, null)
   const text = message.content.length > maxChars ? `${message.content.slice(0, maxChars)}… (${message.content.length - maxChars} more characters: read this message for all of it)` : message.content
   const status = message.status === "error" ? " [stopped early]" : message.status === "streaming" ? " [still being written]" : ""
   return `${opened ? "→ (the message you opened) " : ""}${ct(message.createdAt)} · ${who}${status}: ${text || "(no text)"}`
@@ -143,9 +148,9 @@ export const roomsSource: SearchSource = {
   key: "rooms",
   description: `messages officers wrote in Jack rooms, and the rooms' notes (proposals applied, renames); with includeJackReplies, also your own earlier answers, labelled "${JACK_ANSWER_LABEL}"`,
   byDefault: true,
-  async search({ query, limit, includeJackReplies }) {
+  async search({ query, limit, includeJackReplies, replyId }) {
     const kinds: RoomMessageKind[] = includeJackReplies ? ["user", "system", "assistant"] : ["user", "system"]
-    return (await searchRoomMessages({ query, limit, kinds })).map(toHit)
+    return (await searchRoomMessages({ query, limit, kinds, replyId })).map(toHit)
   },
   readers: [
     {

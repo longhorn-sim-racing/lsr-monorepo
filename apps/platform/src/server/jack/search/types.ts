@@ -35,6 +35,8 @@ export type SearchRequest = {
   limit: number
   /** Rooms: also search Jack's own earlier answers (labelled "not a source") */
   includeJackReplies: boolean
+  /** The reply searching, when Jack searches: rooms leave out the messages it's answering (the question itself) */
+  replyId?: string
   signal?: AbortSignal
 }
 

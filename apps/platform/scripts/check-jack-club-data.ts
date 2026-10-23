@@ -93,7 +93,7 @@ async function main() {
     });
     const officerMessage = await prisma.jackMessage.create({ data: { roomId: room, kind: "user", authorUserId: applicant, content: `We decided the sponsorship budget is $500 ${tag}.`, createdAt: minute(530) } });
     await prisma.jackMessage.create({ data: { roomId: room, kind: "system", authorUserId: applicant, content: `Applicant renamed this room ${tag}`, createdAt: minute(531) } });
-    await prisma.jackMessage.create({ data: { roomId: room, kind: "assistant", persona: "jack", content: `I think the budget is $900 ${tag}.`, createdAt: minute(532) } });
+    const jackReply = await prisma.jackMessage.create({ data: { roomId: room, kind: "assistant", persona: "jack", content: `I think the budget is $900 ${tag}.`, createdAt: minute(532) } });
     await prisma.jackMessage.create({ data: { roomId: room, kind: "assistant", persona: "jack", status: "streaming", content: `Still streaming ${tag}`, createdAt: minute(533) } });
 
     remember("knowledge", (await prisma.knowledgeEntry.create({ data: { title: `Sponsor tiers ${tag}`, body: `# Tiers\n\nGold sponsors get a logo on the car. ${tag}`, tags: ["sponsors"], sourceType: "JACK", createdById: reviewer } })).id);
@@ -130,6 +130,9 @@ async function main() {
 
     const withJack = await search({ query: `budget ${tag}`, sources: ["rooms"], limit: 10, includeJackReplies: true });
     check("rooms: Jack's answers only when asked, labelled not a source", withJack.hits.some((h) => h.title.startsWith(JACK_ANSWER_LABEL)));
+    await prisma.jackMessage.update({ where: { id: officerMessage.id }, data: { answeredById: jackReply.id } });
+    const fromThatReply = await search({ query: tag, sources: ["rooms"], limit: 10, replyId: jackReply.id });
+    check("rooms: a reply's own question isn't one of its results", fromThatReply.hits.length > 0 && !fromThatReply.hits.some((h) => h.id === officerMessage.id));
 
     const teamsOn = await teamsEnabled();
     if (!teamsOn) {

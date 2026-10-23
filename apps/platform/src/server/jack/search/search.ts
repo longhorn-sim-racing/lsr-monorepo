@@ -13,6 +13,8 @@ export type SearchOptions = {
   sources?: string[]
   limit: number
   includeJackReplies?: boolean
+  /** The reply searching (JackToolContext.messageId), so rooms leave out the question it answers */
+  replyId?: string
   signal?: AbortSignal
   /** The sources to pick from (tests); SEARCH_SOURCES by default */
   registry?: SearchSource[]
@@ -36,14 +38,14 @@ export function sourcesFor(names: string[] | undefined, registry: SearchSource[]
   return names?.length ? registry.filter((source) => names.includes(source.key)) : registry.filter((source) => source.byDefault)
 }
 
-export async function search({ query, sources, limit, includeJackReplies = false, signal, registry = SEARCH_SOURCES }: SearchOptions): Promise<SearchResult> {
+export async function search({ query, sources, limit, includeJackReplies = false, replyId, signal, registry = SEARCH_SOURCES }: SearchOptions): Promise<SearchResult> {
   const chosen = sourcesFor(sources, registry)
   const results = await Promise.all(
     chosen.map(async (source): Promise<{ outcome: SourceOutcome; hits: SearchHit[] }> => {
       try {
         const reason = await source.unavailable?.()
         if (reason) return { outcome: { source: source.key, status: "unavailable", reason }, hits: [] }
-        const hits = await source.search({ query, limit, includeJackReplies, signal })
+        const hits = await source.search({ query, limit, includeJackReplies, ...(replyId ? { replyId } : {}), signal })
         return { outcome: { source: source.key, status: "searched", hits: hits.length }, hits }
       } catch (error) {
         console.error(`[jack] Searching ${source.key} failed:`, error)

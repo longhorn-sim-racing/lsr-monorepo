@@ -110,6 +110,14 @@ describe("the rooms source", () => {
     ])
   })
 
+  it("leaves out the question the searching reply is answering", async () => {
+    await roomsSource.search({ query: "plan", limit: 5, includeJackReplies: false, replyId: "reply-9" })
+    expect(sqlText()).toContain(`m."answeredById" IS DISTINCT FROM`)
+    expect(sqlValues()).toContain("reply-9")
+    await roomsSource.search({ query: "plan", limit: 5, includeJackReplies: false })
+    expect(sqlText(1)).not.toContain("answeredById")
+  })
+
   it("adds Jack's answers only when asked, labelled as not a source", async () => {
     db.$queryRaw.mockResolvedValue([row("assistant", "lift")])
     const [found] = await roomsSource.search({ query: "plan", limit: 5, includeJackReplies: true })
@@ -132,7 +140,8 @@ describe("the rooms source", () => {
     expect(lines[0]).toBe("# Room “GM 2”")
     expect(lines[1]).toBe("Mon 2026-10-19 18:01 CT · Room note: Alex renamed this room “GM 2”")
     expect(lines[2]).toBe("→ (the message you opened) Mon 2026-10-19 18:05 CT · Gray: What did we decide?")
-    expect(lines[3]).toMatch(new RegExp(`^Mon 2026-10-19 18:06 CT · Jack \\(${JACK_ANSWER_LABEL.replace(/[()]/g, "\\$&")}\\): x+… \\(500 more characters`))
+    expect(lines[3].startsWith(`Mon 2026-10-19 18:06 CT · Jack [${JACK_ANSWER_LABEL}]: xxx`)).toBe(true)
+    expect(lines[3]).toMatch(/x… \(500 more characters: read this message for all of it\)$/)
     expect(result.doc.url).toBe("/admin/jack/r1?m=m2")
   })
 })

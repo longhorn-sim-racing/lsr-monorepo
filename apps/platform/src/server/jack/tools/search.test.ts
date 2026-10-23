@@ -52,7 +52,7 @@ describe("search", () => {
     })
     expect(result.label).toBe("Searched for “sponsor tiers” (1 result)")
     expect(result.displays).toEqual([
-      { kind: "links", items: [{ title: "Sponsor tiers", url: "/admin/knowledge?entry=k1", meta: "knowledge · Oct 19, 2026", snippet: "Gold tier gets a logo" }], caption: "Not searched: teams: Teams isn't connected." },
+      { kind: "links", items: [{ title: "Sponsor tiers", url: "/admin/knowledge?entry=k1", meta: "Knowledge · Oct 19, 2026", snippet: "Gold tier gets a logo" }], caption: "Not searched: teams: Teams isn't connected." },
     ])
   })
 

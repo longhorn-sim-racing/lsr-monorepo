@@ -35,9 +35,12 @@ export function hitForModel(hit: SearchHit) {
   }
 }
 
+/** What a hit is, for the room, when its source doesn't say (the site's hits name their kind, documents where they're from) */
+const SOURCE_LABEL: Record<string, string> = { knowledge: "Knowledge", documents: "Document", rooms: "Room message", site: "Site", teams: "Teams" }
+
 export function hitLink(hit: SearchHit): JackLinkItem {
-  const kind = typeof hit.meta.kind === "string" ? hit.meta.kind : null
-  return { title: hit.title, url: hit.url, meta: [kind ?? hit.source, shortDate(hit.date)].filter(Boolean).join(" · "), snippet: hit.snippet || undefined }
+  const kind = typeof hit.meta.kind === "string" ? hit.meta.kind : typeof hit.meta.in === "string" ? hit.meta.in : (SOURCE_LABEL[hit.source] ?? hit.source)
+  return { title: hit.title, url: hit.url, meta: [kind, shortDate(hit.date)].filter(Boolean).join(" · "), snippet: hit.snippet || undefined }
 }
 
 /** Sources that weren't searched, for the model and the room: "teams: Teams isn't connected…" */
@@ -71,7 +74,7 @@ export const searchTool: JackTool<z.infer<typeof searchInput>> = {
     "Full-text search across the club's records: knowledge entries, Drive and SharePoint documents, what officers wrote in Jack rooms (and the rooms' notes), the public site (news, pages, events, gallery, Instagram) and Teams messages. Use it for decisions, how-tos, past discussions, documents and anything the club wrote down, before saying there's no record. Returns the best matches from every source with a link, date and the passage that matched; open one with read (its type and id) to see all of it. Cite results by their link.",
   input: searchInput,
   async run({ query, sources, includeJackReplies, limit }, ctx) {
-    const { hits, outcomes } = await search({ query, sources, limit, includeJackReplies, signal: ctx.signal })
+    const { hits, outcomes } = await search({ query, sources, limit, includeJackReplies, replyId: ctx.messageId, signal: ctx.signal })
     const notSearched = skipped(outcomes)
     const rows = hits.map(hitForModel)
     const base = {
