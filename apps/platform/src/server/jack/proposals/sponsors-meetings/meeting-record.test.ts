@@ -4,9 +4,11 @@ const db = vi.hoisted(() => ({
   $transaction: vi.fn(),
   meeting: { findUnique: vi.fn() },
   jackFile: { findUnique: vi.fn() },
+  externalDocument: { findUnique: vi.fn() },
   jackProposal: { findUnique: vi.fn() },
   jackMessage: { findUnique: vi.fn(), findMany: vi.fn() },
 }))
+const sources = vi.hoisted(() => ({ enabledDocumentSources: vi.fn() }))
 const officers = vi.hoisted(() => ({ officersByHandle: vi.fn(), userNames: vi.fn() }))
 const knowledge = vi.hoisted(() => ({ findKnowledgeDuplicates: vi.fn(), knowledgeSecret: vi.fn(), createKnowledgeEntry: vi.fn() }))
 const service = vi.hoisted(() => ({
@@ -24,6 +26,7 @@ vi.mock("@/server/services/officers", async (importOriginal) => ({ ...(await imp
 vi.mock("@/server/jack/knowledge/service", () => knowledge)
 vi.mock("@/server/services/meeting.service", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/server/services/meeting.service")>()), ...service }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
+vi.mock("@/server/connectors/documents/sources", () => ({ DOCUMENT_SOURCE_LABEL: { drive: "Google Drive", sharepoint: "SharePoint" }, enabledDocumentSources: sources.enabledDocumentSources }))
 
 import { textKey } from "@/lib/meetings"
 import { ProposalInputError, StaleProposalError } from "../errors"
@@ -38,6 +41,19 @@ const DYLAN = { id: "u-dylan", displayName: "Dylan", handle: "dylan" }
 const HELD = new Date("2026-10-19T23:30:00Z") // Mon Oct 19, 6:30 PM Central
 const existing = { id: "m-1", title: "Board meeting", kind: "board", heldAt: HELD, agendaMd: "1. Sponsors", summaryMd: null, transcriptFileId: null, transcriptDocumentId: null, roomId: null, createdById: null, createdAt: HELD, updatedAt: HELD }
 const transcript = { id: "f-1", roomId: "room-1", filename: "board-10-19.vtt", status: "READY", kind: "TRANSCRIPT", sha256: "abc123" }
+/** A transcript synced from the club's Drive folder (a Transcripts folder) */
+const synced = {
+  id: "doc-1",
+  name: "GM 2 transcript.vtt",
+  path: "Club/Meetings/Transcripts",
+  source: "drive",
+  webUrl: "https://drive.google.com/file/d/fake-gm-2/view",
+  mimeType: "text/vtt",
+  modifiedAt: new Date("2026-10-20T15:00:00Z"),
+  version: "7",
+  textStatus: "ok",
+  deletedAt: null as Date | null,
+}
 const noneYet = () => ({ decisions: new Set<string>(), actionItems: new Set<string>() })
 
 const record: MeetingRecord = {
@@ -58,6 +74,8 @@ beforeEach(() => {
   db.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(db))
   db.meeting.findUnique.mockResolvedValue(existing)
   db.jackFile.findUnique.mockResolvedValue(transcript)
+  db.externalDocument.findUnique.mockResolvedValue(synced)
+  sources.enabledDocumentSources.mockResolvedValue(["drive"])
   db.jackProposal.findUnique.mockResolvedValue({ messageId: "reply-1", proposedForId: "u-ana" })
   db.jackMessage.findUnique.mockResolvedValue({
     toolCalls: [
@@ -102,7 +120,7 @@ describe("meeting.record", () => {
       ["Type", "Board"],
       ["When", "Mon, Oct 19, 2026, 6:30 PM"],
       ["Summary", "We went over sponsors and GM 2."],
-      ["Transcript", "board-10-19.vtt"],
+      ["Transcript", "board-10-19.vtt (room file)"],
     ])
     expect(prepared.view.rows).toEqual([
       { id: "m", label: "Meeting: Board meeting (Mon Oct 19)", detail: "Title, type and time, summary, transcript. Keep it picked to apply any decision or action item" },
@@ -179,7 +197,7 @@ describe("meeting.record", () => {
     expect(service.createMeetingTx.mock.calls[0].slice(1)).toEqual([
       { title: "Board meeting", type: "board", heldAt: HELD, summaryMd: "We went over sponsors and GM 2." },
       { userId: "u-gray", auditMetadata: audit },
-      { transcriptFileId: "f-1", roomId: "room-1" },
+      { transcriptFileId: "f-1", transcriptDocumentId: null, roomId: "room-1" },
     ])
     expect(service.createDecisionsTx.mock.calls[0][2]).toEqual([{ text: "GM 2 moves to the Alienware lounge.", title: "GM 2 venue" }])
     expect(service.createActionItemTx).toHaveBeenCalledTimes(1)
@@ -278,5 +296,81 @@ describe("meeting.record", () => {
     officers.officersByHandle.mockResolvedValue(new Map())
     await expect(meetingRecordKind.apply(record, applyCtx(before))).rejects.toBeInstanceOf(StaleProposalError)
     expect(service.createMeetingTx).not.toHaveBeenCalled()
+  })
+})
+
+describe("meeting.record from a synced document", () => {
+  const fromDrive: MeetingRecord = { title: "General Meeting 2", type: "general", date: "2026-10-19", documentId: "doc-1", decisions: [{ text: "GM 3 is a karting night." }] }
+
+  it("takes one transcript: a room file or a synced document", () => {
+    expect(meetingRecordSchema.safeParse({ ...fromDrive, fileId: "f-1" }).success).toBe(false)
+    expect(meetingRecordSchema.safeParse({ meetingId: "m-1", documentId: "doc-1" }).success).toBe(true)
+  })
+
+  it("shows where the transcript came from on the card, pins the version it read, and keeps it on the meeting", async () => {
+    const prepared = await meetingRecordKind.prepare(fromDrive, ctx)
+    expect(prepared.view.diff.find((row) => row.label === "Transcript")).toEqual({ field: "transcript", label: "Transcript", before: null, after: "GM 2 transcript.vtt (Google Drive: Club/Meetings/Transcripts)", format: "text" })
+    // An outside link: the card shows its host
+    expect(prepared.view.links).toEqual([{ title: "GM 2 transcript.vtt", url: "https://drive.google.com/file/d/fake-gm-2/view" }])
+    expect(prepared.before).toEqual({ meetingId: null, fields: {}, document: { id: "doc-1", name: "GM 2 transcript.vtt", modifiedAt: "2026-10-20T15:00:00.000Z", version: "7" } })
+    // Only a room file is pinned by sha256 (the framework's check); a document by its version, below
+    expect(prepared.fileSha256).toBeUndefined()
+
+    await meetingRecordKind.apply(fromDrive, applyCtx(prepared.before))
+    expect(service.createMeetingTx.mock.calls[0][3]).toEqual({ transcriptFileId: null, transcriptDocumentId: "doc-1", roomId: "room-1" })
+    // The decision log says where the decision came from
+    const provenance = service.linkDecisionsToLog.mock.calls[0][3].provenance
+    expect(provenance.tools.at(-1)).toEqual({ name: "propose_meeting", input: '{"proposalId":"prop-1","documentId":"doc-1"}', label: "Meeting record applied by Gray, from GM 2 transcript.vtt" })
+  })
+
+  it("refuses a document it can't use: unknown, its source switched off, removed, without text, or not a transcript or notes", async () => {
+    db.externalDocument.findUnique.mockResolvedValueOnce(null)
+    await expect(meetingRecordKind.prepare(fromDrive, ctx)).rejects.toThrow(/no synced document doc-1\. Find the transcript with search/)
+    sources.enabledDocumentSources.mockResolvedValueOnce([])
+    await expect(meetingRecordKind.prepare(fromDrive, ctx)).rejects.toThrow("Google Drive isn't connected, so its documents can't be used.")
+    db.externalDocument.findUnique.mockResolvedValueOnce({ ...synced, deletedAt: new Date() })
+    await expect(meetingRecordKind.prepare(fromDrive, ctx)).rejects.toThrow("GM 2 transcript.vtt was removed from Google Drive.")
+    db.externalDocument.findUnique.mockResolvedValueOnce({ ...synced, textStatus: "too_large" })
+    await expect(meetingRecordKind.prepare(fromDrive, ctx)).rejects.toThrow(/has no text/)
+    db.externalDocument.findUnique.mockResolvedValueOnce({ ...synced, name: "Budget", mimeType: "application/vnd.google-apps.spreadsheet" })
+    await expect(meetingRecordKind.prepare(fromDrive, ctx)).rejects.toThrow(/Budget isn't a transcript or notes/)
+    // A Google Doc of notes, and a Word file by its name, are fine
+    db.externalDocument.findUnique.mockResolvedValueOnce({ ...synced, name: "GM 2 notes", mimeType: "application/vnd.google-apps.document" })
+    await expect(meetingRecordKind.prepare(fromDrive, ctx)).resolves.toBeTruthy()
+    db.externalDocument.findUnique.mockResolvedValueOnce({ ...synced, name: "GM 2 minutes.docx", mimeType: "application/octet-stream" })
+    await expect(meetingRecordKind.prepare(fromDrive, ctx)).resolves.toBeTruthy()
+  })
+
+  it("goes stale when the document changed or went since it was read", async () => {
+    const { before } = await meetingRecordKind.prepare(fromDrive, ctx)
+    expect(await meetingRecordKind.checkStale(fromDrive, before)).toBeNull()
+    db.externalDocument.findUnique.mockResolvedValueOnce({ ...synced, version: "8", modifiedAt: new Date("2026-10-21T10:00:00Z") })
+    expect(await meetingRecordKind.checkStale(fromDrive, before)).toBe("The transcript “GM 2 transcript.vtt” changed in Google Drive since this was proposed.")
+    db.externalDocument.findUnique.mockResolvedValueOnce({ ...synced, deletedAt: new Date() })
+    expect(await meetingRecordKind.checkStale(fromDrive, before)).toBe("The transcript “GM 2 transcript.vtt” was removed from Google Drive since this was proposed.")
+    db.externalDocument.findUnique.mockResolvedValueOnce(null)
+    expect(await meetingRecordKind.checkStale(fromDrive, before)).toBe("The transcript “GM 2 transcript.vtt” is no longer synced.")
+    // A record built from a room file doesn't look at documents
+    db.externalDocument.findUnique.mockClear()
+    expect(await meetingRecordKind.checkStale(record, { meetingId: null, fields: {} })).toBeNull()
+    expect(db.externalDocument.findUnique).not.toHaveBeenCalled()
+  })
+
+  it("replaces a recorded meeting's room-file transcript with a synced one, checked against what it was", async () => {
+    db.meeting.findUnique.mockResolvedValue({ ...existing, transcriptFileId: "f-1" })
+    const p: MeetingRecord = { meetingId: "m-1", documentId: "doc-1" }
+    const prepared = await meetingRecordKind.prepare(p, ctx)
+    expect(prepared.view.diff).toEqual([{ field: "transcript", label: "Transcript", before: "board-10-19.vtt (room file)", after: "GM 2 transcript.vtt (Google Drive: Club/Meetings/Transcripts)", format: "text" }])
+    expect(prepared.before).toMatchObject({ meetingId: "m-1", fields: { transcriptFileId: "f-1", transcriptDocumentId: null } })
+    expect(prepared.targetId).toBe("m-1")
+
+    service.updateMeetingTx.mockResolvedValueOnce({ ok: true, meeting: existing, changed: ["transcriptFileId", "transcriptDocumentId"] })
+    const result = await meetingRecordKind.apply(p, applyCtx(prepared.before))
+    expect(service.updateMeetingTx.mock.calls[0].slice(2)).toEqual([{}, { userId: "u-gray", auditMetadata: audit }, { transcriptFileId: null, transcriptDocumentId: "doc-1", expected: { transcriptFileId: "f-1", transcriptDocumentId: null } }])
+    expect(result.summary).toBe("Updated “Board meeting” (Mon Oct 19).")
+
+    // The same transcript again changes nothing
+    db.meeting.findUnique.mockResolvedValue({ ...existing, transcriptDocumentId: "doc-1" })
+    await expect(meetingRecordKind.prepare(p, ctx)).rejects.toThrow(/Nothing would change/)
   })
 })

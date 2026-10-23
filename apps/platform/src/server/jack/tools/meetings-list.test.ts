@@ -94,4 +94,18 @@ describe("meetings_list", () => {
     expect(data.decisions).toEqual([{ text: "Keep the tiers.", decisionLog: "/admin/knowledge/k-1" }])
     expect(data.actionItems).toHaveLength(1)
   })
+
+  it("names a synced transcript and where it is, with its id to read", async () => {
+    queries.getMeetingDetail.mockResolvedValue({
+      meeting: { id: "m-2", title: "GM 2", kind: "general", heldAt: HELD, agendaMd: null, summaryMd: null, createdAt: HELD, updatedAt: HELD },
+      createdBy: null,
+      transcript: null,
+      transcriptDocument: { id: "doc-1", name: "GM 2 transcript.vtt", webUrl: "https://drive.google.com/file/d/fake/view", source: "drive", path: "Club/Meetings/Transcripts", deletedAt: null },
+      room: null,
+      decisions: [],
+      actionItems: [],
+    })
+    const data = JSON.parse((await call({ meetingId: "m-2" })).forModel)
+    expect(data.meeting).toMatchObject({ transcript: "GM 2 transcript.vtt (Google Drive)", transcriptDocumentId: "doc-1" })
+  })
 })

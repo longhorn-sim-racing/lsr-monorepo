@@ -196,7 +196,8 @@ export type MeetingDetail = {
   }
   createdBy: OfficerRef | null
   transcript: { id: string; filename: string; roomId: string } | null
-  transcriptDocument: { id: string; name: string; webUrl: string } | null
+  /** A synced Drive or SharePoint document the meeting was recorded from (deletedAt: removed there since) */
+  transcriptDocument: { id: string; name: string; webUrl: string; source: string; path: string; deletedAt: Date | null } | null
   room: { id: string; title: string | null } | null
   decisions: DecisionRow[]
   actionItems: ActionItemRow[]
@@ -207,7 +208,7 @@ export async function getMeetingDetail(id: string, now = new Date()): Promise<Me
     where: { id },
     include: {
       transcriptFile: { select: { id: true, filename: true, roomId: true } },
-      transcriptDocument: { select: { id: true, name: true, webUrl: true } },
+      transcriptDocument: { select: { id: true, name: true, webUrl: true, source: true, path: true, deletedAt: true } },
       room: { select: { id: true, title: true } },
     },
   })

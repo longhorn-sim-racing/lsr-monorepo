@@ -24,7 +24,7 @@ const proposal = (id: string, status: string, extra: Record<string, unknown> = {
   expiresAt: new Date(NOW.getTime() + 86_400_000),
   proposedForId: "u1",
   decidedById: null,
-  room: { title: "Planning" },
+  room: { title: "Planning", archivedAt: null },
   ...extra,
 })
 
@@ -50,13 +50,20 @@ describe("listProposals", () => {
     expect(first.items.slice(0, 4).map((item) => item.id)).toEqual(["o1", "o2", "o3", "d0"])
     expect(first.items).toHaveLength(PROPOSALS_PAGE_SIZE)
     expect(first.pageCount).toBe(2)
-    expect(first.items[0]).toMatchObject({ roomTitle: "Planning", proposedFor: "Ana", decidedBy: null })
+    expect(first.items[0]).toMatchObject({ roomTitle: "Planning", roomArchived: false, proposedFor: "Ana", decidedBy: null })
 
     db.jackProposal.findMany.mockClear()
     const second = await listProposals({ status: null, kind: null, page: 2 }, NOW)
     // Page 2 starts 47 rows into the decided ones (50 minus the 3 open ones on page 1), and asks for no open ones
     expect(second.items[0].id).toBe("d47")
     expect(db.jackProposal.findMany).toHaveBeenCalledTimes(1)
+  })
+
+  it("says when a proposal's room is archived (its pending proposals wait for it to come back)", async () => {
+    db.jackProposal.count.mockResolvedValue(1)
+    db.jackProposal.findMany.mockImplementation(async ({ where }: { where: unknown }) => (isOpenQuery(where) ? [proposal("p", "PENDING", { room: { title: "Old plans", archivedAt: NOW } })] : []))
+    const list = await listProposals({ status: null, kind: null, page: 1 }, NOW)
+    expect(list.items[0]).toMatchObject({ id: "p", status: "PENDING", roomTitle: "Old plans", roomArchived: true })
   })
 
   it("counts an expired pending proposal as stale, and lists the kinds to filter by", async () => {
