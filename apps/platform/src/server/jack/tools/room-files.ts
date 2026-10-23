@@ -181,12 +181,16 @@ async function readRoomFile(id: string, args: Input, ctx: JackToolContext): Prom
   }
 }
 
+/** How long putting a file on Claude Files may take in a read, well inside the tool's own time limit; past it the file goes another way */
+const CLAUDE_READ_MS = 15_000
+
 /** The Claude Files id for a photo or PDF, when it can go by id (uploading it now if it has none); null otherwise */
 async function claudeIdFor(file: NonNullable<RoomFile>, ctx: JackToolContext): Promise<string | null> {
   if (!claudeIdsReachModel()) return null
   const client = await claudeFilesForUploads()
   if (!client) return null
-  const ids = await ensureClaudeIds(client, [file], { store: jackFileStore(), signal: ctx.signal })
+  const budget = AbortSignal.timeout(CLAUDE_READ_MS)
+  const ids = await ensureClaudeIds(client, [file], { store: jackFileStore(), signal: ctx.signal ? AbortSignal.any([ctx.signal, budget]) : budget })
   return ids.get(file.id) ?? null
 }
 

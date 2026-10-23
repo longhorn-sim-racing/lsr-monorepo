@@ -6,7 +6,7 @@ import { redactSecrets } from "@/lib/redact"
 import { prisma } from "@/server/db"
 import type { ClaudeFilesClient } from "@/server/connectors/anthropic/files"
 import { jackFileStore, type JackFileStore } from "@/server/jack/decks/storage"
-import { claudeFilesForUploads, deleteClaudeFiles, isEncryptedPdf, pdfFitsAsDocument, uploadToClaude } from "./claude"
+import { claudeFilesForUploads, claudeUploadType, deleteClaudeFiles, isEncryptedPdf, pdfFitsAsDocument, uploadToClaude } from "./claude"
 import { extractText } from "./extract"
 import { imageCopies } from "./images"
 import { checkContent } from "./magic"
@@ -51,7 +51,8 @@ export async function registerFile(
   if (row.status === "READY") return ok(toFileItem(row))
   if (row.status === "FAILED") return problem("bad_request", row.error ?? "This file couldn't be read.")
 
-  const client = claude === undefined ? await claudeFilesForUploads() : claude
+  // Only photos and PDFs go to Claude Files
+  const client = !claudeUploadType(row.kind) ? null : claude === undefined ? await claudeFilesForUploads() : claude
   // The copy on Claude Files, once uploaded; `settled` once it's recorded on the row or deleted again
   let uploading: Promise<string | null> = Promise.resolve(null)
   let settled = false
