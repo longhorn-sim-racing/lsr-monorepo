@@ -170,6 +170,32 @@ export function addCitations(cited: Map<string, string | null>, content: readonl
   }
 }
 
+/**
+ * Search results the reply's text links to count as cited too. With dynamic filtering (web_search_20260209)
+ * Claude reads the results in code execution, and its text carries its own links instead of citations
+ * (checked live on Sonnet and Haiku 5.5, 10/23), so without this a search would never list its pages
+ */
+export function addLinkedPages(cited: Map<string, string | null>, text: string, calls: Iterable<WebCall>) {
+  const linked = new Set([...text.matchAll(/https?:\/\/[^\s<>()[\]"'`]+/g)].map((match) => comparableUrl(match[0])))
+  if (!linked.size) return
+  for (const call of calls) {
+    if (call.name !== WEB_SEARCH || !call.found) continue
+    for (const page of call.found) if (!cited.has(page.url) && linked.has(comparableUrl(page.url))) cited.set(page.url, page.title)
+  }
+}
+
+/** A link as it compares to another to the same page: no fragment, no trailing slash or punctuation, host in lowercase */
+function comparableUrl(url: string): string {
+  const trimmed = url.replace(/[.,;:!?*_]+$/, "")
+  try {
+    const parsed = new URL(trimmed)
+    // Forums put the page in the query ("index.php?threads/x.123/"), so the slash goes from its end too
+    return `${parsed.protocol}//${parsed.host.toLowerCase()}${(parsed.pathname + parsed.search).replace(/\/+$/, "")}`
+  } catch {
+    return trimmed
+  }
+}
+
 /** Most pages one part lists */
 const MAX_SOURCES = 10
 

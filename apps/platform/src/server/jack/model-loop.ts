@@ -22,6 +22,7 @@ import { SERVER_FALLBACK_BETA, THINKING_BINDING_BETA, type JackModelConfig } fro
 import type { AnyJackTool, JackModelDocument, JackModelImage, JackRequestType, JackToolContext } from "./tools/types"
 import {
   addCitations,
+  addLinkedPages,
   isWebCall,
   pendingServerCalls,
   recordWebResult,
@@ -263,6 +264,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
       }
     }
     addCitations(cited, content)
+    addLinkedPages(cited, text, webCalls.values())
     refreshWebParts()
   }
   /**
