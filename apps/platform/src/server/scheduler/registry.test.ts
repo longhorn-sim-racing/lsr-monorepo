@@ -27,6 +27,8 @@ describe("the job registry", () => {
       expect(job.budgetMs, job.kind).toBeGreaterThan(0)
     }
     expect(findJobKind("nope")).toBeUndefined()
+    // The proposal sweep is joined in by the registry itself, not by a track's slot file
+    expect(findJobKind("proposals.sweep")?.label).toBe("Proposal sweep")
   })
 
   it("joins the tracks' jobs in track order and finds them by kind", async () => {
