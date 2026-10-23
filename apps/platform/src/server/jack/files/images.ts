@@ -16,18 +16,21 @@ const MAX_INPUT_PIXELS = 70_000_000
 export type ImageCopies = { width: number; height: number; model: Buffer; thumb: Buffer }
 
 export async function imageCopies(body: Buffer): Promise<ImageCopies> {
-  const input = () => sharp(body, { limitInputPixels: MAX_INPUT_PIXELS, failOn: "error" })
-  const meta = await input().metadata()
+  const input = sharp(body, { limitInputPixels: MAX_INPUT_PIXELS, failOn: "error" })
+  const meta = await input.metadata()
   if (!meta.width || !meta.height) throw new Error("Not an image sharp can read")
   // EXIF orientations 5 to 8 turn the picture a quarter turn
   const turned = (meta.orientation ?? 1) >= 5
-  const copy = (edge: number, quality: number) =>
-    input()
-      .rotate()
-      .resize({ width: edge, height: edge, fit: "inside", withoutEnlargement: true })
-      .flatten({ background: "#ffffff" })
-      .jpeg({ quality, mozjpeg: true })
-      .toBuffer()
-  const [model, thumb] = await Promise.all([copy(MODEL_LONG_EDGE, 85), copy(THUMB_LONG_EDGE, 75)])
+  // The original is decoded once, for the model copy; the thumbnail is made from that small copy
+  const model = await input
+    .rotate()
+    .resize({ width: MODEL_LONG_EDGE, height: MODEL_LONG_EDGE, fit: "inside", withoutEnlargement: true })
+    .flatten({ background: "#ffffff" })
+    .jpeg({ quality: 85, mozjpeg: true })
+    .toBuffer()
+  const thumb = await sharp(model)
+    .resize({ width: THUMB_LONG_EDGE, height: THUMB_LONG_EDGE, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 75, mozjpeg: true })
+    .toBuffer()
   return { width: turned ? meta.height : meta.width, height: turned ? meta.width : meta.height, model, thumb }
 }
