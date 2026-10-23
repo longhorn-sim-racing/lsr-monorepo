@@ -82,7 +82,7 @@ Every kind's `prepare` only reads. It writes the card (title, summary, the chang
 - **Plain text:** the email template puts the title and text into the email as written, so `<` and `>` are refused (in the link text too). A link is a site path or an https link; the card shows an outside link's host. The card's preview shows the message as written, with its button.
 - **Email limit:** counted as the Notifications page counts it (`getEmailUsage`, the plan's daily limit less 10 kept for confirmations and receipts; only members who allow club emails get one). More than a day can send is refused when proposed; more than today has left is said on the card, and Apply refuses it then (there's no "send anyway"). Scheduled sends aren't checked, as on the page.
 - **Never twice:** every notification row carries `metadata.proposalId`; an apply that finds rows for its proposal sends nothing. The kind is `destructive` (the card asks first).
-- **One pending proposal per audience:** a newer one for the same audience replaces the older (`targetId` is the audience's key).
+- **One pending proposal per audience:** a newer one for the same audience replaces the older (`targetId` is the audience's key), so a revised message can't go out twice. The description tells the model to put everything for one audience in one message, or ask before proposing a second.
 
 ### results.import
 - Reads the room file's bytes from the file store and checks them against the sha256 taken at registration; runs `previewResultFile` (no writes) and shows the drivers, who isn't linked to a member yet, what the file says it is (track, session, time) and any parse problems. Practice and qualifying never award points.
