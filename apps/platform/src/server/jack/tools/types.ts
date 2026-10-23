@@ -47,8 +47,12 @@ export type JackReplyState = {
   toolParts?: () => readonly JackToolPart[]
 }
 
-/** An image a tool shows the model (base64), after a line of text that says what it is */
-export type JackModelImage = { caption: string; mediaType: "image/jpeg" | "image/png"; data: string }
+/**
+ * An image a tool shows the model, after a line of text that says what it is: base64, or by Claude Files
+ * API id (uploaded on the server; never an id from the browser). The id must be an image's: a PDF's
+ * file id in an image block is a 400
+ */
+export type JackModelImage = { caption: string } & ({ mediaType: "image/jpeg" | "image/png"; data: string } | { fileId: string })
 
 /**
  * A document a tool shows the model (a PDF, read with its pages as images), after a line of text that
