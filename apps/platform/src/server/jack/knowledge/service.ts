@@ -214,6 +214,8 @@ export type UpdateKnowledgeOptions = {
   provenance?: Prisma.InputJsonValue
   /** An officer saving from the page can mark it reviewed as of now in the same step */
   markReviewed?: boolean
+  /** The seed loader: reviewed as of the sign-off date */
+  reviewedAt?: Date
   /** Officers can edit an archived entry on the page; Jack can't */
   allowArchived?: boolean
 }
@@ -272,15 +274,18 @@ export async function updateKnowledgeEntry(
     const contentChanged = !sameContent(data, before)
     const otherChanged =
       data.sourceUrl !== before.sourceUrl || data.sourceNote !== before.sourceNote || !sameDate(data.sourceDate, before.sourceDate) || data.ownerId !== before.ownerId
-    if (!contentChanged && !otherChanged && !options.markReviewed) return { ok: true, entry: before, versionId: latest?.id ?? null, changed: false }
+    const reviewChanged = !!options.reviewedAt && options.reviewedAt.getTime() !== before.reviewedAt?.getTime()
+    if (!contentChanged && !otherChanged && !options.markReviewed && !reviewChanged) return { ok: true, entry: before, versionId: latest?.id ?? null, changed: false }
 
     const now = new Date()
     const review =
       writer.via === "jack" && contentChanged
         ? { reviewedAt: null, reviewedById: null }
-        : options.markReviewed
-          ? { reviewedAt: now, reviewedById: writer.userId }
-          : {}
+        : options.reviewedAt
+          ? { reviewedAt: options.reviewedAt, reviewedById: writer.userId }
+          : options.markReviewed
+            ? { reviewedAt: now, reviewedById: writer.userId }
+            : {}
     const entry = await tx.knowledgeEntry.update({
       where: { id },
       data: {

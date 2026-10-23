@@ -220,6 +220,16 @@ describe("updateKnowledgeEntry", () => {
     expect(versionsOf(entry.id).at(-1)).toMatchObject({ via: "jack", roomId: "room-1", body: "$12 now." })
   })
 
+  it("re-dates a seed's review on a new sign-off, with a new version only for new text", async () => {
+    const seed: KnowledgeWriter = { userId: "gray", via: "seed" }
+    const { entry, versionId } = await seedEntry({}, seed)
+    const signedOff = new Date("2026-11-01T05:00:00Z")
+    expect(await updateKnowledgeEntry(entry.id, { body: entry.body }, seed, { reviewedAt: signedOff })).toMatchObject({ ok: true, changed: true, versionId, entry: { reviewedAt: signedOff, reviewedById: "gray" } })
+    expect(versionsOf(entry.id)).toHaveLength(1)
+    // The same sign-off again changes nothing
+    expect(await updateKnowledgeEntry(entry.id, { body: entry.body }, seed, { reviewedAt: signedOff })).toMatchObject({ ok: true, changed: false })
+  })
+
   it("does nothing when nothing changes", async () => {
     const { entry, versionId } = await seedEntry()
     expect(await updateKnowledgeEntry(entry.id, { title: "LSC entry fee", tags: ["LSC"] }, officer, { baseVersionId: versionId })).toMatchObject({ ok: true, changed: false, versionId })
