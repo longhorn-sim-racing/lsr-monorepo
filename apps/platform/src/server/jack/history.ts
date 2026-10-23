@@ -1,7 +1,9 @@
 import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages/messages"
+import { linkHost } from "@/lib/jack/links"
 import { parseToolParts, type JackToolPart } from "@/lib/jack/parts"
 import type { JackPersonaKey } from "@/lib/jack/types"
 import { FORMER_OFFICER } from "./messages"
+import { WEB_FETCH, WEB_SEARCH } from "./web-tools"
 
 /** The fields of a JackMessage row the history needs (a JackMessageRow fits) */
 export type HistoryRow = {
@@ -12,6 +14,9 @@ export type HistoryRow = {
   toolCalls: unknown
   status: "streaming" | "done" | "error"
   answeredById: string | null
+  /** Notes a reply answers, like an officer message: a deck's continue note, a scheduled run's question */
+  continues?: boolean
+  scheduled?: boolean
   model: string | null
   createdAt: Date
   author: { displayName: string } | null
@@ -35,8 +40,9 @@ const EARLIER_LEFT_OUT = "(Earlier messages in this room aren't included.)"
  * messages this reply answers.
  *
  * - An officer turn is every message a reply answered (`answeredById`), as "Name: text" under a
- *   Central Time timestamp, so several officers posting during one answer become one turn. Room
- *   notes (a persona switch) go in the turn they came before, as context.
+ *   Central Time timestamp, so several officers posting during one answer become one turn. Notes a
+ *   reply answers (a deck's continue note, a scheduled question) go in that reply's turn the same way;
+ *   other room notes (a persona switch) go in the turn they came before, as context.
  * - A reply Claude didn't write (a "not connected" or "budget used up" notice, or a placeholder
  *   from before the model) is left out, so the questions it got carry into the next turn.
  * - An earlier reply is its text plus a one-line note of the tools it used. Its thinking and raw
@@ -57,7 +63,9 @@ export function buildHistory(rows: HistoryRow[], replyId: string, limits: Histor
   turnOf.set(replyId, turns.length - 1)
 
   for (const row of sorted) {
-    if (row.kind === "user") {
+    // A note a reply answers goes in that reply's turn, like an officer message: a scheduled question
+    // waiting behind officer messages isn't theirs to answer, and its own reply needs it
+    if (row.kind === "user" || row.continues || row.scheduled) {
       const index = row.answeredById ? turnOf.get(row.answeredById) : undefined
       if (index !== undefined) turns[index].items.push(row)
     } else if (row.kind === "system") {
@@ -150,12 +158,26 @@ function clip(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
-/** One line per reply: which tools ran, with what input, and what came back (as labelled) */
+/**
+ * One line per reply: which tools ran, with what input, and what came back (as labelled). Web searches
+ * and fetches are in it too (parts named web_search and web_fetch): a search with its query and the sites
+ * of the pages the reply cited, a fetch with only its label ("Read fia.com"), so a later turn knows the
+ * reply used the web and where it looked. The links themselves aren't: web_fetch couldn't open a link
+ * from here anyway, so web_links returns them instead
+ */
 export function toolNote(parts: JackToolPart[]): string {
   const used = parts.map((part) => {
-    const input = part.input === null || part.input === undefined ? "" : ` ${clip(JSON.stringify(part.input), 300)}`
+    const input = part.input === null || part.input === undefined || part.name === WEB_FETCH ? "" : ` ${clip(JSON.stringify(part.input), 300)}`
     const outcome = part.status === "error" ? `failed: ${part.error ?? part.label}` : part.label
-    return `${part.name}${input} → ${outcome}`
+    const hosts = [...new Set(citedPages(part).map((source) => linkHost(source.url) ?? "").filter(Boolean))]
+    const sites = hosts.length ? ` (cited: ${hosts.slice(0, 5).join(", ")}${hosts.length > 5 ? ", …" : ""})` : ""
+    return `${part.name}${input} → ${outcome}${sites}`
   })
   return `[Tools used: ${used.join("; ")}]`
+}
+
+/** The pages a web search part lists: the ones its reply cited */
+function citedPages(part: JackToolPart) {
+  if (part.name !== WEB_SEARCH) return []
+  return (Array.isArray(part.displays) ? part.displays : []).flatMap((display) => (display.kind === "web_sources" && Array.isArray(display.sources) ? display.sources : []))
 }

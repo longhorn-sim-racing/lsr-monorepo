@@ -43,6 +43,7 @@ function setup(script: FakeTurn[] | ((params: never, call: number) => FakeTurn),
     onPart: async (part) => {
       parts.push([part])
     },
+    requestType: "room",
     ...extra,
   }
   return { fake, options, run: () => runModelReply(options) }

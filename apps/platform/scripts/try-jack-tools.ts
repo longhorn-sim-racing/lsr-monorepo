@@ -69,6 +69,12 @@ async function main() {
     ["run_sql", { sql: 'SELECT * FROM "SystemSetting"' }],
     ["chart", { type: "bar", title: "Signups by month", xKey: "month", series: [{ key: "n", label: "Signups" }], rows: [{ month: "2026-09", n: 3 }, { month: "2026-10", n: "1" }] }],
     ["chart", { type: "pie", title: "Bad", xKey: "k", series: [{ key: "a", label: "A" }, { key: "b", label: "B" }], rows: [{ k: "x", a: 1, b: 2 }] }],
+    // Jack 2.0 club data (#188); site_page reads need the site running at NEXT_PUBLIC_SITE_URL
+    ["search", { query: "general meeting" }],
+    ["read", { type: "site_page", id: "/about" }],
+    ["read", { type: "site_page", id: "/admin" }],
+    ["recruiting_pipeline", { applicants: true }],
+    ["race_performance", { season: "all", focus: "rounds" }],
   ];
   if (draft) {
     calls.push(["draft_event", { title: "Jack local check event", startsAt: "2026-11-02T18:00", endsAt: "2026-11-02T20:00", summary: "Drafted by scripts/try-jack-tools.ts" }]);

@@ -1,6 +1,8 @@
 import type { Metadata } from "next"
 import { prisma } from "@/server/db"
 import { requireOfficerPage } from "@/server/auth/guards"
+import { SafeSlot } from "@/components/admin/safe-slot"
+import { PerformancePanel } from "./_components/performance-panel"
 import { ResultsAdminClient } from "./client"
 
 export const metadata: Metadata = { title: "Results" }
@@ -25,5 +27,10 @@ export default async function ResultsAdminPage({ searchParams }: { searchParams:
   })
 
   // ?upload=1 (from the Overview) opens the upload dialog
-  return <ResultsAdminClient results={results} openUpload={upload === "1"} />
+  return (
+    <>
+      <ResultsAdminClient results={results} openUpload={upload === "1"} />
+      <SafeSlot id="best laps and form" where="results" render={() => PerformancePanel()} />
+    </>
+  )
 }

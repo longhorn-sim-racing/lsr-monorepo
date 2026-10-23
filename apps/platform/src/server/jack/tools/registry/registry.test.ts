@@ -27,7 +27,8 @@ describe("the tool slots", () => {
     vi.doMock("./sponsors-meetings", () => ({ TOOLS: [fakeTool("draft_text")] }))
     vi.doMock("./groundwork", () => ({ TOOLS: [fakeTool("room_files")] }))
     const { CORE_JACK_TOOLS, JACK_TOOLS, findJackTool } = await import("../index")
-    expect(JACK_TOOLS.slice(CORE_JACK_TOOLS.length).map((t) => t.name)).toEqual(["room_files", "draft_text"])
+    // Only the mocked ones: the tracks' real tools sit among them
+    expect(JACK_TOOLS.slice(CORE_JACK_TOOLS.length).map((t) => t.name).filter((name) => ["room_files", "draft_text"].includes(name))).toEqual(["room_files", "draft_text"])
     expect(JACK_TOOLS.slice(0, CORE_JACK_TOOLS.length)).toEqual(CORE_JACK_TOOLS)
     expect(findJackTool("draft_text")?.description).toBe("A test tool")
   })

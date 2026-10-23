@@ -18,15 +18,20 @@ export const maxDuration = 300
 
 type JackRoomPageArgs = {
   params: Promise<{ roomId: string }>
+  /** m: a message to open the room at (search results link here) */
+  searchParams: Promise<{ m?: string | string[] }>
 }
 
-export default async function JackRoomPage({ params }: JackRoomPageArgs) {
+export default async function JackRoomPage({ params, searchParams }: JackRoomPageArgs) {
   const officer = await requireOfficerPage()
   const { roomId } = await params
   if (!jackRoomIdSchema.safeParse(roomId).success) notFound()
+  const { m } = await searchParams
+  const anchor = jackRoomIdSchema.safeParse(Array.isArray(m) ? m[0] : m)
+  const anchorId = anchor.success ? anchor.data : undefined
 
   const [snapshot, rooms, spend] = await Promise.all([
-    getRoomSnapshot(roomId),
+    getRoomSnapshot(roomId, { around: anchorId }),
     listRooms(),
     getMonthSpend().catch((error) => {
       console.error("[jack] Couldn't load this month's spend:", error)
@@ -34,6 +39,19 @@ export default async function JackRoomPage({ params }: JackRoomPageArgs) {
     }),
   ])
   if (!snapshot) notFound()
+  const { gap, ...initial } = snapshot
+  const openAt = anchorId && snapshot.messages.some((message) => message.id === anchorId) ? anchorId : undefined
 
-  return <JackRoomClient initial={snapshot} rooms={rooms} spend={spend} me={{ userId: officer.id, displayName: officer.displayName, avatarUrl: officer.avatarUrl }} />
+  return (
+    <JackRoomClient
+      // A new ?m= (or none: "jump to latest") starts the room over from its own snapshot
+      key={openAt ?? "latest"}
+      initial={initial}
+      rooms={rooms}
+      spend={spend}
+      me={{ userId: officer.id, displayName: officer.displayName, avatarUrl: officer.avatarUrl }}
+      anchorId={openAt}
+      gap={gap}
+    />
+  )
 }

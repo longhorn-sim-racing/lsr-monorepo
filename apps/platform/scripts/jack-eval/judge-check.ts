@@ -5,25 +5,13 @@
  *
  *   pnpm --filter @lsr/platform exec tsx scripts/jack-eval/judge-check.ts
  */
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
-import { judgeAnswer, type JudgeInput } from "./judge";
+import { loadAppEnv } from "./env";
+import { judgeAnswer, judgeSystem, judgeTools, type JudgeInput } from "./judge";
 
 // apps/platform's env files, like the eval itself (without overriding the environment)
-for (const file of [".env.local", ".env"]) {
-  const path = resolve(__dirname, "..", "..", file);
-  if (!existsSync(path)) continue;
-  for (const raw of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const line = raw.trim();
-    const eq = line.indexOf("=");
-    if (!line || line.startsWith("#") || eq < 0) continue;
-    const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
-    if (process.env[key] === undefined) process.env[key] = value;
-  }
-}
+loadAppEnv();
+(process.env as Record<string, string | undefined>).NODE_ENV ??= "production";
 
 const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
 if (!apiKey) {
@@ -47,9 +35,12 @@ const cases: { label: string; shouldPass: boolean; input: JudgeInput }[] = [
 
 async function main() {
   const client = new Anthropic({ apiKey, maxRetries: 4 });
+  // The judge's tool overview from the live tool list, as the eval builds it
+  const [{ JACK_TOOLS }, { PROPOSE_TOOLS }] = await Promise.all([import("../../src/server/jack/tools"), import("../../src/server/jack/proposals/types")]);
+  const system = judgeSystem(judgeTools(JACK_TOOLS, PROPOSE_TOOLS));
   let wrong = 0;
   for (const c of cases) {
-    const { grade } = await judgeAnswer(client, c.input);
+    const { grade } = await judgeAnswer(client, { ...c.input, system });
     const passed = grade.meets_expectation && grade.facts_correct !== "no" && grade.no_invention;
     if (passed !== c.shouldPass) wrong++;
     console.log(`${passed === c.shouldPass ? "ok  " : "BAD "} ${c.label.padEnd(20)} judged ${passed ? "pass" : "fail"}: ${grade.explanation}`);

@@ -30,7 +30,9 @@ describe("the digest check registry", () => {
     vi.doMock("./checks/groundwork", () => ({ CHECKS: [fakeCheck("proposals.pending", 10)] }))
     vi.doMock("./checks/memory", () => ({ CHECKS: [fakeCheck("knowledge.unreviewed", 20)] }))
     const { DIGEST_CHECKS, findDigestCheck } = await import("./registry")
-    expect(DIGEST_CHECKS.map((c) => c.id)).toEqual(["proposals.pending", "prospects.quiet", "knowledge.unreviewed", "action_items.overdue"])
+    // Only the mocked ones: the tracks' real checks sit among them
+    const mocked = ["proposals.pending", "prospects.quiet", "knowledge.unreviewed", "action_items.overdue"]
+    expect(DIGEST_CHECKS.map((c) => c.id).filter((id) => mocked.includes(id))).toEqual(mocked)
     expect(findDigestCheck("knowledge.unreviewed")?.order).toBe(20)
   })
 
