@@ -8,7 +8,9 @@ const nextConfig: NextConfig = {
   // be traced into the functions that render: the room page (Jack's reply loop runs there) and the
   // deck image and export routes. pnpm links the package from node_modules/.pnpm and the code runs
   // from there, so the binary is included at that real path as well as through the link.
-  serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core"],
+  // pdfjs-dist (text from PDFs Jack reads) loads its worker file from next to its own build at runtime;
+  // bundled, it can't find it ("Setting up fake worker failed"), so it stays a plain Node package too.
+  serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core", "pdfjs-dist"],
   outputFileTracingIncludes: {
     "/admin/jack/**": CHROMIUM_BINARY,
     "/api/admin/jack/**": CHROMIUM_BINARY,
