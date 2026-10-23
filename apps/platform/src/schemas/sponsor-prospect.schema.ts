@@ -109,8 +109,11 @@ export const PROSPECT_FIELD_LABEL: Record<ProspectFieldKey, string> = {
   notes: "Notes",
 }
 
-/** Fields that hold a person's details: never copied into the audit log, so deleting a prospect removes them */
-export const PROSPECT_PERSONAL_FIELDS: readonly ProspectFieldKey[] = ["contactName", "contactEmail", "contactRole", "notes"]
+/**
+ * Fields that can hold a person's details (a next step often names or addresses the contact): never
+ * copied into the audit log, which still names them as changed, so deleting a prospect removes them
+ */
+export const PROSPECT_PERSONAL_FIELDS: readonly ProspectFieldKey[] = ["contactName", "contactEmail", "contactRole", "nextStep", "notes"]
 
 /** One activity an officer logs */
 export const activitySchema = z.object({

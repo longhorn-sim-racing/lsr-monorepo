@@ -76,6 +76,9 @@ describe("updateProspect", () => {
     expect(db.sponsorProspect.update.mock.calls[0][0]).toEqual({ where: { id: "pr-1" }, data: { stage: "talking", nextStep: "Send the packet" } })
     expect(db.sponsorActivity.create.mock.calls[0][0].data).toMatchObject({ prospectId: "pr-1", type: "stage_change", summary: "Stage: Contacted → Talking", byId: "officer-1" })
     expect(audit.createAuditLog.mock.calls[0][0]).toMatchObject({ actionType: "UPDATE", metadata: { ...actor.auditMetadata, changedFields: ["stage", "nextStep"] } })
+    // The next step is named as changed, but its text (it often names or addresses the contact) stays out
+    expect(audit.createAuditLog.mock.calls[0][0].after).toEqual({ stage: "talking" })
+    expect(JSON.stringify(audit.createAuditLog.mock.calls[0][0])).not.toContain("Send the packet")
   })
 
   it("refuses when a field it was read with moved on, and changes nothing", async () => {

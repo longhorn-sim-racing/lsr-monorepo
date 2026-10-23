@@ -25,8 +25,8 @@ import { officerIdSet } from "./officers"
  * - A stage change logs a stage_change activity; contact (an email, reply, call or meeting) moves
  *   lastContactAt forward.
  * - Owners must be officers.
- * - Audit entries name the company and the fields changed, never the contact's details or the notes, so
- *   deleting a prospect really removes them.
+ * - Audit entries name the company and the fields changed, never the contact's details, the next step or
+ *   the notes, so deleting a prospect really removes them.
  * Callers revalidate (prospectPaths): revalidatePath only works inside a request.
  */
 
@@ -55,7 +55,7 @@ export function prospectValue(value: unknown): string | null {
   return String(value)
 }
 
-/** Fields the audit entry may show (never the contact's details or the notes) */
+/** Fields the audit entry may show (never the contact's details, the next step or the notes) */
 function auditable(fields: Partial<Record<ProspectFieldKey, unknown>>): Record<string, string | null> {
   return Object.fromEntries(Object.entries(fields).filter(([key]) => !PROSPECT_PERSONAL_FIELDS.includes(key as ProspectFieldKey)).map(([key, value]) => [key, prospectValue(value)]))
 }
