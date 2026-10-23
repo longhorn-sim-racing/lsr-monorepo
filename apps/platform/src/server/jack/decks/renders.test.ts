@@ -50,6 +50,14 @@ describe("ensureRender", () => {
     expect(renderSlide).toHaveBeenCalledTimes(1)
   })
 
+  it("never gives a deck another room's render, however a room photo's URL is written", async () => {
+    // The renderer loads https://JACK.ASSETS/ROOM/<id> as the deck's room photo, like the lowercase form
+    const photo = { ...source, html: '<section><img src="https://JACK.ASSETS/ROOM/11111111-2222-4333-8444-555555555555"></section>' }
+    await Promise.all([ensureRender({ ...photo, roomId: "room-1" }), getRenderFile({ ...photo, roomId: "room-2" }, "png")])
+    await ensureRender({ ...photo, roomId: "room-2" })
+    expect(vi.mocked(renderSlide).mock.calls.map(([made]) => made.roomId)).toEqual(["room-1", "room-2"])
+  })
+
   it("shares one render between two callers asking at once", async () => {
     const other = { ...source, html: "<section>Other</section>" }
     await Promise.all([ensureRender(other), ensureRender(other), getRenderFile(other, "thumb")])
