@@ -46,7 +46,8 @@ const EARLIER_LEFT_OUT = "(Earlier messages in this room aren't included.)"
  *   reply answers (a deck's continue note, a scheduled question) go in that reply's turn the same way;
  *   other room notes (a persona switch) go in the turn they came before, as context.
  * - In a mention-mode room, officer messages that didn't mention Jack go in the turn of the reply that
- *   took them as context (the reply loop's waitingAsides), each marked ASIDE_MARK.
+ *   took them as context (the reply loop's waitingAsides), each marked ASIDE_MARK; a turn keeps only
+ *   the newest of them (ASIDE_LIMITS) and says how many it left out.
  * - A reply Claude didn't write (a "not connected" or "budget used up" notice, or a placeholder
  *   from before the model) is left out, so the questions it got carry into the next turn.
  * - An earlier reply is its text plus a one-line note of the tools it used. Its thinking and raw
@@ -60,7 +61,7 @@ export function buildHistory(rows: HistoryRow[], replyId: string, limits: Histor
   const current = sorted.find((row) => row.id === replyId)
   const cutoff = current?.createdAt ?? new Date(8.64e15)
 
-  type Turn = { reply: HistoryRow | null; items: HistoryRow[] }
+  type Turn = { reply: HistoryRow | null; items: HistoryRow[]; asidesLeftOut?: number }
   const replies = sorted.filter((row) => row.kind === "assistant" && row.id !== replyId && row.createdAt <= cutoff)
   const turns: Turn[] = [...replies.map((reply) => ({ reply, items: [] as HistoryRow[] })), { reply: null, items: [] }]
   const turnOf = new Map<string, number>(replies.map((reply, index) => [reply.id, index]))
@@ -79,11 +80,16 @@ export function buildHistory(rows: HistoryRow[], replyId: string, limits: Histor
       turns[index].items.push(row)
     }
   }
+  for (const turn of turns) {
+    const kept = newestAsides(turn.items)
+    turn.items = kept.items
+    turn.asidesLeftOut = kept.leftOut
+  }
 
   const start = windowStart(turns.map(turnSize), limits)
   const entries: { role: "user" | "assistant"; text: string }[] = []
   turns.slice(start).forEach((turn, index) => {
-    const lead = index === 0 && start > 0 ? `${EARLIER_LEFT_OUT}\n` : ""
+    const lead = (index === 0 && start > 0 ? `${EARLIER_LEFT_OUT}\n` : "") + (turn.asidesLeftOut ? `${asidesLeftOut(turn.asidesLeftOut)}\n` : "")
     const officers = renderOfficerTurn(turn.items.map(markAside))
     if (officers || lead) entries.push({ role: "user", text: lead + officers })
     const reply = turn.reply && !isNotice(turn.reply) ? renderReply(turn.reply) : ""
@@ -153,7 +159,41 @@ export const ASIDE_MARK = "(not addressed to you)"
  * last reply, as context. Those lines are marked, so the reply answers only what's addressed to Jack
  */
 function markAside(row: HistoryRow): HistoryRow {
-  return row.kind === "user" && row.expectsAnswer === false ? { ...row, content: `${ASIDE_MARK} ${row.content}` } : row
+  return isAside(row) ? { ...row, content: `${ASIDE_MARK} ${row.content}` } : row
+}
+
+function isAside(row: HistoryRow): boolean {
+  return row.kind === "user" && row.expectsAnswer === false
+}
+
+/** The most asides one turn keeps (the newest), and about how much text they may add up to */
+export const ASIDE_LIMITS = { maxLines: 40, maxChars: 20_000 }
+
+/**
+ * A turn keeps only its newest asides (ASIDE_LIMITS). The newest turn is always sent whole, so otherwise
+ * the first mention in a room used as a chat for weeks would send the whole backlog. The reply loop still
+ * marks them all answered; the turn starts with a line saying how many it left out
+ */
+function newestAsides(items: HistoryRow[], limits = ASIDE_LIMITS): { items: HistoryRow[]; leftOut: number } {
+  const left = new Set<HistoryRow>()
+  let lines = 0
+  let chars = 0
+  for (const item of [...items].reverse()) {
+    if (!isAside(item)) continue
+    if (left.size || lines >= limits.maxLines || chars + item.content.length > limits.maxChars) {
+      left.add(item)
+    } else {
+      lines++
+      chars += item.content.length
+    }
+  }
+  return left.size ? { items: items.filter((item) => !left.has(item)), leftOut: left.size } : { items, leftOut: 0 }
+}
+
+function asidesLeftOut(count: number): string {
+  return count === 1
+    ? "(1 earlier message among officers, not addressed to you, isn't included.)"
+    : `(${count} earlier messages among officers, not addressed to you, aren't included.)`
 }
 
 /** A finished reply with no model never reached Claude: a notice, or a pre-model placeholder */
