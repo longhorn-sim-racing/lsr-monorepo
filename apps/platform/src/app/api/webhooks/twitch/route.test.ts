@@ -40,7 +40,7 @@ const CALLBACK = "http://localhost:3133/api/webhooks/twitch"
 let tables: FakeSourcesBDb
 let seq = 0
 
-const subscription = (type: string, broadcaster = CLUB) => ({ id: "sub-1", type, version: "1", status: "enabled", cost: 0, condition: { broadcaster_user_id: broadcaster }, transport: { method: "webhook", callback: CALLBACK }, created_at: "2026-10-22T00:00:00Z" })
+const subscription = (type: string, broadcaster: string = CLUB) => ({ id: "sub-1", type, version: "1", status: "enabled", cost: 0, condition: { broadcaster_user_id: broadcaster }, transport: { method: "webhook", callback: CALLBACK }, created_at: "2026-10-22T00:00:00Z" })
 const club = { broadcaster_user_id: CLUB, broadcaster_user_login: TWITCH_FAKE.broadcasterLogin, broadcaster_user_name: TWITCH_FAKE.broadcasterName }
 
 /** A delivery as Twitch sends it, signed over the exact body */
