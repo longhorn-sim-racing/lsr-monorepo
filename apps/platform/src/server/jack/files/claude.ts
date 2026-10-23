@@ -84,6 +84,9 @@ export async function uploadToClaude(client: ClaudeFilesClient, file: { id: stri
   }
 }
 
+/** Deletes sent at once (the Files API allows about 500 file requests a minute) */
+const DELETES_AT_ONCE = 8
+
 /**
  * Deletes uploaded copies. One that's already gone counts as deleted. `failed` lists the ids that
  * couldn't be (no key, or the API failed); they're logged, since nothing points at them any more
@@ -113,9 +116,6 @@ export async function deleteClaudeFiles(ids: string[], { client = claudeFilesFor
   }
   return { deleted, failed }
 }
-
-/** Deletes sent at once (the Files API allows about 500 file requests a minute) */
-const DELETES_AT_ONCE = 8
 
 export type ClaudeCandidate = {
   id: string
