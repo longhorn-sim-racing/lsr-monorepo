@@ -27,7 +27,8 @@ import type { AnyProposalKind, ProposalAuditMetadata, ProposalDiffRow, ProposalP
  *   called. It ends APPLIED, FAILED or STALE, with an audit entry for APPLIED and FAILED.
  * - discardProposal: PENDING to DISCARDED.
  * - An archived room is read-only: neither applies nor discards its proposals until an officer
- *   unarchives it (both claims also require the room not archived, so an archive racing a click wins).
+ *   unarchives it (both claims also require the room not archived, so an archive that lands between
+ *   the check and the claim still stops it; an apply already claimed finishes, like a streaming reply).
  * - Expiry is lazy: a PENDING proposal past expiresAt reads as STALE, and is set so when someone applies
  *   or discards it, or by the sweep job (sweepProposals, which also fails applies that stopped partway).
  *   Reading it (the card's route) never writes.
