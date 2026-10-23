@@ -59,6 +59,23 @@ describe("readBucketUsage", () => {
     expect(await readBucketUsage()).toBeNull()
     expect(console.error).toHaveBeenCalledWith("[jack] Couldn't read Storage usage:", "permission denied for schema storage")
   })
+
+  it("is null when row-level security would hide the rows, rather than calling the bucket missing", async () => {
+    // A role without BYPASSRLS reads zero rows and no error from either table; the first query says so
+    db.$queryRaw.mockResolvedValueOnce([{ present: false }])
+    expect(await readBucketUsage()).toBeNull()
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1)
+    const [present] = sqlOf()
+    expect(present).toContain("row_security_active(to_regclass('storage.objects'))")
+    expect(present).toContain("row_security_active(to_regclass('storage.buckets'))")
+    // A table that isn't there makes row_security_active null: still unreadable, never present
+    expect(present).toMatch(/AND NOT coalesce\(.*, true\) AS present/)
+
+    setJackFileStore(storeOf("supabase"))
+    db.$queryRaw.mockResolvedValueOnce([{ present: false }])
+    const usage = await getStorageUsage()
+    expect(usage).toMatchObject({ bucket: null, bucketError: expect.stringContaining("row-level security") })
+  })
 })
 
 describe("roomFileCounts", () => {

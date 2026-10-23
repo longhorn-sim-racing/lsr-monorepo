@@ -6,8 +6,8 @@ import { JACK_BUCKET, jackFileStore, type JackFileStoreKind } from "@/server/jac
  * is in use (as /api/admin/jack/render-check reports it), and on Supabase Storage the `jack` bucket's
  * objects and bytes against the Free plan's 1 GB, plus room files by status. Storage's tables live in
  * the same Postgres as the app (`storage.objects`), so the numbers come from one query there; a database
- * without them (no storage schema, no grant) leaves the usage out instead of failing the page. Nothing
- * here is a key or a link with one.
+ * without them (no storage schema, no grant, or a role that row-level security hides their rows from)
+ * leaves the usage out instead of failing the page. Nothing here is a key or a link with one.
  */
 
 /** Supabase Free includes 1 GB of storage across all buckets (supabase.com/pricing, checked 10/22). Decimal, like the plan's GB */
@@ -31,14 +31,20 @@ export async function getStorageUsage(): Promise<StorageUsage> {
   const kind = jackFileStore().kind
   const [bucket, files] = await Promise.all([kind === "supabase" ? readBucketUsage() : Promise.resolve(null), roomFileCounts()])
   if (kind !== "supabase") return { kind, bucket: null, files }
-  if (bucket === null) return { kind, bucket: null, bucketError: "Couldn't read Storage's tables (storage.objects) from the database", files }
+  if (bucket === null) return { kind, bucket: null, bucketError: "Couldn't read Storage's tables (storage.objects) from the database: missing, not granted, or hidden by row-level security", files }
   return { kind, bucket, files }
 }
 
-/** The bucket's settings and usage from storage.buckets and storage.objects, or null when they can't be read */
+/**
+ * The bucket's settings and usage from storage.buckets and storage.objects, or null when they can't be
+ * read. Both tables have row-level security on: a role it applies to (no BYPASSRLS, not their owner) reads
+ * no rows and no error, which would look like a missing bucket, so that counts as unreadable too
+ */
 export async function readBucketUsage(bucket = JACK_BUCKET): Promise<BucketUsage | null> {
   try {
-    const [present] = await prisma.$queryRaw<{ present: boolean }[]>`SELECT to_regclass('storage.objects') IS NOT NULL AND to_regclass('storage.buckets') IS NOT NULL AS present`
+    const [present] = await prisma.$queryRaw<{ present: boolean }[]>`
+      SELECT to_regclass('storage.objects') IS NOT NULL AND to_regclass('storage.buckets') IS NOT NULL
+        AND NOT coalesce(row_security_active(to_regclass('storage.objects')) OR row_security_active(to_regclass('storage.buckets')), true) AS present`
     if (!present?.present) return null
     const [settings, sizes] = await Promise.all([
       prisma.$queryRaw<{ public: boolean; fileSizeLimit: bigint | number | null }[]>`
