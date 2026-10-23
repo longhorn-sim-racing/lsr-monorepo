@@ -14,7 +14,7 @@ const db = vi.hoisted(() => ({
   knowledgeEntry: { findUnique: vi.fn() },
   jackMessage: { findUnique: vi.fn(), findMany: vi.fn(), create: vi.fn() },
 }))
-const broadcast = vi.hoisted(() => ({ broadcastRoomEvent: vi.fn(async (_roomId: string, _event: JackRoomEvent) => {}) }))
+const broadcast = vi.hoisted(() => ({ broadcastRoomEvent: vi.fn<(roomId: string, event: JackRoomEvent) => Promise<void>>(async () => {}) }))
 vi.mock("../knowledge/service", () => service)
 vi.mock("@/server/db", () => ({ prisma: db }))
 vi.mock("../broadcast", () => broadcast)

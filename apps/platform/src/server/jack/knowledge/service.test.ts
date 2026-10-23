@@ -13,12 +13,12 @@ const store = vi.hoisted(() => ({ entries: new Map<string, Entry>(), versions: [
 const db = vi.hoisted(() => {
   const byNewest = (a: Version, b: Version) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1)
   const db = {
-    $queryRaw: vi.fn(async (..._args: unknown[]): Promise<unknown[]> => []),
+    $queryRaw: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(async () => []),
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
     knowledgeEntry: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         const now = new Date()
-        const entry = { id: `entry-${++store.ids}`, archivedAt: null, createdAt: now, updatedAt: now, ...data } as Entry
+        const entry = { id: `entry-${++store.ids}`, archivedAt: null, createdAt: now, updatedAt: now, ...data } as unknown as Entry
         store.entries.set(entry.id, entry)
         return { ...entry }
       }),
