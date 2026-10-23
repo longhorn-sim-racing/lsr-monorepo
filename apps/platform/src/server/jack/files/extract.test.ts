@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
-import { capText, cellText, EXTRACT_LIMITS, extractText, vttText, type ExtractLimits } from "./extract"
+import { capText, cellText, EXTRACT_LIMITS, extractText, vttText, wordText, xlsxParts, type ExtractLimits } from "./extract"
 import { docxFile, imageFile, pdfFile, xlsxFile } from "./fixtures"
+import { readZipParts } from "./zip"
 
 const text = (s: string) => Buffer.from(s, "utf8")
 const limits = (over: Partial<ExtractLimits>): ExtractLimits => ({ ...EXTRACT_LIMITS, ...over })
@@ -68,6 +69,52 @@ describe("extractText", () => {
     expect(result.text).not.toContain("never read")
   })
 
+  it("gives dates as dates", async () => {
+    const result = await extractText("SPREADSHEET", await xlsxFile({ GMs: [["GM 2", new Date(Date.UTC(2026, 9, 19))]] }))
+    expect(result.text).toContain("GM 2,2026-10-19")
+  })
+
+  it("reads a big spreadsheet from a capped slice of its sheet XML, row by row, and stops at the row cap", async () => {
+    // A lap export: 20,000 rows is about 4 MB of sheet XML. With 400 KB of XML allowed, exceljs only
+    // ever gets the first 400 KB (zip.ts cuts it), and stops reading at the row cap
+    const laps = Array.from({ length: 20_000 }, (_, i) => [`Driver ${i % 40}`, `Car ${i % 9}`, i, 90 + (i % 30) / 7, `lap note ${i}`])
+    const xlsx = await xlsxFile({ Laps: [["Driver", "Car", "Lap", "Time", "Note"], ...laps] })
+    const small = limits({ maxXmlBytes: 400_000, maxRows: 1_000 })
+    const sheet = readZipParts(xlsx, xlsxParts(small)).parts.find((p) => p.name === "xl/worksheets/sheet1.xml")!
+    expect(sheet).toMatchObject({ cut: true, data: expect.objectContaining({ length: 400_000 }) })
+
+    const result = await extractText("SPREADSHEET", xlsx, small)
+    expect(result.textStatus).toBe("truncated")
+    const lines = result.text!.split("\n")
+    expect(lines.slice(0, 3)).toEqual(["## Sheet: Laps", "Driver,Car,Lap,Time,Note", "Driver 0,Car 0,0,90,lap note 0"])
+    expect(lines).toHaveLength(1 + 1_000)
+
+    // A slice too small for the row cap still gives the rows it holds, and says it's partial
+    const tiny = await extractText("SPREADSHEET", xlsx, limits({ maxXmlBytes: 20_000 }))
+    expect(tiny.textStatus).toBe("truncated")
+    expect(tiny.text!.split("\n").length).toBeGreaterThan(50)
+  })
+
+  it("stops reading a spreadsheet at the time limit, keeping what it read", async () => {
+    const xlsx = await xlsxFile({ One: Array.from({ length: 50 }, (_, i) => [i]) })
+    const start = Date.now()
+    // The deadline is set from the first reading of the clock; after that the clock is a minute on
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => start + 60_000)
+    clock.mockImplementationOnce(() => start)
+    const result = await extractText("SPREADSHEET", xlsx)
+    clock.mockRestore()
+    expect(result).toEqual({ text: "## Sheet: One", textStatus: "timeout" })
+  })
+
+  it("reads a Word document too big for mammoth straight from its XML, capped", async () => {
+    const docx = docxFile(["Bylaws", "Article 1: the club races."])
+    expect(await extractText("DOCUMENT", docx, limits({ maxMammothBytes: 10 }))).toEqual({ text: "Bylaws\n\nArticle 1: the club races.", textStatus: "ok" })
+    const cut = await extractText("DOCUMENT", docxFile(Array.from({ length: 500 }, (_, i) => `Paragraph ${i}`)), limits({ maxMammothBytes: 10, maxXmlBytes: 2_000 }))
+    expect(cut.textStatus).toBe("truncated")
+    expect(cut.text).toMatch(/^Paragraph 0\n\nParagraph 1\n/)
+    expect(cut.text).not.toContain("Paragraph 499")
+  })
+
   it("reads PDF text page by page, with the page count", async () => {
     const result = await extractText("PDF", await pdfFile(["GM 2 sign-in\nAda Lovelace", "Page two"]))
     expect(result).toMatchObject({ textStatus: "ok", pageCount: 2 })
@@ -106,6 +153,24 @@ describe("vttText", () => {
 
   it("shows hours for long meetings", () => {
     expect(vttText("WEBVTT\n\n01:02:03.000 --> 01:02:04.000\n<v.loud Sam>Late point</v>")).toBe("[1:02:03] Sam: Late point")
+  })
+})
+
+describe("wordText", () => {
+  it("gives paragraphs, tabs and breaks, and leaves out deleted text, tab stops and a text box's second copy", () => {
+    const xml = [
+      '<?xml version="1.0"?><w:document><w:body>',
+      '<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="720"/></w:tabs></w:pPr><w:r><w:t>Item</w:t><w:tab/><w:t xml:space="preserve">$120 </w:t></w:r></w:p>',
+      "<w:p><w:r><w:t>Line one</w:t><w:br/><w:t>Line two</w:t></w:r><w:del><w:r><w:delText>gone</w:delText></w:r></w:del></w:p>",
+      "<w:p><mc:AlternateContent><mc:Choice><w:txbxContent><w:p><w:r><w:t>Box</w:t></w:r></w:p></w:txbxContent></mc:Choice><mc:Fallback><w:p><w:r><w:t>Box</w:t></w:r></w:p></mc:Fallback></mc:AlternateContent></w:p>",
+      "<w:p><w:r><w:t>Tires &amp; fuel</w:t></w:r></w:p>",
+      "</w:body></w:document>",
+    ].join("")
+    expect(wordText(xml)).toBe("Item\t$120\n\nLine one\nLine two\n\nBox\n\nTires & fuel\n\n")
+  })
+
+  it("reads a document cut mid-paragraph up to the cut", () => {
+    expect(wordText("<w:document><w:body><w:p><w:r><w:t>Whole</w:t></w:r></w:p><w:p><w:r><w:t>Half a sent")).toBe("Whole\n\nHalf a sent")
   })
 })
 

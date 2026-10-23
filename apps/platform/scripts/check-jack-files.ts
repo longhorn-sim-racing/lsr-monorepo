@@ -77,7 +77,7 @@ async function main() {
   const { prisma } = await import("../src/server/db")
   const { jackFileStore } = await import("../src/server/jack/decks/storage")
   const { createUpload } = await import("../src/server/jack/files/service")
-  const { storedPaths } = await import("../src/server/jack/files/paths")
+  const { filePaths, storedPaths } = await import("../src/server/jack/files/paths")
   const { docxFile, imageFile, pdfFile, xlsxFile } = await import("../src/server/jack/files/fixtures")
   const { postOfficerMessage } = await import("../src/server/jack/rooms")
   const { defaultReplyDeps } = await import("../src/server/jack/reply-loop")
@@ -150,6 +150,12 @@ async function main() {
 
     const xlsx = await uploadAndRegister("budget.xlsx", await xlsxFile({ Budget: [["Item", "Cost"], ["Tires", 120], ["Total", { formula: "SUM(B2:B2)", result: 120 }]] }))
     check("XLSX registers READY with the saved formula results", "row" in xlsx && Boolean(xlsx.row?.text?.includes("Total,120")), "row" in xlsx ? `${xlsx.row?.textStatus}` : "")
+
+    // More rows than the cap: exceljs's streaming reader (inside the built server) stops at 5,000
+    const laps = await xlsxFile({ Laps: Array.from({ length: 6_000 }, (_, i) => [`Driver ${i % 40}`, i, 90 + (i % 30) / 7]) })
+    const bigXlsx = await uploadAndRegister("laps.xlsx", laps)
+    const lapRows = "row" in bigXlsx ? (bigXlsx.row?.text?.split("\n").filter((line) => line.startsWith("Driver ")).length ?? 0) : 0
+    check("a 6,000-row XLSX is read row by row up to the 5,000-row cap", "row" in bigXlsx && bigXlsx.row?.textStatus === "truncated" && lapRows === 5_000, "row" in bigXlsx ? `${bigXlsx.row?.textStatus} rows=${lapRows}` : "")
 
     const vtt = await uploadAndRegister("GM 2.vtt", Buffer.from("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n<v Dylan>Welcome to GM 2.</v>\n"))
     check("VTT registers READY as speaker-tagged text", "row" in vtt && vtt.row?.text === "[0:01] Dylan: Welcome to GM 2.", "row" in vtt ? `${vtt.row?.text}` : "")
@@ -237,8 +243,8 @@ async function main() {
   } finally {
     // ---- clean up ------------------------------------------------------------------------------
     if (roomId) {
-      const files = await prisma.jackFile.findMany({ where: { roomId }, select: { storagePath: true, modelCopyPath: true, thumbPath: true } })
-      await store.delete(files.flatMap(storedPaths)).catch((e) => console.error("Cleanup: stored files", e))
+      const files = await prisma.jackFile.findMany({ where: { roomId }, select: { id: true, roomId: true, storagePath: true, modelCopyPath: true, thumbPath: true } })
+      await store.delete([...new Set(files.flatMap((file) => [...storedPaths(file), ...filePaths(file)]))]).catch((e) => console.error("Cleanup: stored files", e))
       await prisma.jackRoom.delete({ where: { id: roomId } }).catch((e) => console.error("Cleanup: room", e))
     }
     if (userId) {
