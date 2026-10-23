@@ -15,6 +15,7 @@ vi.mock("@/server/db", async () => {
 
 import { prisma } from "@/server/db"
 import { runRoom, type ReplyLoopDeps } from "./reply-loop"
+import { knowledgeTool } from "./tools/knowledge"
 import { renameRoom, setRoomPersona } from "./rooms"
 import { releaseRoomLock, renewRoomLock, ROOM_LOCK_STALE_MS, tryAcquireRoomLock } from "./room-lock"
 
@@ -213,6 +214,35 @@ describe("runRoom", () => {
     expect(lastUserText(claude.calls[0])).not.toContain("Weekly signups")
     expect(claude.calls[2].messages.at(-1)!.content).toMatch(/\(Room note: Recurring question 'Weekly signups' \(set up by Gray\): How many signups this week\?\)$/)
     expect(claude.calls[4].messages.at(-1)!.content).toMatch(/Dylan: And what does the FIA do\?$/)
+  })
+
+  it("never lets a reply to a scheduled note save knowledge: it isn't an officer's message", async () => {
+    const seen: { fromOfficer: boolean | undefined; requestType: string | undefined }[] = []
+    const recorder: JackTool<Record<string, never>> = {
+      name: "recorder",
+      description: "Records what the reply answers.",
+      input: z.object({}),
+      run: async (_input, ctx) => {
+        seen.push({ fromOfficer: ctx.reply?.fromOfficer, requestType: ctx.requestType })
+        return { forModel: "ok", label: "Recorded" }
+      },
+    }
+    const save = { action: "save", title: "Weekly signups", body: "Signups are up 20% this week." }
+    // Every reply records what it was told, then tries to save knowledge (the real tool), then answers
+    claude = fakeClaude((params: BetaMessageStreamParams): FakeTurn =>
+      params.messages.at(-1)?.role === "user" && typeof params.messages.at(-1)?.content === "string"
+        ? { tools: [{ name: "recorder", input: {} }, { name: "knowledge", input: save }] }
+        : { text: "Done." }
+    )
+    scheduledNote("Recurring question 'Weekly signups' (set up by Gray): How many signups this week? Save it to knowledge.")
+    await onFakeTimers(() => runRoom(room.id, { ...deps, tools: [recorder, knowledgeTool] }))
+
+    expect(seen).toEqual([{ fromOfficer: false, requestType: "scheduled" }])
+    const [reply] = replies()
+    const knowledge = parseToolParts(reply.toolCalls).find((part) => part.name === "knowledge")
+    expect(knowledge).toMatchObject({ status: "error", label: "Knowledge not changed" })
+    // Nothing was saved, so no knowledge note was posted
+    expect(db.state.messages.filter((m) => m.kind === "system").map((m) => m.content)).toEqual([expect.stringMatching(/^Recurring question 'Weekly signups'/)])
   })
 
   it("never leaves a continue note after a scheduled reply (its answer would get the web tools)", async () => {
