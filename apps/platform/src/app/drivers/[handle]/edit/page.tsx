@@ -15,6 +15,7 @@ import { RacingNumber } from '@/components/racing-number';
 import { initials } from '../../names';
 import { EidField } from './eid-field';
 import { inputClass, labelClass } from './form-styles';
+import { DEPARTMENTS, WORKING_ON_MAX } from '@/schemas/officer-profile.schema';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,7 +50,7 @@ export default async function EditDriverPage({
   const pageUser = await prisma.user.findUnique({ where: { handle } });
   if (!pageUser || pageUser.status === 'deleted') return notFound();
 
-  const { user: sessionUser } = await getCachedSessionUser();
+  const { user: sessionUser, roles } = await getCachedSessionUser();
   if (!sessionUser) {
     redirect(`/auth/signin?next=/drivers/${encodeURIComponent(handle)}/edit`);
   }
@@ -59,6 +60,7 @@ export default async function EditDriverPage({
   }
 
   const socials = (pageUser.socials as Record<string, string> | null) ?? {};
+  const isOfficer = roles.includes('officer') || roles.includes('admin');
 
   return (
     <div className="bg-lsr-charcoal text-white min-h-screen">
@@ -163,6 +165,35 @@ export default async function EditDriverPage({
                   </FormField>
                 </div>
               </Step>
+
+              {isOfficer && (
+                <Step n="5" title="Officer profile">
+                  <p className="font-sans text-sm leading-relaxed text-white/60">
+                    Only officers see this step. Jack, the officer assistant, uses it to pitch his answers to you; the facts he gives don&apos;t change.
+                  </p>
+                  <div className="grid gap-6 sm:grid-cols-2">
+                    <FormField id="department" label="Department">
+                      <select id="department" name="department" defaultValue={pageUser.department ?? ''} className={`${inputClass} w-full border px-3`}>
+                        <option value="" className="bg-lsr-charcoal">None</option>
+                        {DEPARTMENTS.map((d) => (
+                          <option key={d.id} value={d.id} className="bg-lsr-charcoal">
+                            {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </FormField>
+                    <div className="flex items-end">
+                      <label htmlFor="isBoard" className="flex h-12 cursor-pointer items-center gap-3 font-sans text-sm text-white/80">
+                        <input id="isBoard" name="isBoard" type="checkbox" defaultChecked={pageUser.isBoard} className="size-4 accent-lsr-orange" />
+                        I hold a board seat
+                      </label>
+                    </div>
+                  </div>
+                  <FormField id="workingOn" label="What I work on" hint={`One line, up to ${WORKING_ON_MAX} characters.`}>
+                    <Input id="workingOn" name="workingOn" maxLength={WORKING_ON_MAX} defaultValue={pageUser.workingOn ?? ''} placeholder="e.g. Race control and the sim servers" className={inputClass} />
+                  </FormField>
+                </Step>
+              )}
 
               <div className="flex flex-col gap-3 pt-2 sm:flex-row">
                 <Button type="submit" className="h-12 rounded-none bg-lsr-orange px-8 font-sans text-[10px] font-bold uppercase tracking-widest text-white transition-all hover:bg-white hover:text-lsr-charcoal">

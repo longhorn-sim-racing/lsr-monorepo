@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { revalidateDriverList } from "@/server/cache/revalidate-public";
 import { syncManualMembershipEntitlement } from "@/server/services/membership.service";
 import type { ActionResult } from "@/lib/action-result";
+import { officerProfileSchema } from "@/schemas/officer-profile.schema";
 
 export type UpdateUserPayload = {
     displayName: string;
@@ -17,6 +18,10 @@ export type UpdateUserPayload = {
     major: string | null;
     socials: Record<string, string> | null;
     officerTitle: string | null;
+    /** Officer profile (Jack 2.0): roster department id, board seat, "what I work on" (160 characters at most) */
+    department: string | null;
+    isBoard: boolean;
+    workingOn: string | null;
     roleKeys: string[];
     activeMembershipTierKey: string | null; // e.g. "LSR_MEMBER"
     activeMembershipValidTo: Date | null;
@@ -69,6 +74,10 @@ export async function updateUser(userId: string, payload: UpdateUserPayload): Pr
     if (!trimmedHandle || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trimmedHandle)) {
         return { ok: false, error: "The handle can only use lowercase letters, numbers and single hyphens, like john-doe." };
     }
+    const profile = officerProfileSchema.safeParse({ department: payload.department, isBoard: payload.isBoard, workingOn: payload.workingOn });
+    if (!profile.success) {
+        return { ok: false, error: profile.error.issues[0]?.message ?? "Check the officer profile." };
+    }
 
     // Check handle uniqueness if changed
     if (trimmedHandle !== targetUser.handle) {
@@ -89,6 +98,7 @@ export async function updateUser(userId: string, payload: UpdateUserPayload): Pr
             major: payload.major || null,
             socials: payload.socials ?? undefined,
             officerTitle: payload.officerTitle || null,
+            ...profile.data,
         },
     });
 
@@ -195,6 +205,9 @@ export async function updateUser(userId: string, payload: UpdateUserPayload): Pr
             major: targetUser.major,
             socials: targetUser.socials,
             officerTitle: targetUser.officerTitle,
+            department: targetUser.department,
+            isBoard: targetUser.isBoard,
+            workingOn: targetUser.workingOn,
             roles: beforeRoles,
             membership: beforeMembership,
         },
@@ -207,6 +220,7 @@ export async function updateUser(userId: string, payload: UpdateUserPayload): Pr
             major: payload.major,
             socials: payload.socials,
             officerTitle: payload.officerTitle,
+            ...profile.data,
             roles: afterRoles,
             membership: afterMembership,
         },
