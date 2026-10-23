@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-const state = vi.hoisted(() => ({ connectorEnabled: vi.fn() }))
-vi.mock("../state", () => ({ connectorEnabled: state.connectorEnabled, readConnectorState: vi.fn(async () => null) }))
+const state = vi.hoisted(() => ({ connectorEnabled: vi.fn(), recordConnectorError: vi.fn(), recordConnectorSync: vi.fn() }))
+vi.mock("../state", () => ({ ...state, readConnectorState: vi.fn(async () => null) }))
 
 import { mountFakes, type MountedFakes } from "../fakes/testing"
 import { teamsWebhookClient, TeamsWebhookError, webhookHost, webhookUrlProblem } from "./client"
-import { SMOKE_CARD, teamsWebhookConnector } from "./connector"
+import { postRecorded, SMOKE_CARD, teamsWebhookConnector } from "./connector"
 import { teamsWebhookFake } from "./fake/handlers"
 
 /** A flow's URL: the `sig` is its secret (built from pieces, it's never a real one) */
@@ -91,9 +91,27 @@ describe("the teams-webhook connector", () => {
     const fakes = mountFakes([teamsWebhookFake])
     vi.stubEnv("TEAMS_WEBHOOK_URL", URL_)
     state.connectorEnabled.mockResolvedValue(false)
+    state.recordConnectorSync.mockResolvedValue(undefined)
     expect(await teamsWebhookConnector.smoke!()).toEqual({ ok: true, summary: "Posted a test card through prod-00.westus.logic.azure.com (answered 202)" })
     expect(JSON.parse(fakes.requests[0].body)).toEqual(SMOKE_CARD)
+    expect(state.recordConnectorSync).toHaveBeenCalledWith("teams-webhook")
     vi.stubEnv("TEAMS_WEBHOOK_URL", "")
     expect(await teamsWebhookConnector.smoke!()).toEqual({ ok: false, summary: "TEAMS_WEBHOOK_URL isn't set." })
+  })
+
+  it("records each post's outcome on the connector, without the URL, and still throws a failure", async () => {
+    const fakes = mountFakes([teamsWebhookFake])
+    state.recordConnectorSync.mockResolvedValue(undefined)
+    state.recordConnectorError.mockRejectedValue(new Error("database down"))
+    const client = teamsWebhookClient(URL_)
+    expect(await postRecorded(client, card)).toEqual({ status: 202 })
+    expect(state.recordConnectorSync).toHaveBeenCalledWith("teams-webhook")
+
+    await fetch(`${fakes.origin}/teams-webhook/_fake/fail`, { method: "POST", body: JSON.stringify({ status: 404 }) })
+    // Recording failing too never hides the post's own error
+    const error = await postRecorded(client, card).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(TeamsWebhookError)
+    expect(state.recordConnectorError).toHaveBeenCalledWith("teams-webhook", error)
+    expect(String((error as Error).message)).not.toContain(SIG)
   })
 })

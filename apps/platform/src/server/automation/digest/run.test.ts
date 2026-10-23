@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const db = vi.hoisted(() => ({ jackRoom: { findUnique: vi.fn() }, jackMessage: { findMany: vi.fn() }, auditLog: { count: vi.fn() } }))
+const db = vi.hoisted(() => ({ jackRoom: { findUnique: vi.fn() }, jackMessage: { findMany: vi.fn(), findFirst: vi.fn() }, auditLog: { count: vi.fn() } }))
 const officers = vi.hoisted(() => ({ userNames: vi.fn(), officerIdSet: vi.fn() }))
 const notes = vi.hoisted(() => ({ postAutomationNote: vi.fn() }))
 const answer = vi.hoisted(() => ({ answerScheduledNote: vi.fn(), retryJobAt: vi.fn(), defaultRunRoom: vi.fn(), RETRY_AFTER_MS: 180_000, RETRY_WINDOW_MS: 2_700_000 }))
 const discord = vi.hoisted(() => ({ sendDigestToDiscord: vi.fn() }))
 const audit = vi.hoisted(() => ({ createAuditLog: vi.fn() }))
+const state = vi.hoisted(() => ({ recordConnectorError: vi.fn(), recordConnectorSync: vi.fn(), connectorEnabled: vi.fn(), readConnectorState: vi.fn() }))
 vi.mock("@/server/db", () => ({ prisma: db }))
 vi.mock("@/server/services/officers", () => officers)
 vi.mock("../notes", () => notes)
@@ -16,7 +17,8 @@ vi.mock("../registry", () => ({ DIGEST_CHECKS: [] }))
 vi.mock("../cap", () => ({ automationBudget: vi.fn() }))
 vi.mock("@/server/jack/broadcast", () => ({ broadcastRoomEvent: vi.fn() }))
 vi.mock("@/server/connectors/discord/connector", () => ({ discordConnector: { client: vi.fn() } }))
-vi.mock("@/server/connectors/teams-webhook/connector", () => ({ teamsWebhookConnector: { client: vi.fn() } }))
+vi.mock("@/server/connectors/state", () => state)
+vi.mock("@/server/connectors/teams-webhook/connector", async (importOriginal) => ({ ...(await importOriginal<object>()), teamsWebhookConnector: { client: vi.fn() } }))
 
 import type { AutomationBudget } from "../cap"
 import type { DigestReport } from "../run-checks"
@@ -55,6 +57,9 @@ beforeEach(() => {
   }
   db.jackRoom.findUnique.mockResolvedValue({ archivedAt: null })
   db.jackMessage.findMany.mockResolvedValue([])
+  db.jackMessage.findFirst.mockResolvedValue(null)
+  state.recordConnectorError.mockResolvedValue("")
+  state.recordConnectorSync.mockResolvedValue(undefined)
   db.auditLog.count.mockResolvedValue(0)
   officers.userNames.mockResolvedValue(new Map([["gray", { id: "gray", displayName: "Gray", handle: "gray" }]]))
   officers.officerIdSet.mockResolvedValue(new Set(["gray"]))
@@ -109,6 +114,36 @@ describe("the weekly digest's run", () => {
     expect(db.jackMessage.findMany.mock.calls[0][0].where).toEqual({ roomId: "room-1", jobKey: "digest.weekly", createdAt: { gte: new Date("2026-10-26T05:00:00Z") } })
     expect(answer.answerScheduledNote.mock.calls[0][0]).toMatchObject({ id: "note-0" })
     expect(result.summary).toContain("Room: already posted today")
+  })
+
+  it("keeps a retry that runs past midnight on its first try's day, so nothing is posted twice", async () => {
+    const after = new Date("2026-10-27T05:10:00Z") // Tue, Oct 27, 12:10 AM Central
+    const asked = new Date("2026-10-27T04:50:00Z") // Mon, Oct 26, 11:50 PM Central
+    deps.now = () => after
+    db.jackMessage.findFirst.mockResolvedValue({ createdAt: asked })
+    db.jackMessage.findMany.mockResolvedValue([{ id: "note-0", roomId: "room-1", createdAt: asked, scheduled: true, answeredById: null }])
+    db.auditLog.count.mockResolvedValue(1)
+    discord.sendDigestToDiscord.mockResolvedValue({ status: "already_sent", messageId: "m-1", postId: "post-1" })
+    const result = await runWeeklyDigest(ctx({ discordChannelId: "1100000000000000020", teams: true }), deps)
+    expect(db.jackMessage.findFirst.mock.calls[0][0].where).toEqual({ jobKey: "digest.weekly", scheduled: true, answeredById: null, createdAt: { gte: new Date(after.getTime() - 2_700_000) } })
+    expect(db.jackMessage.findMany.mock.calls[0][0].where.createdAt).toEqual({ gte: new Date("2026-10-26T05:00:00Z") })
+    expect(notes.postAutomationNote).not.toHaveBeenCalled()
+    expect(discord.sendDigestToDiscord.mock.calls[0][0].dedupeKey).toBe("digest:2026-10-26")
+    expect(db.auditLog.count.mock.calls[0][0].where.entityId).toBe("teams:2026-10-26")
+    expect(teamsPost).not.toHaveBeenCalled()
+    expect(answer.answerScheduledNote.mock.calls[0][0]).toMatchObject({ id: "note-0" })
+    expect(result.summary).toBe("3 things need attention · Room: already posted today · Discord: already posted today · Teams: already posted today · Jack's summary: written → /admin/jack/room-1?m=reply-1")
+  })
+
+  it("records each Teams post's outcome on its connector, so Connections shows a broken flow", async () => {
+    await runWeeklyDigest(ctx({ teams: true }), deps)
+    expect(state.recordConnectorSync).toHaveBeenCalledWith("teams-webhook")
+    const refused = new Error("The Teams webhook answered 404 (WorkflowNotFound)")
+    teamsPost.mockRejectedValue(refused)
+    await expect(runWeeklyDigest(ctx({ teams: true }), deps)).rejects.toThrow("The digest didn't reach everywhere: Teams: The Teams webhook answered 404 (WorkflowNotFound)")
+    expect(state.recordConnectorError).toHaveBeenCalledWith("teams-webhook", refused)
+    // Only the first run's post was audited as posted
+    expect(audit.createAuditLog.mock.calls.filter(([entry]) => entry.entityId === "teams:2026-10-26")).toHaveLength(1)
   })
 
   it("skips an archived or deleted room, and still posts outside", async () => {

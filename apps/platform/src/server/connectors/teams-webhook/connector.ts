@@ -1,4 +1,5 @@
 import { defineConnector } from "../define"
+import { recordConnectorError, recordConnectorSync } from "../state"
 import { teamsWebhookClient, webhookHost, webhookUrlProblem, type TeamsWebhookClient } from "./client"
 
 /**
@@ -31,6 +32,23 @@ export const SMOKE_CARD = {
   ],
 }
 
+/**
+ * Posts through the webhook and records the outcome on the connector, so Connections and the
+ * failing-connectors check see a flow that was deleted, had its URL rotated or got blocked. Recording
+ * never hides the post's own outcome; the error text never has the URL in it
+ */
+export async function postRecorded(client: TeamsWebhookClient, message: unknown, signal?: AbortSignal): Promise<{ status: number }> {
+  let posted: { status: number }
+  try {
+    posted = await client.post(message, signal)
+  } catch (error) {
+    await recordConnectorError(TEAMS_WEBHOOK_CONNECTOR, error).catch(() => undefined)
+    throw error
+  }
+  await recordConnectorSync(TEAMS_WEBHOOK_CONNECTOR).catch(() => undefined)
+  return posted
+}
+
 export const teamsWebhookConnector = defineConnector<TeamsWebhookClient>({
   id: TEAMS_WEBHOOK_CONNECTOR,
   label: "Teams digest posts",
@@ -41,12 +59,13 @@ export const teamsWebhookConnector = defineConnector<TeamsWebhookClient>({
     return teamsWebhookClient(env.TEAMS_WEBHOOK_URL!, env)
   },
   // Works while switched off. It posts one short test card: a Workflows webhook has nothing to read, so
-  // a post is the only way to know the flow is there and allowed
+  // a post is the only way to know the flow is there and allowed. Being a real post, it's recorded like
+  // the digest's, so a fixed flow stops showing as failing without waiting a week for the next digest
   async smoke({ signal } = {}) {
     const problem = webhookUrlProblem(process.env.TEAMS_WEBHOOK_URL)
     if (problem) return { ok: false, summary: problem }
     const client = teamsWebhookClient(process.env.TEAMS_WEBHOOK_URL!)
-    const { status } = await client.post(SMOKE_CARD, signal)
+    const { status } = await postRecorded(client, SMOKE_CARD, signal)
     return { ok: true, summary: `Posted a test card through ${client.host} (answered ${status})` }
   },
   async details() {

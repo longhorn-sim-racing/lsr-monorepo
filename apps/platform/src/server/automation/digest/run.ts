@@ -5,7 +5,7 @@ import { getSiteUrl } from "@/lib/site-url"
 import { createAuditLog } from "@/server/audit/log"
 import { discordConnector } from "@/server/connectors/discord/connector"
 import type { DiscordClient } from "@/server/connectors/discord/client"
-import { teamsWebhookConnector } from "@/server/connectors/teams-webhook/connector"
+import { postRecorded, teamsWebhookConnector } from "@/server/connectors/teams-webhook/connector"
 import type { TeamsWebhookClient } from "@/server/connectors/teams-webhook/client"
 import { prisma } from "@/server/db"
 import { broadcastRoomEvent, type RoomBroadcaster } from "@/server/jack/broadcast"
@@ -23,13 +23,15 @@ import { discordDigestMessage, roomDigestText, teamsDigestCard } from "./render"
 /**
  * The weekly digest's run (design §11.2), handed off to /api/admin/jack/run: the checks once, then the
  * room, Discord and Teams as its settings say, each at most once a day (a second run that day, a retry or
- * Run now, fills in only what's missing), then Jack's summary in the room last, since it takes longest.
+ * Run now, fills in only what's missing; a retry after midnight still counts as its first try's day), then
+ * Jack's summary in the room last, since it takes longest.
  *
  * - The room gets the full list as a note. With the summary on (and its owner still an officer, and
  *   automations under their cap), the note is a scheduled one that Jack answers with a short summary, as
  *   the officer who set the digest up; when the room is busy the job looks again in a few minutes.
  * - Discord and Teams get counts and links only, never items (render.ts), and only while their connector
- *   is on.
+ *   is on. A Teams post's outcome is recorded on its connector (it posts nothing else); a Discord post's
+ *   failure stays on its DiscordPost row, since one channel refusing doesn't mean Discord is down.
  * One destination failing doesn't stop the others; the run fails at the end, saying which.
  */
 
@@ -113,12 +115,25 @@ async function postedToTeams(day: string): Promise<boolean> {
   return (await prisma.auditLog.count({ where: { entityType: DIGEST_ENTITY, entityId: `teams:${day}`, actionType: DIGEST_POSTED } })) > 0
 }
 
+/**
+ * The digest's summary note from an earlier try that's still waiting (within RETRY_WINDOW_MS), in any
+ * room. A retry belongs to that try's day, so one that runs past midnight doesn't post the digest again
+ */
+async function waitingSummaryNote(now: Date): Promise<{ createdAt: Date } | null> {
+  return prisma.jackMessage.findFirst({
+    where: { jobKey: DIGEST_JOB_KEY, scheduled: true, answeredById: null, createdAt: { gte: new Date(now.getTime() - RETRY_WINDOW_MS) } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { createdAt: true },
+  })
+}
+
 export async function runWeeklyDigest(ctx: Pick<JobContext, "config" | "job" | "startedAt" | "log" | "signal">, deps: DigestRunDeps = defaultDigestRunDeps): Promise<JobResult> {
   const config = readDigestConfig(ctx.config)
   if (!config.roomId && !config.discordChannelId && !config.teams) return { status: "skipped", summary: `Not set up yet: an officer picks a room on Jack → Recurring questions (${DIGEST_SETTINGS_PATH}).` }
 
   const now = deps.now()
-  const day = centralDate(now)
+  const waiting = await waitingSummaryNote(now)
+  const day = centralDate(waiting?.createdAt ?? now)
   const report = await deps.checks(now, ctx.signal)
   const total = attentionCount(report)
   const done: string[] = []
@@ -161,7 +176,7 @@ export async function runWeeklyDigest(ctx: Pick<JobContext, "config" | "job" | "
       if (!client) done.push("Teams: not connected, skipped")
       else if (await postedToTeams(day)) done.push("Teams: already posted today")
       else {
-        await client.post(teamsDigestCard(report, deps.siteUrl()), ctx.signal)
+        await postRecorded(client, teamsDigestCard(report, deps.siteUrl()), ctx.signal)
         await createAuditLog({ actorUserId: null, actionType: DIGEST_POSTED, entityType: DIGEST_ENTITY, entityId: `teams:${day}`, summary: "Posted the weekly digest to Teams", metadata: { host: client.host, attention: total } })
         done.push("Teams: posted")
       }
