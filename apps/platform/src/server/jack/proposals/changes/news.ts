@@ -81,9 +81,10 @@ const FIELD_LABEL: Record<PostField, string> = { title: "Title", slug: "Link", e
 
 const NOW = "now"
 
-function checkBody(text: string, what = "The post's text") {
+/** The parse of a post's text, when it's plain Markdown; `was` is the text an edit starts from (./markdown.ts mdxError) */
+function checkBody(text: string, was?: string) {
   const tree = parseMarkdown(text)
-  const problem = mdxError(text, what, tree)
+  const problem = mdxError(text, "The post's text", tree, was)
   if (problem) throw new ProposalInputError(problem)
   return tree
 }
@@ -299,7 +300,7 @@ async function planUpdate(p: NewsUpdate, post: PostState & { id: string }, now: 
     ;(current as Record<string, unknown>)[field] = post[field]
   }
   if (!Object.keys(next).length) throw new ProposalInputError(`Nothing would change: the post “${post.title}” already reads that way.`)
-  if (next.bodyMd !== undefined) checkBody(next.bodyMd)
+  if (next.bodyMd !== undefined) checkBody(next.bodyMd, post.bodyMd)
   if (next.slug !== undefined) {
     const owner = await slugOwner(next.slug, post.id)
     if (owner) throw new ProposalInputError(`/news/${next.slug} is taken by “${owner.title}”. Pick another slug.`)

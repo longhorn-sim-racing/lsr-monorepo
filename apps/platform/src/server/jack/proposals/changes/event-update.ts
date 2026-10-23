@@ -169,6 +169,29 @@ const LABEL: Record<Column, string> = {
   publishedAt: "Goes live",
 }
 
+/** What a sentence calls each column: "Change “GM 2”: start time and capacity" */
+const NOUN: Record<Column, string> = {
+  title: "title",
+  summary: "summary",
+  description: "description",
+  startsAtUtc: "start time",
+  endsAtUtc: "end time",
+  venueId: "venue",
+  seriesId: "series",
+  streamUrl: "stream link",
+  registrationEnabled: "registration",
+  registrationOpensAt: "registration opening",
+  registrationClosesAt: "registration closing",
+  registrationMax: "capacity",
+  registrationWaitlistEnabled: "waitlist",
+  waitlistAutoPromote: "waitlist moving up on its own",
+  attendanceEnabled: "check-in",
+  attendanceOpensAt: "check-in opening",
+  attendanceClosesAt: "check-in closing",
+  status: "status",
+  publishedAt: "publish time",
+}
+
 /** The payload field for each column, for the model's error messages */
 const FIELD: Partial<Record<Column, keyof EventUpdate>> = {
   startsAtUtc: "startsAt",
@@ -446,7 +469,7 @@ function proposalTitle(event: EventRow, next: Values): string {
   const changed = (Object.keys(next) as Column[]).filter((column) => column !== "status" && column !== "publishedAt")
   const status = next.status as ProposedStatus | undefined
   if (!changed.length && status) return `${STATUS_TITLE[status]} ${name}`
-  const what = changed.slice(0, 3).map((column) => LABEL[column].toLowerCase())
+  const what = changed.slice(0, 3).map((column) => NOUN[column])
   const rest = changed.length > 3 ? `${what.join(", ")} and ${changed.length - 3} more` : listed(what)
   const and = status === "PUBLISHED" ? " and publish it" : status === "SCHEDULED" ? " and schedule it" : status ? ` and set it to ${STATUS_LABEL[status].toLowerCase()}` : ""
   return `Change ${name}: ${rest}${and}`
@@ -525,7 +548,7 @@ export const eventUpdateKind: ProposalKind<EventUpdate> = {
     if (!event) return "The event was deleted."
     for (const [column, was] of Object.entries(saved.current) as [Column, Value][]) {
       const now = columnValue(event, column)
-      if (now !== was) return `The event's ${LABEL[column].toLowerCase()} changed since this was proposed (it's now ${display(column, now, event, {}) ?? "not set"}).`
+      if (now !== was) return `The event's ${NOUN[column]} changed since this was proposed (it's now ${display(column, now, event, {}) ?? "not set"}).`
     }
     const problem = eventProblem(event, saved.next)
     return problem ? `With this change the event no longer passes the event form's checks: ${problem}` : null
@@ -589,7 +612,7 @@ export const eventUpdateKind: ProposalKind<EventUpdate> = {
     }
     revalidate(paths)
 
-    const changed = (Object.keys(next) as Column[]).filter((column) => column !== "publishedAt").map((column) => LABEL[column].toLowerCase())
+    const changed = (Object.keys(next) as Column[]).filter((column) => column !== "publishedAt").map((column) => NOUN[column])
     const after = await loadEvent(event.id)
     const title = after?.title ?? event.title
     return {

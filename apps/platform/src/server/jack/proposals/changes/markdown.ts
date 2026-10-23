@@ -49,8 +49,8 @@ function walk(node: MdNode, visit: (node: MdNode) => void) {
   for (const child of node.children ?? []) walk(child, visit)
 }
 
-/** One place the text has something MDX would run */
-export type MdxProblem = { line: number; what: string; excerpt: string }
+/** One place the text has something MDX would run; `text` is its whole line */
+export type MdxProblem = { line: number; what: string; excerpt: string; text: string }
 
 /** "<", "{", "}" outside code, and import/export lines: what MDX would treat as code. Empty when it's plain Markdown */
 export function mdxProblems(text: string, tree: MdNode = parseMarkdown(text)): MdxProblem[] {
@@ -71,29 +71,36 @@ export function mdxProblems(text: string, tree: MdNode = parseMarkdown(text)): M
     while (line + 1 < lineStarts.length && lineStarts[line + 1] <= offset) line++
     return line
   }
-  const excerpt = (offset: number) => {
+  const lineEnd = (line: number) => (line + 1 < lineStarts.length ? lineStarts[line + 1] - 1 : text.length)
+  const problem = (offset: number, what: string): MdxProblem => {
     const line = lineOf(offset)
     const from = lineStarts[line]
-    const to = line + 1 < lineStarts.length ? lineStarts[line + 1] - 1 : text.length
+    const to = lineEnd(line)
     const start = Math.max(from, offset - 25)
     const end = Math.min(to, offset + 25)
-    return `${start > from ? "…" : ""}${text.slice(start, end).trim()}${end < to ? "…" : ""}`
+    return { line: line + 1, what, excerpt: `${start > from ? "…" : ""}${text.slice(start, end).trim()}${end < to ? "…" : ""}`, text: text.slice(from, to) }
   }
 
   for (let i = 0; i < text.length; i++) {
     const ch = text[i]
-    if ((ch === "<" || ch === "{" || ch === "}") && !inCode(i)) problems.push({ line: lineOf(i) + 1, what: ch, excerpt: excerpt(i) })
+    if ((ch === "<" || ch === "{" || ch === "}") && !inCode(i)) problems.push(problem(i, ch))
   }
-  for (const [n, start] of lineStarts.entries()) {
+  for (const start of lineStarts) {
     const match = /^[ \t]*(import|export)\s/.exec(text.slice(start, start + 20))
-    if (match && !inCode(start + match[0].indexOf(match[1]))) problems.push({ line: n + 1, what: match[1], excerpt: excerpt(start) })
+    if (match && !inCode(start + match[0].indexOf(match[1]))) problems.push(problem(start, match[1]))
   }
   return problems.sort((a, b) => a.line - b.line)
 }
 
-/** Why `text` can't go in a post, written for the model to fix it, or null when it's plain Markdown */
-export function mdxError(text: string, what = "The post's text", tree?: MdNode): string | null {
-  const problems = mdxProblems(text, tree)
+/**
+ * Why `text` can't go in a post, written for the model to fix it, or null when it's plain Markdown.
+ * `was`: the post's text as it is now (an edit). A line the site already runs as MDX, kept exactly as
+ * it is (an officer's own HTML, say), isn't Jack's to fix, so only new or changed lines are held to the
+ * rule. Only lines that were already outside code count: moving a line out of a code block is a change
+ */
+export function mdxError(text: string, what = "The post's text", tree?: MdNode, was?: string): string | null {
+  const existing = was === undefined ? null : new Set(mdxProblems(was).map((p) => p.text.trim()))
+  const problems = mdxProblems(text, tree).filter((p) => !existing?.has(p.text.trim()))
   if (!problems.length) return null
   // One mention per line, naming each thing it has
   const lines = new Map<number, { what: Set<string>; excerpt: string }>()

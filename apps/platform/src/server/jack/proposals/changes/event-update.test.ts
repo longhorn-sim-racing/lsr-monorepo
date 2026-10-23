@@ -95,7 +95,7 @@ describe("event.update: prepare", () => {
     const prepared = await prepare({ startsAt: "2026-10-29T19:00" })
     expect(prepared.targetId).toBe("ev-1")
     expect(prepared.before).toEqual({ current: { startsAtUtc: "2026-10-29T23:00:00.000Z" }, next: { startsAtUtc: "2026-10-30T00:00:00.000Z" } })
-    expect(prepared.view.title).toBe("Change “GM 2”: starts")
+    expect(prepared.view.title).toBe("Change “GM 2”: start time")
     expect(prepared.view.diff).toEqual([{ field: "startsAtUtc", label: "Starts", before: "Thu Oct 29, 6:00 PM CT", after: "Thu Oct 29, 7:00 PM CT", format: "value" }])
     expect(prepared.view.summary).toBe("Applying it saves the changes below. 12 people are registered; they aren't messaged about the new time automatically.")
     expect(prepared.view.links).toEqual([
@@ -169,7 +169,7 @@ describe("event.update: staleness", () => {
     db.event.findUnique.mockResolvedValue({ ...GM2, endsAtUtc: new Date("2026-10-30T00:15:00Z") })
     expect(await eventUpdateKind.checkStale(p, before)).toMatch(/no longer passes the event form's checks: The event can't end before it starts/)
     db.event.findUnique.mockResolvedValue({ ...GM2, startsAtUtc: new Date("2026-10-29T22:00:00Z") })
-    expect(await eventUpdateKind.checkStale(p, before)).toBe("The event's starts changed since this was proposed (it's now Thu Oct 29, 5:00 PM CT).")
+    expect(await eventUpdateKind.checkStale(p, before)).toBe("The event's start time changed since this was proposed (it's now Thu Oct 29, 5:00 PM CT).")
     db.event.findUnique.mockResolvedValue(null)
     expect(await eventUpdateKind.checkStale(p, before)).toBe("The event was deleted.")
     expect(await eventUpdateKind.checkStale(p, null)).toMatch(/copy of the event is missing/)
@@ -206,7 +206,7 @@ describe("event.update: apply", () => {
     const result = await eventUpdateKind.apply(p, applyCtx((await eventUpdateKind.prepare(p, ctx)).before))
     expect(events.updateEventDetails).toHaveBeenCalledWith({ eventId: "ev-1", details: { startsAtUtc: new Date("2026-10-30T00:00:00Z") }, publish: null }, actor)
     expect(events.updateEventRegistration).toHaveBeenCalledWith({ eventId: "ev-1", settings: { registrationClosesAt: new Date("2026-10-29T17:00:00Z"), registrationMax: 40 } }, actor)
-    expect(result).toMatchObject({ summary: "Updated “GM 2”: starts, registration closes and capacity. 2 people moved off the waitlist and were notified.", counts: { promoted: 2 } })
+    expect(result).toMatchObject({ summary: "Updated “GM 2”: start time, registration closing and capacity. 2 people moved off the waitlist and were notified.", counts: { promoted: 2 } })
   })
 
   it("says what was saved when a later part fails, and goes stale without its copy or its event", async () => {

@@ -145,6 +145,13 @@ describe("news.update", () => {
     expect(prepared.view.preview).toBeUndefined()
   })
 
+  it("edits around an officer's own HTML, without adding any", async () => {
+    const withEmbed = `${BODY}\n\n<iframe src="https://www.youtube.com/embed/x"></iframe>`
+    db.post.findUnique.mockResolvedValue({ ...POST, bodyMd: withEmbed })
+    await expect(newsUpdateKind.prepare(update({ edits: [{ find: "Fastest lap: Ben", replace: "Fastest lap: Carla" }] }), ctx)).resolves.toBeTruthy()
+    await expect(newsUpdateKind.prepare(update({ edits: [{ find: "Fastest lap: Ben", replace: "Fastest lap: <b>Carla</b>" }] }), ctx)).rejects.toThrow(/must be plain Markdown/)
+  })
+
   it("refuses edits that don't apply, MDX, a taken link and changes that change nothing", async () => {
     await expect(newsUpdateKind.prepare(update({ edits: [{ find: "Monza", replace: "Imola" }] }), ctx)).rejects.toThrow(/the find text isn't in the post's text/)
     await expect(newsUpdateKind.prepare(update({ bodyMd: "Now with {props}" }), ctx)).rejects.toThrow(/must be plain Markdown/)

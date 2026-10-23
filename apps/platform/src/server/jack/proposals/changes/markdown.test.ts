@@ -43,6 +43,17 @@ describe("mdxProblems: what the site's MDX would run", () => {
     expect(problems("```\nimport x from 'y'\n```")).toEqual([])
   })
 
+  it("lets an edit keep lines the site already runs, but not add, change or uncover any", () => {
+    const was = 'Intro\n\n<iframe src="https://www.youtube.com/embed/x"></iframe>\n\n```\n<Secret />\n```'
+    // A typo fixed elsewhere: the officer's own embed stays
+    expect(mdxError(was.replace("Intro", "Intro!"), undefined, undefined, was)).toBeNull()
+    // A new or changed line is held to the rule
+    expect(mdxError(`${was}\n\n<b>new</b>`, undefined, undefined, was)).toMatch(/line 9 has "<"/)
+    expect(mdxError(was.replace('embed/x"', 'embed/y"'), undefined, undefined, was)).toMatch(/line 3 has "<"/)
+    // A line that was code before isn't something the site runs: taking it out of its block is a change
+    expect(mdxError(was.replace("```\n<Secret />\n```", "<Secret />"), undefined, undefined, was)).toMatch(/line 5 has "<"/)
+  })
+
   it("says where and how to fix it, for the model", () => {
     const error = mdxError("Line one\n\nCome to <b>GM 2</b>, {free food}")
     expect(error).toMatch(/^The post's text must be plain Markdown/)
