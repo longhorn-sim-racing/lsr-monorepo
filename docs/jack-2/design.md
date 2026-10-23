@@ -16,7 +16,7 @@ The plan for everything in #188, written for the people and agents building it: 
 5. **Outside content is data, not instructions.** That covers web pages, documents, Discord and Teams messages, emails, uploaded files and synced records. Nothing Jack reads can cause a change, a post, a fetch of an outside URL, or a knowledge save without an officer in the loop. Section 14 lists the specific guards.
 6. **Jack cites sources:** a link to the room message, document, page, post or record.
 7. **Jack is never the only way to see information.** Every source has a place in the admin console (section 13).
-8. **Credentials live in env (Vercel) or in `SystemSetting` rows.** `SystemSetting` is revoked from Jack's SQL role, and every key that holds a credential is listed in section 3.2. Nothing else stores a token. Cursors, configs and error columns are passed through `redactSecrets()` before they're written.
+8. **Credentials live in env (Vercel) or in `SystemSetting` rows.** `SystemSetting` is revoked from Jack's SQL role, and every key that holds a credential is listed in section 3.2. Nothing else stores a token. Error and summary columns pass through `redactSecrets()` (`src/lib/redact.ts`) before they're written. Cursors and configs must simply never contain tokens; they are NOT redacted, because redaction strips query strings and would break page tokens and Graph delta links.
 9. **Outside keys are read-only or restricted** wherever the provider offers it. The exceptions are documented, for Gray's sign-off: Vercel's analytics token (section 12.5) and Resend's sending key (section 12.4).
 10. **Budget:** $50/month in total. Automations (recurring questions and Jack-written digest summaries) get their own cap inside it, **$10/month**, so they can't use up the officers' share.
 11. **Everything works locally against fakes,** and every outside service is switchable. When a service is missing or switched off, its tools say "not connected" and the app keeps working. **Connectors ship switched off** and are turned on one at a time once their smoke test passes.
@@ -364,7 +364,7 @@ type ProposalKind<P> = {
   - parsers capped by uncompressed size (zip-bomb guard), row count and time;
   - XLSX through `exceljs`;
   - DOCX text through a maintained extractor (decided in G5), with the same zip caps;
-  - PDF text (for search) through `pdfjs-dist` ≥4.2.67 with `isEvalSupported: false`.
+  - PDF text (for search) through `pdfjs-dist` 6.x (no eval paths left in it; the old `isEvalSupported` option is gone). It's in `serverExternalPackages`; its worker file (`pdf.worker.mjs`) must be imported statically or added to `outputFileTracingIncludes`, or PDF text breaks on Vercel.
 - **Serving:** `GET /api/admin/jack/files/[id]` (officer check) looks the file up by id, never by path.
   - Sends `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox` and `Cache-Control: private, no-store`.
   - Sends `Content-Disposition: attachment` for everything except raster images.
