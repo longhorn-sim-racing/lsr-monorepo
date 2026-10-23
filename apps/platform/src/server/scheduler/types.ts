@@ -11,6 +11,8 @@ export type JobContext = {
   signal: AbortSignal
   /** Epoch ms by which `run` must have returned */
   deadline: number
+  /** Epoch ms when the invocation running this job started (the hand-off request's own start for `handoff` jobs): pass it to runRoom as `startedAt` */
+  startedAt: number
   /** Adds a line to this run's summary on the Scheduled jobs page. Never log secrets or personal data */
   log(summary: string): void
   /** ScheduledJob.config as saved (JSON, null when unset); the kind parses it with its own schema */
@@ -41,5 +43,11 @@ export type JobKind = {
   budgetMs: number
   /** Runs in its own invocation (the signed hand-off to /api/admin/jack/run) instead of inside the tick: Jack runs, backfills, anything over about 60 s */
   handoff?: boolean
+  /**
+   * false for kinds whose jobs their own feature creates, one row each (every recurring question is its own
+   * job, keyed "recurring:<id>"). Otherwise the kind has exactly one job, keyed by the kind, which
+   * ensureJobRows() creates switched off. Schedules of non-singleton jobs are changed on their feature's page
+   */
+  singleton?: false
   run(ctx: JobContext): Promise<JobResult>
 }
