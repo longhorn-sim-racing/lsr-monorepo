@@ -14,6 +14,9 @@ export type HistoryRow = {
   toolCalls: unknown
   status: "streaming" | "done" | "error"
   answeredById: string | null
+  /** Notes a reply answers, like an officer message: a deck's continue note, a scheduled run's question */
+  continues?: boolean
+  scheduled?: boolean
   model: string | null
   createdAt: Date
   author: { displayName: string } | null
@@ -37,8 +40,9 @@ const EARLIER_LEFT_OUT = "(Earlier messages in this room aren't included.)"
  * messages this reply answers.
  *
  * - An officer turn is every message a reply answered (`answeredById`), as "Name: text" under a
- *   Central Time timestamp, so several officers posting during one answer become one turn. Room
- *   notes (a persona switch) go in the turn they came before, as context.
+ *   Central Time timestamp, so several officers posting during one answer become one turn. Notes a
+ *   reply answers (a deck's continue note, a scheduled question) go in that reply's turn the same way;
+ *   other room notes (a persona switch) go in the turn they came before, as context.
  * - A reply Claude didn't write (a "not connected" or "budget used up" notice, or a placeholder
  *   from before the model) is left out, so the questions it got carry into the next turn.
  * - An earlier reply is its text plus a one-line note of the tools it used. Its thinking and raw
@@ -59,7 +63,9 @@ export function buildHistory(rows: HistoryRow[], replyId: string, limits: Histor
   turnOf.set(replyId, turns.length - 1)
 
   for (const row of sorted) {
-    if (row.kind === "user") {
+    // A note a reply answers goes in that reply's turn, like an officer message: a scheduled question
+    // waiting behind officer messages isn't theirs to answer, and its own reply needs it
+    if (row.kind === "user" || row.continues || row.scheduled) {
       const index = row.answeredById ? turnOf.get(row.answeredById) : undefined
       if (index !== undefined) turns[index].items.push(row)
     } else if (row.kind === "system") {

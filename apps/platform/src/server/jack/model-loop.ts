@@ -122,9 +122,10 @@ export type ModelReplyOptions = {
   limits?: Partial<ReplyLimits>
   /**
    * What the reply is for. Room replies get web search and fetch when JACK_WEB_TOOLS=on; scheduled runs
-   * (recurring questions, digest summaries) never do (design §7.2). Default "room"
+   * (recurring questions, digest summaries) never do (design §7.2). Required, so no caller gets the web
+   * tools by leaving it out
    */
-  requestType?: JackRequestType
+  requestType: JackRequestType
   /** Cancels the reply: aborts the Claude call in flight and any tool that's running */
   signal?: AbortSignal
   /** Where the calls' token usage adds up; pass one in to read it even if the reply throws */
@@ -166,7 +167,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
   const limits = { ...REPLY_LIMITS, ...options.limits }
   const now = options.now ?? Date.now
   const name = JACK_PERSONA_NAME[config.persona]
-  const requestType = options.requestType ?? "room"
+  const { requestType } = options
   const ctx: JackToolContext = { ...options.ctx, requestType }
   const { offered: tools, defs: toolDefs } = requestTools(options.tools, { web: requestType === "room" && webToolsOn() })
   const usage = options.usage ?? new UsageTally(config.model)

@@ -1046,6 +1046,9 @@ model JackMessage {
   /// A room note asking Jack to keep going (#177): a deck job that ran out of time or tool calls
   /// leaves one, and it's answered like an officer message (answeredById), as the officer it names
   continues     Boolean           @default(false)
+  /// A room note a scheduled run posted (a recurring question, design §11.1). It's answered as the officer
+  /// it names, in a reply of its own (never together with officer messages) that gets no web tools
+  scheduled     Boolean           @default(false)
   /// Officer messages (Jack 2.0): the author's profile when they posted it, e.g. "Technology Director ·
   /// Technology · CS". Snapshotted so history never changes when a profile does
   authorLabel   String?
