@@ -4,14 +4,17 @@
 -- Additive only: new enums and tables, new nullable or defaulted columns, new indexes. Code that's
 -- already running never reads any of it, so this is safe to apply before the app deploys (and the
 -- 2.0 release applies its migrations to production first, because getSessionUser reads whole User
--- rows; see the design's release plan).
+-- rows; see the design's release plan). No existing table gains a tsvector column, so run_sql's
+-- SELECT * keeps working for Jack 1.x too.
 --
 -- The generated part is Prisma's. The hand-written tail (after it) adds what Prisma can't express:
---   1. full-text search triggers for the `search` tsvector columns (declared in schema.prisma as
---      Unsupported("tsvector") so Prisma knows them and never drops them),
---   2. row level security on the tables that hold personal data, with a read policy for
---      jack_readonly only (the same pattern as 20261015000000_add_recruiting),
---   3. a row per outside connector in ConnectorState, all switched off.
+--   1. full-text search: triggers keep "JackSearchDoc" (one row per room message, knowledge entry,
+--      document and Teams message) current, and existing room messages are indexed,
+--   2. deleting a recurring question deletes its scheduled job,
+--   3. row level security on the tables that hold personal data, with a read policy for
+--      jack_readonly only (the same pattern as 20261015000000_add_recruiting); "JackSearchDoc" gets
+--      none,
+--   4. a row per outside connector in ConnectorState, all switched off.
 -- ---------------------------------------------------------------------------
 
 -- CreateEnum
@@ -40,8 +43,7 @@ ADD COLUMN     "views" INTEGER;
 
 -- AlterTable
 ALTER TABLE "public"."JackMessage" ADD COLUMN     "authorLabel" TEXT,
-ADD COLUMN     "expectsAnswer" BOOLEAN NOT NULL DEFAULT true,
-ADD COLUMN     "search" tsvector;
+ADD COLUMN     "expectsAnswer" BOOLEAN NOT NULL DEFAULT true;
 
 -- AlterTable
 ALTER TABLE "public"."JackRoom" ADD COLUMN     "answerMode" TEXT NOT NULL DEFAULT 'always',
@@ -128,7 +130,6 @@ CREATE TABLE "public"."KnowledgeEntry" (
     "createdById" TEXT,
     "updatedById" TEXT,
     "archivedAt" TIMESTAMP(3),
-    "search" tsvector,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -223,7 +224,6 @@ CREATE TABLE "public"."ExternalDocument" (
     "textStatus" TEXT NOT NULL,
     "syncedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
-    "search" tsvector,
 
     CONSTRAINT "ExternalDocument_pkey" PRIMARY KEY ("id")
 );
@@ -251,7 +251,6 @@ CREATE TABLE "public"."TeamsMessage" (
     "createdAt" TIMESTAMP(3) NOT NULL,
     "editedAt" TIMESTAMP(3),
     "deletedAt" TIMESTAMP(3),
-    "search" tsvector,
 
     CONSTRAINT "TeamsMessage_pkey" PRIMARY KEY ("id")
 );
@@ -328,8 +327,8 @@ CREATE TABLE "public"."DiscordDailyStat" (
 CREATE TABLE "public"."DiscordGuildDaily" (
     "date" DATE NOT NULL,
     "memberCount" INTEGER NOT NULL,
-    "joined" INTEGER,
-    "left" INTEGER,
+    "joinedCount" INTEGER,
+    "leftCount" INTEGER,
 
     CONSTRAINT "DiscordGuildDaily_pkey" PRIMARY KEY ("date")
 );
@@ -654,6 +653,16 @@ CREATE TABLE "public"."JackFeedback" (
     CONSTRAINT "JackFeedback_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "public"."JackSearchDoc" (
+    "source" TEXT NOT NULL,
+    "sourceId" TEXT NOT NULL,
+    "search" tsvector,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "JackSearchDoc_pkey" PRIMARY KEY ("source","sourceId")
+);
+
 -- CreateIndex
 CREATE INDEX "JackProposal_roomId_createdAt_idx" ON "public"."JackProposal"("roomId", "createdAt");
 
@@ -682,7 +691,7 @@ CREATE INDEX "JackFile_status_createdAt_idx" ON "public"."JackFile"("status", "c
 CREATE INDEX "KnowledgeEntry_archivedAt_updatedAt_idx" ON "public"."KnowledgeEntry"("archivedAt", "updatedAt");
 
 -- CreateIndex
-CREATE INDEX "KnowledgeEntry_search_idx" ON "public"."KnowledgeEntry" USING GIN ("search");
+CREATE INDEX "KnowledgeEntry_ownerId_idx" ON "public"."KnowledgeEntry"("ownerId");
 
 -- CreateIndex
 CREATE INDEX "KnowledgeEntryVersion_entryId_createdAt_idx" ON "public"."KnowledgeEntryVersion"("entryId", "createdAt");
@@ -703,16 +712,10 @@ CREATE INDEX "ScheduledJobRun_startedAt_idx" ON "public"."ScheduledJobRun"("star
 CREATE INDEX "ExternalDocument_source_modifiedAt_idx" ON "public"."ExternalDocument"("source", "modifiedAt");
 
 -- CreateIndex
-CREATE INDEX "ExternalDocument_search_idx" ON "public"."ExternalDocument" USING GIN ("search");
-
--- CreateIndex
 CREATE UNIQUE INDEX "ExternalDocument_source_externalId_key" ON "public"."ExternalDocument"("source", "externalId");
 
 -- CreateIndex
 CREATE INDEX "TeamsMessage_channelId_createdAt_idx" ON "public"."TeamsMessage"("channelId", "createdAt");
-
--- CreateIndex
-CREATE INDEX "TeamsMessage_search_idx" ON "public"."TeamsMessage" USING GIN ("search");
 
 -- CreateIndex
 CREATE INDEX "DiscordMessage_channelId_createdAt_idx" ON "public"."DiscordMessage"("channelId", "createdAt");
@@ -751,10 +754,28 @@ CREATE UNIQUE INDEX "InstagramPublish_proposalId_key" ON "public"."InstagramPubl
 CREATE INDEX "SponsorProspect_stage_updatedAt_idx" ON "public"."SponsorProspect"("stage", "updatedAt");
 
 -- CreateIndex
+CREATE INDEX "SponsorProspect_ownerId_idx" ON "public"."SponsorProspect"("ownerId");
+
+-- CreateIndex
 CREATE INDEX "SponsorActivity_prospectId_occurredAt_idx" ON "public"."SponsorActivity"("prospectId", "occurredAt");
 
 -- CreateIndex
 CREATE INDEX "Meeting_heldAt_idx" ON "public"."Meeting"("heldAt");
+
+-- CreateIndex
+CREATE INDEX "Meeting_roomId_idx" ON "public"."Meeting"("roomId");
+
+-- CreateIndex
+CREATE INDEX "Meeting_transcriptFileId_idx" ON "public"."Meeting"("transcriptFileId");
+
+-- CreateIndex
+CREATE INDEX "Meeting_transcriptDocumentId_idx" ON "public"."Meeting"("transcriptDocumentId");
+
+-- CreateIndex
+CREATE INDEX "MeetingDecision_meetingId_idx" ON "public"."MeetingDecision"("meetingId");
+
+-- CreateIndex
+CREATE INDEX "MeetingDecision_knowledgeEntryId_idx" ON "public"."MeetingDecision"("knowledgeEntryId");
 
 -- CreateIndex
 CREATE INDEX "ActionItem_status_dueAt_idx" ON "public"."ActionItem"("status", "dueAt");
@@ -763,16 +784,28 @@ CREATE INDEX "ActionItem_status_dueAt_idx" ON "public"."ActionItem"("status", "d
 CREATE INDEX "ActionItem_ownerId_status_idx" ON "public"."ActionItem"("ownerId", "status");
 
 -- CreateIndex
+CREATE INDEX "ActionItem_meetingId_idx" ON "public"."ActionItem"("meetingId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "RecurringQuestion_scheduledJobId_key" ON "public"."RecurringQuestion"("scheduledJobId");
+
+-- CreateIndex
+CREATE INDEX "RecurringQuestion_roomId_idx" ON "public"."RecurringQuestion"("roomId");
+
+-- CreateIndex
+CREATE INDEX "RecurringQuestion_createdById_idx" ON "public"."RecurringQuestion"("createdById");
+
+-- CreateIndex
+CREATE INDEX "JackFeedback_userId_idx" ON "public"."JackFeedback"("userId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "JackFeedback_messageId_userId_key" ON "public"."JackFeedback"("messageId", "userId");
 
 -- CreateIndex
-CREATE INDEX "ApplicationEmail_resendMessageId_idx" ON "public"."ApplicationEmail"("resendMessageId");
+CREATE INDEX "JackSearchDoc_search_idx" ON "public"."JackSearchDoc" USING GIN ("search");
 
 -- CreateIndex
-CREATE INDEX "JackMessage_search_idx" ON "public"."JackMessage" USING GIN ("search");
+CREATE INDEX "ApplicationEmail_resendMessageId_idx" ON "public"."ApplicationEmail"("resendMessageId");
 
 -- CreateIndex
 CREATE INDEX "Notification_emailMessageId_idx" ON "public"."Notification"("emailMessageId");
@@ -851,72 +884,110 @@ ALTER TABLE "public"."JackFeedback" ADD CONSTRAINT "JackFeedback_userId_fkey" FO
 -- Hand-written (Prisma can't express these)
 -- ---------------------------------------------------------------------------
 
--- 1. Full-text search. Triggers fill each `search` column; inputs are capped (a tsvector over 1 MB
--- is an error). JackMessage is rewritten about once a second while a reply streams, so its vector is
--- only built once the message isn't streaming, and only when its text or status changed.
+-- 1. Full-text search. One index table, "JackSearchDoc", kept current by triggers on the searchable
+-- tables. It's separate so no table Jack reads with SELECT * carries a tsvector (Prisma can't
+-- deserialize them, which would break run_sql's SELECT * queries, Jack 1.x's included). Inputs are
+-- capped (a tsvector over 1 MB is an error). JackMessage is rewritten about once a second while a
+-- reply streams, so a message is indexed only once it isn't streaming, and only when its text or
+-- status changed.
 
-CREATE OR REPLACE FUNCTION public.jack2_knowledge_search() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
+CREATE OR REPLACE FUNCTION public.jack2_search_put(p_source text, p_id text, p_vector tsvector) RETURNS void
+LANGUAGE sql SET search_path = '' AS $$
+  INSERT INTO public."JackSearchDoc" (source, "sourceId", search, "updatedAt")
+  VALUES (p_source, p_id, p_vector, now() AT TIME ZONE 'UTC')
+  ON CONFLICT (source, "sourceId") DO UPDATE SET search = EXCLUDED.search, "updatedAt" = EXCLUDED."updatedAt";
+$$;
+
+CREATE OR REPLACE FUNCTION public.jack2_search_delete() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
 BEGIN
-  NEW.search :=
-    setweight(pg_catalog.to_tsvector('english'::regconfig, coalesce(NEW.title, '')), 'A') ||
-    setweight(pg_catalog.to_tsvector('english'::regconfig, left(coalesce(pg_catalog.array_to_string(NEW.tags, ' '), ''), 2000)), 'B') ||
-    setweight(pg_catalog.to_tsvector('english'::regconfig, left(coalesce(NEW.body, ''), 100000)), 'C');
-  RETURN NEW;
+  DELETE FROM public."JackSearchDoc" WHERE source = TG_ARGV[0] AND "sourceId" = OLD.id;
+  RETURN NULL;
 END $$;
-
-CREATE TRIGGER "KnowledgeEntry_search" BEFORE INSERT OR UPDATE OF title, tags, body ON public."KnowledgeEntry"
-  FOR EACH ROW EXECUTE FUNCTION public.jack2_knowledge_search();
 
 CREATE OR REPLACE FUNCTION public.jack2_message_search() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
 BEGIN
   IF NEW.status = 'streaming' THEN
-    NEW.search := NULL;
-  ELSIF TG_OP = 'INSERT' OR NEW.content IS DISTINCT FROM OLD.content OR NEW.status IS DISTINCT FROM OLD.status THEN
-    NEW.search := pg_catalog.to_tsvector('english'::regconfig, left(coalesce(NEW.content, ''), 100000));
+    RETURN NULL;
   END IF;
-  RETURN NEW;
+  IF TG_OP = 'UPDATE' AND NEW.content IS NOT DISTINCT FROM OLD.content AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
+    RETURN NULL;
+  END IF;
+  PERFORM public.jack2_search_put('room_message', NEW.id,
+    pg_catalog.to_tsvector('english'::regconfig, left(coalesce(NEW.content, ''), 100000)));
+  RETURN NULL;
 END $$;
 
-CREATE TRIGGER "JackMessage_search" BEFORE INSERT OR UPDATE OF content, status ON public."JackMessage"
-  FOR EACH ROW EXECUTE FUNCTION public.jack2_message_search();
+CREATE OR REPLACE FUNCTION public.jack2_knowledge_search() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
+BEGIN
+  PERFORM public.jack2_search_put('knowledge', NEW.id,
+    setweight(pg_catalog.to_tsvector('english'::regconfig, coalesce(NEW.title, '')), 'A') ||
+    setweight(pg_catalog.to_tsvector('english'::regconfig, left(coalesce(pg_catalog.array_to_string(NEW.tags, ' '), ''), 2000)), 'B') ||
+    setweight(pg_catalog.to_tsvector('english'::regconfig, left(coalesce(NEW.body, ''), 100000)), 'C'));
+  RETURN NULL;
+END $$;
 
 CREATE OR REPLACE FUNCTION public.jack2_document_search() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
 BEGIN
-  NEW.search :=
+  PERFORM public.jack2_search_put('document', NEW.id,
     setweight(pg_catalog.to_tsvector('english'::regconfig, coalesce(NEW.name, '')), 'A') ||
     setweight(pg_catalog.to_tsvector('english'::regconfig, left(coalesce(NEW.path, ''), 1000)), 'B') ||
-    setweight(pg_catalog.to_tsvector('english'::regconfig, left(coalesce(NEW.text, ''), 100000)), 'C');
-  RETURN NEW;
+    setweight(pg_catalog.to_tsvector('english'::regconfig, left(coalesce(NEW.text, ''), 100000)), 'C'));
+  RETURN NULL;
 END $$;
-
-CREATE TRIGGER "ExternalDocument_search" BEFORE INSERT OR UPDATE OF name, path, text ON public."ExternalDocument"
-  FOR EACH ROW EXECUTE FUNCTION public.jack2_document_search();
 
 CREATE OR REPLACE FUNCTION public.jack2_teams_search() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
 BEGIN
-  NEW.search :=
+  PERFORM public.jack2_search_put('teams', NEW.id,
     setweight(pg_catalog.to_tsvector('simple'::regconfig, coalesce(NEW."authorName", '')), 'B') ||
-    setweight(pg_catalog.to_tsvector('english'::regconfig, left(coalesce(NEW.content, ''), 100000)), 'C');
-  RETURN NEW;
+    setweight(pg_catalog.to_tsvector('english'::regconfig, left(coalesce(NEW.content, ''), 100000)), 'C'));
+  RETURN NULL;
 END $$;
 
-CREATE TRIGGER "TeamsMessage_search" BEFORE INSERT OR UPDATE OF "authorName", content ON public."TeamsMessage"
+CREATE TRIGGER "JackMessage_search" AFTER INSERT OR UPDATE OF content, status ON public."JackMessage"
+  FOR EACH ROW EXECUTE FUNCTION public.jack2_message_search();
+CREATE TRIGGER "JackMessage_search_delete" AFTER DELETE ON public."JackMessage"
+  FOR EACH ROW EXECUTE FUNCTION public.jack2_search_delete('room_message');
+CREATE TRIGGER "KnowledgeEntry_search" AFTER INSERT OR UPDATE OF title, tags, body ON public."KnowledgeEntry"
+  FOR EACH ROW EXECUTE FUNCTION public.jack2_knowledge_search();
+CREATE TRIGGER "KnowledgeEntry_search_delete" AFTER DELETE ON public."KnowledgeEntry"
+  FOR EACH ROW EXECUTE FUNCTION public.jack2_search_delete('knowledge');
+CREATE TRIGGER "ExternalDocument_search" AFTER INSERT OR UPDATE OF name, path, text ON public."ExternalDocument"
+  FOR EACH ROW EXECUTE FUNCTION public.jack2_document_search();
+CREATE TRIGGER "ExternalDocument_search_delete" AFTER DELETE ON public."ExternalDocument"
+  FOR EACH ROW EXECUTE FUNCTION public.jack2_search_delete('document');
+CREATE TRIGGER "TeamsMessage_search" AFTER INSERT OR UPDATE OF "authorName", content ON public."TeamsMessage"
   FOR EACH ROW EXECUTE FUNCTION public.jack2_teams_search();
+CREATE TRIGGER "TeamsMessage_search_delete" AFTER DELETE ON public."TeamsMessage"
+  FOR EACH ROW EXECUTE FUNCTION public.jack2_search_delete('teams');
 
--- Backfill the existing room messages (the other tables are new and empty). A plain UPDATE of
--- `search` doesn't fire the trigger (it only listens to content and status), so compute it here
-UPDATE public."JackMessage"
-SET search = pg_catalog.to_tsvector('english'::regconfig, left(coalesce(content, ''), 100000))
-WHERE status <> 'streaming';
+-- Index the room messages that already exist (the other tables are new and empty)
+INSERT INTO public."JackSearchDoc" (source, "sourceId", search, "updatedAt")
+SELECT 'room_message', id, pg_catalog.to_tsvector('english'::regconfig, left(coalesce(content, ''), 100000)), now() AT TIME ZONE 'UTC'
+FROM public."JackMessage"
+WHERE status <> 'streaming'
+ON CONFLICT (source, "sourceId") DO NOTHING;
 
--- These trigger functions are only ever called as triggers
-REVOKE EXECUTE ON FUNCTION public.jack2_knowledge_search(), public.jack2_message_search(),
-  public.jack2_document_search(), public.jack2_teams_search() FROM PUBLIC;
+-- 2. A recurring question owns its scheduled job: deleting the question (or the room it lives in)
+-- deletes the job, so it can't keep coming due
+CREATE OR REPLACE FUNCTION public.jack2_recurring_job_cleanup() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
+BEGIN
+  DELETE FROM public."ScheduledJob" WHERE id = OLD."scheduledJobId";
+  RETURN NULL;
+END $$;
 
--- 2. Row level security on tables that hold personal data. The app connects as the table owner, so
+CREATE TRIGGER "RecurringQuestion_job_cleanup" AFTER DELETE ON public."RecurringQuestion"
+  FOR EACH ROW EXECUTE FUNCTION public.jack2_recurring_job_cleanup();
+
+-- These functions only run inside the triggers above
+REVOKE EXECUTE ON FUNCTION public.jack2_search_put(text, text, tsvector), public.jack2_search_delete(),
+  public.jack2_message_search(), public.jack2_knowledge_search(), public.jack2_document_search(),
+  public.jack2_teams_search(), public.jack2_recurring_job_cleanup() FROM PUBLIC;
+
+-- 3. Row level security on tables that hold personal data. The app connects as the table owner, so
 -- RLS doesn't change what it can do; it keeps the anon and authenticated roles out (in production
 -- they have no access to schema public anyway, but locally they do), and jack_readonly reads through
--- an explicit policy. Same pattern as the recruiting tables.
+-- an explicit policy. Same pattern as the recruiting tables. "JackSearchDoc" (lexemes of everything
+-- searchable) gets RLS with NO policy for jack_readonly: search goes through the tools.
 ALTER TABLE public."JackFile" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."JackProposal" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."EmailEvent" ENABLE ROW LEVEL SECURITY;
@@ -931,6 +1002,7 @@ ALTER TABLE public."MeetingDecision" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."ActionItem" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."KnowledgeEntry" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."KnowledgeEntryVersion" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public."JackSearchDoc" ENABLE ROW LEVEL SECURITY;
 
 DO $rls$
 DECLARE
@@ -945,13 +1017,14 @@ BEGIN
   -- Supabase's API roles get nothing on these tables (they don't exist on plain Postgres)
   FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
-      FOREACH t IN ARRAY personal LOOP
+      FOREACH t IN ARRAY personal || ARRAY['JackSearchDoc'] LOOP
         EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', t, r);
       END LOOP;
     END IF;
   END LOOP;
 
-  -- jack_readonly reads through a policy (without one it would see zero rows)
+  -- jack_readonly reads the personal-data tables through a policy (without one it would see zero
+  -- rows); "JackSearchDoc" deliberately has none
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'jack_readonly') THEN
     FOREACH t IN ARRAY personal LOOP
       EXECUTE format('DROP POLICY IF EXISTS jack_readonly_select ON public.%I', t);
@@ -960,7 +1033,7 @@ BEGIN
   END IF;
 
   -- Checks: every personal-data table has RLS on, and Jack's role can still only read
-  FOREACH t IN ARRAY personal LOOP
+  FOREACH t IN ARRAY personal || ARRAY['JackSearchDoc'] LOOP
     IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = format('public.%I', t)::regclass) THEN
       RAISE EXCEPTION 'row level security is off on %', t;
     END IF;
@@ -976,17 +1049,17 @@ BEGIN
 END
 $rls$;
 
--- 3. One row per outside connector, all off: admins switch each on after its smoke test (design §12)
+-- 4. One row per outside connector, all off: admins switch each on after its smoke test (design §12)
 INSERT INTO public."ConnectorState" (id, enabled, "updatedAt")
 VALUES
-  ('discord', false, now()),
-  ('twitch', false, now()),
-  ('stripe', false, now()),
-  ('resend', false, now()),
-  ('site-traffic', false, now()),
-  ('instagram-insights', false, now()),
-  ('instagram-publish', false, now()),
-  ('google-drive', false, now()),
-  ('sharepoint', false, now()),
-  ('teams', false, now())
+  ('discord', false, now() AT TIME ZONE 'UTC'),
+  ('twitch', false, now() AT TIME ZONE 'UTC'),
+  ('stripe', false, now() AT TIME ZONE 'UTC'),
+  ('resend', false, now() AT TIME ZONE 'UTC'),
+  ('site-traffic', false, now() AT TIME ZONE 'UTC'),
+  ('instagram-insights', false, now() AT TIME ZONE 'UTC'),
+  ('instagram-publish', false, now() AT TIME ZONE 'UTC'),
+  ('google-drive', false, now() AT TIME ZONE 'UTC'),
+  ('sharepoint', false, now() AT TIME ZONE 'UTC'),
+  ('teams', false, now() AT TIME ZONE 'UTC')
 ON CONFLICT (id) DO NOTHING;

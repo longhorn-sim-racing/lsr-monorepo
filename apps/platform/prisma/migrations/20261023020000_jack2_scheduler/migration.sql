@@ -2,7 +2,9 @@
 -- Jack 2.0 scheduler (#188; design §6; research: docs/jack-2/research/supabase-pg-cron.md).
 --
 -- pg_cron runs scheduler.tick() every minute (that schedule is a setup step, not a migration: see
--- scripts/jack-scheduler-setup.ts). tick() does nothing unless a ScheduledJob row is due; when one is,
+-- scripts/jack-scheduler-setup.ts). Every call records a heartbeat (so the Connections and Scheduled
+-- jobs pages can tell a dead scheduler from an idle one). Beyond that it does nothing unless a
+-- ScheduledJob row is due; when one is,
 -- it POSTs to the site's /api/cron/tick through pg_net, signed with an HMAC. It never sends the secret
 -- itself: pg_net's request queue is readable by every database role (Supabase grants it to PUBLIC
 -- and that can't be revoked), Jack's read-only role included.
@@ -36,16 +38,21 @@ REVOKE ALL ON SCHEMA scheduler FROM PUBLIC;
 -- Called by pg_cron every minute. Returns the pg_net request id, or NULL when nothing was due (or the
 -- Vault values aren't set). The signature is v1=hex(HMAC_SHA256(secret, timestamp + "." + body)),
 -- over the exact body text pg_net sends; /api/cron/tick verifies it against the raw request body.
+-- Prisma stores DateTime as UTC in timestamp columns, so times are compared with now() in UTC (not
+-- the session time zone, which an ALTER DATABASE could change).
 CREATE OR REPLACE FUNCTION scheduler.tick() RETURNS bigint LANGUAGE plpgsql SET search_path = '' AS $$
 DECLARE
+  v_now timestamp := now() AT TIME ZONE 'UTC';
   v_url text;
   v_secret text;
   v_ts text;
   v_body jsonb;
 BEGIN
+  INSERT INTO public."SchedulerHeartbeat" (id, "lastTickAt") VALUES ('tick', v_now)
+  ON CONFLICT (id) DO UPDATE SET "lastTickAt" = EXCLUDED."lastTickAt";
   IF NOT EXISTS (
     SELECT 1 FROM public."ScheduledJob"
-    WHERE enabled AND "nextRunAt" <= now() AND ("lockedUntil" IS NULL OR "lockedUntil" < now())
+    WHERE enabled AND "nextRunAt" <= v_now AND ("lockedUntil" IS NULL OR "lockedUntil" < v_now)
   ) THEN
     RETURN NULL;
   END IF;

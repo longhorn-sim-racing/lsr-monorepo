@@ -1025,7 +1025,7 @@ model JackUsage {
 /// One message in a room. `kind` says who it's from; a check constraint keeps `persona` set exactly
 /// on assistant messages, and `authorUserId` off them
 model JackMessage {
-  id            String                   @id @default(uuid())
+  id            String            @id @default(uuid())
   roomId        String
   kind          JackMessageKind
   /// user: the officer who wrote it. system: the officer whose action it records. Null for assistant
@@ -1033,27 +1033,24 @@ model JackMessage {
   authorUserId  String?
   /// assistant: the model that wrote it. Null otherwise
   persona       JackPersona?
-  content       String                   @default("")
+  content       String            @default("")
   /// Tool calls and their results (later steps)
   toolCalls     Json?
-  status        JackMessageStatus        @default(done)
+  status        JackMessageStatus @default(done)
   /// The last streamed delta whose text is saved in `content`. Viewers who open the room
   /// mid-answer apply only the deltas after it
-  streamSeq     Int                      @default(0)
+  streamSeq     Int               @default(0)
   /// user messages: the reply that answered it. Null until Jack picks it up, so a message posted
   /// while he's answering waits for the next pass
   answeredById  String?
   /// A room note asking Jack to keep going (#177): a deck job that ran out of time or tool calls
   /// leaves one, and it's answered like an officer message (answeredById), as the officer it names
-  continues     Boolean                  @default(false)
+  continues     Boolean           @default(false)
   /// Officer messages (Jack 2.0): the author's profile when they posted it, e.g. "Technology Director ·
   /// Technology · CS". Snapshotted so history never changes when a profile does
   authorLabel   String?
   /// False for officer messages in a mention-mode room that don't mention Jack: context, not questions
-  expectsAnswer Boolean                  @default(true)
-  /// Full-text search (room search). Filled by a database trigger once the message is done streaming;
-  /// Prisma never reads or writes it
-  search        Unsupported("tsvector")?
+  expectsAnswer Boolean           @default(true)
 
   /// Assistant messages only (later steps)
   model           String?
@@ -1077,7 +1074,6 @@ model JackMessage {
   @@index([roomId, createdAt])
   @@index([roomId, kind, answeredById])
   @@index([authorUserId])
-  @@index([search], type: Gin)
 }
 
 /// A deck's canvas: 16:9 slides (1920x1080), an Instagram post (1080x1350), an Instagram story
@@ -1406,12 +1402,12 @@ enum KnowledgeSource {
 /// One piece of club knowledge: a decision, a how-to, a policy, who does what (design §9). Personal
 /// data: entries can name people
 model KnowledgeEntry {
-  id           String                   @id @default(uuid())
+  id           String          @id @default(uuid())
   title        String
   /// Markdown
   body         String
-  tags         String[]                 @default([])
-  sourceType   KnowledgeSource          @default(MANUAL)
+  tags         String[]        @default([])
+  sourceType   KnowledgeSource @default(MANUAL)
   sourceUrl    String?
   /// Where it came from, e.g. "Teams General, Dylan, 9/28"
   sourceNote   String?
@@ -1426,17 +1422,15 @@ model KnowledgeEntry {
   createdById  String?
   updatedById  String?
   archivedAt   DateTime?
-  /// Full-text search, filled by a database trigger; Prisma never reads or writes it
-  search       Unsupported("tsvector")?
-  createdAt    DateTime                 @default(now())
-  updatedAt    DateTime                 @updatedAt
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
   owner     User?                   @relation("KnowledgeOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   versions  KnowledgeEntryVersion[]
   decisions MeetingDecision[]
 
   @@index([archivedAt, updatedAt])
-  @@index([search], type: Gin)
+  @@index([ownerId])
 }
 
 /// Every saved state of a knowledge entry. Personal data, like the entry
@@ -1530,7 +1524,7 @@ model ConnectorState {
 /// §12.7 and §12.8). Personal data: documents can hold anything. Deleted files keep the row but lose
 /// their text
 model ExternalDocument {
-  id         String                   @id @default(uuid())
+  id         String    @id @default(uuid())
   /// "drive" | "sharepoint"
   source     String
   /// Drive file id, or "driveId!itemId" for SharePoint
@@ -1549,13 +1543,11 @@ model ExternalDocument {
   textStatus String
   syncedAt   DateTime
   deletedAt  DateTime?
-  search     Unsupported("tsvector")?
 
   meetingsAsTranscript Meeting[]
 
   @@unique([source, externalId])
   @@index([source, modifiedAt])
-  @@index([search], type: Gin)
 }
 
 /// A Teams channel we may sync (off until UT IT approves; design §12.8)
@@ -1570,7 +1562,7 @@ model TeamsChannel {
 
 /// A synced Teams channel message. Personal data. Deleted messages lose their content
 model TeamsMessage {
-  id          String                   @id
+  id          String    @id
   channelId   String
   replyToId   String?
   authorAadId String?
@@ -1580,10 +1572,8 @@ model TeamsMessage {
   createdAt   DateTime
   editedAt    DateTime?
   deletedAt   DateTime?
-  search      Unsupported("tsvector")?
 
   @@index([channelId, createdAt])
-  @@index([search], type: Gin)
 }
 
 /// A Microsoft Graph change-notification subscription (they expire after about 3 days and are renewed)
@@ -1659,8 +1649,8 @@ model DiscordDailyStat {
 model DiscordGuildDaily {
   date        DateTime @id @db.Date
   memberCount Int
-  joined      Int?
-  left        Int?
+  joinedCount Int?
+  leftCount   Int?
 }
 
 /// A standing automation an officer set up (design §12.1): fixed templates over our own data, never
@@ -1901,6 +1891,7 @@ model SponsorProspect {
   activities SponsorActivity[]
 
   @@index([stage, updatedAt])
+  @@index([ownerId])
 }
 
 /// Personal data, like its prospect
@@ -1942,6 +1933,9 @@ model Meeting {
   actionItems        ActionItem[]
 
   @@index([heldAt])
+  @@index([roomId])
+  @@index([transcriptFileId])
+  @@index([transcriptDocumentId])
 }
 
 /// A decision, also kept in the knowledge base's decision log. Personal data
@@ -1955,6 +1949,9 @@ model MeetingDecision {
 
   meeting        Meeting?        @relation(fields: [meetingId], references: [id], onDelete: SetNull)
   knowledgeEntry KnowledgeEntry? @relation(fields: [knowledgeEntryId], references: [id], onDelete: SetNull)
+
+  @@index([meetingId])
+  @@index([knowledgeEntryId])
 }
 
 /// Something someone said they'd do. Personal data
@@ -1977,6 +1974,7 @@ model ActionItem {
 
   @@index([status, dueAt])
   @@index([ownerId, status])
+  @@index([meetingId])
 }
 
 /// A question Jack answers on a schedule in a room (design §11.1). The schedule lives on its
@@ -1999,6 +1997,9 @@ model RecurringQuestion {
   room         JackRoom     @relation(fields: [roomId], references: [id], onDelete: Cascade)
   scheduledJob ScheduledJob @relation(fields: [scheduledJobId], references: [id], onDelete: Cascade)
   createdBy    User?        @relation("RecurringQuestionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([roomId])
+  @@index([createdById])
 }
 
 /// An officer's thumbs up or down on one of Jack's replies
@@ -2015,4 +2016,20 @@ model JackFeedback {
   user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
+  @@index([userId])
+}
+
+/// Full-text search index for Jack 2.0: one row per searchable thing (a room message, knowledge entry,
+/// document or Teams message), kept current by database triggers on those tables (see the migration).
+/// It's its own table so that no table Jack reads with SELECT * carries a tsvector, which Prisma can't
+/// deserialize. Row level security with no policy for jack_readonly: search goes through the tools
+model JackSearchDoc {
+  /// "room_message" | "knowledge" | "document" | "teams"
+  source    String
+  sourceId  String
+  search    Unsupported("tsvector")?
+  updatedAt DateTime                 @default(now())
+
+  @@id([source, sourceId])
+  @@index([search], type: Gin)
 }

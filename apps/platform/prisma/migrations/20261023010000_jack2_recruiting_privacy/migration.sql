@@ -8,7 +8,10 @@
 --   - Teams, reviews, scores, decisions and decision emails on an application from someone who holds
 --     the officer or admin role are invisible, so an officer can never read their own (or a fellow
 --     officer's) reviews through Jack.
--- The recruiting tool applies the same rules in code; this covers raw SQL (run_sql).
+--   - The same goes for the audit log's recruiting entries about those applications (status changes,
+--     reviews with their scores, views, emails): AuditLog gets row level security with a policy for
+--     jack_readonly that hides them. Everything else in the audit log stays readable.
+-- The recruiting and audit_log tools apply the same rules in code; this covers raw SQL (run_sql).
 --
 -- Only touches jack_readonly's policies; the app connects as the table owner, which RLS doesn't
 -- restrict. Safe to apply before the app deploys.
@@ -54,5 +57,19 @@ BEGIN
         )
     ));
   -- RecruitingCycle and RecruitingTrackConfig keep USING (true): rounds and booking links
+
+  -- The audit log: hide recruiting entries whose subject (targetUserId, the applicant) is an officer or
+  -- admin. Other roles: the app connects as the owner (not restricted), and anon/authenticated get no
+  -- policy, so they see nothing (production gives them no access to schema public anyway)
+  ALTER TABLE public."AuditLog" ENABLE ROW LEVEL SECURITY;
+  DROP POLICY IF EXISTS jack_readonly_select ON public."AuditLog";
+  CREATE POLICY jack_readonly_select ON public."AuditLog" FOR SELECT TO jack_readonly
+    USING (NOT (
+      "entityType" IN ('APPLICATION', 'APPLICATION_TRACK', 'APPLICATION_EMAIL')
+      AND EXISTS (
+        SELECT 1 FROM public."UserRole" ur JOIN public."Role" r ON r.id = ur."roleId"
+        WHERE ur."userId" = "AuditLog"."targetUserId" AND r.key IN ('officer', 'admin')
+      )
+    ));
 END
 $recruit$;

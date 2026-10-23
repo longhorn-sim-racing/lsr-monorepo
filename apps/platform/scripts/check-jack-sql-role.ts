@@ -22,7 +22,9 @@
  *   - run_sql drops session advisory locks after every query, failing ones included
  *   - Jack 2.0 (#188): pg_cron's cron schema and the scheduler are denied; every personal-data table
  *     has row level security on, Jack's read policy, and nothing for Supabase's anon/authenticated
- *     roles; DRAFT applications, and reviews of officers' own applications, are invisible to the role
+ *     roles; the search index has row level security and no policy for Jack; the recruiting and audit
+ *     log policies hide drafts and anything about an officer's own application (checked on the data
+ *     when there is some, and on the policy text either way)
  *
  * Warns (doesn't fail) when the database keeps secret-looking settings in pg_db_role_setting, which any
  * role can read. Local Supabase does by design (its well-known local JWT secret in
@@ -167,17 +169,43 @@ async function main() {
     const row = rls.find((r) => r.table === table);
     report(!!row && row.rls && row.policy && !row.api, `"${table}": row level security, Jack's read policy, no API-role access`, row ? `rls ${row.rls}, policy ${row.policy}, api ${row.api}` : "table missing");
   }
+  const [searchDoc] = await app.$queryRawUnsafe<{ rls: boolean; policies: number }[]>(
+    `SELECT c.relrowsecurity AS rls, (SELECT count(*)::int FROM pg_policies p WHERE p.schemaname = 'public' AND p.tablename = 'JackSearchDoc') AS policies
+     FROM pg_class c WHERE c.oid = 'public."JackSearchDoc"'::regclass`,
+  );
+  report(!!searchDoc && searchDoc.rls && searchDoc.policies === 0, '"JackSearchDoc": row level security and no policy (Jack sees no rows)', JSON.stringify(searchDoc));
 
-  // Recruiting (design §3.2): drafts, and anything about an officer's own application, stay hidden
-  const appDrafts = (await app.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "Application" WHERE state = 'DRAFT'`))[0].n;
-  const jackDrafts = await attempt(`SELECT count(*)::int AS n FROM "Application" WHERE state = 'DRAFT'`);
-  report(jackDrafts.ok && (jackDrafts.rows as { n: number }[])[0].n === 0, "recruiting: DRAFT applications are invisible", `${appDrafts} in the database`);
-  const officerReviewsSql = `SELECT count(*)::int AS n FROM "ApplicationReview" rv JOIN "ApplicationTrack" t ON t.id = rv."applicationTrackId"
-    JOIN "Application" a ON a.id = t."applicationId"
-    WHERE EXISTS (SELECT 1 FROM "UserRole" ur JOIN "Role" r ON r.id = ur."roleId" WHERE ur."userId" = a."userId" AND r.key IN ('officer', 'admin'))`;
-  const appOfficerReviews = (await app.$queryRawUnsafe<{ n: number }[]>(officerReviewsSql))[0].n;
-  const jackOfficerReviews = await attempt(officerReviewsSql);
-  report(jackOfficerReviews.ok && (jackOfficerReviews.rows as { n: number }[])[0].n === 0, "recruiting: reviews of officers' applications are invisible", `${appOfficerReviews} in the database`);
+  // Recruiting and the audit log (design §3.2): drafts, and anything about an officer's own
+  // application, stay hidden. The policy text is checked always; the data only when there's some to
+  // test against (this script writes nothing)
+  const policies = await app.$queryRawUnsafe<{ table: string; qual: string }[]>(
+    `SELECT tablename AS "table", qual FROM pg_policies WHERE schemaname = 'public' AND policyname = 'jack_readonly_select'
+       AND tablename IN ('Application', 'ApplicationTrack', 'ApplicationReview', 'ApplicationEmail', 'AuditLog')`,
+  );
+  const qual = (table: string) => policies.find((p) => p.table === table)?.qual ?? "";
+  report(qual("Application").includes("SUBMITTED"), "recruiting policy: only SUBMITTED applications", qual("Application").slice(0, 80));
+  for (const table of ["ApplicationTrack", "ApplicationEmail", "AuditLog"]) {
+    report(qual(table).includes("officer") && qual(table).includes("admin"), `${table} policy: hides officer and admin applicants`, qual(table).slice(0, 80));
+  }
+  report(qual("ApplicationReview").includes("ApplicationTrack"), "ApplicationReview policy: follows its team application", qual("ApplicationReview").slice(0, 80));
+
+  async function hiddenOnData(name: string, sql: string) {
+    const inDatabase = (await app.$queryRawUnsafe<{ n: number }[]>(sql))[0].n;
+    if (inDatabase === 0) return console.log(`SKIP  ${name}  (nothing in the database to test against)`);
+    const seen = await attempt(sql);
+    report(seen.ok && (seen.rows as { n: number }[])[0].n === 0, name, `${inDatabase} in the database`);
+  }
+  const officerApplicant = `EXISTS (SELECT 1 FROM "UserRole" ur JOIN "Role" r ON r.id = ur."roleId" WHERE ur."userId" = a."userId" AND r.key IN ('officer', 'admin'))`;
+  await hiddenOnData("recruiting: DRAFT applications are invisible", `SELECT count(*)::int AS n FROM "Application" WHERE state = 'DRAFT'`);
+  await hiddenOnData(
+    "recruiting: reviews of officers' applications are invisible",
+    `SELECT count(*)::int AS n FROM "ApplicationReview" rv JOIN "ApplicationTrack" t ON t.id = rv."applicationTrackId" JOIN "Application" a ON a.id = t."applicationId" WHERE ${officerApplicant}`,
+  );
+  await hiddenOnData(
+    "audit log: recruiting entries about officers' applications are invisible",
+    `SELECT count(*)::int AS n FROM "AuditLog" l WHERE l."entityType" IN ('APPLICATION', 'APPLICATION_TRACK', 'APPLICATION_EMAIL')
+       AND EXISTS (SELECT 1 FROM "UserRole" ur JOIN "Role" r ON r.id = ur."roleId" WHERE ur."userId" = l."targetUserId" AND r.key IN ('officer', 'admin'))`,
+  );
   await app.$disconnect();
 
   // One statement at a time
