@@ -2,7 +2,7 @@ import type { BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages
 import { linkHost } from "@/lib/jack/links"
 import { parseToolParts, type JackToolPart } from "@/lib/jack/parts"
 import type { JackPersonaKey } from "@/lib/jack/types"
-import { attachmentLine, type HistoryFile } from "./files/describe"
+import { attachmentLine, neutralizeLinks, type HistoryFile } from "./files/describe"
 import { FORMER_OFFICER } from "./messages"
 import { WEB_FETCH, WEB_SEARCH } from "./web-tools"
 
@@ -55,7 +55,8 @@ const EARLIER_LEFT_OUT = "(Earlier messages in this room aren't included.)"
  * - An officer turn is every message a reply answered (`answeredById`), as "Name: text" under a
  *   Central Time timestamp, so several officers posting during one answer become one turn. Notes a
  *   reply answers (a deck's continue note, a scheduled question) go in that reply's turn the same way;
- *   other room notes (a persona switch) go in the turn they came before, as context.
+ *   other room notes (a persona switch) go in the turn they came before, as context. Every note is one
+ *   line with its links neutralized (roomNoteLine).
  * - In a mention-mode room, officer messages that didn't mention Jack go in the turn of the reply that
  *   took them as context (the reply loop's waitingAsides), each marked ASIDE_MARK; a turn keeps only
  *   the newest of them (ASIDE_LIMITS) and says how many it left out.
@@ -176,11 +177,25 @@ export function formatTurnTime(date: Date): string {
 function renderOfficerTurn(items: HistoryRow[]): string {
   if (!items.length) return ""
   const lines = items.flatMap((item) => {
-    if (item.kind === "system") return [`(Room note: ${item.content})`]
+    if (item.kind === "system") return [roomNoteLine(item.content)]
     const line = `${officerName(item)}:${item.content ? ` ${item.content}` : ""}`
     return item.files?.length ? [line, attachmentLine(item.files)] : [line]
   })
   return `[${formatTurnTime(items[items.length - 1].createdAt)}]\n${lines.join("\n")}`
+}
+
+/** Line breaks of every kind, with the spaces around them */
+const NOTE_BREAKS = /\s*[\n\r\v\f\u0085\u2028\u2029]+\s*/g
+
+/**
+ * A room note as Jack reads it. Notes can carry text a model wrote, which may come from outside content:
+ * a knowledge entry's body, a proposal's title, Stand's name for the room. web_fetch may open any URL in
+ * a user turn (design §7.2), so the note's links are neutralized like a file's, and it's kept to one line
+ * (" / " between its lines), so nothing in it can pass for an officer's line. The room shows the note as
+ * it was written; Jack reads an entry's links with `read`, a tool result, which web_fetch never opens
+ */
+export function roomNoteLine(content: string): string {
+  return `(Room note: ${neutralizeLinks(content.trim()).replace(NOTE_BREAKS, " / ")})`
 }
 
 /**
