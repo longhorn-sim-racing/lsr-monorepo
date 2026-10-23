@@ -172,7 +172,8 @@ export async function runJob(job: DueJob, kind: JobKind, { startedAt, clock = Da
   const begin = clock()
   const deadline = Math.min(begin + kind.budgetMs, startedAt + FUNCTION_MAX_MS - END_MARGIN_MS)
   const controller = new AbortController()
-  const abort = setTimeout(() => controller.abort(new Error(`Ran out of its ${Math.round(kind.budgetMs / 1000)} s budget`)), Math.max(0, deadline - begin))
+  const reason = deadline < begin + kind.budgetMs ? "Ran out of time: the function running it was about to end" : `Ran out of its ${Math.round(kind.budgetMs / 1000)} s budget`
+  const abort = setTimeout(() => controller.abort(new Error(reason)), Math.max(0, deadline - begin))
   let late: ReturnType<typeof setTimeout> | undefined
   const lines: string[] = []
   const log = (line: string) => {
