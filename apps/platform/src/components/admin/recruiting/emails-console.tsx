@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Badge, Button, CheckboxField, Dialog, EmptyState, Notice, PageHeader, Panel, Select, TD, TH, THead, TR, Table, Toolbar } from "@/components/admin/kit";
 import { resendAllFailedAction, resendEmailAction } from "@/app/admin/recruiting/actions";
 import { EMAIL_STATUS_TONE, EMAIL_TEMPLATE_LABEL, formatCentral } from "@/lib/recruiting/labels";
+import { DELIVERY_LABEL, type DeliveryStatus } from "@/lib/email-delivery";
 
 type Row = {
   id: string;
@@ -18,18 +19,28 @@ type Row = {
   toEmail: string;
   applicationId: string;
   applicantName: string | null;
+  /** What Resend reported after sending (null: it never reached Resend) */
+  delivery: { status: DeliveryStatus; reason: string | null } | null;
 };
+
+/** The round's sent emails by what Resend reported */
+type DeliverySummary = { sent: number; arrived: number; undelivered: number; delayed: number; noReport: number };
 
 export function EmailsConsole({
   cycles,
   cycle,
   quota,
   rows,
+  deliverySummary,
+  deliveryUnavailable = false,
 }: {
   cycles: Array<{ slug: string; name: string; isActive: boolean }>;
   cycle: { id: string; slug: string; name: string };
   quota: { sentToday: number; dailyLimit: number | null; left: number | null };
   rows: Row[];
+  deliverySummary: DeliverySummary | null;
+  /** Delivery tracking is set up but its reports couldn't be read this time */
+  deliveryUnavailable?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -55,7 +66,7 @@ export function EmailsConsole({
       <PageHeader
         back={{ href: `/admin/recruiting?cycle=${cycle.slug}`, label: "Applications" }}
         title="Emails that need attention"
-        description="Failed emails, and ones stuck while sending."
+        description="Failed emails, ones stuck while sending, and sent ones that didn't arrive."
         actions={
           <Button variant="primary" disabled={failed.length === 0 || pending} onClick={() => setBulkOpen(true)}>
             Resend all failed ({failed.length})
@@ -87,16 +98,32 @@ export function EmailsConsole({
         )}
       </Notice>
 
+      {deliveryUnavailable && (
+        <Notice tone="warning" className="mb-3">
+          Couldn&apos;t load Resend&apos;s delivery reports, so sent emails that didn&apos;t arrive may be missing below. Reload to try again.
+        </Notice>
+      )}
+
+      {deliverySummary && deliverySummary.sent > 0 && (
+        <p className="mb-3 text-[13px] text-muted-foreground">
+          Delivery of this round&apos;s {deliverySummary.sent} sent {deliverySummary.sent === 1 ? "email" : "emails"}: {deliverySummary.arrived} arrived
+          {deliverySummary.undelivered > 0 && `, ${deliverySummary.undelivered} didn't arrive`}
+          {deliverySummary.delayed > 0 && `, ${deliverySummary.delayed} delayed`}
+          {deliverySummary.noReport > 0 && `, ${deliverySummary.noReport} with no report yet`}.
+        </p>
+      )}
+
       {rows.length === 0 ? (
         <Panel>
           <EmptyState title="Nothing needs attention" description="Every email for this round was sent." />
         </Panel>
       ) : (
-        <Table minWidth={720}>
+        <Table minWidth={820}>
           <THead>
             <TH>Applicant</TH>
             <TH>Email</TH>
             <TH>Status</TH>
+            <TH>Delivery</TH>
             <TH>Created</TH>
             <TH className="text-right">
               <span className="sr-only">Actions</span>
@@ -119,12 +146,30 @@ export function EmailsConsole({
                   <Badge tone={EMAIL_STATUS_TONE[r.status] ?? "neutral"}>{r.status.toLowerCase()}</Badge>
                   {r.error && <div className="mt-1 max-w-xs text-xs text-tone-danger-foreground">{r.error}</div>}
                 </TD>
+                <TD>
+                  {r.delivery ? (
+                    <>
+                      <span title={DELIVERY_LABEL[r.delivery.status].hint}>
+                        <Badge tone={DELIVERY_LABEL[r.delivery.status].tone}>{DELIVERY_LABEL[r.delivery.status].label}</Badge>
+                      </span>
+                      {r.delivery.reason && <div className="mt-1 max-w-xs text-xs text-admin-subtle">{r.delivery.reason}</div>}
+                    </>
+                  ) : (
+                    <span className="text-xs text-admin-subtle">—</span>
+                  )}
+                </TD>
                 <TD className="whitespace-nowrap text-muted-foreground">{formatCentral(r.createdAt, "MMM d, h:mm a")}</TD>
                 <TD className="text-right">
                   {r.status === "FAILED" ? (
                     <Button size="sm" pending={busyId === r.id} disabled={pending} onClick={() => resendOne(r.id)}>
                       Resend
                     </Button>
+                  ) : r.status === "SENT" ? (
+                    r.delivery?.status === "delayed" ? (
+                      <span className="text-xs text-admin-subtle">Resend is still trying</span>
+                    ) : (
+                      <span className="text-xs text-admin-subtle" title="Resending to the same address won't help: check it on their account">check the address</span>
+                    )
                   ) : (
                     <span className="text-xs text-admin-subtle">sending</span>
                   )}

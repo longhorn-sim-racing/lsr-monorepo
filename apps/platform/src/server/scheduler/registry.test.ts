@@ -36,8 +36,8 @@ describe("the job registry", () => {
     vi.doMock("./jobs/groundwork", () => ({ JOBS: [fakeJob("housekeeping.prune")] }))
     vi.doMock("./jobs/proposals", () => ({ JOBS: [] })) // the real sweep; left out of the order check
     const { JOB_KINDS, findJobKind } = await import("./registry")
-    // The room file jobs (jobs/files.ts) join the groundwork slot, after its own
-    expect(JOB_KINDS.map((j) => j.kind)).toEqual(["housekeeping.prune", "files.cleanup", "discord.sync"])
+    // The room file jobs (jobs/files.ts) join the groundwork slot, after its own. Only these: the other tracks' real jobs sit among them
+    expect(JOB_KINDS.map((j) => j.kind).filter((kind) => ["housekeeping.prune", "files.cleanup", "discord.sync"].includes(kind))).toEqual(["housekeeping.prune", "files.cleanup", "discord.sync"])
     expect(findJobKind("discord.sync")?.label).toBe("discord.sync")
   })
 

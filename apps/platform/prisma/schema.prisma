@@ -1803,6 +1803,30 @@ model StripeRefund {
   syncedAt        DateTime
 }
 
+/// A Stripe charge, synced daily (design §12.3). No card, billing or customer details. paymentIntentId
+/// joins Payment.providerRef; feeCents and netCents come from its balance transaction, payoutId from the
+/// automatic payout it was paid out in (set once that payout's transactions are listed)
+model StripeCharge {
+  id                  String   @id
+  paymentIntentId     String?
+  amountCents         Int
+  amountRefundedCents Int      @default(0)
+  currency            String
+  status              String
+  disputed            Boolean  @default(false)
+  /// metadata.purpose, e.g. "donation" (donations have no Payment row)
+  purpose             String?
+  feeCents            Int?
+  netCents            Int?
+  payoutId            String?
+  createdAt           DateTime
+  syncedAt            DateTime
+
+  @@index([paymentIntentId])
+  @@index([payoutId])
+  @@index([createdAt])
+}
+
 /// One Resend delivery event for one recipient (design §12.4). Personal data (addresses). Joins to
 /// Notification.emailMessageId and ApplicationEmail.resendMessageId. Pruned after 12 months
 model EmailEvent {

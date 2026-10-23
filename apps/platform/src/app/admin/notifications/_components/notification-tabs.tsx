@@ -7,6 +7,7 @@ import { NOTIFICATION_TABS, type NotificationTab } from "./format"
 const LABELS: Record<NotificationTab, string> = {
   activity: "Activity",
   scheduled: "Scheduled",
+  delivery: "Delivery",
   compose: "Compose",
   settings: "Settings",
   cleanup: "Cleanup",

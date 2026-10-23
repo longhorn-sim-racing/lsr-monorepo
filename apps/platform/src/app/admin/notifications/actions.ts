@@ -16,6 +16,7 @@ import { createAuditLog } from "@/server/audit/log";
 import type { ActionResult } from "@/lib/action-result";
 import { fromZonedTime } from "date-fns-tz";
 import { DEFAULT_TIMEZONE } from "@/lib/dates";
+import { deliveryFor } from "@/server/connectors/resend/delivery";
 
 export async function getNotificationStats() {
   await requireOfficer();
@@ -33,7 +34,7 @@ export async function getNotificationStats() {
 export async function getRecentNotifications(limit = 20, skip = 0) {
   await requireOfficer();
 
-  return prisma.notification.findMany({
+  const rows = await prisma.notification.findMany({
     include: {
       user: {
         select: { id: true, displayName: true, email: true },
@@ -43,6 +44,9 @@ export async function getRecentNotifications(limit = 20, skip = 0) {
     take: limit,
     skip: skip,
   });
+  // What happened to each email after Resend took it (Resend's delivery events; none until the webhook is set up)
+  const delivery = await deliveryFor(rows.map((row) => row.emailMessageId));
+  return rows.map((row) => ({ ...row, delivery: (row.emailMessageId && delivery.get(row.emailMessageId)) || null }));
 }
 
 export async function getScheduledNotifications() {

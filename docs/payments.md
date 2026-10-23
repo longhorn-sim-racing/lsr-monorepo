@@ -65,6 +65,7 @@ Endpoint: `/api/stripe/webhook`, verified with `STRIPE_WEBHOOK_SECRET`. The prod
 | `checkout.session.async_payment_failed` | Mark the `Payment` `failed`. |
 | `checkout.session.expired` | Mark the `Payment` `failed`. |
 | `charge.refunded` | Mark the `Payment` `refunded`, even for a partial refund. For dues and league entry, a **full** refund also ends the entitlement and undoes its dues membership change, unless that row has changed since; a partial refund leaves the entitlement in place. Refunding a paid event registration leaves the seat taken: cancel it by hand. |
+| `payout.*`, `charge.dispute.*` (Jack 2.0, once added in the dashboard) | Update the read-only copy of Stripe that the Payments page's Stripe panel and Jack read (`StripePayout`, `StripeDispute`). Nothing else: no `Payment` changes, no money moves. See `docs/jack-2/tracks/sources-a.md`. |
 
 Rules the handler keeps:
 
