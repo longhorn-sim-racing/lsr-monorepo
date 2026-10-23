@@ -86,12 +86,17 @@ export async function uploadToClaude(client: ClaudeFilesClient, file: { id: stri
 
 /** Deletes sent at once (the Files API allows about 500 file requests a minute) */
 const DELETES_AT_ONCE = 8
+/** How long deleting may take when the caller gives no signal (removing a chip, a registration cleaning up): the SDK's retries could take minutes */
+const DELETE_BUDGET_MS = 15_000
 
 /**
  * Deletes uploaded copies. One that's already gone counts as deleted. `failed` lists the ids that
  * couldn't be (no key, or the API failed); they're logged, since nothing points at them any more
  */
-export async function deleteClaudeFiles(ids: string[], { client = claudeFilesForCleanup(), signal }: { client?: ClaudeFilesClient | null; signal?: AbortSignal } = {}): Promise<{ deleted: number; failed: string[] }> {
+export async function deleteClaudeFiles(
+  ids: string[],
+  { client = claudeFilesForCleanup(), signal = AbortSignal.timeout(DELETE_BUDGET_MS) }: { client?: ClaudeFilesClient | null; signal?: AbortSignal } = {}
+): Promise<{ deleted: number; failed: string[] }> {
   const unique = [...new Set(ids.filter(Boolean))]
   if (!unique.length) return { deleted: 0, failed: [] }
   if (!client) {
