@@ -32,8 +32,19 @@ type TeamsRow = {
   snippet: string | null
 }
 
-/** Messages shown with the one `read` opens: its thread, oldest first */
-const THREAD_MESSAGES = 30
+/**
+ * The most messages `read` shows of a thread, oldest first: its first message and the replies
+ * around the one opened (the first replies when that's the first message)
+ */
+export const THREAD_MESSAGES = 30
+
+const threadSelect = { id: true, authorName: true, content: true, createdAt: true, editedAt: true } as const
+
+/** Which replies to show, from up to `slots` on each side of the opened one: half before, more when there are few after */
+export function threadWindow<T>(before: T[], fromOpened: T[], slots: number): { before: T[]; fromOpened: T[] } {
+  const keepBefore = Math.min(before.length, Math.max(Math.floor(slots / 2), slots - fromOpened.length))
+  return { before: before.slice(0, keepBefore), fromOpened: fromOpened.slice(0, slots - keepBefore) }
+}
 
 export const teamsSource: SearchSource = {
   key: "teams",
@@ -78,21 +89,40 @@ export const teamsSource: SearchSource = {
       description: "a Teams message with its thread, by message id",
       async read(id) {
         if (!(await teamsEnabled())) return { ok: false, error: TEAMS_OFF }
-        const message = await prisma.teamsMessage.findUnique({ where: { id }, select: { id: true, channelId: true, replyToId: true, deletedAt: true } })
+        const message = await prisma.teamsMessage.findUnique({ where: { id }, select: { id: true, channelId: true, replyToId: true, createdAt: true, deletedAt: true } })
         if (!message || message.deletedAt) return { ok: false, error: `No Teams message ${id}: it may have been deleted.` }
         const rootId = message.replyToId ?? message.id
-        const [channel, thread] = await Promise.all([
+        const replies = { channelId: message.channelId, replyToId: rootId, deletedAt: null }
+        // A reply opened: the replies just before it and from it on. The thread's first message opened: its first replies
+        const opened = message.replyToId ? message : null
+        const beforeOpened = opened ? { ...replies, OR: [{ createdAt: { lt: opened.createdAt } }, { createdAt: opened.createdAt, id: { lt: opened.id } }] } : null
+        const slots = THREAD_MESSAGES - 1
+        const [channel, root, before, fromOpened, replyCount, earlierCount] = await Promise.all([
           prisma.teamsChannel.findUnique({ where: { id: message.channelId }, select: { name: true, teamId: true } }),
+          prisma.teamsMessage.findFirst({ where: { id: rootId, channelId: message.channelId, deletedAt: null }, select: threadSelect }),
+          beforeOpened ? prisma.teamsMessage.findMany({ where: beforeOpened, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: slots, select: threadSelect }) : [],
           prisma.teamsMessage.findMany({
-            where: { channelId: message.channelId, deletedAt: null, OR: [{ id: rootId }, { replyToId: rootId }] },
-            orderBy: { createdAt: "asc" },
-            take: THREAD_MESSAGES,
-            select: { id: true, authorName: true, content: true, createdAt: true, editedAt: true },
+            where: opened ? { ...replies, OR: [{ createdAt: { gt: opened.createdAt } }, { createdAt: opened.createdAt, id: { gte: opened.id } }] } : replies,
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            take: slots,
+            select: threadSelect,
           }),
+          prisma.teamsMessage.count({ where: replies }),
+          beforeOpened ? prisma.teamsMessage.count({ where: beforeOpened }) : 0,
         ])
-        const lines = thread.map(
-          (m) => `${m.id === message.id ? "→ (the message you opened) " : ""}${ct(m.createdAt)} · ${m.authorName}${m.editedAt ? " (edited)" : ""}: ${m.content || "(no text)"}`,
-        )
+        const shown = threadWindow(before, fromOpened, slots)
+        const earlierLeft = earlierCount - shown.before.length
+        const laterLeft = replyCount - earlierCount - shown.fromOpened.length
+        const notShown = (n: number, which: string) => `(${n} ${which} ${n === 1 ? "reply" : "replies"} not shown)`
+        const line = (m: (typeof fromOpened)[number]) =>
+          `${m.id === message.id ? "→ (the message you opened) " : ""}${ct(m.createdAt)} · ${m.authorName}${m.editedAt ? " (edited)" : ""}: ${m.content || "(no text)"}`
+        const lines = [
+          ...(root ? [line(root)] : []),
+          ...(earlierLeft > 0 ? [notShown(earlierLeft, "earlier")] : []),
+          ...[...shown.before].reverse().map(line),
+          ...shown.fromOpened.map(line),
+          ...(laterLeft > 0 ? [notShown(laterLeft, "later")] : []),
+        ]
         const where = channel ? `#${channel.name}` : "Teams"
         return {
           ok: true,
@@ -101,8 +131,8 @@ export const teamsSource: SearchSource = {
             id: message.id,
             title: `Thread in ${where}`,
             url: teamsMessageHref(message, channel?.teamId ?? null),
-            date: isoOrNull(thread.find((m) => m.id === message.id)?.createdAt),
-            meta: { channel: channel?.name ?? null, messages: thread.length },
+            date: isoOrNull(message.createdAt),
+            meta: { channel: channel?.name ?? null, replies: replyCount, shown: (root ? 1 : 0) + shown.before.length + shown.fromOpened.length },
             text: `# Thread in ${where}\n\n${lines.join("\n\n")}`,
           },
         }

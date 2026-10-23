@@ -8,7 +8,7 @@ const db = vi.hoisted(() => ({
   knowledgeEntry: { findUnique: vi.fn() },
   externalDocument: { findUnique: vi.fn() },
   jackMessage: { findUnique: vi.fn(), findMany: vi.fn() },
-  teamsMessage: { findUnique: vi.fn(), findMany: vi.fn() },
+  teamsMessage: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), count: vi.fn() },
   teamsChannel: { findUnique: vi.fn() },
   post: { findUnique: vi.fn() },
   page: { findUnique: vi.fn() },
@@ -24,7 +24,7 @@ import { documentsSource } from "./sources/documents"
 import { knowledgeAgeDays, knowledgeSource } from "./sources/knowledge"
 import { JACK_ANSWER_LABEL, roomsSource } from "./sources/rooms"
 import { siteSource } from "./sources/site"
-import { TEAMS_OFF, teamsSource } from "./sources/teams"
+import { TEAMS_OFF, THREAD_MESSAGES, teamsSource, threadWindow } from "./sources/teams"
 import type { SearchHit, SearchSource } from "./types"
 
 /** The parameters of the raw query a source ran */
@@ -221,28 +221,97 @@ describe("the Teams source", () => {
     expect(db.teamsMessage.findUnique).not.toHaveBeenCalled()
   })
 
-  it("reads a message's thread, oldest first, and links into Teams", async () => {
-    db.connectorState.findUnique.mockResolvedValue({ enabled: true })
-    db.teamsMessage.findUnique.mockResolvedValue({ id: "t2", channelId: "19:abc", replyToId: "t1", deletedAt: null })
-    db.teamsChannel.findUnique.mockResolvedValue({ name: "general", teamId: "team-1" })
-    db.teamsMessage.findMany.mockResolvedValue([
-      { id: "t1", authorName: "Dylan", content: "Budget?", createdAt: new Date("2026-10-19T23:00:00Z"), editedAt: null },
-      { id: "t2", authorName: "Gray", content: "Approved.", createdAt: new Date("2026-10-19T23:05:00Z"), editedAt: null },
-    ])
-    const result = await teamsSource.readers[0].read("t2", {})
-    expect(result).toMatchObject({ ok: true, doc: { title: "Thread in #general", url: "https://teams.microsoft.com/l/message/19%3Aabc/t2?groupId=team-1&parentMessageId=t1" } })
-    if (result.ok) expect(result.doc.text).toContain("→ (the message you opened) Mon 2026-10-19 18:05 CT · Gray: Approved.")
+  describe("reading a thread", () => {
+    type TeamsRow = { id: string; channelId: string; replyToId: string | null; authorName: string; content: string; createdAt: Date; editedAt: Date | null; deletedAt: Date | null }
+    const at = (min: number) => new Date(Date.UTC(2026, 9, 19, 23, min))
+    const teamsRow = (id: string, min: number, replyToId: string | null = "t0"): TeamsRow => ({ id, channelId: "19:abc", replyToId, authorName: "Gray", content: `Message ${id}`, createdAt: at(min), editedAt: null, deletedAt: null })
+
+    /** The rows matching a where like the reader's: equality, OR, and lt / gt / gte on dates and ids */
+    function matches(row: TeamsRow, where: Record<string, unknown>): boolean {
+      return Object.entries(where).every(([key, condition]) => {
+        if (key === "OR") return (condition as Record<string, unknown>[]).some((w) => matches(row, w))
+        const value = row[key as keyof TeamsRow]
+        if (condition instanceof Date) return value instanceof Date && value.getTime() === condition.getTime()
+        if (condition && typeof condition === "object") {
+          const { lt, gt, gte } = condition as { lt?: Date | string; gt?: Date | string; gte?: Date | string }
+          const v = value as Date | string
+          return (lt === undefined || v < lt) && (gt === undefined || v > gt) && (gte === undefined || v >= gte)
+        }
+        return value === condition
+      })
+    }
+
+    /** Serves the reader's queries from `rows` */
+    function thread(rows: TeamsRow[]) {
+      db.connectorState.findUnique.mockResolvedValue({ enabled: true })
+      db.teamsChannel.findUnique.mockResolvedValue({ name: "general", teamId: "team-1" })
+      db.teamsMessage.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => rows.find((r) => r.id === where.id) ?? null)
+      db.teamsMessage.findFirst.mockImplementation(async ({ where }: { where: Record<string, unknown> }) => rows.find((r) => matches(r, where)) ?? null)
+      db.teamsMessage.count.mockImplementation(async ({ where }: { where: Record<string, unknown> }) => rows.filter((r) => matches(r, where)).length)
+      db.teamsMessage.findMany.mockImplementation(async ({ where, orderBy, take }: { where: Record<string, unknown>; orderBy: { createdAt: "asc" | "desc" }[]; take: number }) => {
+        const sign = orderBy[0].createdAt === "asc" ? 1 : -1
+        return rows
+          .filter((r) => matches(r, where))
+          .sort((a, b) => sign * (a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id)))
+          .slice(0, take)
+      })
+    }
+
+    it("reads a short thread whole, oldest first, and links into Teams", async () => {
+      thread([{ ...teamsRow("t0", 0, null), authorName: "Dylan", content: "Budget?" }, { ...teamsRow("t2", 5), content: "Approved." }])
+      const result = await teamsSource.readers[0].read("t2", {})
+      expect(result).toMatchObject({
+        ok: true,
+        doc: { title: "Thread in #general", url: "https://teams.microsoft.com/l/message/19%3Aabc/t2?groupId=team-1&parentMessageId=t0", date: "2026-10-19T23:05:00.000Z", meta: { replies: 1, shown: 2 } },
+      })
+      if (result.ok) expect(result.doc.text.split("\n\n")).toEqual(["# Thread in #general", "Mon 2026-10-19 18:00 CT · Dylan: Budget?", "→ (the message you opened) Mon 2026-10-19 18:05 CT · Gray: Approved."])
+    })
+
+    it("always includes the message opened: a late reply in a long thread comes with the replies before it", async () => {
+      thread([teamsRow("t0", 0, null), ...Array.from({ length: 40 }, (_, i) => teamsRow(`r${String(i + 1).padStart(2, "0")}`, i + 1))])
+      const result = await teamsSource.readers[0].read("r35", {})
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      const lines = result.doc.text.split("\n\n").slice(1)
+      expect(lines).toHaveLength(THREAD_MESSAGES + 1)
+      expect(lines[0]).toContain("Message t0")
+      expect(lines[1]).toBe("(11 earlier replies not shown)")
+      expect(lines[2]).toContain("Message r12")
+      expect(lines.filter((line) => line.startsWith("→ (the message you opened)"))).toEqual([expect.stringContaining("Message r35")])
+      expect(lines.at(-1)).toContain("Message r40")
+      expect(result.doc).toMatchObject({ date: at(35).toISOString(), meta: { replies: 40, shown: THREAD_MESSAGES } })
+    })
+
+    it("opens a thread's first message with its first replies, saying how many more there are", async () => {
+      thread([teamsRow("t0", 0, null), ...Array.from({ length: 40 }, (_, i) => teamsRow(`r${String(i + 1).padStart(2, "0")}`, i + 1))])
+      const result = await teamsSource.readers[0].read("t0", {})
+      if (!result.ok) throw new Error(result.error)
+      const lines = result.doc.text.split("\n\n").slice(1)
+      expect(lines[0]).toMatch(/^→ \(the message you opened\) .*Message t0$/)
+      expect(lines[1]).toContain("Message r01")
+      expect(lines.at(-2)).toContain("Message r29")
+      expect(lines.at(-1)).toBe("(11 later replies not shown)")
+    })
+  })
+
+  it("picks the replies around the one opened: half before it, more when few come after", () => {
+    const nums = (n: number, from = 0) => Array.from({ length: n }, (_, i) => from + i)
+    expect(threadWindow(nums(29), nums(29), 29)).toEqual({ before: nums(14), fromOpened: nums(15) })
+    expect(threadWindow(nums(29), nums(6), 29)).toEqual({ before: nums(23), fromOpened: nums(6) })
+    expect(threadWindow(nums(3), nums(29), 29)).toEqual({ before: nums(3), fromOpened: nums(26) })
+    expect(threadWindow([], nums(5), 29)).toEqual({ before: [], fromOpened: nums(5) })
   })
 })
 
 describe("the site source: public items only", () => {
-  it("searches published posts, shown pages, public events, albums and visible Instagram posts", async () => {
+  it("searches published posts, shown pages, public events, albums with photos and visible Instagram posts", async () => {
     db.$queryRaw.mockResolvedValue([])
     await siteSource.search({ query: "rules", limit: 5, includeJackReplies: false })
     const text = sqlText()
     expect(text).toContain(`p.visibility = 'public' AND p."publishedAt" <= clock.now`)
     expect(text).toContain(`g.visibility = 'public' AND g.slug IN`)
     expect(text).toContain(`e.status NOT IN ('DRAFT', 'SCHEDULED') OR (e.status = 'SCHEDULED' AND e."publishedAt" <= clock.now)`)
+    expect(text).toMatch(/FROM "GalleryAlbum" a\s+WHERE EXISTS \(SELECT 1 FROM "GalleryImage" gi WHERE gi\."albumId" = a\.id\)/)
     expect(text).toContain("i.hidden = false")
     expect(text).not.toMatch(/meetingUrl|streamUrl/)
     expect(sqlValues()).toContain("lone-star-cup-rules")
@@ -269,6 +338,14 @@ describe("the site source: public items only", () => {
   })
 
   const reader = (type: string) => SEARCH_READERS.find((r) => r.type === type)!
+
+  it("reads an album only once it has photos, as the gallery lists it", async () => {
+    const album = { id: "a1", title: "Fall social", slug: "fall-social", description: "Draft caption", date: null, event: null }
+    db.galleryAlbum.findUnique.mockResolvedValue({ ...album, _count: { images: 0 } })
+    expect(await reader("album").read("a1", {})).toEqual({ ok: false, error: expect.stringContaining("No public gallery album a1") })
+    db.galleryAlbum.findUnique.mockResolvedValue({ ...album, _count: { images: 12 } })
+    expect(await reader("album").read("a1", {})).toMatchObject({ ok: true, doc: { url: "/gallery?album=fall-social", meta: { photos: 12 } } })
+  })
 
   it("won't read a draft or scheduled post, a draft event, a hidden Instagram post or a page the site doesn't show", async () => {
     db.post.findUnique.mockResolvedValue({ id: "p1", title: "Draft", slug: "draft", excerpt: null, bodyMd: "x", publishedAt: null, visibility: "public", author: null })

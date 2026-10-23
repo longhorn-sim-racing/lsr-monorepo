@@ -9,8 +9,9 @@ import type { ReadResult, SearchReader, SearchSource } from "../types"
 
 /**
  * The public site's content (design §7.1): published news posts, content pages the site shows,
- * public events, gallery albums and Instagram posts that aren't hidden. Only what a signed-out visitor
- * can see: drafts, scheduled posts, hidden events and their meeting links are never searched or read.
+ * public events, gallery albums with photos in them and Instagram posts that aren't hidden. Only what
+ * a signed-out visitor can see: drafts, scheduled posts, hidden events and their meeting links, and
+ * albums the gallery doesn't list yet (no photos) are never searched or read.
  * These tables are small, so they're searched with to_tsvector on the fly rather than an index.
  */
 
@@ -152,7 +153,8 @@ const readers: SearchReader[] = [
         where: { id },
         select: { id: true, title: true, slug: true, description: true, date: true, _count: { select: { images: true } }, event: { select: { title: true, status: true, publishedAt: true, visibility: true } } },
       })
-      if (!album) return notFound("gallery album", id)
+      // The gallery lists only albums with photos (getGalleryAlbums); an empty one is still being put together
+      if (!album || album._count.images === 0) return notFound("gallery album", id)
       const event = album.event && isEventPublic(album.event) ? album.event.title : null
       return {
         ok: true,
@@ -227,6 +229,7 @@ export const siteSource: SearchSource = {
           setweight(to_tsvector('english', a.title), 'A') || setweight(to_tsvector('english', coalesce(a.description, '')), 'B'),
           coalesce(a.description, a.title)
         FROM "GalleryAlbum" a
+        WHERE EXISTS (SELECT 1 FROM "GalleryImage" gi WHERE gi."albumId" = a.id)
         UNION ALL
         SELECT 'instagram', i.id, left(coalesce(nullif(i.caption, ''), 'Instagram post'), 80), i.permalink, i."postedAt",
           setweight(to_tsvector('english', left(coalesce(i.caption, ''), 20000)), 'B'),
