@@ -15,7 +15,10 @@ The working record for Jack 2.0 (#188): what's done, what's next, and every call
 | Area | Status | PR |
 |---|---|---|
 | Design (`docs/jack-2/design.md`) | v2 done (research + six-lens review folded in) | |
-| Groundwork: schema, proposed changes, files, scheduler, connectors, who's asking | Not started | |
+| G1: schema, migrations, RLS, scheduler SQL | Reviewed, fixes in | #192 |
+| G1: interfaces, plug-in slots, display kinds | Built, in review | #193 |
+| G1: 2.0 prompt, run_sql hardening, CI, dependencies | Built, in review | #194 |
+| Wave 1: refactors, connectors, scheduler, proposals, files, model loop, eval harness, club data, memory | Briefs ready; starts when G1 merges | |
 | Club data: recruiting, race performance, site content, room search | Not started | |
 | Memory: knowledge base, seed drafts, officer profiles | Not started | |
 | Outside sources: Stripe, Resend, Vercel analytics, Instagram, Twitch, web search | Not started | |
@@ -67,6 +70,8 @@ Calls made during the build, for Gray to review. Newest last.
 - **News proposals are Markdown only,** because news renders as MDX (§4.3).
 - **Officer departments** reuse the roster's team ids plus a board flag (§3.3).
 - **Standing Discord rules post fixed templates:** public events only, no pings unless an officer names one (§12.1).
+- **Search index is one side table (`JackSearchDoc`)** kept current by triggers, instead of tsvector columns: Prisma can't read tsvector, so a column would break Jack's `SELECT *` queries, including today's Jack once migrations reach production (G1-data review).
+- **The audit log hides recruiting entries about officers' own applications** from Jack (RLS policy plus the `audit_log` tool). Those entries carry review scores and decisions (G1-data review).
 - **For Gray to sign off, two key exceptions to "read-only or restricted":**
   - Vercel offers no read-only analytics token. A project-scoped, read-write token is used only by a daily snapshot job, with a short expiry (§12.5).
   - Resend's production key stays send-only, and delivery data arrives by webhook instead.
@@ -87,3 +92,13 @@ Calls made during the build, for Gray to review. Newest last.
   - API research done: 11 specs in `research/`, each double-checked against official docs.
   - Six-lens design review done (`reviews/`). Design v2 written.
   - **Found on main, fixed separately:** `cost.ts` priced Sonnet 5.5 cache reads at $0.20 per million tokens; Anthropic's pricing page says $0.10. PR #191 (to main, for Gray).
+- **10/22–23 (night):**
+  - G1 split into three parallel PRs:
+    - **#192 G1-data** (me): the schema, three migrations and the role checks.
+    - **#193 G1-slots** (agent): interfaces, slots and display kinds.
+    - **#194 G1-prompt** (agent): the 2.0 prompt, `run_sql` hardening, CI on `jack-2`, dependencies.
+  - The #192 review found two major issues, both fixed:
+    - tsvector columns broke `SELECT *`;
+    - the audit log leaked officer-applicant review scores.
+  - Verified locally as `jack_readonly` with temporary data.
+  - Wave-1 briefs written (9 builders); a shared build lock keeps parallel Next builds from exhausting memory.
