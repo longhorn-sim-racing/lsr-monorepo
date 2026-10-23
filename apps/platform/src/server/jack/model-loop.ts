@@ -356,7 +356,7 @@ export async function runModelReply(options: ModelReplyOptions): Promise<ModelRe
       // With eager input streaming the SDK parses each tool input when its block closes; input that
       // isn't JSON at all fails the stream. There's no tool_use id to answer, so re-issue the call.
       // The call's text goes too, for viewers as well: the re-issued call writes its own
-      console.error(`[jack] A streamed tool input wasn't valid JSON in room ${ctx.roomId}:`, error)
+      console.error(...streamFailureLog(error, ctx.roomId, jsonRetries + 1))
       takeBack(textBefore)
       closeOpenParts("Didn't run: the call came through garbled")
       if (jsonRetries++ < limits.maxJsonRetries) continue
@@ -738,6 +738,22 @@ function reportDroppedThinking(message: BetaMessage, roomId: string) {
     const log = entry.reason === "prefix_binding_mismatch" ? console.warn : console.info
     log(`[jack] Thinking block ${entry.type ?? "?"} at ${entry.path ?? "?"} in room ${roomId}: ${entry.reason ?? "?"}`)
   }
+}
+
+/** How the SDK's error for a streamed tool input that isn't JSON starts */
+const GARBLED_INPUT = "Unable to parse tool parameter JSON"
+
+/**
+ * What the log says when Claude's stream breaks without an API error. The SDK's message for a garbled
+ * tool input ends with the raw input, and the SyntaxError inside it quotes a stretch of it too: a run_sql
+ * WHERE clause, an email recipient, check-in names. So nothing of an SDK error's text is logged, only
+ * what happened. An error from Jack's own code (a bug) is logged whole, for its stack
+ */
+export function streamFailureLog(error: unknown, roomId: string, attempt: number): unknown[] {
+  const where = `in room ${roomId} (attempt ${attempt})`
+  if (error instanceof Error && error.message.startsWith(GARBLED_INPUT)) return [`[jack] A streamed tool input wasn't valid JSON ${where}`]
+  if (error instanceof Anthropic.AnthropicError) return [`[jack] Claude's reply stream broke ${where} (an SDK error; its text isn't logged)`]
+  return [`[jack] Claude's reply stream failed ${where}:`, error]
 }
 
 /**

@@ -135,6 +135,7 @@ describe("event.update: prepare", () => {
     ])
     const prepared = await prepare({ capacity: 23 })
     expect(prepared.view.summary).toContain("It moves 3 people off the waitlist into the event, and they're notified.")
+    expect(prepared.before).toEqual({ current: { registrationMax: 20 }, next: { registrationMax: 23 }, promoted: 3 })
     const lower = await prepare({ capacity: 15 })
     expect(lower.view.summary).toContain("20 people are already registered, more than the new capacity; nobody is removed.")
   })
@@ -173,6 +174,47 @@ describe("event.update: staleness", () => {
     db.event.findUnique.mockResolvedValue(null)
     expect(await eventUpdateKind.checkStale(p, before)).toBe("The event was deleted.")
     expect(await eventUpdateKind.checkStale(p, null)).toMatch(/copy of the event is missing/)
+  })
+
+  it("is stale when applying would move more people off the waitlist than the card says", async () => {
+    const counts = (registered: number, waitlisted: number) =>
+      db.eventRegistration.groupBy.mockResolvedValue([
+        { status: "REGISTERED", _count: { _all: registered } },
+        { status: "WAITLISTED", _count: { _all: waitlisted } },
+      ])
+    counts(20, 2)
+    const p = parse({ capacity: 30 })
+    const { before, view } = await eventUpdateKind.prepare(p, ctx)
+    expect(view.summary).toContain("It moves 2 people off the waitlist into the event, and they're notified.")
+    expect(await eventUpdateKind.checkStale(p, before)).toBeNull()
+    // Fewer is fine: nobody is emailed who the card didn't count
+    counts(20, 1)
+    expect(await eventUpdateKind.checkStale(p, before)).toBeNull()
+    // Ten more joined the waitlist meanwhile; capacity is still 20, so no column changed
+    counts(20, 12)
+    expect(await eventUpdateKind.checkStale(p, before)).toBe("Applying it now would move 10 people off the waitlist into the event and notify them, not the 2 the card says.")
+  })
+
+  it("is stale when the waitlist filled after an empty one, or moving up was switched on elsewhere", async () => {
+    // Nobody waiting when proposed: the card says nothing about the waitlist
+    const p = parse({ capacity: null })
+    const { before, view } = await eventUpdateKind.prepare(p, ctx)
+    expect(view.summary).not.toContain("waitlist")
+    expect(before).toEqual({ current: { registrationMax: 20 }, next: { registrationMax: null } })
+    db.eventRegistration.groupBy.mockResolvedValue([
+      { status: "REGISTERED", _count: { _all: 20 } },
+      { status: "WAITLISTED", _count: { _all: 4 } },
+    ])
+    // No limit moves everyone, whatever moving up on its own says
+    expect(await eventUpdateKind.checkStale(p, before)).toBe("Applying it now would move 4 people off the waitlist into the event and notify them, which the card doesn't say.")
+
+    // Moving up on its own was off when proposed, and an officer switched it on from the event's page
+    db.event.findUnique.mockResolvedValue({ ...GM2, waitlistAutoPromote: false })
+    const raise = parse({ capacity: 25 })
+    const raised = await eventUpdateKind.prepare(raise, ctx)
+    expect(raised.view.summary).not.toContain("waitlist")
+    db.event.findUnique.mockResolvedValue(GM2)
+    expect(await eventUpdateKind.checkStale(raise, raised.before)).toBe("Applying it now would move 4 people off the waitlist into the event and notify them, which the card doesn't say.")
   })
 })
 

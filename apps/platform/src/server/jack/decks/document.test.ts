@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { cleanCss, cleanSlideHtml, RENDER_VERSION, renderKey, roomAssetUrl, slideDocument, usesRoomAssets } from "./document"
+import { cleanCss, cleanSlideHtml, RENDER_VERSION, renderKey, roomAssetUrl, slideDocument } from "./document"
 
 describe("cleanSlideHtml", () => {
   it("drops scripts, meta refreshes, base URLs, stylesheets, frames and plugins", () => {
@@ -60,13 +60,25 @@ describe("renderKey", () => {
     expect(RENDER_VERSION).toBeGreaterThan(0)
   })
 
-  it("depends on the deck's room only for slides with room photos, so another room's deck never reuses one", () => {
-    expect(renderKey({ ...base, roomId: "room-1" })).toBe(renderKey(base))
-    const photo = { ...base, html: `<section><img src="${roomAssetUrl("11111111-2222-4333-8444-555555555555")}"></section>` }
-    expect(renderKey({ ...photo, roomId: "room-1" })).not.toBe(renderKey({ ...photo, roomId: "room-2" }))
-    expect(renderKey({ ...photo, roomId: "room-1" })).toBe(renderKey({ ...photo, roomId: "room-1" }))
-    const background = { ...base, css: `.hero { background: url(https://jack.assets/room/x) }` }
-    expect(usesRoomAssets(background)).toBe(true)
-    expect(renderKey({ ...background, roomId: "room-1" })).not.toBe(renderKey(background))
+  it("depends on the deck's room for every slide, so another room's deck never reuses one", () => {
+    expect(renderKey({ ...base, roomId: "room-1" })).not.toBe(renderKey({ ...base, roomId: "room-2" }))
+    expect(renderKey({ ...base, roomId: "room-1" })).toBe(renderKey({ ...base, roomId: "room-1" }))
+    expect(renderKey({ ...base, roomId: "room-1" })).not.toBe(renderKey(base))
+    expect(renderKey({ ...base, roomId: null })).toBe(renderKey(base))
+    const id = "11111111-2222-4333-8444-555555555555"
+    // Every way of writing a room photo's URL that the renderer still loads it from
+    const photos = [
+      `<img src="${roomAssetUrl(id)}">`,
+      `<img src="https://JACK.ASSETS/room/${id}">`,
+      `<img src="https://jack.assets/ROOM/${id}">`,
+      `<img src="https://jack.assets/&#114;oom/${id}">`,
+      `<img src="https://jack.assets:443/x/../room/${id}">`,
+    ]
+    for (const img of photos) {
+      const photo = { ...base, html: `<section>${img}</section>` }
+      expect(renderKey({ ...photo, roomId: "room-1" }), img).not.toBe(renderKey({ ...photo, roomId: "room-2" }))
+    }
+    const background = { ...base, css: `.hero { background: url(https://jack.assets/\\72 oom/${id}) }` }
+    expect(renderKey({ ...background, roomId: "room-1" })).not.toBe(renderKey({ ...background, roomId: "room-2" }))
   })
 })

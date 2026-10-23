@@ -7,7 +7,7 @@ const db = vi.hoisted(() => ({
   eventAttendance: { findMany: vi.fn() },
   notification: { count: vi.fn() },
 }))
-const notifications = vi.hoisted(() => ({ countEmailRecipients: vi.fn(), getEmailUsage: vi.fn(), sendBulkNotification: vi.fn(), TRANSACTIONAL_HEADROOM: 10 }))
+const notifications = vi.hoisted(() => ({ countEmailRecipients: vi.fn(), countScheduledAnnouncementEmails: vi.fn(), getEmailUsage: vi.fn(), sendBulkNotification: vi.fn(), TRANSACTIONAL_HEADROOM: 10 }))
 const seasons = vi.hoisted(() => ({ resolveLeagueSeason: vi.fn(), DEFAULT_LEAGUE: "lone-star-cup" }))
 const entries = vi.hoisted(() => ({ listSeasonEntrants: vi.fn() }))
 const audit = vi.hoisted(() => ({ createAuditLog: vi.fn() }))
@@ -45,6 +45,7 @@ beforeEach(() => {
   db.notification.count.mockResolvedValue(0)
   notifications.countEmailRecipients.mockImplementation(async (ids: string[]) => ids.length - (ids.includes("c") ? 1 : 0))
   notifications.getEmailUsage.mockResolvedValue({ sentToday: 20, dailyLimit: 100 })
+  notifications.countScheduledAnnouncementEmails.mockResolvedValue(0)
   notifications.sendBulkNotification.mockResolvedValue({ inApp: 3, emails: 2, emailsSent: 2, emailsFailed: 0 })
 })
 
@@ -103,7 +104,7 @@ describe("notification.send: prepare", () => {
   it("lists every recipient as a row, previews the message, and counts the emails", async () => {
     const prepared = await notificationSendKind.prepare(message({ link: "/events/gm-2", linkText: "Event page" }), ctx)
     expect(prepared.targetId).toBe("event:ev-1:registered")
-    expect(prepared.before).toEqual({ recipients: ["a", "b", "c"], label: "people registered for “GM 2”" })
+    expect(prepared.before).toEqual({ recipients: ["a", "b", "c"], label: "people registered for “GM 2”", key: "event:ev-1:registered" })
     expect(prepared.view.title).toBe("Send “GM 2 moved to 7 PM” to people registered for “GM 2”")
     expect(prepared.view.summary).toBe(
       "Applying it sends “GM 2 moved to 7 PM” in the site's bell and by email to the 3 people checked below (people registered for “GM 2”), right away. 2 people get the email; the others have club emails turned off. It can't be unsent.",
@@ -134,10 +135,34 @@ describe("notification.send: prepare", () => {
     expect(tight.view.summary).toContain("Only 1 of today's 100 emails are left (89 sent today, 10 kept for confirmations and receipts), so applying it today is refused unless fewer people are checked.")
     notifications.countEmailRecipients.mockResolvedValue(95)
     await expect(notificationSendKind.prepare(message({}), ctx)).rejects.toThrow("This would send 95 emails, more than the 90 a day an announcement can use")
-    // A scheduled send's day isn't known yet, as on the admin page
-    expect((await notificationSendKind.prepare(message({ sendAt: "2026-10-23T09:00" }), ctx)).view.summary).toContain(", at Fri Oct 23, 9:00 AM CT.")
     // In the bell only: no email to count
     await expect(notificationSendKind.prepare(message({ channels: ["in_app"] }), ctx)).resolves.toBeTruthy()
+  })
+
+  it("holds a scheduled send to the day's maximum too, and counts what that day already has", async () => {
+    // Tomorrow, 9 AM CT: today's emails don't count against it
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 89, dailyLimit: 100 })
+    const tomorrow = await notificationSendKind.prepare(message({ sendAt: "2026-10-23T09:00" }), ctx)
+    expect(tomorrow.view.summary).toContain(", at Fri Oct 23, 9:00 AM CT.")
+    expect(tomorrow.view.summary).toContain("If other emails use up that day's limit before it goes out, the ones over it aren't sent; they show as failed on Notifications.")
+    expect(notifications.countScheduledAnnouncementEmails).toHaveBeenCalledWith(new Date("2026-10-23T14:00:00Z"))
+    // The day's maximum is the same whatever day it goes out
+    notifications.countEmailRecipients.mockResolvedValue(95)
+    await expect(notificationSendKind.prepare(message({ sendAt: "2026-10-23T09:00" }), ctx)).rejects.toThrow("This would send 95 emails, more than the 90 a day an announcement can use")
+    // Other announcements already scheduled for that day
+    notifications.countEmailRecipients.mockResolvedValue(40)
+    notifications.countScheduledAnnouncementEmails.mockResolvedValue(60)
+    expect((await notificationSendKind.prepare(message({ sendAt: "2026-10-23T09:00" }), ctx)).view.summary).toContain(
+      "Only 30 of the 90 announcement emails for that day are left (60 already scheduled for it), so applying it is refused unless fewer people are checked. The limit resets",
+    )
+    // Later today: what's sent today counts too
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 50, dailyLimit: 100 })
+    notifications.countScheduledAnnouncementEmails.mockResolvedValue(5)
+    expect((await notificationSendKind.prepare(message({ sendAt: "2026-10-22T17:00" }), ctx)).view.summary).toContain("Only 35 of the 90 announcement emails for that day are left (50 sent today and 5 already scheduled for it)")
+    // A plan without a daily limit
+    notifications.getEmailUsage.mockResolvedValue({ sentToday: 5000, dailyLimit: null })
+    notifications.countEmailRecipients.mockResolvedValue(1500)
+    expect((await notificationSendKind.prepare(message({ sendAt: "2026-10-23T09:00" }), ctx)).view.summary).not.toContain("limit")
   })
 
   it("refuses bad links, past times and empty audiences", async () => {
@@ -202,10 +227,70 @@ describe("notification.send: apply", () => {
     expect(scheduled.summary).toBe("Scheduled “GM 2 moved to 7 PM” for 3 people, Fri Oct 23, 9:00 AM CT.")
   })
 
+  it("refuses a scheduled send over the day's maximum, or over what that day has left", async () => {
+    notifications.countEmailRecipients.mockResolvedValue(95)
+    await expect(notificationSendKind.apply(message({ sendAt: "2026-10-23T09:00" }), applyCtx(before))).rejects.toThrow("This would send 95 emails, more than the 90 a day an announcement can use")
+    notifications.countEmailRecipients.mockResolvedValue(40)
+    notifications.countScheduledAnnouncementEmails.mockResolvedValue(60)
+    await expect(notificationSendKind.apply(message({ sendAt: "2026-10-23T09:00" }), applyCtx(before))).rejects.toThrow(
+      "This would send 40 emails at Fri Oct 23, 9:00 AM CT, but only 30 of the 90 announcement emails for that day are left (60 already scheduled for it).",
+    )
+    expect(notifications.sendBulkNotification).not.toHaveBeenCalled()
+    // In the bell only: no email budget
+    await notificationSendKind.apply(message({ sendAt: "2026-10-23T09:00", channels: ["in_app"] }), applyCtx(before))
+    expect(notifications.sendBulkNotification).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("notification.send: staleness", () => {
+  const before = { recipients: ["a", "b", "c"], label: "people registered for “GM 2”", key: "event:ev-1:registered" }
+  const dee = { id: "d", displayName: "Dee Lu", handle: "dee-lu" }
+
   it("goes stale once its send time has passed", async () => {
     const p = message({ sendAt: "2026-10-23T09:00" })
     expect(await notificationSendKind.checkStale(p, before)).toBeNull()
     vi.setSystemTime(new Date("2026-10-24T00:00:00Z"))
     expect(await notificationSendKind.checkStale(p, before)).toMatch(/Its send time \(Fri Oct 23, 9:00 AM CT\) has passed/)
+  })
+
+  it("goes stale when someone left or joined its audience since it was proposed", async () => {
+    const p = message({})
+    expect(await notificationSendKind.checkStale(p, before)).toBeNull()
+    // Cy unregistered: the card still lists them
+    db.eventRegistration.findMany.mockResolvedValue([people[0], people[1]].map((user) => ({ user })))
+    expect(await notificationSendKind.checkStale(p, before)).toBe(
+      "Its audience (people registered for “GM 2”) changed since this was proposed: 1 person on the card left. Ask Jack to propose it again, so the card lists who gets it now.",
+    )
+    // Dee registered: the card doesn't list them
+    db.eventRegistration.findMany.mockResolvedValue([...people, dee].map((user) => ({ user })))
+    expect(await notificationSendKind.checkStale(p, before)).toMatch(/changed since this was proposed: 1 person joined\./)
+    db.eventRegistration.findMany.mockResolvedValue([people[0], dee].map((user) => ({ user })))
+    expect(await notificationSendKind.checkStale(p, before)).toMatch(/changed since this was proposed: 2 people on the card left and 1 person joined\./)
+    // Every active member: someone signed up since
+    db.user.findMany.mockResolvedValue([...people, dee])
+    expect(await notificationSendKind.checkStale(message({ audience: { type: "all_members" } }), { recipients: ["a", "b", "c"], label: "every active member", key: "all_members" })).toMatch(
+      /^Its audience \(every active member\) changed since this was proposed: 1 person joined\./,
+    )
+  })
+
+  it("goes stale when its event was deleted, or its audience now means another season", async () => {
+    db.event.findUnique.mockResolvedValue(null)
+    expect(await notificationSendKind.checkStale(message({}), before)).toBe("The event was deleted.")
+    // "The open season" moved on
+    const lsc = message({ audience: { type: "lsc_drivers" } })
+    const lscBefore = { recipients: ["a"], label: "LSC Season 3 drivers with an entry", key: "lsc:s3:entered" }
+    seasons.resolveLeagueSeason.mockResolvedValue({ ok: true, season: { id: "s4", name: "LSC Season 4" } })
+    entries.listSeasonEntrants.mockResolvedValue({ entrants: [{ status: "paid", application: {}, user: people[0] }] })
+    db.user.findMany.mockResolvedValue([{ id: "a" }])
+    expect(await notificationSendKind.checkStale(lsc, lscBefore)).toBe("It was proposed for LSC Season 3 drivers with an entry, which now means LSC Season 4 drivers with an entry. Ask Jack to propose it again.")
+    seasons.resolveLeagueSeason.mockResolvedValue({ ok: false, error: "Lone Star Cup has no seasons yet." })
+    expect(await notificationSendKind.checkStale(lsc, lscBefore)).toBe("Its audience (LSC Season 3 drivers with an entry) can't be worked out anymore: Lone Star Cup has no seasons yet.")
+  })
+
+  it("keeps a list of handles as proposed, and needs its saved list otherwise", async () => {
+    const handles = message({ audience: { type: "members", handles: ["ana-torres"] } })
+    expect(await notificationSendKind.checkStale(handles, { recipients: ["a"], label: "Ana Torres", key: "members:ana-torres" })).toBeNull()
+    expect(db.user.findMany).not.toHaveBeenCalled()
+    expect(await notificationSendKind.checkStale(message({}), null)).toMatch(/list of recipients is missing/)
   })
 })

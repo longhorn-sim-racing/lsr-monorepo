@@ -61,13 +61,19 @@ export function attachmentLine(files: HistoryFile[]): string {
  * is where the file's summary goes, so a link planted in an uploaded file would otherwise become
  * fetchable. The full text, links included, stays readable through room_files read: a tool result,
  * which url_sources excludes. A link becomes "[link to example[.]com]": the reader still knows where it
- * pointed. What counts as a link: anything with a scheme or starting www.; a host name followed by a
- * path, a query or a fragment (evil.example/x, evil.example?list=1, evil.example#x); an IPv4 address
- * with a port or followed by a path, a query or a fragment
+ * pointed. What counts as a link: anything with a scheme (https:evil.example too), whatever comes right
+ * before it (_https://… and 1https://… too), or starting www.; a host name followed by a path, a query
+ * or a fragment (evil.example/x, evil.example?list=1, evil.example#x); an IPv4 address with a port or
+ * followed by a path, a query or a fragment (x_10.0.0.1/x too). Host names are read the way a URL parser
+ * reads them: labels in any script (пример.com, evil.рф), punycode (evil.xn--p1ai), underscores,
+ * invisible format characters (a soft hyphen), the dots IDNA treats as dots (evil。example) and a
+ * trailing dot (evil.example./x). A scheme or an IPv4 address needs no \b before it: a digit or an
+ * underscore right before one (or a letter, before an address) would hide the link
  */
 const LINK =
-  /\b(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>"'`]+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(?:\/[^\s<>"'`]*|[?#][^\s<>"'`]+)|\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+(?:[/?#][^\s<>"'`]*)?|[/?#][^\s<>"'`]*)/gi
-const TRAILING = /[.,;:!?)\]}>'"]+$/
+  /(?:[a-z][a-z0-9+.-]*:\/\/|https?:|\bwww\.)[^\s<>"'`]+|(?<![\p{L}\p{M}\p{N}\p{Cf}_-])(?:[\p{L}\p{M}\p{N}\p{Cf}_-]+[.\u3002\uff0e\uff61])+(?:xn--[a-z0-9-]+|\p{L}[\p{L}\p{M}\p{Cf}]+)[.\u3002\uff0e\uff61]?(?::\d+)?(?:\/[^\s<>"'`]*|[?#][^\s<>"'`]+)|(?<!\d)(?:\d{1,3}[.\u3002\uff0e\uff61]){3}\d{1,3}(?::\d+(?:[/?#][^\s<>"'`]*)?|[/?#][^\s<>"'`]*)/giu
+/** Punctuation after a link that isn't part of it, closing quotes (“…”) and CJK punctuation included */
+const TRAILING = /[.,;:!?)\]}>'"”’»）。、]+$/
 
 export function neutralizeLinks(text: string): string {
   return text.replace(LINK, (match) => {
@@ -80,7 +86,7 @@ export function neutralizeLinks(text: string): string {
 function linkPlaceholder(link: string): string {
   let host = ""
   try {
-    host = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(link) ? link : `https://${link}`).hostname
+    host = new URL(/^(?:[a-z][a-z0-9+.-]*:\/\/|https?:)/i.test(link) ? link : `https://${link}`).hostname
   } catch {
     // Not a URL after all; it still goes
   }

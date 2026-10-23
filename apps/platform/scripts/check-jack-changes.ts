@@ -151,6 +151,28 @@ async function main() {
     check("notification.send sends only to the ticked member, with the proposal on the row", sent.ok && rows.length === 1 && rows[0].userId === ana.id && rows[0].status === "SENT", JSON.stringify(rows))
     check("one audit entry for the send", (await auditFor(notify, "NOTIFICATION")) === 1)
 
+    // ---- staleness from what the card counted: someone joins the audience, the waitlist grows ----
+    const cy = await member("cy")
+    const dee = await member("dee")
+    made.users.push(cy.id, dee.id)
+    const toRegistered = await propose("notification.send", { audience: { type: "event", eventId: event.id }, channels: ["in_app"], title: `Check ${tag} registered`, body: "Just checking." })
+    await prisma.eventRegistration.create({ data: { eventId: event.id, userId: cy.id, status: "REGISTERED" } })
+    const late = await apply(toRegistered)
+    const lateRows = await prisma.notification.count({ where: { metadata: { path: ["proposalId"], equals: toRegistered } } })
+    check("notification.send goes stale when someone registered for its event since, and sends nothing", !late.ok && late.proposal?.status === "STALE" && /1 person joined/.test(late.error) && lateRows === 0, JSON.stringify(late))
+
+    await prisma.eventRegistration.create({ data: { eventId: event.id, userId: dee.id, status: "WAITLISTED", waitlistOrder: 2 } })
+    const roomier = await propose("event.update", { eventId: event.id, capacity: 10 })
+    await prisma.eventRegistration.update({ where: { eventId_userId: { eventId: event.id, userId: cy.id } }, data: { status: "WAITLISTED", waitlistOrder: 3 } })
+    const grown = await apply(roomier)
+    const waiting = await prisma.eventRegistration.count({ where: { eventId: event.id, status: "WAITLISTED" } })
+    const capacity = (await prisma.event.findUniqueOrThrow({ where: { id: event.id } })).registrationMax
+    check(
+      "event.update goes stale when more would move off the waitlist than the card says, and changes nothing",
+      !grown.ok && grown.proposal?.status === "STALE" && /move 2 people off the waitlist/.test(grown.error) && waiting === 2 && capacity === 2,
+      JSON.stringify({ grown, waiting, capacity }),
+    )
+
     // ---- attendance.checkin ----
     const checkin = await propose("attendance.checkin", { eventId: event.id, names: [ana.displayName, `@${ben.handle}`, "Nobody Here At All"] })
     const checkinRow = await prisma.jackProposal.findUniqueOrThrow({ where: { id: checkin } })
