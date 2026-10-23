@@ -10,8 +10,6 @@ import { InstagramSections } from "./_sections"
 import { InstagramAdmin } from "./client"
 
 export const dynamic = "force-dynamic"
-// Connecting runs the first sync, which can copy up to 24 images
-export const maxDuration = 60
 
 export const metadata: Metadata = { title: "Instagram" }
 

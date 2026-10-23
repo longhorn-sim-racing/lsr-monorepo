@@ -405,7 +405,7 @@ type ProposalKind<P> = {
   - Mark orphaned `running` rows as errors when they're next claimed.
   - Errors go through `redactSecrets()`.
 - **Long jobs hand off:** Jack runs (recurring questions, digest summaries), Drive and SharePoint backfills, and anything over about 60 s.
-  - The dispatcher sends a signed self-POST to `/api/admin/jack/run` (maxDuration 300, inside the Chromium trace).
+  - The dispatcher sends a signed self-POST to `/api/admin/jack/run` (the project's 300 s limit, inside the Chromium trace).
   - That route runs the job with its own `startedAt`. For Jack runs it calls `runRoom(roomId, deps, { startedAt: requestStart })`.
 - **Housekeeping jobs (G3):**
   - prune `ScheduledJobRun` (90 days), `cron.job_run_details` (7 days), `TwitchViewerSample` (180 days) and old render caches;

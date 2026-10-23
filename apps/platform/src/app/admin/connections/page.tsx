@@ -10,8 +10,6 @@ import { ConnectionsList } from "./connections-client"
 import { connectionsSummary, toConnectionView } from "./view"
 
 export const dynamic = "force-dynamic"
-// A smoke test can take up to 25 s
-export const maxDuration = 60
 
 export const metadata: Metadata = { title: "Connections" }
 

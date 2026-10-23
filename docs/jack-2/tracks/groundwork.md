@@ -107,7 +107,7 @@ Every outside service goes through the same shape, so Jack's tools, the sync job
   - On needs the connector's code, its env and its settings.
   - Switching on without a passing smoke test asks first.
   - Both directions are audited (`ENABLE` and `DISABLE`).
-- **Smoke tests:** "Run smoke test" calls `connector.smoke()` on the server; it works while switched off. The page's `maxDuration` is 60 s.
+- **Smoke tests:** "Run smoke test" calls `connector.smoke()` on the server; it works while switched off. A test times out after 25 s, well inside the page's 300 s (no route sets its own `maxDuration`; see `src/app/function-config.test.ts`).
   - Each run is written to the audit log (actionType `SMOKE_TEST`, entityType `CONNECTOR`, metadata `{ ok, summary, ms }`). The page shows the latest one per connector.
   - A connector without one says "No smoke test yet".
 - **Panels above the list** (rendered through `SafeSlot`, each loading its own data inside the guard):

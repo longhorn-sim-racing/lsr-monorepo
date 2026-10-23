@@ -191,7 +191,7 @@ When the month's total reaches `JACK_MONTHLY_BUDGET_USD` (default $50), Jack sto
 
 ### Function duration
 
-Posting (or **Ask him to continue**) runs the reply loop after the response, inside the room page's function (Server Actions use their page's settings), so `maxDuration` on `src/app/admin/jack/[roomId]/page.tsx` is **300 s**: Vercel's Fluid compute default and the most the Hobby plan allows (Pro allows up to 800 s). A function can be cut off at that limit without warning, so a run keeps well inside it (`RUN_TIMING` in `src/server/jack/reply-loop.ts`):
+Posting (or **Ask him to continue**) runs the reply loop after the response, inside the room page's function (Server Actions use their page's settings), so the whole run fits in that function's time limit: **300 s**, Vercel's Fluid compute default and the most the Hobby plan allows (Pro allows up to 800 s). No page or route sets its own `maxDuration`: Vercel makes each different setting its own function, and Hobby allows 12 per deployment (`src/app/function-config.test.ts` checks). A function can be cut off at that limit without warning, so a run keeps well inside it (`RUN_TIMING` in `src/server/jack/reply-loop.ts`):
 
 - **A run lasts at most 280 s** from the start of the request that started it (the post or the **continue** click, since the function's own limit counts from there). An answer still going then is cancelled (its Claude call and any running tool are aborted, and the reply says it was stopped). After that it only saves the reply, sends its done event (no more deltas) and lets go of the lock.
 - **An answer starts only with at least 150 s of the run left.** Otherwise the run lets go of the room's lock and leaves the waiting messages unanswered; the next post, or an officer clicking **Ask him to continue**, starts a fresh run for them.
@@ -200,7 +200,7 @@ Posting (or **Ask him to continue**) runs the reply loop after the response, ins
 
 A typical answer takes 5 to 60 seconds, so one run usually answers several rounds of messages. If a function dies anyway, its room lock goes stale after **6 minutes** (`ROOM_LOCK_STALE_MS` in `src/lib/jack/timing.ts`), longer than any live run holds it (it's renewed before each answer). The next run in that room (a post, or **continue**) takes it over and closes the half-written reply as an error. If `maxDuration` changes, change `RUN_TIMING` with it and keep the stale time above it.
 
-A reply working on a deck that runs out of time (or tool calls) leaves a note asking Jack to keep going, and the next run picks it up, from this run if it has 150 s left, or from the room page, which starts one as soon as it sees the note (see [Decks and graphics](#decks-and-graphics)). The deck image and export routes have their own `maxDuration` (60 s and 120 s): a cold start launches Chromium first.
+A reply working on a deck that runs out of time (or tool calls) leaves a note asking Jack to keep going, and the next run picks it up, from this run if it has 150 s left, or from the room page, which starts one as soon as it sees the note (see [Decks and graphics](#decks-and-graphics)). The deck image and export routes get the same 300 s, which covers a cold start launching Chromium first.
 
 ## The eval
 

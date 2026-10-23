@@ -27,8 +27,6 @@ const bounceCount = () =>
 export const metadata: Metadata = { title: "Notifications" }
 
 export const dynamic = "force-dynamic"
-// Sending to every member takes several batch calls; leave room beyond the default time limit
-export const maxDuration = 60
 
 export default async function AdminNotificationsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   await requireOfficerPage()

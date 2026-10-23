@@ -24,7 +24,10 @@ import type { JobKind, JobResult } from "./types"
  *   with its function and is marked failed then. Errors and summaries go through redactSecrets().
  */
 
-/** The longest a tick or hand-off function may run: the routes' maxDuration */
+/**
+ * The longest any function may run: the project's default time limit on Fluid compute, the most Hobby
+ * allows. Routes don't set maxDuration (each value is its own function on Vercel; Hobby allows 12)
+ */
 export const FUNCTION_MAX_MS = 300_000
 /** No new claims this long after the request started */
 export const CLAIM_WINDOW_MS = 200_000

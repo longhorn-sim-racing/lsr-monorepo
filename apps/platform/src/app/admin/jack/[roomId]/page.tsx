@@ -9,12 +9,13 @@ export const metadata = { title: "Jack" }
 
 export const dynamic = "force-dynamic"
 // Posting a message (or asking Jack to continue) answers after the response, in this route's function
-// (Server Actions run with their page's config), so this covers the whole reply loop. A run stops
-// itself 280 s in and starts no answer with less than 150 s left (RUN_TIMING in reply-loop.ts); what's
-// still waiting then gets a "continue" button. 300 s is the Fluid compute default and the most the
-// Hobby plan allows (Pro allows 800). If this changes, change RUN_TIMING with it, and keep it under the
-// room lock's 6-minute stale time (lib/jack/timing.ts).
-export const maxDuration = 300
+// (Server Actions run with their page's config), so the function's time limit covers the whole reply
+// loop. No route sets maxDuration (each value is its own function on Vercel, and Hobby allows 12 per
+// deployment), so this runs up to the project's default: 300 s on Fluid compute, the most Hobby allows
+// (FUNCTION_MAX_MS, server/scheduler/dispatcher.ts). A run stops itself 280 s in and starts no answer with
+// less than 150 s left (RUN_TIMING in reply-loop.ts); what's still waiting then gets a "continue" button.
+// If the limit changes, change RUN_TIMING with it, and keep it under the room lock's 6-minute stale time
+// (lib/jack/timing.ts).
 
 type JackRoomPageArgs = {
   params: Promise<{ roomId: string }>
