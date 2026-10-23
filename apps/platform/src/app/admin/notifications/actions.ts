@@ -185,7 +185,7 @@ export async function sendCustomNotification(formData: FormData): Promise<Action
   }
 
   // Resend refuses email past its daily limit, so check an immediate email send first. Scheduled
-  // sends aren't checked: the day they go out isn't known yet.
+  // sends are checked when they go out: the cron holds back the emails over the limit then.
   if (sendEmail && !scheduledDate && formData.get("sendAnyway") !== "on") {
     const [{ sentToday, dailyLimit }, emailCount] = await Promise.all([
       getEmailUsage(),

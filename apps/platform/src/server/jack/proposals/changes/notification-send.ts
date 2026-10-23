@@ -6,23 +6,25 @@ import { prisma } from "@/server/db"
 import { DEFAULT_LEAGUE, resolveLeagueSeason } from "@/server/jack/tools/seasons"
 import { CLUB_TZ } from "@/server/jack/tools/time"
 import { listSeasonEntrants } from "@/server/services/league-entry.service"
-import { countEmailRecipients, getEmailUsage, sendBulkNotification, TRANSACTIONAL_HEADROOM } from "@/server/services/notification.service"
+import { countEmailRecipients, countScheduledAnnouncementEmails, getEmailUsage, sendBulkNotification, TRANSACTIONAL_HEADROOM } from "@/server/services/notification.service"
 import { ProposalInputError, StaleProposalError } from "../errors"
 import type { ProposalKind, ProposalLink, ProposalRow } from "../types"
 import { membersByHandle, type MemberRef } from "./members"
-import { clip, fromLocal, LOCAL_TIME, plural, revalidate, safeLink, when } from "./shared"
+import { clip, fromLocal, listed, LOCAL_TIME, plural, revalidate, safeLink, when } from "./shared"
 
 /**
  * notification.send (design §4.3): a message to members, in the site's bell and/or by email, through the
  * same notification service as Notifications in the admin console (sendBulkNotification, type CUSTOM:
  * emails go only to members who allow club emails). The audience is resolved on the server when it's
  * proposed and saved with the proposal: the card lists every recipient with a checkbox, and only the
- * ones left checked get it. One audit entry, as the admin page writes.
+ * ones left checked get it. It's resolved again before applying, and the proposal is stale if anyone
+ * joined or left it. One audit entry, as the admin page writes.
  *
  * The email template puts the title and text in as written, so they're plain text: "<" and ">" are
  * refused. Links are a page of this site or an https link (shown with its host on the card).
- * Resend's daily limit is checked as the admin page checks it. Applying is guarded against sending
- * twice: every notification row carries the proposal's id, and an apply finding rows for it sends nothing.
+ * Resend's daily limit is checked as the admin page checks it, for a scheduled send too (against the
+ * day it goes out). Applying is guarded against sending twice: every notification row carries the
+ * proposal's id, and an apply finding rows for it sends nothing.
  */
 
 /** The most recipients one proposal takes (the Apply action takes at most 2,000 picked rows) */
@@ -117,14 +119,34 @@ export async function resolveAudience(audience: NotificationAudience): Promise<R
   }
 }
 
-/** The day's email budget as the admin page works it out: how many an announcement may send now, and in a day */
-async function emailBudget(): Promise<{ left: number; perDay: number; sentToday: number; dailyLimit: number } | null> {
-  const { sentToday, dailyLimit } = await getEmailUsage()
+type EmailBudget = { perDay: number; dailyLimit: number; left: number; sent: number; scheduled: number }
+
+/**
+ * The email budget as the admin page works it out: how many an announcement may send in a day, and how
+ * many are left on the day it goes out (Resend's day, which is UTC). A scheduled send's day loses what's
+ * sent already (when that's today) and the other announcements scheduled for it; what else goes out
+ * before it that day isn't known yet, so the cron holds back whatever goes over when it sends
+ */
+async function emailBudget(at: Date | null, now: Date): Promise<EmailBudget | null> {
+  const [{ sentToday, dailyLimit }, scheduled] = await Promise.all([getEmailUsage(), at ? countScheduledAnnouncementEmails(at) : 0])
   if (dailyLimit === null) return null
-  return { left: Math.max(0, dailyLimit - sentToday - TRANSACTIONAL_HEADROOM), perDay: dailyLimit - TRANSACTIONAL_HEADROOM, sentToday, dailyLimit }
+  const perDay = dailyLimit - TRANSACTIONAL_HEADROOM
+  const sent = !at || utcDay(at) === utcDay(now) ? sentToday : 0
+  return { perDay, dailyLimit, sent, scheduled, left: Math.max(0, perDay - sent - scheduled) }
+}
+
+const utcDay = (date: Date) => date.toISOString().slice(0, 10)
+
+/** "40 sent today and 30 already scheduled for it" */
+function spoken(budget: EmailBudget): string {
+  return listed([...(budget.sent ? [`${budget.sent} sent today`] : []), ...(budget.scheduled ? [`${budget.scheduled} already scheduled for it`] : [])])
 }
 
 const RESET = "The limit resets at 7 pm Central (6 pm in winter)."
+
+function overPerDay(emails: number, budget: EmailBudget): string {
+  return `This would send ${plural(emails, "email")}, more than the ${budget.perDay} a day an announcement can use (the plan's ${budget.dailyLimit}, minus ${TRANSACTIONAL_HEADROOM} kept for confirmations and receipts).`
+}
 
 /** The message as the card previews it: the title, its paragraphs, and the button */
 function messagePreview(p: NotificationSend, link: { url: string } | null): JackProposalPreview {
@@ -145,7 +167,35 @@ function sendTime(p: NotificationSend, now: Date): Date | null {
   return at
 }
 
-const savedBefore = z.object({ recipients: z.array(z.string()), label: z.string() })
+/** The audience as proposed: who the card lists, and which audience that was (`key`: e.g. which season "the open season" meant) */
+const savedBefore = z.object({ recipients: z.array(z.string()), label: z.string(), key: z.string().optional() })
+
+/**
+ * Why the audience isn't the people the card lists any more, or null when it's the same people. Apply
+ * sends only to the saved list, so without this an event message would still reach people who
+ * unregistered and miss those who registered since. A list of handles names its people on the card and
+ * stays as proposed.
+ */
+async function audienceChanged(audience: NotificationAudience, before: unknown): Promise<string | null> {
+  if (audience.type === "members") return null
+  const saved = savedBefore.safeParse(before)
+  if (!saved.success) return "The proposal's list of recipients is missing. Ask Jack to propose it again."
+  let current: Resolved
+  try {
+    current = await resolveAudience(audience)
+  } catch (error) {
+    if (!(error instanceof ProposalInputError)) throw error
+    return audience.type === "event" ? "The event was deleted." : `Its audience (${saved.data.label}) can't be worked out anymore: ${error.message}`
+  }
+  if (saved.data.key && current.key !== saved.data.key) return `It was proposed for ${saved.data.label}, which now means ${current.label}. Ask Jack to propose it again.`
+  const was = new Set(saved.data.recipients)
+  const now = new Set(current.recipients.map((r) => r.id))
+  const left = saved.data.recipients.filter((id) => !now.has(id)).length
+  const joined = current.recipients.filter((r) => !was.has(r.id)).length
+  if (!left && !joined) return null
+  const moves = [...(left ? [`${plural(left, "person", "people")} on the card left`] : []), ...(joined ? [`${plural(joined, "person", "people")} joined`] : [])]
+  return `Its audience (${current.label}) changed since this was proposed: ${listed(moves)}. Ask Jack to propose it again, so the card lists who gets it now.`
+}
 
 export const notificationSendKind: ProposalKind<NotificationSend> = {
   kind: "notification.send",
@@ -177,31 +227,36 @@ export const notificationSendKind: ProposalKind<NotificationSend> = {
         "CUSTOM",
       )
       sentences.push(emails === recipients.length ? `All of them get the email.` : `${plural(emails, "person gets", "people get")} the email; the others have club emails turned off.`)
-      const budget = at ? null : await emailBudget()
-      if (budget && emails > budget.perDay) {
-        throw new ProposalInputError(
-          `This would send ${plural(emails, "email")}, more than the ${budget.perDay} a day an announcement can use (the plan's ${budget.dailyLimit}, minus ${TRANSACTIONAL_HEADROOM} kept for confirmations and receipts). Send it in-app only, or to fewer people.`,
+      // The day's maximum holds whatever day it goes out; what's left is known for today, and for a later day only as far as other scheduled sends go
+      const budget = await emailBudget(at, now)
+      if (budget && emails > budget.perDay) throw new ProposalInputError(`${overPerDay(emails, budget)} Send it in-app only, or to fewer people.`)
+      if (budget && emails > budget.left) {
+        sentences.push(
+          at
+            ? `Only ${budget.left} of the ${budget.perDay} announcement emails for that day are left (${spoken(budget)}), so applying it is refused unless fewer people are checked. ${RESET}`
+            : `Only ${budget.left} of today's ${budget.dailyLimit} emails are left (${budget.sent} sent today, ${TRANSACTIONAL_HEADROOM} kept for confirmations and receipts), so applying it today is refused unless fewer people are checked. ${RESET}`,
         )
+      } else if (budget && at) {
+        sentences.push(`If other emails use up that day's limit before it goes out, the ones over it aren't sent; they show as failed on Notifications.`)
       }
-      if (budget && emails > budget.left) sentences.push(`Only ${budget.left} of today's ${budget.dailyLimit} emails are left (${budget.sentToday} sent today, ${TRANSACTIONAL_HEADROOM} kept for confirmations and receipts), so applying it today is refused unless fewer people are checked. ${RESET}`)
     }
     sentences.push("It can't be unsent.")
 
     const rows: ProposalRow[] = recipients.map((r) => ({ id: r.id, label: r.displayName, detail: `@${r.handle}` }))
     const links: ProposalLink[] = [...(link ? [{ title: link.host ? `The message's link` : "The message's page", url: link.url }] : []), { title: "Notifications", url: "/admin/notifications" }]
     return {
-      before: { recipients: recipients.map((r) => r.id), label },
+      before: { recipients: recipients.map((r) => r.id), label, key },
       targetId: key,
       view: { title: clip(`Send “${p.title}” to ${label}`, 200), summary: sentences.join(" "), diff: [], rows, links, preview: messagePreview(p, link) },
     }
   },
 
-  async checkStale(p) {
+  async checkStale(p, before) {
     if (p.sendAt) {
       const at = fromLocal(p.sendAt, CLUB_TZ)
       if (at && at <= new Date()) return `Its send time (${when(at)}) has passed. Ask Jack to propose it again, to send now or later.`
     }
-    return null
+    return audienceChanged(p.audience, before)
   },
 
   async apply(p, ctx) {
@@ -218,10 +273,15 @@ export const notificationSendKind: ProposalKind<NotificationSend> = {
     const scheduledFor = p.sendAt ? (fromLocal(p.sendAt, CLUB_TZ) ?? undefined) : undefined
     const link = p.link ? safeLink(p.link) : null
 
-    if (channels.includes("EMAIL") && !scheduledFor) {
-      const [budget, emails] = await Promise.all([emailBudget(), countEmailRecipients(userIds, "CUSTOM")])
+    if (channels.includes("EMAIL")) {
+      const [budget, emails] = await Promise.all([emailBudget(scheduledFor ?? null, new Date()), countEmailRecipients(userIds, "CUSTOM")])
+      if (budget && emails > budget.perDay) throw new Error(`${overPerDay(emails, budget)} Ask Jack to propose it again with fewer people, or in-app only.`)
       if (budget && emails > budget.left) {
-        throw new Error(`This would send ${plural(emails, "email")}, but only ${budget.left} of today's ${budget.dailyLimit} are left (${budget.sentToday} sent, ${TRANSACTIONAL_HEADROOM} kept for confirmations and receipts). ${RESET} Ask Jack to propose it again with fewer people, in-app only, or for after the reset.`)
+        throw new Error(
+          scheduledFor
+            ? `This would send ${plural(emails, "email")} at ${when(scheduledFor)}, but only ${budget.left} of the ${budget.perDay} announcement emails for that day are left (${spoken(budget)}). ${RESET} Cancel a scheduled send on Notifications, or ask Jack to propose it again with fewer people, in-app only, or for another day.`
+            : `This would send ${plural(emails, "email")}, but only ${budget.left} of today's ${budget.dailyLimit} are left (${budget.sent} sent, ${TRANSACTIONAL_HEADROOM} kept for confirmations and receipts). ${RESET} Ask Jack to propose it again with fewer people, in-app only, or for after the reset.`,
+        )
       }
     }
 
