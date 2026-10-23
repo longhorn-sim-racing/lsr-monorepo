@@ -92,7 +92,7 @@ Tracks fill slots. A track that must touch a shared file says so in its PR and k
   - Triggers on JackMessage (`room_message`), KnowledgeEntry (`knowledge`), ExternalDocument (`document`) and TeamsMessage (`teams`) upsert and delete its rows; inputs are capped at 100k characters; existing room messages are backfilled.
   - Room messages are indexed only once they're not streaming, and only when text or status changed.
   - **Why a side table:** Prisma can't deserialize tsvector, so a tsvector column on a table breaks `run_sql`'s `SELECT *` (Jack 1.x's too, since migrations reach production first). No table Jack reads carries one.
-  - It has RLS and **no** policy for `jack_readonly`; search goes through the typed tools, and `run_sql` lists it as off-limits.
+  - It has RLS, no policy for `jack_readonly`, and no grant: `run_sql` gets "permission denied" and calls it off-limits, like `SystemSetting`. Search goes through the typed tools.
   - **Acceptance check for G1 and every PR:** `prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url <throwaway> --exit-code` reports no changes.
 
 ### 3.2 Access: RLS and secrets
@@ -105,7 +105,7 @@ Tracks fill slots. A track that must touch a shared file says so in its PR and k
   - The `recruiting_pipeline` and `audit_log` tools apply the same rules.
 - **Credentials:** env vars, or these `SystemSetting` keys: `instagram` (existing read token), `instagram_publish` (publish token), `twitch` (user refresh token and cached app token). `SystemSetting` is revoked from `jack_readonly`. A migration self-check RAISEs if `jack_readonly` can read it.
 - **`run_sql` hardening:**
-  - Add to `OFF_LIMITS_NAMES`: `net`, `http_get`, `http_post`, `http_delete`, `http_request_queue`, `_http_response`, `cron`, `vault`, `scheduler`, `JackSearchDoc`, plus tests. pg_net's queue is readable by every role and that can't be revoked (`research/supabase-pg-cron.md` §6).
+  - Add to `OFF_LIMITS_NAMES`: `http_get`, `http_post`, `http_delete`, `http_request_queue`, `_http_response`, `ts_rewrite` (anywhere), and the schemas `net`, `cron`, `vault`, `scheduler` (when schema-qualified), plus tests. `JackSearchDoc` is revoked from the role instead (migration `20261023030000`). pg_net's queue is readable by every role and that can't be revoked (`research/supabase-pg-cron.md` §6).
   - The self-check adds `cron` and `scheduler` (never `net`, whose PUBLIC usage can't be revoked).
 
 ### 3.3 Models

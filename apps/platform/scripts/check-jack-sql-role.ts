@@ -174,7 +174,8 @@ async function main() {
     `SELECT c.relrowsecurity AS rls, (SELECT count(*)::int FROM pg_policies p WHERE p.schemaname = 'public' AND p.tablename = 'JackSearchDoc') AS policies
      FROM pg_class c WHERE c.oid = 'public."JackSearchDoc"'::regclass`,
   );
-  report(!!searchDoc && searchDoc.rls && searchDoc.policies === 0, '"JackSearchDoc": row level security and no policy (Jack sees no rows)', JSON.stringify(searchDoc));
+  report(!!searchDoc && searchDoc.rls && searchDoc.policies === 0, '"JackSearchDoc": row level security and no policy', JSON.stringify(searchDoc));
+  expectDenied('"JackSearchDoc" (the search index; no grant)', await attempt(`SELECT count(*)::int AS n FROM "JackSearchDoc"`), ["42501"]);
 
   // Recruiting and the audit log (design §3.2): drafts, and anything about an officer's own
   // application, stay hidden. The policy text is checked always; the data only when there's some to

@@ -10,15 +10,17 @@ import { PROMPT_SLOT as memory } from "./memory"
 import { PROMPT_SLOT as sourcesA } from "./sources-a"
 import { PROMPT_SLOT as sourcesB } from "./sources-b"
 import { PROMPT_SLOT as sponsorsMeetings } from "./sponsors-meetings"
+import type { SlotTrack } from "@/lib/slots"
 import type { PromptSlot } from "./types"
 
 export type { PromptSlot } from "./types"
 
 /**
- * Every track's slot, in a fixed order. The system prompt is a cached prefix, so the order never
- * changes: a new track goes at the end.
+ * Every track's slot, in SLOT_TRACKS order (src/lib/slots.ts), like every other registry. The system
+ * prompt is a cached prefix, so the order never changes: a new track goes at the end of SLOT_TRACKS.
+ * Typed by SlotTrack so a track can't be left out or misspelled.
  */
-export const PROMPT_SLOTS: Readonly<Record<string, PromptSlot>> = {
+export const PROMPT_SLOTS: Readonly<Record<SlotTrack, PromptSlot>> = {
   groundwork,
   "club-data": clubData,
   memory,
