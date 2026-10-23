@@ -5,7 +5,9 @@ import { revalidatePath } from 'next/cache';
 import { requireOfficer } from '@/server/auth/guards';
 import { createAuditLog } from '@/server/audit/log';
 import { destroyImage } from '@/server/cloudinary';
-import { JACK_GALLERY_PREFIX, nextGalleryOrder as nextOrder, uniqueAlbumSlug as uniqueSlug } from '@/server/services/gallery.service';
+import type { ActionResult } from '@/lib/action-result';
+import { JACK_GALLERY_PREFIX } from '@/lib/cloudinary';
+import { nextGalleryOrder as nextOrder, uniqueAlbumSlug as uniqueSlug } from '@/server/services/gallery.service';
 
 function revalidateGallery() {
   revalidatePath('/admin/gallery');
@@ -60,17 +62,25 @@ export async function updateImageOrder(images: { id: string; order: number }[]) 
 }
 
 /**
- * Takes a photo off the gallery. One Jack added (a slide or a room photo, officer-only until then) also
- * comes off Cloudinary, so the link that was in /gallery stops working; officers' own uploads keep their
- * Cloudinary copy, as before. `keptCopy` names a copy that couldn't be deleted (it's still reachable).
+ * Takes a photo off the gallery. One Jack added (a slide or a room photo, officer-only until then) comes
+ * off Cloudinary first, so the link that was in /gallery stops working; when that copy won't delete, the
+ * photo stays (on the gallery too) and the officer tries again. Officers' own uploads keep their
+ * Cloudinary copy, as before.
  */
-export async function deleteImage(id: string): Promise<{ keptCopy: string | null }> {
+export async function deleteImage(id: string): Promise<ActionResult> {
   const user = await requireOfficer();
 
-  const image = await prisma.galleryImage.delete({ where: { id }, select: { publicId: true } });
+  const image = await prisma.galleryImage.findUnique({ where: { id }, select: { publicId: true } });
+  if (!image) return { ok: true }; // already taken off
+
+  // Cloudinary counts a copy that's gone as deleted, so trying again after a failed row delete is safe
   const jackCopy = image.publicId.startsWith(JACK_GALLERY_PREFIX);
-  const removed = jackCopy ? await destroyImage(image.publicId) : null;
-  if (removed === false) console.error(`[gallery] Couldn't delete the Cloudinary copy of gallery image ${id}`);
+  if (jackCopy && !(await destroyImage(image.publicId))) {
+    console.error(`[gallery] Couldn't delete the Cloudinary copy of gallery image ${id}; the image stays`);
+    return { ok: false, error: "Couldn't delete its copy on Cloudinary, so it's still on the gallery. Try again." };
+  }
+  const { count } = await prisma.galleryImage.deleteMany({ where: { id } });
+  if (!count) return { ok: true }; // another officer took it off meanwhile
 
   await createAuditLog({
     actorUserId: user.id,
@@ -78,11 +88,11 @@ export async function deleteImage(id: string): Promise<{ keptCopy: string | null
     entityType: "GALLERY_IMAGE",
     entityId: id,
     summary: `Deleted gallery image ${id}`,
-    metadata: { publicId: image.publicId, ...(jackCopy ? { cloudinaryRemoved: removed } : {}) },
+    metadata: { publicId: image.publicId, ...(jackCopy ? { cloudinaryRemoved: true } : {}) },
   });
 
   revalidateGallery();
-  return { keptCopy: removed === false ? image.publicId : null };
+  return { ok: true };
 }
 
 export async function updateImageCredit(id: string, creditName: string | null, creditUrl: string | null) {

@@ -3,6 +3,13 @@
 
 const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
 
+/**
+ * Where Jack's gallery adds (and the deck page's) put their copies: slides and room photos that were
+ * officer-only until then. Deleting such a gallery image deletes its copy too, so its link stops working
+ * everywhere (decks can use gallery photos by link)
+ */
+export const JACK_GALLERY_PREFIX = "gallery/jack/"
+
 type Options = {
   width?: number
   height?: number

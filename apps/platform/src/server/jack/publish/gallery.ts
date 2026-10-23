@@ -1,4 +1,5 @@
 import sharp from "sharp"
+import { JACK_GALLERY_PREFIX } from "@/lib/cloudinary"
 import { createAuditLog } from "@/server/audit/log"
 import { destroyImage, uploadImageBytes } from "@/server/cloudinary"
 import { prisma } from "@/server/db"
@@ -7,7 +8,7 @@ import { getRenderFile } from "@/server/jack/decks/renders"
 import type { DeckView } from "@/server/jack/decks/service"
 import { jackFileStore } from "@/server/jack/decks/storage"
 import { mapLimit, plural, revalidate } from "@/server/jack/proposals/changes/shared"
-import { JACK_GALLERY_PREFIX, nextGalleryOrder, uniqueAlbumSlug } from "@/server/services/gallery.service"
+import { nextGalleryOrder, uniqueAlbumSlug } from "@/server/services/gallery.service"
 import { slideImage, slideSource, type PickedSlide } from "./slides"
 
 /**

@@ -9,12 +9,6 @@ import { prisma } from "@/server/db"
 
 type Db = Prisma.TransactionClient | typeof prisma
 
-/**
- * Where Jack's gallery adds (and the deck page's) put their copies on Cloudinary: slides and room photos
- * that were officer-only until then. Deleting such a gallery image deletes its copy too
- */
-export const JACK_GALLERY_PREFIX = "gallery/jack/"
-
 /** Next order value at the end of an album (or of the unsorted photos). */
 export async function nextGalleryOrder(albumId: string | null, db: Db = prisma): Promise<number> {
   const last = await db.galleryImage.aggregate({ where: { albumId }, _max: { order: true } })

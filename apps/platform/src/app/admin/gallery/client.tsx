@@ -20,6 +20,7 @@ import { toast } from "sonner"
 import { Button, EmptyState, Notice, PageHeader, Panel, PanelBody, PanelHeader, SearchInput, Toolbar, useConfirm } from "@/components/admin/kit"
 import { createImage, deleteImage, moveImageToAlbum, updateImageOrder } from "@/app/admin/gallery/actions"
 import { unexpectedError } from "@/lib/action-result"
+import { JACK_GALLERY_PREFIX } from "@/lib/cloudinary"
 import { CreditDialog } from "./_components/credit-dialog"
 import { AlbumDialog, type EventOption } from "./_components/album-dialog"
 import { AlbumSelect, AlbumSidebar, albumDate, type GalleryView } from "./_components/album-nav"
@@ -155,7 +156,10 @@ export function GalleryAdminClient({
     const ok = await confirm({
       tone: "danger",
       title: "Delete this photo?",
-      description: "It comes off the gallery. This can't be undone.",
+      // One Jack added loses its Cloudinary copy too, and a deck can use a gallery photo by its link
+      description: image.publicId.startsWith(JACK_GALLERY_PREFIX)
+        ? "It comes off the gallery, and its link stops working everywhere, including on deck slides that use it. This can't be undone."
+        : "It comes off the gallery. This can't be undone.",
       confirmLabel: "Delete photo",
     })
     if (!ok) return
@@ -164,9 +168,13 @@ export function GalleryAdminClient({
     setImages((prev) => prev.filter((img) => img.id !== image.id))
     startTransition(async () => {
       try {
-        const { keptCopy } = await deleteImage(image.id)
-        if (keptCopy) toast.warning(`Photo deleted from the gallery, but its copy on Cloudinary couldn't be deleted, so its old link still works. Ask the Technology team to delete ${keptCopy} in Cloudinary.`, { duration: 15_000 })
-        else toast.success("Photo deleted")
+        const result = await deleteImage(image.id)
+        if (result.ok) toast.success("Photo deleted")
+        else {
+          // Its Cloudinary copy wouldn't delete, so it's still on the gallery
+          setImages((prev) => [...prev, image])
+          toast.error(result.error)
+        }
       } catch (error) {
         setImages((prev) => [...prev, image])
         toast.error(unexpectedError(error, "Couldn't delete the photo"))
