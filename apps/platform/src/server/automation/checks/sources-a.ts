@@ -39,6 +39,8 @@ export const emailBounces: DigestCheck = {
           href: "/admin/notifications?tab=delivery",
           detail: `Last ${entry.last.toLocaleDateString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric" })}`,
         })),
+      // Items are emails (the count is addresses), every one listed
+      moreItems: 0,
     }
   },
 }

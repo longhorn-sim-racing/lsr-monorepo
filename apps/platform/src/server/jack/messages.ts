@@ -39,8 +39,10 @@ export function toMessageView(row: JackMessageRow): JackMessageView {
     tools: parseToolParts(row.toolCalls),
     status: row.status,
     streamSeq: row.streamSeq,
-    answered: row.kind === "user" || row.continues ? row.answeredById !== null : true,
+    answered: row.kind === "user" || row.continues || row.scheduled ? row.answeredById !== null : true,
     ...(row.continues ? { continues: true } : {}),
+    // A recurring question's note waits for its answer like an officer message (design §11.1)
+    ...(row.scheduled ? { scheduled: true } : {}),
     // Mention mode: an officer message that didn't mention Jack (design §10)
     ...(row.kind === "user" && row.expectsAnswer === false ? { expectsAnswer: false as const } : {}),
     ...(row.files?.length ? { files: row.files.map(toFileItem) } : {}),

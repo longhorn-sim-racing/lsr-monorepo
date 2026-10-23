@@ -21,7 +21,8 @@ export type Expectation = {
   fakeAnswer?: string;
   /**
    * For --dry-run: tool calls the fake model makes before it answers, to run a tool path for real (a
-   * proposal, a save) and the checks and cleanup after it. Without them it calls one tool that takes no input
+   * proposal, a save) and the checks and cleanup after it. Without them it calls one tool that takes no input;
+   * an empty list, none
    */
   fakeCalls?: { name: string; input: unknown }[];
   /** Needs a real model to fill in a tool's input; skipped in --dry-run */
@@ -93,6 +94,12 @@ export type Question = {
   unplant?: (ctx: PlantContext) => Promise<void>;
   /** Runs in the question's own room before the reply (room files, earlier state); whatever it makes there goes with the room */
   setup?: (ctx: GuardContext) => Promise<void>;
+  /**
+   * Asked as a scheduled room note from the officer (a recurring question's run, the weekly digest's
+   * summary, design §11) instead of their own message: the reply is a scheduled one, with no web tools
+   * and no knowledge saves. `before` exchanges are then the same job's earlier notes and answers
+   */
+  scheduled?: boolean;
 };
 
 export type EvalContext = {

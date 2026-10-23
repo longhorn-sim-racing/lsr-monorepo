@@ -44,6 +44,15 @@ describe("toMessageView", () => {
     expect(toMessageView(officerRow({ displayName: "Gray", avatarUrl: null }))).not.toHaveProperty("files")
   })
 
+  it("marks a scheduled note and says whether a reply picked it up; other notes count as answered", () => {
+    const note = { ...officerRow(null), kind: "system", authorUserId: "officer-1", scheduled: true } as JackMessageRow
+    expect(toMessageView(note)).toMatchObject({ scheduled: true, answered: false })
+    expect(toMessageView({ ...note, answeredById: "reply-1" })).toMatchObject({ scheduled: true, answered: true })
+    const plain = toMessageView({ ...note, scheduled: false })
+    expect(plain.answered).toBe(true)
+    expect(plain).not.toHaveProperty("scheduled")
+  })
+
   it("has no picture for an officer without one, or one who deleted their account", () => {
     expect(toMessageView(officerRow({ displayName: "Gray", avatarUrl: null })).author).toMatchObject({ avatarUrl: null })
     expect(toMessageView(officerRow(null)).author).toEqual({ kind: "user", userId: null, displayName: FORMER_OFFICER, avatarUrl: null })

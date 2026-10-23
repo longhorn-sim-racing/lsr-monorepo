@@ -34,6 +34,8 @@ export type FakeMessage = {
   answeredById: string | null
   continues?: boolean
   scheduled?: boolean
+  /** The scheduled job that posted a note ("recurring:<id>", "digest.weekly") */
+  jobKey?: string | null
   expectsAnswer?: boolean
   model: string | null
   inputTokens: number | null
@@ -106,6 +108,8 @@ export function createFakeJackDb() {
     messages: [] as FakeMessage[],
     usage: [] as FakeUsage[],
     users: new Map<string, string>(), // id -> displayName
+    /** Recurring questions by id: who answers each (scheduled-replies.ts reads it) */
+    recurring: new Map<string, { persona: string }>(),
     /** Runs before each call (awaited), to step in at an exact moment */
     hook: null as Hook | null,
   }
@@ -137,6 +141,7 @@ export function createFakeJackDb() {
       state.messages = []
       state.usage = []
       state.users = new Map()
+      state.recurring = new Map()
       state.hook = null
     },
     addRoom(fields: Partial<FakeRoom> = {}): FakeRoom {
@@ -172,6 +177,7 @@ export function createFakeJackDb() {
         answeredById: null,
         continues: false,
         scheduled: false,
+        jobKey: null,
         expectsAnswer: true,
         model: null,
         inputTokens: null,
@@ -265,6 +271,14 @@ export function createFakeJackDb() {
         const hits = state.messages.filter((m) => matches(m, where))
         for (const message of hits) Object.assign(message, data, { updatedAt: tick() })
         return { count: hits.length }
+      },
+    },
+
+    recurringQuestion: {
+      async findUnique({ where }: { where: { id: string } }) {
+        await step("recurringQuestion.findUnique", { where })
+        const question = state.recurring.get(where.id)
+        return question ? { ...question } : null
       },
     },
 

@@ -48,6 +48,8 @@ export const unreviewedApplications: DigestCheck = {
       count,
       severity: !count ? "info" : oldest > WAITING_DAYS ? "warning" : "info",
       items: items.sort((a, b) => b.waiting - a.waiting).map(({ title, href, detail }) => ({ title, href, detail })),
+      // Items are teams (the count is applications), every one listed
+      moreItems: 0,
     }
   },
 }

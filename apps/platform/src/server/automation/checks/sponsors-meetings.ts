@@ -44,7 +44,8 @@ export const overdueActionItems: DigestCheck = {
       href: g.href,
       detail: `Oldest due ${centralDay(g.oldestDue)} (${g.oldest} ${g.oldest === 1 ? "day" : "days"} ago)`,
     }))
-    return { count: overdue.length, severity: groups.some((g) => g.oldest > LATE_DAYS) ? "warning" : "info", items }
+    // Items are owners, so "and N more" counts the owners left out
+    return { count: overdue.length, severity: groups.some((g) => g.oldest > LATE_DAYS) ? "warning" : "info", items, moreItems: groups.length - items.length }
   },
 }
 

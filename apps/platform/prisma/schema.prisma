@@ -1055,6 +1055,11 @@ model JackMessage {
   authorLabel   String?
   /// False for officer messages in a mention-mode room that don't mention Jack: context, not questions
   expectsAnswer Boolean           @default(true)
+  /// Notes a scheduled job posted (Jack 2.0 automation): the job's ScheduledJob.key, "recurring:<id>" for a
+  /// recurring question or "digest.weekly" for the weekly digest. A scheduled reply's history is its own
+  /// job's notes only (the question and its last answer, design §11.1), and the Recurring questions and
+  /// Usage pages find a job's runs by it. A plain string: the notes keep it after the job is deleted
+  jobKey        String?
 
   /// Assistant messages only (later steps)
   model           String?
@@ -1078,6 +1083,7 @@ model JackMessage {
   @@index([roomId, createdAt])
   @@index([roomId, kind, answeredById])
   @@index([authorUserId])
+  @@index([jobKey, createdAt])
 }
 
 /// A deck's canvas: 16:9 slides (1920x1080), an Instagram post (1080x1350), an Instagram story

@@ -40,6 +40,8 @@ export type DiscordMessageBody = {
   embeds?: DiscordEmbed[]
   poll?: DiscordPollCreate
   allowed_mentions: DiscordAllowedMentions
+  /** Message flags: 4 (SUPPRESS_EMBEDS) keeps its links from unfolding into previews (the weekly digest) */
+  flags?: number
 }
 
 export type DiscordRole = {

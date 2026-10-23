@@ -403,6 +403,12 @@ describe("stallCandidate", () => {
     expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" }), { ...keepGoing, answered: true }])).toBeNull()
   })
 
+  it("counts a scheduled note (a recurring question) waiting for its answer, until a reply picks it up", () => {
+    const question: JackMessageView = { ...note, id: "s3", scheduled: true, answered: false }
+    expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" }), question])).toBe("unanswered")
+    expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" }), { ...question, answered: true }])).toBeNull()
+  })
+
   it("ignores system notes, and answered messages after the last reply", () => {
     expect(stallCandidate([officerMessage("m1", "2026-10-12T20:00:00.000Z"), reply({ status: "done" }), note])).toBeNull()
     expect(stallCandidate([reply({ status: "done" }), officerMessage("m2", "2026-10-12T20:00:09.000Z")])).toBeNull()

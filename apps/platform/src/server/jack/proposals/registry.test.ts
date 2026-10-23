@@ -28,6 +28,7 @@ afterEach(() => {
   vi.doUnmock("./kinds/changes")
   vi.doUnmock("./kinds/discord-post")
   vi.doUnmock("./kinds/sponsors-meetings")
+  vi.doUnmock("./kinds/automation")
   vi.doUnmock("./import-targets/changes")
   vi.doUnmock("./import-targets/sponsors-meetings")
   vi.resetModules()
@@ -46,6 +47,7 @@ describe("the proposal kind registry", () => {
 
   it("joins the tracks' kinds in track order, finds them by key, and groups them by tool", async () => {
     vi.doMock("./kinds/groundwork", () => ({ KINDS: [] })) // page.update is real; leave it out of the order check
+    vi.doMock("./kinds/automation", () => ({ KINDS: [] })) // so is recurring.upsert
     vi.doMock("./kinds/discord-post", () => ({ KINDS: [fakeKind("discord.post", "propose_discord")] }))
     vi.doMock("./kinds/sponsors-meetings", () => ({ KINDS: [fakeKind("action_item.update")] }))
     vi.doMock("./kinds/changes", () => ({ KINDS: [fakeKind("event.update"), fakeKind("news.create", "propose_content")] }))

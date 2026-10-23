@@ -43,6 +43,11 @@ export default async function JackUsagePage({ searchParams }: { searchParams: Pr
       <StatRow>
         <Stat label={`Spent in ${month.label}`} value={formatUsd(selected.totalUsd)} hint={<CapMeter usd={selected.totalUsd} budgetUsd={budgetUsd} current={usage.current} />} />
         <Stat label="Replies" value={selected.replies.toLocaleString("en-US")} hint="Answers from Jack, Lift or Stand" />
+        <Stat
+          label="Automations"
+          value={formatUsd(usage.automation.spentUsd)}
+          hint={<CapMeter usd={usage.automation.spentUsd} budgetUsd={usage.automation.capUsd} current={usage.current} pauses="recurring questions and digest summaries pause" />}
+        />
         {PERSONAS.map((persona) => (
           <Stat key={persona} label={JACK_PERSONA_NAME[persona]} value={formatUsd(selected.byPersona[persona])} hint={`${PERSONA_HINT[persona]} · ${share(selected.byPersona[persona])}`} />
         ))}
@@ -61,7 +66,7 @@ export default async function JackUsagePage({ searchParams }: { searchParams: Pr
         <Panel>
           <PanelHeader
             title={`By officer and automation · ${month.label}`}
-            description="A reply counts for the officer whose message started it; replies to recurring questions and side jobs count apart."
+            description="A reply counts for the officer whose message started it; recurring questions, digest summaries and side jobs count apart."
           />
           <SpenderTable spenders={usage.spenders} total={selected.totalUsd} />
         </Panel>
@@ -118,15 +123,15 @@ export default async function JackUsagePage({ searchParams }: { searchParams: Pr
   )
 }
 
-/** This month against the cap: a meter whose fill turns from blue to amber at 80% and red at the cap, with the same words beside it */
-function CapMeter({ usd, budgetUsd, current }: { usd: number; budgetUsd: number; current: boolean }) {
+/** This month against a cap: a meter whose fill turns from blue to amber at 80% and red at the cap, with the same words beside it. `pauses` says what stops at the cap */
+function CapMeter({ usd, budgetUsd, current, pauses = "replies pause" }: { usd: number; budgetUsd: number; current: boolean; pauses?: string }) {
   const ratio = budgetUsd > 0 ? usd / budgetUsd : 1
   const level = ratio >= 1 ? "danger" : ratio >= 0.8 ? "warning" : "info"
   const percent = Math.round(Math.min(ratio, 1) * 100)
   const label =
     ratio >= 1
       ? current
-        ? "Cap reached: replies pause until the 1st"
+        ? `Cap reached: ${pauses} until the 1st`
         : "Reached the cap"
       : `${Math.round(ratio * 100)}% of the ${formatUsd(budgetUsd, { wholeIfRound: true })} cap`
   return (
