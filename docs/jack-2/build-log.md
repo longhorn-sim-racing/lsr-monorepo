@@ -113,3 +113,6 @@ Calls made during the build, for Gray to review. Newest last.
   - **Found on main, fixed separately:** `run_sql`'s name check could be bypassed with `ts_rewrite()`. PR #195 (P1, for Gray).
   - Knowledge seed drafting started (an agent reads Teams and Drive; output stays in the private folder).
   - Wave 1 launched as a workflow: 9 builders in worktrees, each PR then independently reviewed and fixed.
+  - **Knowledge seed drafted:** 99 entries plus an index in the private seed folder (not the repo). Topics: the club 5, who does what 27, decisions 14, policies 7, brand 5, sponsors 6, events playbook 7, recruiting 3, services and access 20, calendar 5.
+    - **Waiting on Gray:** 26 questions at the end of `_index.md` (conflicts between sources, facts not found, judgment calls).
+    - **Note for the memory PR:** the seed's `owner` is a department name. The loader maps it to a person when one clearly owns it, otherwise leaves `ownerId` empty and keeps the department as a tag.
