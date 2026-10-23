@@ -94,6 +94,9 @@ export function PurgeLinkedButton({ userId, username }: { userId: string; userna
 /** What role sync took back from the account; when it couldn't, the admin removes the roles in Discord */
 function rolesToast(roles: PurgeRoles) {
   if (!roles) return
-  if (roles.error) toast.warning(`Role sync couldn't take back the roles it gave them${roles.taken.length ? ` (it took ${roles.taken.join(", ")})` : ""}: ${roles.error.replace(/\.?$/, ".")} Remove its roles from them in Discord.`, { duration: 15_000 })
-  else if (roles.taken.length) toast.success(`Role sync took back ${roles.taken.join(", ")}.`)
+  if (roles.error) {
+    const which = roles.left.length ? roles.left.join(", ") : "the roles it gave them"
+    const remove = roles.left.length === 1 ? "that role" : roles.left.length ? "those roles" : "its roles"
+    toast.warning(`Role sync couldn't take back ${which}${roles.taken.length ? ` (it took ${roles.taken.join(", ")})` : ""}: ${roles.error.replace(/\.?$/, ".")} Remove ${remove} from them in Discord.`, { duration: 15_000 })
+  } else if (roles.taken.length) toast.success(`Role sync took back ${roles.taken.join(", ")}.`)
 }

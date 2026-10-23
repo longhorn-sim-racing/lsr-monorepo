@@ -19,8 +19,9 @@ import { queueRoleTakeBack, runQueuedTakeBacks } from "./role-takeback"
  * - Only linked members, never anyone on the purged list, and only members the member sync has seen in
  *   the server (DiscordMember.roles is what they hold now).
  * - An account that leaves (unlinked, its site account deleted, or purged) can't be seen here any more, so
- *   its roles are taken back when it goes (role-takeback.ts); each run first takes back what an unlink
- *   left queued, and a role given to someone who unlinked while the run was going is taken back at once.
+ *   its roles are taken back when it goes (role-takeback.ts, every rule's role, on or off); each run first
+ *   takes back what an unlink left queued (even with no rule on), and a role given to someone who unlinked
+ *   while the run was going is taken back at once.
  * - At most MAX_ROLE_CHANGES_PER_RUN changes a run; the rest wait for the next.
  * - Every change is audited (entityType DISCORD_ROLE, the member as target, the system as actor).
  * - One rule per role. Rules are managed on Community → Discord (admins).
@@ -119,8 +120,8 @@ export type RoleSyncRun = { rules: number; added: number; removed: number; taken
 /** One role sync run over the switched-on rules */
 export async function runRoleSync({ client, writer }: { client: DiscordClient; writer: DiscordWriter }, ctx: { now: Date; log: (line: string) => void; signal?: AbortSignal }): Promise<RoleSyncRun> {
   const run: RoleSyncRun = { rules: 0, added: 0, removed: 0, takenBack: 0, refused: 0, skipped: 0, waiting: 0 }
-  // First, accounts unlinked while Discord couldn't be reached: nothing below can see them any more
-  const queued = await runQueuedTakeBacks(writer, { maxChanges: MAX_ROLE_CHANGES_PER_RUN, signal: ctx.signal, log: ctx.log })
+  // First, unlinked accounts still waiting (Discord couldn't be reached, or refused a role): nothing below can see them any more
+  const queued = await runQueuedTakeBacks({ client, writer }, { maxChanges: MAX_ROLE_CHANGES_PER_RUN, signal: ctx.signal, log: ctx.log })
   run.takenBack = queued.removed
   run.waiting += queued.waiting
   let changes = queued.removed

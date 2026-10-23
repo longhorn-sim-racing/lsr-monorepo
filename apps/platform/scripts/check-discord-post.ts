@@ -12,8 +12,9 @@
  * Refuses unless DATABASE_URL points at 127.0.0.1 or localhost. It writes only its own rows (a temporary
  * event, rule and posts named after this run) and deletes them again, pass or fail, and puts the posting
  * channels setting back as it was. The rule part is skipped when another standing rule is switched on
- * (the run would act on it too), and the role part when a role sync rule is on or accounts are waiting
- * (it writes a temporary member, rule and queue, and their audit entries, and deletes them).
+ * (the run would act on it too), and the role part when any role sync rule exists (on or off; the
+ * take-back acts on every rule's role) or accounts are waiting (it writes a temporary member, rule and
+ * queue, and their audit entries, and deletes them).
  */
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -74,7 +75,8 @@ async function main() {
     return router(request);
   };
   const hook = (path: string, body: unknown) => fetch(`${FAKES_ORIGIN}/discord/_fake/${path}`, { method: "POST", body: JSON.stringify(body) });
-  const writer = discordWriter(discordClient({ token: FAKE_DISCORD.botToken, guildId: FAKE_DISCORD.guildId }).rest, FAKE_DISCORD.guildId);
+  const client = discordClient({ token: FAKE_DISCORD.botToken, guildId: FAKE_DISCORD.guildId });
+  const writer = discordWriter(client.rest, FAKE_DISCORD.guildId);
 
   const run = randomUUID().slice(0, 8);
   const prefix = `check-discord-post:${run}`;
@@ -152,15 +154,15 @@ async function main() {
     }
 
     // Role sync taking its roles back: an unlink queues the account in its own transaction, and the queue keeps every account under real concurrency
-    const busy = (await prisma.discordRoleRule.count({ where: { enabled: true } })) + (await prisma.systemSetting.count({ where: { key: takeback.TAKEBACK_SETTING } }));
+    const busy = (await prisma.discordRoleRule.count()) + (await prisma.systemSetting.count({ where: { key: takeback.TAKEBACK_SETTING } }));
     if (busy) {
-      console.log("SKIP  the role take-back checks: role sync rules are switched on, or accounts are waiting, in this database");
+      console.log("SKIP  the role take-back checks: role sync rules exist, or accounts are waiting, in this database");
     } else {
       roleChecks = true;
       const { unlinkDiscord } = await import("../src/server/services/discord-link.service");
       const queue = async () => (JSON.parse((await prisma.systemSetting.findUnique({ where: { key: takeback.TAKEBACK_SETTING } }))?.value ?? '{"accounts":[]}') as { accounts: string[] }).accounts;
       const role = FAKE_DISCORD.roles.lscDriver;
-      const [memberId] = (await discordClient({ token: FAKE_DISCORD.botToken, guildId: FAKE_DISCORD.guildId }).members({ limit: 1000 })).filter((m) => !m.user.bot).map((m) => m.user.id);
+      const [memberId] = (await client.members({ limit: 1000 })).filter((m) => !m.user.bot).map((m) => m.user.id);
       await writer.addRole(memberId, role, "check");
       await prisma.discordRoleRule.create({ data: { id: roleRuleId, roleId: role, condition: "lsc_driver", enabled: true } });
       checkUserId = (await prisma.user.create({ data: { email: `${run}-takeback@example.test`, handle: `check-takeback-${run}`, displayName: `Check takeback ${run}`, discordUserId: memberId, discordLinkedAt: new Date() } })).id;
@@ -168,7 +170,7 @@ async function main() {
       await unlinkDiscord(checkUserId);
       // Discord is off locally, so the unlink's own try is skipped and the account waits (with it on, the try against the fake fails on the token)
       check("unlinking clears the link and queues the account", (await prisma.user.findUnique({ where: { id: checkUserId } }))?.discordUserId === null && (await queue()).includes(memberId));
-      const drained = await takeback.runQueuedTakeBacks(writer, { maxChanges: 25, log: () => {} });
+      const drained = await takeback.runQueuedTakeBacks({ client, writer }, { maxChanges: 25, log: () => {} });
       check("the next run takes the synced role back and the account leaves the queue", drained.removed === 1 && !(await writer.member(memberId)).roles.includes(role) && (await queue()).length === 0, JSON.stringify(drained));
 
       // Accounts that aren't in the fake server: taking their roles back is done at once
@@ -177,7 +179,7 @@ async function main() {
       await Promise.all(ids.map((id) => takeback.queueRoleTakeBack(id)));
       check("12 unlinks queued at once are all kept", (await queue()).length === 12, JSON.stringify(await queue()));
       const more = accountIds("18", 6);
-      await Promise.all([takeback.runQueuedTakeBacks(writer, { only: ids[0], maxChanges: 25, log: () => {} }), ...more.map((id) => takeback.queueRoleTakeBack(id))]);
+      await Promise.all([takeback.runQueuedTakeBacks({ client, writer }, { only: ids[0], maxChanges: 25, log: () => {} }), ...more.map((id) => takeback.queueRoleTakeBack(id))]);
       const after = await queue();
       check("unlinks that land while a run takes an account back are all kept", !after.includes(ids[0]) && [...ids.slice(1), ...more].every((id) => after.includes(id)), JSON.stringify(after));
     }

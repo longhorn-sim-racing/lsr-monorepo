@@ -109,7 +109,7 @@ export function RoleSyncPanel({ view, conditions, isAdmin }: { view: RoleSyncVie
 
   const lastRun = view.lastRun ? `Last run ${view.lastRun.at}${view.lastRun.summary ? `: ${view.lastRun.summary}` : ""}` : "Hasn't run yet (Scheduled jobs → discord.role-sync)"
   const waiting = view.waitingTakeBacks
-    ? ` ${view.waitingTakeBacks} unlinked ${view.waitingTakeBacks === 1 ? "account still has its" : "accounts still have their"} roles: the next run takes them back (Discord couldn't be reached when they unlinked).`
+    ? ` ${view.waitingTakeBacks} unlinked ${view.waitingTakeBacks === 1 ? "account still holds roles" : "accounts still hold roles"} it gave: each run tries again to take them back (the run's log in Scheduled jobs → discord.role-sync says why it couldn't).`
     : ""
   return (
     <Panel>
@@ -138,7 +138,7 @@ export function RoleSyncPanel({ view, conditions, isAdmin }: { view: RoleSyncVie
                   </div>
                   <p className="text-xs text-muted-foreground">
                     For {rule.conditionLabel.toLowerCase()}: {rule.qualifying === null ? "can't tell who right now" : `${rule.qualifying} qualify`}, {rule.holders} hold it
-                    {rule.others > 0 && `, and ${rule.others} who ${rule.others === 1 ? "isn't" : "aren't"} linked (role sync leaves members who never linked alone)`}
+                    {rule.others > 0 && `, and ${rule.others} more who ${rule.others === 1 ? "isn't" : "aren't"} linked now (role sync changes only linked members' roles, and takes its roles back when someone unlinks)`}
                   </p>
                   {rule.refusal && <p className="text-xs text-tone-danger-foreground">{rule.refusal}</p>}
                 </div>

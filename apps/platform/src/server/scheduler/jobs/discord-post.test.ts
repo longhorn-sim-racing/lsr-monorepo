@@ -80,6 +80,9 @@ describe("the discord-post jobs", () => {
     expect((await discordEventMirrorJob.run(ctx())).summary).toBe("Discord events: 2 added, 1 removed, 3 interested counts updated")
     mocks.runRoleSync.mockResolvedValue({ rules: 0, added: 0, removed: 0, refused: 0, skipped: 0, waiting: 0 })
     expect((await discordRoleSyncJob.run(ctx())).summary).toBe("No role sync rules switched on")
+    // Queued take-backs run with no rule on, and say so
+    mocks.runRoleSync.mockResolvedValue({ rules: 0, added: 0, removed: 0, takenBack: 2, refused: 0, skipped: 0, waiting: 1 })
+    expect(await discordRoleSyncJob.run(ctx())).toMatchObject({ summary: "No role sync rules switched on; 2 taken back from unlinked accounts, 1 waiting for the next run", counts: { takenBack: 2, waiting: 1 } })
     mocks.runRoleSync.mockResolvedValue({ rules: 1, added: 3, removed: 1, refused: 1, skipped: 0, waiting: 2 })
     expect((await discordRoleSyncJob.run(ctx())).summary).toBe("Role sync over 1 rule: 3 added, 1 removed, 2 waiting for the next run, 1 rule refused")
   })

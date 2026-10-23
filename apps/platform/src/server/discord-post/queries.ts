@@ -249,14 +249,14 @@ export type RoleRuleView = {
   qualifying: number | null
   /** Linked members who hold the role, as of the last member sync */
   holders: number
-  /** Members in the server who hold it but aren't linked (role sync leaves members who never linked alone) */
+  /** Members in the server who hold it but aren't linked now: never linked (role sync leaves them alone), or unlinked and still waiting for the take-back */
   others: number
 }
 
 export type RoleSyncView = {
   rules: RoleRuleView[]
   linked: number
-  /** Unlinked accounts whose roles the next run takes back (Discord couldn't be reached when they went) */
+  /** Unlinked accounts still holding a rule's role; each run tries again to take them back */
   waitingTakeBacks: number
   /** The server's roles role sync may hand out (read live; empty while Discord is off or can't be read) */
   safeRoles: { id: string; name: string }[]

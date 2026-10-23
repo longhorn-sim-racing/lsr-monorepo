@@ -135,6 +135,16 @@ describe("role sync", () => {
     expect(JSON.stringify(state.audits)).not.toContain(unlinked)
   })
 
+  it("works through the queued take-backs while no rule is switched on, taking a paused rule's role too", async () => {
+    state.rules = [{ id: "rr-1", roleId: R.member, condition: "officer", enabled: false, createdById: null }]
+    const unlinked = humans[6]
+    expect((await posting.writer.member(unlinked)).roles).toContain(R.member)
+    state.settings.set("discord_role_takeback", JSON.stringify({ accounts: [unlinked] }))
+    expect(await run()).toMatchObject({ rules: 0, takenBack: 1, added: 0, removed: 0, waiting: 0 })
+    expect((await posting.writer.member(unlinked)).roles).not.toContain(R.member)
+    expect(state.settings.has("discord_role_takeback")).toBe(false)
+  })
+
   it("takes back at once a role it just gave someone who unlinked while the run was going", async () => {
     state.rules = [{ id: "rr-1", roleId: R.lscDriver, condition: "lsc_driver", enabled: true, createdById: null }]
     // Member 0 has the badge and not the role; they unlink after the run read who's linked (their own take-back found nothing yet)

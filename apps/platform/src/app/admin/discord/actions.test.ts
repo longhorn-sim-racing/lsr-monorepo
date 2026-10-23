@@ -102,13 +102,13 @@ describe("purgeDiscordMemberAction", () => {
   it("takes back the roles role sync gave the account right after the purge, and says what happened", async () => {
     const order: string[] = []
     service.purgeDiscordData.mockImplementation(async () => (order.push("purge"), { messages: 3, member: true, unlinkedUserId: "user-9" }))
-    takeback.takeBackAfterPurge.mockImplementation(async () => (order.push("take back"), { taken: ["@LSC Driver"], error: null }))
-    expect(await purgeDiscordMemberAction({ discordUserId: DISCORD_ID })).toMatchObject({ ok: true, data: { unlinkedUserId: "user-9", roles: { taken: ["@LSC Driver"], error: null } } })
+    takeback.takeBackAfterPurge.mockImplementation(async () => (order.push("take back"), { taken: ["@LSC Driver"], left: [], error: null }))
+    expect(await purgeDiscordMemberAction({ discordUserId: DISCORD_ID })).toMatchObject({ ok: true, data: { unlinkedUserId: "user-9", roles: { taken: ["@LSC Driver"], left: [], error: null } } })
     expect(takeback.takeBackAfterPurge).toHaveBeenCalledWith(DISCORD_ID, { wasLinked: true, targetUserId: "user-9" })
     expect(order).toEqual(["purge", "take back"])
 
-    takeback.takeBackAfterPurge.mockResolvedValue({ taken: [], error: "Discord isn't connected." })
-    expect(await purgeDiscordMemberAction({ discordUserId: DISCORD_ID })).toMatchObject({ ok: true, data: { roles: { taken: [], error: "Discord isn't connected." } } })
+    takeback.takeBackAfterPurge.mockResolvedValue({ taken: [], left: [], error: "Discord isn't connected." })
+    expect(await purgeDiscordMemberAction({ discordUserId: DISCORD_ID })).toMatchObject({ ok: true, data: { roles: { taken: [], left: [], error: "Discord isn't connected." } } })
   })
 
   it("finds the account by a unique username, or by a member's link", async () => {
