@@ -57,6 +57,16 @@ describe("neutralizeLinks", () => {
     expect(neutralizeLinks("Send “see evil.example/x”. Or 例え.com/x。")).toBe("Send “see [link to evil[.]example]”. Or [link to xn--r8jz45g[.]com]。")
   })
 
+  it("catches a link with a scheme, or an IPv4 address, right after a letter, a digit or an underscore", () => {
+    // An integer IPv4 host, a host with no path, an IPv6 literal: only the scheme marks them as links
+    expect(neutralizeLinks("_http://3405803783/c?d=alice@example.com")).toBe("_[link to 203[.]0[.]113[.]7]")
+    expect(neutralizeLinks("1https://alice-utexas-edu.evil.example")).toBe("1[link to alice-utexas-edu[.]evil[.]example]")
+    expect(neutralizeLinks("x_http://[2001:db8::1]/c?d=1")).toBe("x_[link to [2001:db8::1]]")
+    expect(neutralizeLinks("x_https:evil.example and xhttps://evil.example/a")).toBe("x_[link to evil[.]example] and [link to evil[.]example]")
+    expect(neutralizeLinks("x_10.0.0.1/collect, v10.0.0.2:8080")).toBe("x_[link to 10[.]0[.]0[.]1], v[link to 10[.]0[.]0[.]2]")
+    expect(neutralizeLinks("Awww...really, 1234.0.0.1/x, v10.2.3.4")).toBe("Awww...really, 1234.0.0.1/x, v10.2.3.4")
+  })
+
   it("leaves what isn't a link alone", () => {
     const text = "e.g. laps.csv, v1.2.3, 3/4 of drivers, gray@example.com, and/or 1.5/2, 10.0.0.1 alone, and did you open laps.csv? Or notes.txt#"
     expect(neutralizeLinks(text)).toBe(text)
