@@ -70,14 +70,17 @@ export async function uploadRemoteImage(url: string, publicId: string) {
   return { publicId: json.public_id, width: json.width ?? null, height: json.height ?? null }
 }
 
-/** Delete an image uploaded by the server (best effort: a failure is reported, not thrown). */
+/**
+ * Delete an image uploaded by the server (best effort: a failure is reported, not thrown). `invalidate`
+ * asks Cloudinary's CDN to drop its cached copies too, so the old link stops working, not just new ones.
+ */
 export async function destroyImage(publicId: string): Promise<boolean> {
   const cloud = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
   const apiKey = process.env.CLOUDINARY_API_KEY
   const apiSecret = process.env.CLOUDINARY_API_SECRET
   if (!cloud || !apiKey || !apiSecret) return false
 
-  const params: Record<string, string> = { public_id: publicId, timestamp: String(Math.floor(Date.now() / 1000)) }
+  const params: Record<string, string> = { invalidate: "true", public_id: publicId, timestamp: String(Math.floor(Date.now() / 1000)) }
   const form = new FormData()
   for (const [key, value] of Object.entries(params)) form.append(key, value)
   form.append("api_key", apiKey)

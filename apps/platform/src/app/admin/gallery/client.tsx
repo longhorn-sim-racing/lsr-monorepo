@@ -164,8 +164,9 @@ export function GalleryAdminClient({
     setImages((prev) => prev.filter((img) => img.id !== image.id))
     startTransition(async () => {
       try {
-        await deleteImage(image.id)
-        toast.success("Photo deleted")
+        const { keptCopy } = await deleteImage(image.id)
+        if (keptCopy) toast.warning(`Photo deleted from the gallery, but its copy on Cloudinary couldn't be deleted, so its old link still works. Ask the Technology team to delete ${keptCopy} in Cloudinary.`, { duration: 15_000 })
+        else toast.success("Photo deleted")
       } catch (error) {
         setImages((prev) => [...prev, image])
         toast.error(unexpectedError(error, "Couldn't delete the photo"))

@@ -4,7 +4,8 @@ import { prisma } from '@/server/db';
 import { revalidatePath } from 'next/cache';
 import { requireOfficer } from '@/server/auth/guards';
 import { createAuditLog } from '@/server/audit/log';
-import { nextGalleryOrder as nextOrder, uniqueAlbumSlug as uniqueSlug } from '@/server/services/gallery.service';
+import { destroyImage } from '@/server/cloudinary';
+import { JACK_GALLERY_PREFIX, nextGalleryOrder as nextOrder, uniqueAlbumSlug as uniqueSlug } from '@/server/services/gallery.service';
 
 function revalidateGallery() {
   revalidatePath('/admin/gallery');
@@ -58,10 +59,18 @@ export async function updateImageOrder(images: { id: string; order: number }[]) 
   revalidateGallery();
 }
 
-export async function deleteImage(id: string) {
+/**
+ * Takes a photo off the gallery. One Jack added (a slide or a room photo, officer-only until then) also
+ * comes off Cloudinary, so the link that was in /gallery stops working; officers' own uploads keep their
+ * Cloudinary copy, as before. `keptCopy` names a copy that couldn't be deleted (it's still reachable).
+ */
+export async function deleteImage(id: string): Promise<{ keptCopy: string | null }> {
   const user = await requireOfficer();
 
-  await prisma.galleryImage.delete({ where: { id } });
+  const image = await prisma.galleryImage.delete({ where: { id }, select: { publicId: true } });
+  const jackCopy = image.publicId.startsWith(JACK_GALLERY_PREFIX);
+  const removed = jackCopy ? await destroyImage(image.publicId) : null;
+  if (removed === false) console.error(`[gallery] Couldn't delete the Cloudinary copy of gallery image ${id}`);
 
   await createAuditLog({
     actorUserId: user.id,
@@ -69,9 +78,11 @@ export async function deleteImage(id: string) {
     entityType: "GALLERY_IMAGE",
     entityId: id,
     summary: `Deleted gallery image ${id}`,
+    metadata: { publicId: image.publicId, ...(jackCopy ? { cloudinaryRemoved: removed } : {}) },
   });
 
   revalidateGallery();
+  return { keptCopy: removed === false ? image.publicId : null };
 }
 
 export async function updateImageCredit(id: string, creditName: string | null, creditUrl: string | null) {
