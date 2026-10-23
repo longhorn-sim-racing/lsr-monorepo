@@ -459,7 +459,7 @@ export const deckScreenshotTool: JackTool<z.infer<typeof deckScreenshotInput>> =
       return fail(`${input.page} isn't a public page of the site. Use a path like "/", "/events", "/lone-star-cup", "/gallery", "/apply", "/drivers", "/news" or "/sponsors".`, "Screenshot not taken")
     }
     const store = jackFileStore()
-    if (store.kind === "none") return fail("Screenshots need the private Blob store, which isn't connected yet. Tell the officers an admin needs to connect it.", "Screenshot not taken")
+    if (store.kind === "none") return fail("Screenshots need Jack's private file store, which isn't connected yet. Tell the officers an admin needs to connect it.", "Screenshot not taken")
     const device = input.device ?? "desktop"
     const shot = await screenshotSite(input.page, { device, fullPage: input.fullPage })
     const name = `shot-${createHash("sha256").update(shot.png).digest("hex").slice(0, 20)}.png`

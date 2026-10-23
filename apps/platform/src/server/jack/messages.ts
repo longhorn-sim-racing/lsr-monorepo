@@ -1,6 +1,7 @@
 import type { JackRoom, Prisma } from "@prisma/client"
 import type { JackAuthor, JackMessageView, JackRoomView } from "@/lib/jack/types"
 import { parseToolParts } from "@/lib/jack/parts"
+import { jackFileItemSelect, toFileItem } from "./files/views"
 
 /**
  * Officer messages carry their author's name, so everyone in the room (and later the model) knows who
@@ -8,6 +9,8 @@ import { parseToolParts } from "@/lib/jack/parts"
  */
 export const jackMessageInclude = {
   author: { select: { displayName: true, avatarUrl: true } },
+  // Files an officer attached (G5); only READY files can be posted
+  files: { where: { status: "READY" }, orderBy: { position: "asc" }, select: jackFileItemSelect },
 } satisfies Prisma.JackMessageInclude
 
 export type JackMessageRow = Prisma.JackMessageGetPayload<{ include: typeof jackMessageInclude }>
@@ -32,6 +35,7 @@ export function toMessageView(row: JackMessageRow): JackMessageView {
     streamSeq: row.streamSeq,
     answered: row.kind === "user" || row.continues ? row.answeredById !== null : true,
     ...(row.continues ? { continues: true } : {}),
+    ...(row.files?.length ? { files: row.files.map(toFileItem) } : {}),
     createdAt: row.createdAt.toISOString(),
   }
 }

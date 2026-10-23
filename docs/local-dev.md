@@ -78,6 +78,8 @@ DIRECT_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
 For other env vars (Cloudinary, Shopify, Stripe, Resend), ask the team lead. These are optional for most local development. Stripe uses test-mode keys locally; see [payments.md](./payments.md).
 
+**Jack's files (deck renders, room uploads)** are kept in `apps/platform/.jack-renders/` on disk locally, even when `SUPABASE_SERVICE_ROLE_KEY` is set: local Supabase Storage is only used with `JACK_FILE_STORE=supabase`, which needs the `jack` bucket created first (`pnpm --filter @lsr/platform exec tsx scripts/jack-storage-setup.ts`) and, on stacks made by an older Supabase CLI, an index fix. See [jack-2/tracks/files.md](./jack-2/tracks/files.md).
+
 > **Never put production database credentials in your local env files.** Production credentials live only in Vercel.
 
 ## 4. Apply migrations and seed the database

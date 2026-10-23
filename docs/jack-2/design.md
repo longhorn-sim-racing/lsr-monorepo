@@ -60,6 +60,7 @@ src/app/api/admin/jack/files/... upload token, register, serve
 - `proposals/import-targets/<track>.ts`
 - `scheduler/jobs/<track>.ts`
 - `connectors/slots/<track>.ts`
+- `connectors/fakes/slots/<track>.ts` (HTTP fakes, added in G2)
 - `automation/checks/<track>.ts` (digest and Overview "needs attention" checks)
 - `app/admin/_overview/cards/<track>.tsx`
 - `scripts/jack-eval/<track>.ts`
@@ -588,7 +589,7 @@ Every external link shows its host. In replies, `reply-text.tsx` also shows the 
 Each connector implements `Connector` (`connectors/types.ts`): `id`, `label`, `requiredEnv`, `configured()`, `enabled()` (from ConnectorState, default off), `client()`, `smoke()` (an opt-in live check script), `status()` for the Connections page.
 
 **Fakes are HTTP:**
-- Every client takes a base URL (`<SERVICE>_BASE_URL`).
+- Every client takes a base URL from `serviceBaseUrl(service, realUrl)` (`connectors/base-url.ts`; an SDK that takes only a host uses `serviceFetch(service)`), not a `<SERVICE>_BASE_URL` per client as some research files planned. `JACK_FAKES` and `JACK_FAKES_URL` switch every client at once; fakes register in `connectors/fakes/slots/<track>.ts` (`tracks/groundwork.md`).
 - `pnpm jack:fakes` runs one local fake server for all services, built from the research specs' fixtures, so the real SDKs (Stripe, Resend) and our own REST clients are exercised.
 - Tests mount the same handlers through a fetch interceptor.
 - `JACK_FAKES=all` points every client at the fakes locally.
@@ -777,7 +778,7 @@ These are the steps Gray (or the named owner) must do. Each is mirrored on Syste
 2. **Gray enables pg_cron and pg_net** in the Supabase dashboard.
 3. **Apply the 2.0 migrations to prod before merging** (they're additive, so main keeps working), by running `migrate.yml` through `workflow_dispatch` on `jack-2` or by merging a migrations-only PR to main. This matters because `getSessionUser` reads whole User rows: deploying the code first would break sign-in until the migrations land.
 4. **Merge `jack-2 → main`.** Vercel deploys.
-5. **Setup steps** (section 15), then **turn connectors on one at a time**, each after its smoke test. Turn on the scheduler, then the jobs.
+5. **Setup steps** (section 15), then **turn connectors on one at a time**, each after its smoke test. Turn on the scheduler, then the jobs. **Turn on `proposals.sweep` first:** until it runs, an apply whose function died stays APPLYING, and an expired proposal gets its "Stale" note only when someone acts on it.
 6. **Launch runbook** in `build-log.md`: the order, smoke checks, rollback (switch connectors off; code rollback is safe because the migrations are additive).
 
 ---
