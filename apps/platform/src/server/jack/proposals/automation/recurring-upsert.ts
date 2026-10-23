@@ -144,7 +144,7 @@ export const recurringUpsertKind: ProposalKind<RecurringUpsertProposal> = {
       view: {
         title: `Set up the recurring question “${clip(p.title!, 60)}”`,
         summary:
-          `Asks it in “${room}” ${(describeSchedule(cron) ?? cron).replace(/^./, (c) => c.toLowerCase())}, answered by ${JACK_PERSONA_NAME[persona]} as ${owner} with no web search. ` +
+          `Asks it in “${room}” (${when(cron)}), answered by ${JACK_PERSONA_NAME[persona]} as ${owner} with no web search. ` +
           `${estimateLine(estimate)}, counted toward automations' ${formatUsd(automationBudgetUsd(), { wholeIfRound: true })} a month. ` +
           (on ? "It starts on." : "It starts off: turn it on on Jack → Recurring questions."),
         diff: [

@@ -30,7 +30,7 @@ export function digestDay(at: Date): string {
 
 const things = (n: number) => `${n} ${n === 1 ? "thing needs" : "things need"} attention`
 
-/** One line of the room's copy: text, then the console path the room links */
+/** One line of the room's copy: text on one line (a title can't break the list), then the console path the room links */
 const linked = (text: string, href: string) => `${text.replace(/\s+/g, " ").trim()} → ${href}`
 
 /**
@@ -50,7 +50,7 @@ export function roomDigestText(report: DigestReport, { setUpBy, askSummary }: { 
     lines.push("", heading)
     for (const { check, result } of checks) {
       lines.push(linked(`- ${check.label}: ${result.count}`, check.href))
-      for (const item of result.items.slice(0, ROOM_ITEMS_PER_CHECK)) lines.push(linked(`  - ${item.title}${item.detail ? ` (${item.detail})` : ""}`, item.href))
+      for (const item of result.items.slice(0, ROOM_ITEMS_PER_CHECK)) lines.push(`  ${linked(`- ${item.title}${item.detail ? ` (${item.detail})` : ""}`, item.href)}`)
       const more = result.count - Math.min(result.items.length, ROOM_ITEMS_PER_CHECK)
       if (more > 0) lines.push(`  - and ${more} more`)
     }
