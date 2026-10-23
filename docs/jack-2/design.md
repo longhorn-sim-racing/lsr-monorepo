@@ -16,7 +16,7 @@ The plan for everything in #188, written for the people and agents building it: 
 5. **Outside content is data, not instructions.** That covers web pages, documents, Discord and Teams messages, emails, uploaded files and synced records. Nothing Jack reads can cause a change, a post, a fetch of an outside URL, or a knowledge save without an officer in the loop. Section 14 lists the specific guards.
 6. **Jack cites sources:** a link to the room message, document, page, post or record.
 7. **Jack is never the only way to see information.** Every source has a place in the admin console (section 13).
-8. **Credentials live in env (Vercel) or in `SystemSetting` rows.** `SystemSetting` is revoked from Jack's SQL role, and every key that holds a credential is listed in section 3.2. Nothing else stores a token. Cursors, configs and error columns are passed through `redactSecrets()` before they're written.
+8. **Credentials live in env (Vercel) or in `SystemSetting` rows.** `SystemSetting` is revoked from Jack's SQL role, and every key that holds a credential is listed in section 3.2. Nothing else stores a token. Error and summary columns pass through `redactSecrets()` (`src/lib/redact.ts`) before they're written. Cursors and configs must simply never contain tokens; they are NOT redacted, because redaction strips query strings and would break page tokens and Graph delta links.
 9. **Outside keys are read-only or restricted** wherever the provider offers it. The exceptions are documented, for Gray's sign-off: Vercel's analytics token (section 12.5) and Resend's sending key (section 12.4).
 10. **Budget:** $50/month in total. Automations (recurring questions and Jack-written digest summaries) get their own cap inside it, **$10/month**, so they can't use up the officers' share.
 11. **Everything works locally against fakes,** and every outside service is switchable. When a service is missing or switched off, its tools say "not connected" and the app keeps working. **Connectors ship switched off** and are turned on one at a time once their smoke test passes.
@@ -84,25 +84,27 @@ Tracks fill slots. A track that must touch a shared file says so in its PR and k
 ### 3.1 Rules
 - **Additive only:** new tables, plus nullable or defaulted columns. No renames, no drops, no new values on existing enums. Main keeps working with every 2.0 migration applied, and that's what lets migrations go to prod before the code (section 17).
 - **Where it's defined:** G1 writes the whole 2.0 schema below into `schema.prisma`, plus the migrations. A track that finds it needs a change adds a small migration (section 18.3).
-- **User references:** behaviour-driving user fields are optional relations with `onDelete: SetNull`, never Restrict, so account deletion is never blocked. Audit-only fields stay plain ids. Every back-relation on `User` and `JackRoom` is added in G1.
+- **User references:** only behaviour-driving user fields are relations (optional, `onDelete: SetNull`, never Restrict, so account deletion is never blocked): `KnowledgeEntry.ownerId`, `ActionItem.ownerId`, `SponsorProspect.ownerId`, `RecurringQuestion.createdById` (who it runs as), `JackFeedback.userId`, `DiscordMember.userId`. Everything else (created by, decided by, uploaded by, approved by) is a plain id, loaded for display and shown as "former officer" when the user is gone. Every back-relation on `User` and `JackRoom` is added in G1.
 - **Lists:** every scalar list has `@default([])`.
-- **Daily tables:** every daily table's `date` is the **America/Chicago** date (helper `chicagoDate()`), except `SiteTrafficDaily`, which keeps Vercel's UTC day and says so. The schema notes record which.
-- **Full-text search:**
-  - Each searchable table declares `search Unsupported("tsvector")?` with `@@index([search], type: Gin)` in `schema.prisma`, so Prisma knows the column and never drops it.
-  - A plpgsql `BEFORE INSERT OR UPDATE` trigger fills it (Prisma doesn't introspect triggers), with input capped at 100k characters. Existing rows are backfilled in the same migration.
-  - `JackMessage`'s trigger skips rows while `status = 'streaming'` and fills the column when the reply finishes.
+- **Daily tables:** every daily table's `date` is the **America/Chicago** date (helper `chicagoDay()` in `src/lib/dates.ts`), except `SiteTrafficDaily`, which keeps Vercel's UTC day and says so. The schema notes record which.
+- **Full-text search lives in one side table, `JackSearchDoc`** (`source`, `sourceId`, `search` tsvector with a GIN index; declared in `schema.prisma` so Prisma never drops it):
+  - Triggers on JackMessage (`room_message`), KnowledgeEntry (`knowledge`), ExternalDocument (`document`) and TeamsMessage (`teams`) upsert and delete its rows; inputs are capped at 100k characters; existing room messages are backfilled.
+  - Room messages are indexed only once they're not streaming, and only when text or status changed.
+  - **Why a side table:** Prisma can't deserialize tsvector, so a tsvector column on a table breaks `run_sql`'s `SELECT *` (Jack 1.x's too, since migrations reach production first). No table Jack reads carries one.
+  - It has RLS and **no** policy for `jack_readonly`; search goes through the typed tools, and `run_sql` lists it as off-limits.
   - **Acceptance check for G1 and every PR:** `prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url <throwaway> --exit-code` reports no changes.
 
 ### 3.2 Access: RLS and secrets
-- **Personal data (RLS plus the `jack_readonly_select` policy, copying the recruiting migration's tail).** The tables: JackFile, JackProposal, EmailEvent, ExternalDocument, DiscordMessage, DiscordMember, TeamsMessage, SponsorProspect, SponsorActivity, Meeting, MeetingDecision, ActionItem, KnowledgeEntry, KnowledgeEntryVersion.
+- **Personal data (RLS plus the `jack_readonly_select` policy, copying the recruiting migration's tail).** The tables: JackFile, JackProposal, EmailEvent, ExternalDocument, DiscordMessage, DiscordMember, TeamsMessage, SponsorProspect, SponsorActivity, Meeting, MeetingDecision, ActionItem, KnowledgeEntry, KnowledgeEntryVersion. `JackSearchDoc` has RLS with no policy for Jack.
 - **Check script:** `scripts/check-jack-sql-role.ts` gains a check that each listed table has `relrowsecurity` on and the policy present, and that anon/authenticated have no privileges.
 - **Recruiting policies are tightened** (new migration, replacing the `USING (true)` policies on the recruiting tables):
   - Jack's role never sees DRAFT applications.
   - It never sees reviews, scores or decisions on an application whose applicant holds the officer or admin role. Rooms are shared, so an officer must never be able to read their own reviews through Jack.
-  - The `recruiting` tool applies the same rules.
+  - **The audit log too:** `AuditLog` gets RLS, with a Jack policy hiding recruiting entries (APPLICATION, APPLICATION_TRACK, APPLICATION_EMAIL) whose target is an officer or admin; they carry review scores and decisions.
+  - The `recruiting_pipeline` and `audit_log` tools apply the same rules.
 - **Credentials:** env vars, or these `SystemSetting` keys: `instagram` (existing read token), `instagram_publish` (publish token), `twitch` (user refresh token and cached app token). `SystemSetting` is revoked from `jack_readonly`. A migration self-check RAISEs if `jack_readonly` can read it.
 - **`run_sql` hardening:**
-  - Add to `OFF_LIMITS_NAMES`: `net`, `http_get`, `http_post`, `http_delete`, `http_request_queue`, `_http_response`, `cron`, `vault`, `scheduler`, plus tests. pg_net's queue is readable by every role and that can't be revoked (`research/supabase-pg-cron.md` §6).
+  - Add to `OFF_LIMITS_NAMES`: `net`, `http_get`, `http_post`, `http_delete`, `http_request_queue`, `_http_response`, `cron`, `vault`, `scheduler`, `JackSearchDoc`, plus tests. pg_net's queue is readable by every role and that can't be revoked (`research/supabase-pg-cron.md` §6).
   - The self-check adds `cron` and `scheduler` (never `net`, whose PUBLIC usage can't be revoked).
 
 ### 3.3 Models
@@ -113,9 +115,8 @@ Types are abbreviated: every `id` is `String @id @default(uuid())` unless noted,
   - id, roomId → JackRoom (Cascade), messageId?, kind, title, summary
   - payload Json, before Json?, targetType?, targetId?
   - status `JackProposalStatus`, claimedAt?
-  - proposedForId → User, decidedById → User, decidedAt?
+  - proposedForId, decidedById (plain ids), decidedAt?
   - result Json?, expiresAt, supersededById?, fileSha256?
-  - search tsvector
   - indexes `[roomId, createdAt]`, `[status, createdAt]`, `[targetType, targetId]`, `[kind, targetType, targetId, status]`
 - `enum JackProposalStatus { PENDING APPLYING APPLIED DISCARDED FAILED STALE SUPERSEDED }`
 
@@ -136,7 +137,7 @@ Types are abbreviated: every `id` is `String @id @default(uuid())` unless noted,
   - reviewedAt?, reviewedById → User
   - provenance Json? (room, message, and the outside sources read in that reply)
   - ownerId → User, createdById → User, updatedById → User, archivedAt?
-  - search tsvector; index `[archivedAt, updatedAt]`
+  - indexes `[archivedAt, updatedAt]`, `[ownerId]`
 - `KnowledgeEntryVersion`:
   - id, entryId → KnowledgeEntry (Cascade), title, body, tags @default([])
   - editedById → User, via ("admin" | "jack" | "seed"), roomId?, createdAt
@@ -161,16 +162,15 @@ Types are abbreviated: every `id` is `String @id @default(uuid())` unless noted,
 - `ExternalDocument`:
   - source ("drive" | "sharepoint"), externalId, driveId?, name, path, mimeType, webUrl
   - modifiedAt, sizeBytes BigInt?, version?, text?, textStatus, syncedAt, deletedAt?
-  - search tsvector
   - `@@unique([source, externalId])`; for SharePoint, externalId is `driveId!itemId`
   - On delete: set `deletedAt` **and null `text`**.
 
 **Teams** (all behind the `teams` connector)
 - `TeamsChannel`: id (Graph channel id), teamId, name, synced @default(false), deltaLink?, lastSyncedAt?
 - `TeamsMessage`:
-  - id (Graph id), channelId, replyToId?, authorAadId?, authorName, userId? → User
+  - id (Graph id), channelId, replyToId?, authorAadId?, authorName
   - content (text, HTML stripped), createdAt, editedAt?, deletedAt?
-  - search tsvector; index `[channelId, createdAt]`
+  - index `[channelId, createdAt]`
 - `GraphSubscription`: id (Graph subscription id), resource, expiresAt, clientStateHash, createdAt
 
 **Discord** (no message content stored; see section 12.1)
@@ -181,7 +181,7 @@ Types are abbreviated: every `id` is `String @id @default(uuid())` unless noted,
   - lastSeenAt; index `[channelId, createdAt]`
 - `DiscordMember`: id (snowflake), username, displayName?, joinedAt?, roles String[] @default([]), userId? → User, firstSeenAt, lastSeenAt, leftAt?
 - `DiscordDailyStat`: date @db.Date, channelId, messages, activeAuthors; `@@id([date, channelId])`
-- `DiscordGuildDaily`: date @id @db.Date, memberCount, joined Int?, left Int?
+- `DiscordGuildDaily`: date @id @db.Date, memberCount, joinedCount Int?, leftCount Int? (not `left`: it's a reserved word in SQL)
 - `DiscordRule`: id, kind, channelId?, config Json, enabled @default(false), cutoffAt (only acts on items after it), createdById → User, updatedById → User, timestamps
 - `DiscordPost`:
   - id, source ("rule" | "proposal" | "admin"), ruleId?, proposalId?, channelId
@@ -256,7 +256,6 @@ Types are abbreviated: every `id` is `String @id @default(uuid())` unless noted,
 - **New columns on `JackMessage`:**
   - `authorLabel String?`: the asker's profile snapshot ("Technology Director · Technology · CS"), set when the message is posted and never changed afterwards
   - `expectsAnswer Boolean @default(true)`: false for officer messages in mention mode that don't mention Jack
-  - `search` tsvector
 - `JackFeedback`: id, messageId → JackMessage (Cascade), userId → User (Cascade), rating ("up" | "down"), note?, createdAt; `@@unique([messageId, userId])`
 - `JackUsage` gains `job` values for automations (no schema change; it's a string).
 
@@ -365,7 +364,7 @@ type ProposalKind<P> = {
   - parsers capped by uncompressed size (zip-bomb guard), row count and time;
   - XLSX through `exceljs`;
   - DOCX text through a maintained extractor (decided in G5), with the same zip caps;
-  - PDF text (for search) through `pdfjs-dist` ≥4.2.67 with `isEvalSupported: false`.
+  - PDF text (for search) through `pdfjs-dist` 6.x (no eval paths left in it; the old `isEvalSupported` option is gone). It's in `serverExternalPackages`; its worker file (`pdf.worker.mjs`) must be imported statically or added to `outputFileTracingIncludes`, or PDF text breaks on Vercel.
 - **Serving:** `GET /api/admin/jack/files/[id]` (officer check) looks the file up by id, never by path.
   - Sends `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox` and `Cache-Control: private, no-store`.
   - Sends `Content-Disposition: attachment` for everything except raster images.
@@ -386,7 +385,8 @@ type ProposalKind<P> = {
 ## 6. Scheduler
 - **The tick** (from `research/supabase-pg-cron.md`):
   - `pg_cron` runs `scheduler.tick()` every minute. It's a SQL function in a new `scheduler` schema, with EXECUTE revoked from PUBLIC.
-  - It does nothing unless a `ScheduledJob` row is due or a heartbeat is needed.
+  - Every call writes `SchedulerHeartbeat.lastTickAt` locally (no HTTP), so the admin pages can tell a dead scheduler from an idle one. Beyond that it does nothing unless a `ScheduledJob` row is due. Times are compared with `now() AT TIME ZONE 'UTC'` (Prisma stores UTC in timestamp columns).
+  - Deleting a recurring question (or its room) deletes its job, through a trigger.
   - When it calls, it POSTs through pg_net to `/api/cron/tick` with `X-LSR-Timestamp` and `X-LSR-Signature: v1=hex(HMAC_SHA256(secret, ts + "." + body))`.
   - The secret is `SCHEDULER_SIGNING_SECRET`: kept in Vault (`lsr_scheduler_secret`) and in Vercel env, separate from `CRON_SECRET`. `_PREVIOUS` is accepted while rotating.
   - The site URL is in Vault (`lsr_scheduler_url`): the exact canonical prod URL, because pg_net follows redirects and would turn the POST into a GET.
@@ -530,11 +530,11 @@ Every external link shows its host. In replies, `reply-text.tsx` also shows the 
 - **Tabs** (from the tab registry): Documents (Drive and SharePoint) and Teams messages.
 - **Age:** Jack mentions an entry's age when it's over 180 days old, counted from reviewed, source or updated date.
 - **Seed:**
-  - Drafts live in `docs/jack-2/knowledge-seed/*.md`, one entry per file with front matter: title, tags, sourceNote, sourceDate, owner.
+  - **The repo is public, so seed content is never committed.** Drafts live in a private folder outside the repo (default `~/.lsr/jack-knowledge-seed/`), one entry per `.md` file with front matter: title, tags, sourceNote, sourceDate, owner. Only the README describing the format is in the repo (`docs/jack-2/knowledge-seed/README.md`).
   - They're drafted from Teams posts, the Drive folder and repo docs.
   - A lint step rejects emails, keys and tokens.
   - Gray reviews them in one pass, recorded in `build-log.md`.
-  - `scripts/jack-knowledge-seed.ts` loads them (sourceType SEED, reviewedAt = sign-off date) only with `--approved`.
+  - `scripts/jack-knowledge-seed.ts --dir <folder>` loads them (sourceType SEED, reviewedAt = sign-off date) only with `--approved`, against the database `DATABASE_URL` points at (production loading is a release step Gray runs).
   - **Coverage checklist** (from #188): the club; who does what (with officer profiles); decision log (one entry per decision, tag `decision`); policies; brand; sponsors; events playbook; recruiting; services and who holds access (names only); calendar rhythm.
   - Gray's private notes are never used.
 
