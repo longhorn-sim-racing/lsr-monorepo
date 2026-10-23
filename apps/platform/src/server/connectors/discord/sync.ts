@@ -1,21 +1,22 @@
 import { fromZonedTime } from "date-fns-tz"
 import { chicagoDay, DEFAULT_TIMEZONE } from "@/lib/dates"
 import { DISCORD_ERROR, DiscordApiError, DiscordRateLimitError, type DiscordClient } from "./client"
-import { authorHash, keepMessage, messageRow, type MessageRow } from "./metadata"
+import { keepMessage, messageRow, type MessageRow, type PurgedList } from "./metadata"
 import { compareSnowflakes, snowflakeAt, snowflakeTime } from "./snowflake"
 import type { ChannelInput, DiscordStore, MemberInput, StoredChannel, StoredMessage } from "./store"
-import { CHANNEL_TYPE, MESSAGE_CHANNEL_TYPES, SYNCABLE_CHANNEL_TYPES, THREAD_TYPES, type DiscordMessage } from "./types"
+import { CHANNEL_TYPE, MESSAGE_CHANNEL_TYPES, SYNCABLE_CHANNEL_TYPES, SYNCED_THREAD_TYPES, THREAD_PARENT_TYPES, type DiscordMessage } from "./types"
 
 /**
  * The Discord sync (design §12.1, research §3 and §6), REST only: metadata of the channels admins opted
- * in (and the threads in them), never message text.
+ * in (and the public threads in them), never message text, and nothing at all from other channels.
  * - `syncMessages` (every 10 minutes): new messages since each channel's cursor, a page of 100 at a time,
- *   saving the cursor after every page so a run cut short picks up where it stopped. A channel's first
- *   run reaches back `backfillDays`.
+ *   saving the cursor with every page so a run cut short picks up where it stopped. A channel's first
+ *   run reaches back `backfillDays`. A page is written only while its channel is still opted in.
  * - `rescan` (hourly): Discord has no feed of edits and deletions without the gateway, so the trailing
  *   7 days are read again; rows missing from a complete pass are marked deleted, edits and poll counts
  *   updated. Polls older than that are refreshed one by one until they're finalized.
  * - `syncMembers` (hourly): the member list, diffed against the last one for joins and leaves.
+ * A thread Discord deleted is dropped with its messages; a channel Discord deleted is switched off.
  * Daily stats (DiscordDailyStat, DiscordGuildDaily) are rebuilt for every Central day a run touched.
  */
 
@@ -44,6 +45,14 @@ export type SyncContext = {
 /** A channel the run couldn't read, and why (shown in the run's summary and the connector's last error) */
 export type ChannelProblem = { channel: string; error: string }
 
+/** An opted-in channel Discord deleted: the run switched it off, deleting the records stored from it */
+export type GoneChannel = { id: string; name: string; messages: number }
+
+/** What a run gathers besides its counts */
+type RunState = { touched: Map<number, Date>; problems: ChannelProblem[]; gone: GoneChannel[]; threadsGone: number; unfinished: number }
+
+const newRun = (): RunState => ({ touched: new Map(), problems: [], gone: [], threadsGone: 0, unfinished: 0 })
+
 const clock = (ctx: SyncContext) => (ctx.now ? ctx.now() : new Date())
 
 function stopping(ctx: SyncContext): boolean {
@@ -58,6 +67,11 @@ function fatal(error: unknown): boolean {
 /** The run was stopped (its deadline) or Discord asked us to wait longer than the client waits: not a fault, the next run resumes from the saved cursor */
 function interrupted(error: unknown, ctx: SyncContext): boolean {
   return Boolean(ctx.signal?.aborted) || error instanceof DiscordRateLimitError
+}
+
+/** Discord says there's no such channel (404 10003): deleted, a thread included */
+function unknownChannel(error: unknown): boolean {
+  return error instanceof DiscordApiError && error.status === 404 && error.code === DISCORD_ERROR.unknownChannel
 }
 
 const byId = (a: { id: string }, b: { id: string }) => compareSnowflakes(a.id, b.id)
@@ -85,17 +99,24 @@ export async function rebuildDailyStats(store: DiscordStore, days: Iterable<Date
   return unique.length
 }
 
+/** The channels opted in, by id */
+function syncedTop(channels: StoredChannel[]): Map<string, StoredChannel> {
+  return new Map(channels.filter((c) => !c.parentId && c.synced).map((c) => [c.id, c]))
+}
+
 /**
- * Reads the server's channels and active threads into DiscordChannel: new channels arrive switched off.
- * Threads are kept only in channels we know, with the channel as their parent. A channel missing from
- * the list stays (since 2026-11-16 Discord leaves out channels the bot can't see, which isn't deletion)
+ * Reads the server's channels into DiscordChannel (new ones arrive switched off), and the active public
+ * threads of the channels that are opted in, with the channel as their parent. Thread titles are written
+ * by members, so none are kept from channels that aren't synced. A channel missing from the list stays
+ * (since 2026-11-16 Discord leaves out channels the bot can't see, which isn't deletion)
  */
 export async function refreshChannels(ctx: SyncContext): Promise<{ channels: StoredChannel[]; activeThreads: Set<string> }> {
-  const [listed, active] = await Promise.all([ctx.client.channels(ctx.signal), ctx.client.activeThreads(ctx.signal)])
+  const [listed, active, stored] = await Promise.all([ctx.client.channels(ctx.signal), ctx.client.activeThreads(ctx.signal), ctx.store.channels()])
   const categories = new Map(listed.filter((c) => c.type === CHANNEL_TYPE.category).map((c) => [c.id, c.name ?? ""]))
   const top = listed.filter((c) => SYNCABLE_CHANNEL_TYPES.includes(c.type))
   const names = new Map(top.map((c) => [c.id, c.name ?? c.id]))
-  const threads = active.threads.filter((t) => THREAD_TYPES.includes(t.type) && t.parent_id && names.has(t.parent_id))
+  const opted = syncedTop(stored)
+  const threads = active.threads.filter((t) => SYNCED_THREAD_TYPES.includes(t.type) && t.parent_id && names.has(t.parent_id) && opted.has(t.parent_id))
   const inputs: ChannelInput[] = [
     ...top.map((c) => ({ id: c.id, name: c.name ?? c.id, type: c.type, parentId: null, parentName: (c.parent_id && categories.get(c.parent_id)) || null })),
     ...threads.map((t) => ({ id: t.id, name: t.name ?? t.id, type: t.type, parentId: t.parent_id!, parentName: names.get(t.parent_id!) ?? null })),
@@ -104,33 +125,94 @@ export async function refreshChannels(ctx: SyncContext): Promise<{ channels: Sto
   return { channels: await ctx.store.channels(), activeThreads: new Set(threads.map((t) => t.id)) }
 }
 
-/** The channels opted in, by id */
-function syncedTop(channels: StoredChannel[]): Map<string, StoredChannel> {
-  return new Map(channels.filter((c) => !c.parentId && c.synced).map((c) => [c.id, c]))
-}
-
 const oldestFirst = (a: StoredChannel, b: StoredChannel) => (a.lastSyncedAt?.getTime() ?? 0) - (b.lastSyncedAt?.getTime() ?? 0)
 
-/** Reads a channel's new messages after its cursor (or from `backfillFrom` the first time), saving the cursor after each page */
-async function readNew(ctx: SyncContext, target: StoredChannel, backfillFrom: Date, purged: ReadonlySet<string>, touched: Map<number, Date>): Promise<{ added: number; done: boolean }> {
+/**
+ * Reads a channel's new messages after its cursor (or from `backfillFrom` the first time), saving the
+ * cursor with each page. Stops, keeping nothing more, once the channel is switched off
+ */
+async function readNew(ctx: SyncContext, target: StoredChannel, backfillFrom: Date, purged: PurgedList, touched: Map<number, Date>): Promise<{ added: number; done: boolean }> {
   let cursor = target.lastMessageId ?? snowflakeAt(backfillFrom)
   let added = 0
   for (;;) {
     if (stopping(ctx)) return { added, done: false }
     const page = (await ctx.client.messages(target.id, { after: cursor, limit: PAGE }, ctx.signal)).sort(byId)
     const now = clock(ctx)
-    if (page.length) {
-      const rows = page.filter((m) => keepMessage(m, purged)).map((m) => messageRow(m, now))
-      added += await ctx.store.insertMessages(rows)
-      for (const row of rows) touched.set(chicagoDay(row.createdAt).getTime(), chicagoDay(row.createdAt))
-      cursor = page[page.length - 1].id
-    }
-    await ctx.store.saveCursor(target.id, { lastMessageId: cursor, lastSyncedAt: now })
+    const rows = page.filter((m) => keepMessage(m, purged)).map((m) => messageRow(m, now))
+    if (page.length) cursor = page[page.length - 1].id
+    const saved = await ctx.store.savePage(target.id, { insert: rows, cursor: { lastMessageId: cursor, lastSyncedAt: now } })
+    if (!saved) return { added, done: true }
+    added += saved.added
+    for (const row of rows) touched.set(chicagoDay(row.createdAt).getTime(), chicagoDay(row.createdAt))
     if (page.length < PAGE) return { added, done: true }
   }
 }
 
-export type MessageSyncResult = { channels: number; threads: number; added: number; unfinished: number; days: number; problems: ChannelProblem[] }
+/**
+ * After a channel or thread failed: a rejected token stops the run (thrown); a stop or a long rate limit
+ * leaves it for the next run; a thread or channel Discord deleted is dropped (dropDeleted); anything
+ * else is a problem the run reports
+ */
+async function failed(ctx: SyncContext, target: StoredChannel, channels: StoredChannel[], error: unknown, run: RunState): Promise<void> {
+  if (fatal(error)) throw error
+  if (interrupted(error, ctx)) {
+    run.unfinished++
+    return
+  }
+  let reason = error
+  if (unknownChannel(error)) {
+    try {
+      if (await dropDeleted(ctx, target, run)) return
+    } catch (check) {
+      if (fatal(check)) throw check
+      if (interrupted(check, ctx)) {
+        run.unfinished++
+        return
+      }
+      reason = check
+    }
+  }
+  run.problems.push({ channel: label(target, channels), error: reason instanceof Error ? reason.message : String(reason) })
+}
+
+/**
+ * A thread or channel Discord answered 404 10003 for. A thread (a member deleting their forum post, say)
+ * is dropped with its messages, and its days' stats rebuilt. A channel is checked once more with
+ * GET /channels/:id (research §6) and, once Discord confirms it's gone, switched off with everything
+ * stored from it. False when Discord says the channel is still there
+ */
+async function dropDeleted(ctx: SyncContext, target: StoredChannel, run: RunState): Promise<boolean> {
+  if (target.parentId) {
+    const span = await ctx.store.dropThread(target.id)
+    if (span) for (const day of daysBetween(span.from, span.to)) run.touched.set(day.getTime(), day)
+    run.threadsGone++
+    return true
+  }
+  try {
+    await ctx.client.channel(target.id, ctx.signal)
+    return false
+  } catch (error) {
+    if (!unknownChannel(error)) throw error
+  }
+  run.gone.push({ id: target.id, name: target.name, messages: await ctx.store.switchOff(target.id, { gone: true }) })
+  return true
+}
+
+/** Whether a channel (or a thread's channel) was found deleted earlier in this run */
+const goneEarlier = (run: RunState, target: StoredChannel) => run.gone.some((g) => g.id === (target.parentId ?? target.id))
+
+export type MessageSyncResult = {
+  channels: number
+  threads: number
+  added: number
+  unfinished: number
+  days: number
+  problems: ChannelProblem[]
+  /** Opted-in channels Discord deleted, switched off */
+  gone: GoneChannel[]
+  /** Threads Discord deleted, dropped with their messages */
+  threadsGone: number
+}
 
 /** New messages in every opted-in channel and its active threads, oldest-synced first */
 export async function syncMessages(ctx: SyncContext, options: { backfillDays?: number } = {}): Promise<MessageSyncResult> {
@@ -143,30 +225,33 @@ export async function syncMessages(ctx: SyncContext, options: { backfillDays?: n
     ...channels.filter((c) => c.parentId && synced.has(c.parentId) && activeThreads.has(c.id)),
   ].sort(oldestFirst)
 
-  const touched = new Map<number, Date>()
-  const problems: ChannelProblem[] = []
+  const run = newRun()
   let added = 0
-  let unfinished = 0
   for (const target of targets) {
+    if (goneEarlier(run, target)) continue
     if (stopping(ctx)) {
-      unfinished++
+      run.unfinished++
       continue
     }
     try {
-      const result = await readNew(ctx, target, backfillFrom, purged, touched)
+      const result = await readNew(ctx, target, backfillFrom, purged, run.touched)
       added += result.added
-      if (!result.done) unfinished++
+      if (!result.done) run.unfinished++
     } catch (error) {
-      if (fatal(error)) throw error
-      if (interrupted(error, ctx)) {
-        unfinished++
-        continue
-      }
-      problems.push({ channel: label(target, channels), error: error instanceof Error ? error.message : String(error) })
+      await failed(ctx, target, channels, error, run)
     }
   }
-  const days = await rebuildDailyStats(ctx.store, touched.values())
-  return { channels: targets.filter((t) => !t.parentId).length, threads: targets.filter((t) => t.parentId).length, added, unfinished, days, problems }
+  const days = await rebuildDailyStats(ctx.store, run.touched.values())
+  return {
+    channels: targets.filter((t) => !t.parentId).length,
+    threads: targets.filter((t) => t.parentId).length,
+    added,
+    unfinished: run.unfinished,
+    days,
+    problems: run.problems,
+    gone: run.gone,
+    threadsGone: run.threadsGone,
+  }
 }
 
 /** "#general", or "#setups › Monza setup help" for a thread */
@@ -183,8 +268,8 @@ const changed = (was: StoredMessage, row: MessageRow) =>
   was.attachments !== row.attachments ||
   JSON.stringify(was.poll) !== JSON.stringify(row.poll)
 
-/** Writes a page read again: new rows added, changed ones updated (and undeleted), the rest stamped as seen */
-async function saveSeen(ctx: SyncContext, page: DiscordMessage[], purged: ReadonlySet<string>, now: Date): Promise<{ added: number; updated: number }> {
+/** Writes a page read again: new rows added, changed ones updated (and undeleted), the rest stamped as seen. Null once the channel is switched off */
+async function saveSeen(ctx: SyncContext, channelId: string, page: DiscordMessage[], purged: PurgedList, now: Date): Promise<{ added: number; updated: number } | null> {
   const kept = page.filter((m) => keepMessage(m, purged))
   const stored = await ctx.store.messagesByIds(kept.map((m) => m.id))
   const fresh: MessageRow[] = []
@@ -197,17 +282,15 @@ async function saveSeen(ctx: SyncContext, page: DiscordMessage[], purged: Readon
     else if (changed(was, row)) updates.push(row)
     else same.push(message.id)
   }
-  const added = await ctx.store.insertMessages(fresh)
-  await ctx.store.updateMessages(updates)
-  await ctx.store.touchMessages(same, now)
-  return { added, updated: updates.length }
+  const saved = await ctx.store.savePage(channelId, { insert: fresh, update: updates, touch: same, at: now })
+  return saved && { added: saved.added, updated: updates.length }
 }
 
 /**
  * Reads a channel's last days again: what's missing from the pass was deleted. A pass cut short marks
  * deletions only up to the last message it read and saves where it got to (`rescanFrom`) for the next run
  */
-async function rescanChannel(ctx: SyncContext, target: StoredChannel, windowStart: Date, purged: ReadonlySet<string>): Promise<{ added: number; updated: number; deleted: number; done: boolean }> {
+async function rescanChannel(ctx: SyncContext, target: StoredChannel, windowStart: Date, purged: PurgedList): Promise<{ added: number; updated: number; deleted: number; done: boolean }> {
   const from = target.rescanFrom && target.rescanFrom > windowStart ? target.rescanFrom : windowStart
   const startedAt = clock(ctx)
   // A millisecond earlier, so a message made in `from`'s own millisecond is read too (after= leaves out the cursor)
@@ -221,7 +304,9 @@ async function rescanChannel(ctx: SyncContext, target: StoredChannel, windowStar
     if (stopping(ctx)) break
     const page = (await ctx.client.messages(target.id, { after: cursor, limit: PAGE }, ctx.signal)).sort(byId)
     for (const message of page) seen.add(message.id)
-    const saved = await saveSeen(ctx, page, purged, clock(ctx))
+    const saved = await saveSeen(ctx, target.id, page, purged, clock(ctx))
+    // Switched off while this run read it: what was stored from it went with the switch
+    if (!saved) return { added, updated, deleted: 0, done: true }
     added += saved.added
     updated += saved.updated
     if (page.length) {
@@ -237,40 +322,51 @@ async function rescanChannel(ctx: SyncContext, target: StoredChannel, windowStar
   // Cut short, only ids up to the last one read: a message made in that same millisecond may not have been read yet
   const gone = (await ctx.store.liveMessageIds(target.id, from, upTo)).filter((id) => !seen.has(id) && (done || compareSnowflakes(id, cursor) <= 0))
   const deleted = await ctx.store.markDeleted(gone, clock(ctx))
-  await ctx.store.saveCursor(target.id, { rescanFrom: done ? null : reached })
+  await ctx.store.savePage(target.id, { cursor: { rescanFrom: done ? null : reached } })
   return { added, updated, deleted, done }
 }
 
-export type RescanResult = { channels: number; added: number; updated: number; deleted: number; polls: number; unfinished: number; days: number; problems: ChannelProblem[] }
+export type RescanResult = {
+  channels: number
+  added: number
+  updated: number
+  deleted: number
+  polls: number
+  unfinished: number
+  days: number
+  problems: ChannelProblem[]
+  gone: GoneChannel[]
+  threadsGone: number
+}
 
 /** Edits, deletions and poll counts in the last RESCAN_DAYS of every opted-in channel and its recent threads, plus older polls still open */
 export async function rescan(ctx: SyncContext): Promise<RescanResult> {
   const now = clock(ctx)
   const windowStart = new Date(now.getTime() - RESCAN_DAYS * DAY_MS)
   const purged = await ctx.store.purgedAuthors()
-  const problems: ChannelProblem[] = []
+  const run = newRun()
   let channels = await ctx.store.channels()
-  const synced = syncedTop(channels)
 
-  // Threads archived in the window: their last messages may have come after the last sync saw them active
+  // Threads archived in the window: their last messages may have come after the last sync saw them active.
+  // Only channels that can have threads (Discord refuses the call for voice and stage channels)
   const archived: ChannelInput[] = []
-  for (const parent of synced.values()) {
+  for (const parent of syncedTop(channels).values()) {
+    if (!THREAD_PARENT_TYPES.includes(parent.type)) continue
     if (stopping(ctx)) break
     try {
       const { threads } = await ctx.client.archivedThreads(parent.id, { limit: 50 }, ctx.signal)
       for (const thread of threads) {
         const at = thread.thread_metadata?.archive_timestamp
-        if (at && new Date(at) >= windowStart && THREAD_TYPES.includes(thread.type)) archived.push({ id: thread.id, name: thread.name ?? thread.id, type: thread.type, parentId: parent.id, parentName: parent.name })
+        if (at && new Date(at) >= windowStart && SYNCED_THREAD_TYPES.includes(thread.type)) archived.push({ id: thread.id, name: thread.name ?? thread.id, type: thread.type, parentId: parent.id, parentName: parent.name })
       }
     } catch (error) {
-      if (fatal(error)) throw error
-      if (!interrupted(error, ctx)) problems.push({ channel: `#${parent.name}`, error: error instanceof Error ? error.message : String(error) })
+      await failed(ctx, parent, channels, error, run)
     }
   }
-  if (archived.length) {
-    await ctx.store.saveChannels(archived)
-    channels = await ctx.store.channels()
-  }
+  if (archived.length) await ctx.store.saveChannels(archived)
+  // Read again: archived threads added, channels found deleted gone
+  channels = await ctx.store.channels()
+  const synced = syncedTop(channels)
   const recentlyArchived = new Set(archived.map((t) => t.id))
   const targets = [
     // A channel the sync hasn't read yet is left to it: its first read reaches back further than this window
@@ -278,23 +374,22 @@ export async function rescan(ctx: SyncContext): Promise<RescanResult> {
     ...channels.filter((c) => c.parentId && synced.has(c.parentId) && (recentlyArchived.has(c.id) || (c.lastSyncedAt && c.lastSyncedAt >= windowStart))),
   ]
 
-  const touched = new Map<number, Date>()
   let added = 0
   let updated = 0
   let deleted = 0
-  let unfinished = 0
   for (const target of targets) {
+    if (goneEarlier(run, target)) continue
     if (stopping(ctx)) {
-      unfinished++
+      run.unfinished++
       continue
     }
     try {
       // A thread never read before gets its first read; then its window is read again like any channel
       if (!target.lastMessageId) {
-        const first = await readNew(ctx, target, windowStart, purged, touched)
+        const first = await readNew(ctx, target, windowStart, purged, run.touched)
         added += first.added
         if (!first.done) {
-          unfinished++
+          run.unfinished++
           continue
         }
       }
@@ -302,24 +397,19 @@ export async function rescan(ctx: SyncContext): Promise<RescanResult> {
       added += result.added
       updated += result.updated
       deleted += result.deleted
-      if (!result.done) unfinished++
+      if (!result.done) run.unfinished++
     } catch (error) {
-      if (fatal(error)) throw error
-      if (interrupted(error, ctx)) {
-        unfinished++
-        continue
-      }
-      problems.push({ channel: label(target, channels), error: error instanceof Error ? error.message : String(error) })
+      await failed(ctx, target, channels, error, run)
     }
   }
 
   const polls = await refreshOpenPolls(ctx, windowStart, channels, synced, purged)
-  const days = await rebuildDailyStats(ctx.store, [...daysBetween(windowStart, now), ...touched.values()])
-  return { channels: targets.length, added, updated, deleted, polls, unfinished, days, problems }
+  const days = await rebuildDailyStats(ctx.store, [...daysBetween(windowStart, now), ...run.touched.values()])
+  return { channels: targets.length, added, updated, deleted, polls, unfinished: run.unfinished, days, problems: run.problems, gone: run.gone, threadsGone: run.threadsGone }
 }
 
 /** Polls older than the re-scan window that aren't finalized yet: each read again until Discord finalizes it */
-async function refreshOpenPolls(ctx: SyncContext, before: Date, channels: StoredChannel[], synced: Map<string, StoredChannel>, purged: ReadonlySet<string>): Promise<number> {
+async function refreshOpenPolls(ctx: SyncContext, before: Date, channels: StoredChannel[], synced: Map<string, StoredChannel>, purged: PurgedList): Promise<number> {
   const open = await ctx.store.openPolls(before, OPEN_POLLS_PER_RUN)
   let refreshed = 0
   for (const { id, channelId } of open) {
@@ -328,11 +418,13 @@ async function refreshOpenPolls(ctx: SyncContext, before: Date, channels: Stored
     if (!channel || !synced.has(channel.parentId ?? channel.id)) continue
     try {
       const message = await ctx.client.message(channelId, id, ctx.signal)
-      const saved = await saveSeen(ctx, [message], purged, clock(ctx))
-      refreshed += saved.updated
+      const saved = await saveSeen(ctx, channelId, [message], purged, clock(ctx))
+      refreshed += saved?.updated ?? 0
     } catch (error) {
       if (fatal(error)) throw error
-      if (error instanceof DiscordApiError && error.status === 404 && error.code === DISCORD_ERROR.unknownMessage) await ctx.store.markDeleted([id], clock(ctx))
+      // The message, or the thread it was in, was deleted
+      const deletedThere = error instanceof DiscordApiError && error.status === 404 && (error.code === DISCORD_ERROR.unknownMessage || error.code === DISCORD_ERROR.unknownChannel)
+      if (deletedThere) await ctx.store.markDeleted([id], clock(ctx))
       else if (interrupted(error, ctx)) break
     }
   }
@@ -371,7 +463,7 @@ export async function syncMembers(ctx: SyncContext): Promise<MemberSyncResult> {
       throw error
     }
     for (const member of page) {
-      if (member.user.bot || purged.has(authorHash(member.user.id))) continue
+      if (member.user.bot || purged.has(member.user.id)) continue
       seen.push({
         id: member.user.id,
         username: member.user.username,

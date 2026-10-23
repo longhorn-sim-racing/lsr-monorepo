@@ -6,6 +6,7 @@ import { prisma } from "@/server/db"
 import { requireOfficer } from "@/server/auth/guards"
 import { createAuditLog } from "@/server/audit/log"
 import { isSnowflake } from "@/server/connectors/discord/snowflake"
+import { prismaDiscordStore } from "@/server/connectors/discord/store"
 import { SYNCABLE_CHANNEL_TYPES } from "@/server/connectors/discord/types"
 import { purgeDiscordData, type PurgeResult } from "@/server/services/discord-link.service"
 import type { ActionResult } from "@/lib/action-result"
@@ -23,9 +24,10 @@ const switchSchema = z.object({ channelId: z.string().refine(isSnowflake), synce
 
 /**
  * Opts a channel in to the sync (and Jack's live search) or out of it. Out also deletes what's stored
- * from it and its threads (message metadata and its daily counts) and resets its cursor, so the club
- * holds nothing from a channel it doesn't sync; opting back in reads it again from the backfill window.
- * Audited when it changes.
+ * from it: its messages' metadata, its threads (their titles and messages) and its daily counts, and
+ * resets its cursor, so the club holds nothing from a channel it doesn't sync (a sync running at that
+ * moment waits for this or stops writing; see prismaDiscordStore.switchOff); opting back in reads it
+ * again from the backfill window. Audited when it changes.
  */
 export async function setDiscordChannelSyncedAction(channelId: string, synced: boolean): Promise<ActionResult<{ changed: boolean; deleted: number }>> {
   const admin = await requireAdminAction()
@@ -38,19 +40,8 @@ export async function setDiscordChannelSyncedAction(channelId: string, synced: b
   if (channel.synced === parsed.data.synced) return { ok: true, data: { changed: false, deleted: 0 } }
 
   let deleted = 0
-  if (parsed.data.synced) {
-    await prisma.discordChannel.update({ where: { id: channel.id }, data: { synced: true } })
-  } else {
-    deleted = await prisma.$transaction(async (tx) => {
-      const threads = (await tx.discordChannel.findMany({ where: { parentId: channel.id }, select: { id: true } })).map((t) => t.id)
-      const ids = [channel.id, ...threads]
-      const { count } = await tx.discordMessage.deleteMany({ where: { channelId: { in: ids } } })
-      await tx.discordDailyStat.deleteMany({ where: { channelId: channel.id } })
-      await tx.discordChannel.updateMany({ where: { id: { in: ids } }, data: { lastMessageId: null, lastSyncedAt: null, rescanFrom: null } })
-      await tx.discordChannel.update({ where: { id: channel.id }, data: { synced: false } })
-      return count
-    })
-  }
+  if (parsed.data.synced) await prisma.discordChannel.update({ where: { id: channel.id }, data: { synced: true } })
+  else deleted = await prismaDiscordStore.switchOff(channel.id)
   await createAuditLog({
     actorUserId: admin.userId,
     actionType: parsed.data.synced ? "ENABLE" : "DISABLE",

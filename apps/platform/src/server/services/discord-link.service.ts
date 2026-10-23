@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client"
 import { prisma } from "@/server/db"
 import { createAuditLog } from "@/server/audit/log"
 import { discordApp, discordConnector, discordRedirectUri } from "@/server/connectors/discord/connector"
-import { authorHash } from "@/server/connectors/discord/metadata"
+import { purgedHash } from "@/server/connectors/discord/metadata"
 import { discordAuthorizeUrl, DISCORD_ISSUER, exchangeDiscordCode, fetchDiscordAccount, pkcePair, revokeDiscordToken } from "@/server/connectors/discord/oauth"
 import { isSnowflake } from "@/server/connectors/discord/snowflake"
 import { prismaDiscordStore, PURGED_SETTING, readPurged } from "@/server/connectors/discord/store"
@@ -140,17 +140,18 @@ export async function unlinkDiscord(userId: string): Promise<boolean> {
   })
 }
 
-export type PurgeResult = { messages: number; member: boolean; unlinkedUserId: string | null }
+/** `reference` is the purge's audit entry id: random, so the audit log never says whose data it was */
+export type PurgeResult = { messages: number; member: boolean; unlinkedUserId: string | null; reference: string }
 
 /**
  * Deletes everything the club holds about one Discord account, on request (design §12.1): its message
- * metadata, its member row and any member's link to it. It also goes on the do-not-collect list (hashed),
- * so the sync never stores it again, and the daily counts it was part of are rebuilt where the messages
- * still are. Admins only (the caller checks); audited.
+ * metadata, its member row and any member's link to it. It also goes on the do-not-collect list (as a
+ * keyed hash, purgedHash; the list's key is made on the first purge), so the sync never stores it again,
+ * and the daily counts it was part of are rebuilt where the messages still are. Admins only (the caller
+ * checks); audited.
  */
 export async function purgeDiscordData(discordUserId: string, actor: { userId: string }): Promise<PurgeResult> {
   if (!isSnowflake(discordUserId)) throw new Error("That isn't a Discord user id.")
-  const hash = authorHash(discordUserId)
   const result = await prisma.$transaction(async (tx) => {
     const span = await tx.discordMessage.aggregate({ where: { authorId: discordUserId }, _min: { createdAt: true }, _max: { createdAt: true } })
     const messages = await tx.discordMessage.deleteMany({ where: { authorId: discordUserId } })
@@ -159,21 +160,22 @@ export async function purgeDiscordData(discordUserId: string, actor: { userId: s
     if (linked) await tx.user.update({ where: { id: linked.id }, data: { discordUserId: null, discordUsername: null, discordLinkedAt: null } })
     const setting = await tx.systemSetting.findUnique({ where: { key: PURGED_SETTING } })
     const purged = readPurged(setting?.value)
-    purged.add(hash)
-    const value = JSON.stringify({ authors: [...purged] })
+    const key = purged.key ?? randomBytes(32).toString("base64url")
+    const value = JSON.stringify({ key, authors: [...new Set([...purged.authors, purgedHash(key, discordUserId)])] })
     await tx.systemSetting.upsert({ where: { key: PURGED_SETTING }, update: { value }, create: { key: PURGED_SETTING, value } })
     return { messages: messages.count, member: member.count > 0, unlinkedUserId: linked?.id ?? null, span }
   })
   if (result.span._min.createdAt && result.span._max.createdAt) await rebuildDailyStats(prismaDiscordStore, daysBetween(result.span._min.createdAt, result.span._max.createdAt))
+  // Neither the Discord id nor its hash: the audit log mustn't let anyone tell whose data was deleted
+  const reference = randomBytes(8).toString("hex")
   await createAuditLog({
     actorUserId: actor.userId,
     actionType: "PURGE",
     entityType: "DISCORD_MEMBER",
-    // The hash, not the Discord id: the audit log mustn't keep what was deleted
-    entityId: hash.slice(0, 16),
+    entityId: reference,
     targetUserId: result.unlinkedUserId ?? undefined,
     summary: `Purged a member's Discord data on request: ${result.messages} message records${result.member ? ", their member record" : ""}${result.unlinkedUserId ? " and their account link" : ""}`,
     metadata: { messages: result.messages, member: result.member, unlinked: Boolean(result.unlinkedUserId) },
   })
-  return { messages: result.messages, member: result.member, unlinkedUserId: result.unlinkedUserId }
+  return { messages: result.messages, member: result.member, unlinkedUserId: result.unlinkedUserId, reference }
 }

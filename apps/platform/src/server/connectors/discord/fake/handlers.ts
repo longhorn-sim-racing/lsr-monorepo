@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto"
 import type { FakeRoute, FakeService } from "../../fakes/types"
-import { APP_FLAG, CHANNEL_TYPE, THREAD_TYPES, type DiscordChannel, type DiscordMember, type DiscordMessage, type DiscordPoll } from "../types"
+import { APP_FLAG, CHANNEL_TYPE, THREAD_PARENT_TYPES, THREAD_TYPES, type DiscordChannel, type DiscordMember, type DiscordMessage, type DiscordPoll } from "../types"
 import { buildFakeServer, FAKE_DISCORD, fakeSnowflake } from "./data"
 
 /**
@@ -12,14 +12,15 @@ import { buildFakeServer, FAKE_DISCORD, fakeSnowflake } from "./data"
  *   (default 50); members in user id order after `after` (default 1, at most 1000);
  * - intents: without Message Content, blank content and attachments, no poll (except the bot's own
  *   messages) and search answers 403; without Server Members, the member list answers 403 50001;
- * - the hidden channel: not in the channel list, 403 50001 on its history;
+ * - the hidden channel: not in the channel list, 403 50001 on its history; a deleted channel or thread,
+ *   404 10003; archived threads of a channel that can't have threads (voice, stage), 400 50024;
  * - search: 202 with code 110000 on the first call (or every call, with the hook), limit at most 25,
  *   offset at most 9975;
  * - rate limits: X-RateLimit-* headers on every answer, and a forced 429 with retry_after;
  * - OAuth: an authorize page that redirects with code, state and iss; a token endpoint that takes only
  *   form bodies and checks the PKCE verifier; /users/@me; revoke.
  *
- * Test hooks under /_fake: intents, rate-limit, search, polls, oauth, messages, members, state.
+ * Test hooks under /_fake: intents, rate-limit, search, polls, oauth, messages, channels, members, state.
  */
 
 const API = "/api/v10"
@@ -297,6 +298,7 @@ export const discordFake: FakeService = {
         handle: api((request, { channelId }) => {
           const found = readable(channelId)
           if (found instanceof Response) return found
+          if (!THREAD_PARENT_TYPES.includes(found.type)) return error(400, 50024, "Cannot execute action on this channel type")
           const url = new URL(request.url)
           const beforeAt = url.searchParams.has("before") ? Date.parse(url.searchParams.get("before")!) : Infinity
           const limit = clamp(url.searchParams.get("limit"), 50, 2, 100)
@@ -443,6 +445,18 @@ export const discordFake: FakeService = {
           const at = list?.findIndex((m) => m.id === params.messageId) ?? -1
           if (!list || at < 0) return error(404, 10008, "Unknown Message")
           list.splice(at, 1)
+          return new Response(null, { status: 204 })
+        },
+      },
+      {
+        // A channel or thread deleted in Discord (a member deleting their forum post, say): gone with its messages, and a channel's threads with it
+        method: "DELETE",
+        path: "/_fake/channels/:channelId",
+        handle(request, { params }) {
+          const gone = server.channels.filter((c) => c.id === params.channelId || c.parent_id === params.channelId).map((c) => c.id)
+          if (!gone.length) return error(404, 10003, "Unknown Channel")
+          server.channels = server.channels.filter((c) => !gone.includes(c.id))
+          for (const id of gone) server.messages.delete(id)
           return new Response(null, { status: 204 })
         },
       },

@@ -21,7 +21,8 @@ vi.mock("@/server/connectors/discord/sync", () => stats)
 import { mountFakes, type MountedFakes } from "@/server/connectors/fakes/testing"
 import { FAKE_DISCORD } from "@/server/connectors/discord/fake/data"
 import { discordFake } from "@/server/connectors/discord/fake/handlers"
-import { authorHash } from "@/server/connectors/discord/metadata"
+import { purgedHash, purgedList } from "@/server/connectors/discord/metadata"
+import { purgedFrom } from "@/server/connectors/discord/store"
 import { finishDiscordLink, linkDiscordAccount, openLinkCookie, purgeDiscordData, sealLinkCookie, startDiscordLink, unlinkDiscord } from "./discord-link.service"
 
 const SECRET = FAKE_DISCORD.clientSecret
@@ -204,22 +205,38 @@ describe("purgeDiscordData", () => {
     db.systemSetting.findUnique.mockResolvedValue({ key: "discord_purged", value: JSON.stringify({ authors: ["earlier"] }) })
   })
 
-  it("deletes the account's metadata, member row and link, lists it (hashed) so it's never collected again, and rebuilds the stats", async () => {
-    expect(await purgeDiscordData(DISCORD_ID, { userId: "admin-1" })).toEqual({ messages: 57, member: true, unlinkedUserId: "user-9" })
+  it("deletes the account's metadata, member row and link, lists it (keyed hash) so it's never collected again, and rebuilds the stats", async () => {
+    expect(await purgeDiscordData(DISCORD_ID, { userId: "admin-1" })).toEqual({ messages: 57, member: true, unlinkedUserId: "user-9", reference: expect.stringMatching(/^[0-9a-f]{16}$/) })
     expect(db.discordMessage.deleteMany).toHaveBeenCalledWith({ where: { authorId: DISCORD_ID } })
     expect(db.discordMember.deleteMany).toHaveBeenCalledWith({ where: { id: DISCORD_ID } })
     expect(db.user.update).toHaveBeenCalledWith({ where: { id: "user-9" }, data: { discordUserId: null, discordUsername: null, discordLinkedAt: null } })
-    const value = JSON.parse(db.systemSetting.upsert.mock.calls[0][0].update.value)
-    expect(value.authors).toEqual(["earlier", authorHash(DISCORD_ID)])
+    const value = JSON.parse(db.systemSetting.upsert.mock.calls[0][0].update.value) as { key: string; authors: string[] }
+    // The list's key is made on the first purge: 32 random bytes
+    expect(Buffer.from(value.key, "base64url")).toHaveLength(32)
+    expect(value.authors).toEqual(["earlier", purgedHash(value.key, DISCORD_ID)])
+    expect(purgedFrom(JSON.stringify(value)).has(DISCORD_ID)).toBe(true)
     expect(JSON.stringify(value)).not.toContain(DISCORD_ID)
     expect(stats.rebuildDailyStats).toHaveBeenCalledWith(expect.anything(), ["days"])
   })
 
-  it("is audited without the Discord id it deleted", async () => {
+  it("keeps the list's key, so earlier purges still match", async () => {
+    const key = Buffer.alloc(32, 3).toString("base64url")
+    db.systemSetting.findUnique.mockResolvedValue({ key: "discord_purged", value: JSON.stringify({ key, authors: [purgedHash(key, "1234567890123456780")] }) })
     await purgeDiscordData(DISCORD_ID, { userId: "admin-1" })
+    const list = purgedFrom(db.systemSetting.upsert.mock.calls[0][0].update.value)
+    expect([list.has("1234567890123456780"), list.has(DISCORD_ID), list.has("1234567890123456781"), list.size]).toEqual([true, true, false, 2])
+  })
+
+  it("is audited under a random reference, never the Discord id or anything worked out from it", async () => {
+    const { reference } = await purgeDiscordData(DISCORD_ID, { userId: "admin-1" })
     const entry = audit.createAuditLog.mock.calls[0][0]
-    expect(entry).toMatchObject({ actorUserId: "admin-1", actionType: "PURGE", entityType: "DISCORD_MEMBER", targetUserId: "user-9", metadata: { messages: 57, member: true, unlinked: true } })
+    expect(entry).toMatchObject({ actorUserId: "admin-1", actionType: "PURGE", entityType: "DISCORD_MEMBER", entityId: reference, targetUserId: "user-9", metadata: { messages: 57, member: true, unlinked: true } })
     expect(JSON.stringify(entry)).not.toContain(DISCORD_ID)
+    // The hash on the list isn't in the entry either
+    const value = JSON.parse(db.systemSetting.upsert.mock.calls[0][0].update.value) as { key: string }
+    expect(JSON.stringify(entry)).not.toContain(purgedHash(value.key, DISCORD_ID).slice(0, 16))
+    // Unkeyed, anyone with a member's (public) Discord id could check it against the list: keyed, they can't
+    expect(purgedList(Buffer.alloc(32, 9).toString("base64url"), [purgedHash(value.key, DISCORD_ID)]).has(DISCORD_ID)).toBe(false)
   })
 
   it("refuses something that isn't a Discord id", async () => {

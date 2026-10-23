@@ -1,15 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { chicagoDay } from "@/lib/dates"
 import { mountFakes, type MountedFakes } from "../fakes/testing"
-import { discordClient } from "./client"
+import { DiscordApiError, discordClient } from "./client"
 import { FAKE_CHANNELS, FAKE_DISCORD, FAKE_POLLS } from "./fake/data"
 import { discordFake } from "./fake/handlers"
 import { memoryDiscordStore } from "./memory-store"
-import { authorHash } from "./metadata"
 import { DiscordRateLimiter } from "./rate-limit"
 import { snowflakeTime } from "./snowflake"
 import { chicagoDayBounds, daysBetween, DiscordMembersIntentError, refreshChannels, rescan, syncMembers, syncMessages, type SyncContext } from "./sync"
-import type { DiscordMessage } from "./types"
+import { CHANNEL_TYPE, type DiscordMessage } from "./types"
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -38,18 +37,30 @@ async function fakeHistory(ctx: SyncContext, channelId: string): Promise<Discord
 }
 
 describe("refreshChannels", () => {
-  it("keeps the channels that can hold messages (switched off), with their category, and active threads under their channel", async () => {
+  it("keeps the channels that can hold messages (switched off), with their category, and no thread of a channel that isn't opted in", async () => {
     const { memory, ctx } = setup()
     const { channels, activeThreads } = await refreshChannels(ctx)
     const byName = new Map(channels.map((c) => [c.name, c]))
-    expect([...byName.keys()].sort()).toEqual(["Lounge", "Monza setup help", "announcements", "general", "lsc-chat", "setups"])
+    expect([...byName.keys()].sort()).toEqual(["Lounge", "announcements", "general", "lsc-chat", "setups"])
     expect(byName.get("general")).toMatchObject({ parentName: "Club", parentId: null, synced: false })
     expect(byName.get("setups")).toMatchObject({ type: 15, parentName: "Racing" })
-    expect(byName.get("Monza setup help")).toMatchObject({ parentId: FAKE_CHANNELS.setups, parentName: "setups", synced: false })
-    expect(activeThreads.size).toBe(1)
+    // A thread's title is a member's words: nothing from #setups while it's off
+    expect(activeThreads.size).toBe(0)
+    expect(memory.channels.has(FAKE_CHANNELS.monzaThread)).toBe(false)
     // Categories and the channel the bot can't see aren't kept
     expect(memory.channels.has(FAKE_CHANNELS.clubCategory)).toBe(false)
     expect(memory.channels.has(FAKE_CHANNELS.officers)).toBe(false)
+  })
+
+  it("keeps the active public threads of an opted-in channel under it, never a private thread", async () => {
+    const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.setups] })
+    const real = ctx.client.activeThreads
+    const privateThread = { id: "1142880731136999999", type: CHANNEL_TYPE.privateThread, name: "Private chat", parent_id: FAKE_CHANNELS.setups }
+    const client = { ...ctx.client, activeThreads: async (signal?: AbortSignal) => ({ threads: [...(await real(signal)).threads, privateThread] }) }
+    const { activeThreads } = await refreshChannels({ ...ctx, client } as SyncContext)
+    expect([...activeThreads]).toEqual([FAKE_CHANNELS.monzaThread])
+    expect(memory.channels.get(FAKE_CHANNELS.monzaThread)).toMatchObject({ name: "Monza setup help", parentId: FAKE_CHANNELS.setups, parentName: "setups", synced: false })
+    expect(memory.channels.has(privateThread.id)).toBe(false)
   })
 
   it("never changes an admin's switch", async () => {
@@ -126,7 +137,7 @@ describe("syncMessages", () => {
     const someone = [...plain.memory.messages.values()][0].authorId
     vi.unstubAllGlobals()
 
-    const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.general], purged: [authorHash(someone)] })
+    const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.general], purged: [someone] })
     await syncMessages(ctx)
     expect(memory.messages.size).toBeGreaterThan(0)
     expect([...memory.messages.values()].some((r) => r.authorId === someone)).toBe(false)
@@ -154,6 +165,60 @@ describe("syncMessages", () => {
   it("stops on a rejected token", async () => {
     const { ctx } = setup({ synced: [FAKE_CHANNELS.general], token: "wrong" })
     await expect(syncMessages(ctx)).rejects.toMatchObject({ status: 401 })
+  })
+
+  it("keeps nothing from a channel switched off while the run reads it: no rows, no daily counts, no cursor", async () => {
+    const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.general, FAKE_CHANNELS.lscChat] })
+    let pages = 0
+    const client = {
+      ...ctx.client,
+      messages: async (...args: Parameters<SyncContext["client"]["messages"]>) => {
+        const page = await ctx.client.messages(...args)
+        // An admin switches #general off while its first page is on its way
+        if (args[0] === FAKE_CHANNELS.general && pages++ === 0) await memory.store.switchOff(FAKE_CHANNELS.general)
+        return page
+      },
+    }
+    const result = await syncMessages({ ...ctx, client } as SyncContext, { backfillDays: 60 })
+    expect(result.problems).toEqual([])
+    expect(pages).toBe(1)
+    expect([...memory.messages.values()].some((m) => m.channelId === FAKE_CHANNELS.general)).toBe(false)
+    expect([...memory.daily.values()].some((s) => s.channelId === FAKE_CHANNELS.general)).toBe(false)
+    expect(memory.channels.get(FAKE_CHANNELS.general)).toMatchObject({ synced: false, lastMessageId: null, lastSyncedAt: null })
+    expect([...memory.messages.values()].some((m) => m.channelId === FAKE_CHANNELS.lscChat)).toBe(true)
+  })
+
+  it("switches off an opted-in channel Discord deleted, with what's stored from it, instead of failing every run", async () => {
+    const { fakes, memory, ctx } = setup({ synced: [FAKE_CHANNELS.general, FAKE_CHANNELS.lscChat] })
+    await syncMessages(ctx)
+    const general = [...memory.messages.values()].filter((m) => m.channelId === FAKE_CHANNELS.general).length
+    expect(general).toBeGreaterThan(0)
+    await hook(fakes, "DELETE", `channels/${FAKE_CHANNELS.general}`)
+
+    const result = await syncMessages(ctx)
+    expect(result.problems).toEqual([])
+    expect(result.gone).toEqual([{ id: FAKE_CHANNELS.general, name: "general", messages: general }])
+    expect(memory.channels.has(FAKE_CHANNELS.general)).toBe(false)
+    expect([...memory.messages.values()].some((m) => m.channelId === FAKE_CHANNELS.general)).toBe(false)
+    expect([...memory.daily.values()].some((s) => s.channelId === FAKE_CHANNELS.general)).toBe(false)
+    expect([...memory.messages.values()].some((m) => m.channelId === FAKE_CHANNELS.lscChat)).toBe(true)
+    // Discord was asked once more before anything was deleted
+    expect(fakes.requests.some((r) => r.method === "GET" && r.path === `/api/v10/channels/${FAKE_CHANNELS.general}`)).toBe(true)
+    expect((await syncMessages(ctx)).gone).toEqual([])
+  })
+
+  it("reports a 404 as a problem, deleting nothing, when Discord says the channel is still there", async () => {
+    const { memory, ctx } = setup({ synced: [FAKE_CHANNELS.general] })
+    const client = {
+      ...ctx.client,
+      messages: async () => {
+        throw new DiscordApiError(404, 10003, "GET /channels/:id/messages", "Unknown Channel")
+      },
+    }
+    const result = await syncMessages({ ...ctx, client } as SyncContext)
+    expect(result.gone).toEqual([])
+    expect(result.problems).toEqual([{ channel: "#general", error: expect.stringContaining("10003") }])
+    expect(memory.channels.get(FAKE_CHANNELS.general)?.synced).toBe(true)
   })
 
   it("starts nothing new past its deadline, and says what's left", async () => {
@@ -247,6 +312,50 @@ describe("rescan", () => {
     expect(spa?.lastMessageId).toBeTruthy()
   })
 
+  it("drops a thread Discord deleted with its messages, and rebuilds its channel's days, without failing the run", async () => {
+    const { fakes, memory, ctx } = setup({ synced: [FAKE_CHANNELS.setups] })
+    await syncMessages(ctx)
+    const monza = [...memory.messages.values()].filter((m) => m.channelId === FAKE_CHANNELS.monzaThread)
+    expect(monza.length).toBe(8)
+    const statTotal = () => [...memory.daily.values()].filter((s) => s.channelId === FAKE_CHANNELS.setups).reduce((n, s) => n + s.messages, 0)
+    expect(statTotal()).toBe(8)
+    // A member deletes their forum post
+    await hook(fakes, "DELETE", `channels/${FAKE_CHANNELS.monzaThread}`)
+
+    const result = await rescan(ctx)
+    expect(result).toMatchObject({ problems: [], gone: [], threadsGone: 1 })
+    expect(memory.channels.has(FAKE_CHANNELS.monzaThread)).toBe(false)
+    expect([...memory.messages.values()].some((m) => m.channelId === FAKE_CHANNELS.monzaThread)).toBe(false)
+    expect(memory.channels.get(FAKE_CHANNELS.setups)?.synced).toBe(true)
+    // Spa (archived 3 days ago) is still there and counted; Monza's messages no longer are
+    const spa = [...memory.messages.values()].filter((m) => m.channelId === FAKE_CHANNELS.spaThread && m.createdAt.getTime() >= Date.now() - 7 * DAY).length
+    expect(statTotal()).toBe(spa)
+    expect((await rescan(ctx)).threadsGone).toBe(0)
+  })
+
+  it("switches off a forum Discord deleted when listing its archived threads finds it gone", async () => {
+    const { fakes, memory, ctx } = setup({ synced: [FAKE_CHANNELS.setups, FAKE_CHANNELS.lscChat] })
+    await syncMessages(ctx)
+    await hook(fakes, "DELETE", `channels/${FAKE_CHANNELS.setups}`)
+    const result = await rescan(ctx)
+    expect(result.problems).toEqual([])
+    expect(result.gone.map((g) => g.name)).toEqual(["setups"])
+    expect(memory.channels.has(FAKE_CHANNELS.setups)).toBe(false)
+    expect(memory.channels.has(FAKE_CHANNELS.monzaThread)).toBe(false)
+    expect([...memory.messages.values()].some((m) => m.channelId === FAKE_CHANNELS.monzaThread)).toBe(false)
+  })
+
+  it("lists archived threads only for channels that can have them (not voice or stage)", async () => {
+    const { fakes, ctx } = setup({ synced: [FAKE_CHANNELS.general, FAKE_CHANNELS.voiceLounge] })
+    await expect(ctx.client.archivedThreads(FAKE_CHANNELS.voiceLounge)).rejects.toMatchObject({ status: 400, code: 50024 })
+    await syncMessages(ctx)
+    const result = await rescan(ctx)
+    expect(result.problems).toEqual([])
+    const listed = fakes.requests.filter((r) => r.path.endsWith("/threads/archived/public")).map((r) => r.path)
+    expect(listed.filter((p) => p.includes(FAKE_CHANNELS.voiceLounge))).toHaveLength(1)
+    expect(listed.some((p) => p.includes(FAKE_CHANNELS.general))).toBe(true)
+  })
+
   it("saves where a pass cut short got to, marks deletions only up to there, and carries on from there next time", async () => {
     const { fakes, memory, ctx } = setup({ synced: [FAKE_CHANNELS.general] })
     // More than one page of recent messages
@@ -318,7 +427,7 @@ describe("syncMembers", () => {
     await syncMembers(first.ctx)
     const someone = [...first.memory.members.keys()][3]
     vi.unstubAllGlobals()
-    const { memory, ctx } = setup({ purged: [authorHash(someone)] })
+    const { memory, ctx } = setup({ purged: [someone] })
     await syncMembers(ctx)
     expect(memory.members.has(someone)).toBe(false)
     expect(memory.members.size).toBe(39)

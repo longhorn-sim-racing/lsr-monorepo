@@ -10,7 +10,7 @@ vi.mock("@/server/db", () => ({ prisma: db }))
 import { mountFakes, type MountedFakes } from "@/server/connectors/fakes/testing"
 import { FAKE_CHANNELS, FAKE_DISCORD, FAKE_INJECTION } from "@/server/connectors/discord/fake/data"
 import { discordFake } from "@/server/connectors/discord/fake/handlers"
-import { authorHash } from "@/server/connectors/discord/metadata"
+import { purgedHash } from "@/server/connectors/discord/metadata"
 import { hitLink } from "../../tools/search"
 import { search } from "../search"
 import { DISCORD_INDEXING, DISCORD_NO_CHANNELS, discordMessageHref, discordQuery, discordSource } from "./discord"
@@ -87,7 +87,8 @@ describe("the Discord search source", () => {
 
     const injected = all.find((h) => h.snippet.includes(FAKE_INJECTION.marker))!
     const author = (await (await fetch(`${fakes.origin}/discord/api/v10/channels/${FAKE_CHANNELS.lscChat}/messages/${injected.id.split("/")[1]}`, { headers: { authorization: `Bot ${FAKE_DISCORD.botToken}` } })).json()) as { author: { id: string } }
-    db.systemSetting.findUnique.mockResolvedValue({ key: "discord_purged", value: JSON.stringify({ authors: [authorHash(author.author.id)] }) })
+    const key = Buffer.alloc(32, 7).toString("base64url")
+    db.systemSetting.findUnique.mockResolvedValue({ key: "discord_purged", value: JSON.stringify({ key, authors: [purgedHash(key, author.author.id)] }) })
     const after = await discordSource.search({ query: "lsc", limit: 25, includeJackReplies: false })
     expect(after.some((h) => h.id === injected.id)).toBe(false)
   })
@@ -124,5 +125,19 @@ describe("reading a Discord conversation", () => {
   it("says Discord isn't connected while it's off", async () => {
     db.connectorState.findUnique.mockResolvedValue(null)
     expect(await reader.read(`${FAKE_CHANNELS.general}/1300000000000000555`, {})).toEqual({ ok: false, error: expect.stringMatching(/Discord isn't connected/) })
+  })
+})
+
+// Last in the file: the rate limit it causes holds Discord search for a few seconds in this process
+describe("the Discord search budget", () => {
+  it("gives up at once on a rate limit longer than its short wait, instead of holding up the other sources", async () => {
+    // The sync's client would wait this out (up to 15 s) and retry; search waits 2.5 s at most
+    await hook("rate-limit", { times: 3, retryAfter: 4, path: "messages/search" })
+    const started = Date.now()
+    const { hits, outcomes } = await search({ query: "monza", sources: ["discord"], limit: 5, registry: [discordSource] })
+    expect(Date.now() - started).toBeLessThan(2_000)
+    expect(hits).toEqual([])
+    expect(outcomes).toEqual([{ source: "discord", status: "failed", reason: expect.any(String) }])
+    expect(searches()).toHaveLength(1)
   })
 })

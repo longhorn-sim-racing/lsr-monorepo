@@ -5,7 +5,7 @@ const db = vi.hoisted(() => {
     $transaction: vi.fn(),
     userRole: { count: vi.fn() },
     user: { findUnique: vi.fn() },
-    discordChannel: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+    discordChannel: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn(), delete: vi.fn() },
     discordMessage: { deleteMany: vi.fn() },
     discordDailyStat: { deleteMany: vi.fn() },
     discordMember: { findMany: vi.fn() },
@@ -57,13 +57,16 @@ describe("setDiscordChannelSyncedAction", () => {
     expect(cache.revalidatePath).toHaveBeenCalledWith("/admin/discord")
   })
 
-  it("opts a channel out by deleting what's stored from it and its threads, and resetting their cursors", async () => {
+  it("opts a channel out by switching it off first, then deleting what's stored from it: messages, its threads (titles too) and daily counts", async () => {
     db.discordChannel.findUnique.mockResolvedValue({ id: GENERAL, name: "general", type: 0, parentId: null, synced: true })
     expect(await setDiscordChannelSyncedAction(GENERAL, false)).toEqual({ ok: true, data: { changed: true, deleted: 240 } })
+    expect(db.discordChannel.update).toHaveBeenCalledWith({ where: { id: GENERAL }, data: { synced: false, lastMessageId: null, lastSyncedAt: null, rescanFrom: null } })
+    // The channel's row goes first: a sync writing a page holds it, so the deletes come after that page
+    expect(db.discordChannel.update.mock.invocationCallOrder[0]).toBeLessThan(db.discordMessage.deleteMany.mock.invocationCallOrder[0])
     expect(db.discordMessage.deleteMany).toHaveBeenCalledWith({ where: { channelId: { in: [GENERAL, THREAD] } } })
+    expect(db.discordChannel.deleteMany).toHaveBeenCalledWith({ where: { parentId: GENERAL } })
     expect(db.discordDailyStat.deleteMany).toHaveBeenCalledWith({ where: { channelId: GENERAL } })
-    expect(db.discordChannel.updateMany).toHaveBeenCalledWith({ where: { id: { in: [GENERAL, THREAD] } }, data: { lastMessageId: null, lastSyncedAt: null, rescanFrom: null } })
-    expect(db.discordChannel.update).toHaveBeenCalledWith({ where: { id: GENERAL }, data: { synced: false } })
+    expect(db.discordChannel.delete).not.toHaveBeenCalled()
     expect(audit.createAuditLog).toHaveBeenCalledWith(expect.objectContaining({ actionType: "DISABLE", summary: "Opted #general out of the Discord sync and deleted 240 stored message records", metadata: { deleted: 240 } }))
   })
 

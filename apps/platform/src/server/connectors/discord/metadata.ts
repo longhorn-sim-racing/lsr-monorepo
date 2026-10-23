@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHmac } from "node:crypto"
 import { MESSAGE_TYPE, type DiscordMessage, type DiscordPoll } from "./types"
 
 /**
@@ -34,9 +34,25 @@ export type MessageRow = {
   lastSeenAt: Date
 }
 
-/** How a purged member's Discord id is kept on the do-not-collect list: hashed, so the list itself names nobody */
-export function authorHash(discordUserId: string): string {
-  return createHash("sha256").update(`lsr-discord-purged:${discordUserId}`).digest("hex")
+/**
+ * The do-not-collect list: members whose Discord data was purged on request. Ask it by Discord user id;
+ * it holds only keyed hashes of them (purgedHash)
+ */
+export type PurgedList = { has(discordUserId: string): boolean; readonly size: number }
+
+/**
+ * How a purged member's Discord id is kept on the list: an HMAC under the list's own random key (kept
+ * with the list in SystemSetting, which Jack can't read and no page shows). Keyed, because Discord ids
+ * are visible to everyone in the server: a plain hash would let anyone check whether someone asked
+ */
+export function purgedHash(key: string, discordUserId: string): string {
+  return createHmac("sha256", Buffer.from(key, "base64url")).update(`lsr-discord-purged:${discordUserId}`).digest("hex")
+}
+
+/** A list from its key and hashes (no key: nobody was purged yet) */
+export function purgedList(key: string | null, hashes: Iterable<string>): PurgedList {
+  const stored = new Set(hashes)
+  return { has: (discordUserId) => Boolean(key && stored.size && stored.has(purgedHash(key, discordUserId))), size: stored.size }
 }
 
 /**
@@ -44,8 +60,8 @@ export function authorHash(discordUserId: string): string {
  * (the bot's own polls included). Not system messages (joins, pins), not other bots or webhooks, and
  * never anyone on the purged list
  */
-export function keepMessage(message: DiscordMessage, purged: ReadonlySet<string>): boolean {
-  if (purged.has(authorHash(message.author.id))) return false
+export function keepMessage(message: DiscordMessage, purged: PurgedList): boolean {
+  if (purged.has(message.author.id)) return false
   if (message.poll) return true
   if (message.type !== MESSAGE_TYPE.default && message.type !== MESSAGE_TYPE.reply) return false
   return !message.author.bot && !message.webhook_id

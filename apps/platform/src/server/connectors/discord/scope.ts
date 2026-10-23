@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db"
-import { PURGED_SETTING, readPurged } from "./store"
+import type { PurgedList } from "./metadata"
+import { PURGED_SETTING, purgedFrom } from "./store"
 
 /**
  * Which Discord channels Jack may read live (design §12.1): the ones an admin opted in, and the threads
@@ -12,8 +13,8 @@ export type DiscordScope = {
   has(channelId: string): boolean
   /** "#general", or "#setups › Monza setup help" for a thread */
   label(channelId: string): string
-  /** Hashed ids of members whose data was purged on request: their messages are never shown */
-  purged: Set<string>
+  /** Members whose data was purged on request (by Discord user id): their messages are never shown */
+  purged: PurgedList
 }
 
 export async function discordScope(): Promise<DiscordScope> {
@@ -36,6 +37,6 @@ export async function discordScope(): Promise<DiscordScope> {
       const parent = channel.parentId ? byId.get(channel.parentId) : undefined
       return parent ? `#${parent.name} › ${channel.name}` : `#${channel.name}`
     },
-    purged: readPurged(purged?.value),
+    purged: purgedFrom(purged?.value),
   }
 }

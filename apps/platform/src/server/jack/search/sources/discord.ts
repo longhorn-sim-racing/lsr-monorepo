@@ -1,6 +1,5 @@
-import { discordConnector, DISCORD_OFF } from "@/server/connectors/discord/connector"
+import { discordClientFromEnv, discordConnector, DISCORD_OFF } from "@/server/connectors/discord/connector"
 import type { DiscordClient } from "@/server/connectors/discord/client"
-import { authorHash } from "@/server/connectors/discord/metadata"
 import { discordScope, type DiscordScope } from "@/server/connectors/discord/scope"
 import { isSnowflake } from "@/server/connectors/discord/snowflake"
 import type { DiscordMessage } from "@/server/connectors/discord/types"
@@ -20,6 +19,18 @@ export const DISCORD_INDEXING = "Discord is still building its search index for 
 
 /** Messages `read` shows around the one opened */
 export const CONVERSATION_MESSAGES = 11
+
+/**
+ * Search waits for every source, under the model loop's tool timeout, so Discord gets a tight budget:
+ * one retry, rate limits waited out for at most 2.5 s, 6 s a request and 8 s in all (index waits
+ * included). A slow or rate-limited Discord then shows as couldn't be searched, without holding up the
+ * other sources
+ */
+export const DISCORD_SEARCH_BUDGET = { timeoutMs: 6_000, maxWaitMs: 2_500, maxRetries: 1 }
+export const DISCORD_SEARCH_TIMEOUT_MS = 8_000
+
+/** The caller's signal, cut off at the search budget */
+const budgeted = (signal?: AbortSignal) => (signal ? AbortSignal.any([signal, AbortSignal.timeout(DISCORD_SEARCH_TIMEOUT_MS)]) : AbortSignal.timeout(DISCORD_SEARCH_TIMEOUT_MS))
 
 /** A message's jump link (opens it in Discord) */
 export function discordMessageHref(guildId: string, channelId: string, messageId: string): string {
@@ -46,13 +57,12 @@ export function discordQuery(query: string): { content: string; without: string[
 
 const authorName = (message: DiscordMessage) => message.author.global_name || message.author.username
 
-/** Why Discord can't be searched or read just now, or null */
+/** Why Discord can't be searched or read just now, or a client on the search budget and the channels it may read */
 async function blocked(): Promise<{ reason: string } | { client: DiscordClient; scope: DiscordScope }> {
-  const client = await discordConnector.client()
-  if (!client) return { reason: `${DISCORD_OFF} Its messages can't be searched or read.` }
+  if (!(await discordConnector.client())) return { reason: `${DISCORD_OFF} Its messages can't be searched or read.` }
   const scope = await discordScope()
   if (!scope.ids.length) return { reason: DISCORD_NO_CHANNELS }
-  return { client, scope }
+  return { client: discordClientFromEnv(process.env, DISCORD_SEARCH_BUDGET), scope }
 }
 
 /** Discord gives no score: its hits rank from 0.3 down in Discord's own order, so they mix with full-text hits without crowding them out */
@@ -72,12 +82,12 @@ export const discordSource: SearchSource = {
     const { client, scope } = access
     const { content, without } = discordQuery(query)
     if (!content) return []
-    const result = await client.search({ content, channelIds: scope.ids, limit: Math.min(limit, 25), sortBy: "relevance" }, signal)
+    const result = await client.search({ content, channelIds: scope.ids, limit: Math.min(limit, 25), sortBy: "relevance" }, budgeted(signal))
     if (result.status === "indexing") throw new SearchSourceError(DISCORD_INDEXING)
     const hits: SearchHit[] = []
     for (const message of result.messages) {
       // Discord was asked for these channels only; checked again here all the same
-      if (!scope.has(message.channel_id) || scope.purged.has(authorHash(message.author.id))) continue
+      if (!scope.has(message.channel_id) || scope.purged.has(message.author.id)) continue
       const text = message.content.toLowerCase()
       if (without.some((word) => text.includes(word))) continue
       const where = scope.label(message.channel_id)
@@ -107,8 +117,8 @@ export const discordSource: SearchSource = {
         if ("reason" in access) return { ok: false, error: access.reason }
         const { client, scope } = access
         if (!scope.has(channelId)) return { ok: false, error: "That Discord channel isn't opted in, so it can't be read." }
-        const page = await client.messages(channelId, { around: messageId, limit: CONVERSATION_MESSAGES }, signal)
-        const messages = page.filter((m) => !scope.purged.has(authorHash(m.author.id))).sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1))
+        const page = await client.messages(channelId, { around: messageId, limit: CONVERSATION_MESSAGES }, budgeted(signal))
+        const messages = page.filter((m) => !scope.purged.has(m.author.id)).sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1))
         const opened = messages.find((m) => m.id === messageId)
         if (!opened) return { ok: false, error: `No Discord message ${messageId} in ${scope.label(channelId)}: it may have been deleted.` }
         const where = scope.label(channelId)

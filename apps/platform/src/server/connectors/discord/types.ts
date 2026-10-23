@@ -27,8 +27,14 @@ export const CHANNEL_TYPE = {
 /** Threads, which live inside another channel */
 export const THREAD_TYPES: readonly number[] = [CHANNEL_TYPE.announcementThread, CHANNEL_TYPE.publicThread, CHANNEL_TYPE.privateThread]
 
+/** The threads the sync reads: public ones. A private thread is only for the people in it, so it's never kept, even in an opted-in channel */
+export const SYNCED_THREAD_TYPES: readonly number[] = [CHANNEL_TYPE.announcementThread, CHANNEL_TYPE.publicThread]
+
 /** Channels whose own history holds messages (forum and media channels only hold threads) */
 export const MESSAGE_CHANNEL_TYPES: readonly number[] = [CHANNEL_TYPE.text, CHANNEL_TYPE.voice, CHANNEL_TYPE.announcement, CHANNEL_TYPE.stage]
+
+/** Channels that can have threads (Discord refuses to list a voice or stage channel's threads) */
+export const THREAD_PARENT_TYPES: readonly number[] = [CHANNEL_TYPE.text, CHANNEL_TYPE.announcement, CHANNEL_TYPE.forum, CHANNEL_TYPE.media]
 
 /** Channels an admin can opt in: the ones with messages, plus forums and media channels (their threads sync) */
 export const SYNCABLE_CHANNEL_TYPES: readonly number[] = [...MESSAGE_CHANNEL_TYPES, CHANNEL_TYPE.forum, CHANNEL_TYPE.media]

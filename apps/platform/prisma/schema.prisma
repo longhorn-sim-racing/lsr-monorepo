@@ -1597,8 +1597,9 @@ model DiscordChannel {
   name          String
   type          Int
   parentName    String?
-  /// For a thread (types 10, 11, 12): the channel it's in. A thread syncs when that channel does, and
-  /// its activity counts toward it
+  /// For a thread (types 10, 11): the channel it's in. A thread syncs when that channel does, and its
+  /// activity counts toward it. Its name is a member's title, so threads are kept only in opted-in
+  /// channels (switching one off deletes them) and never private ones
   parentId      String?
   synced        Boolean   @default(false)
   lastMessageId String?

@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client"
 import { prisma } from "@/server/db"
-import { readStoredPoll, type MessageRow, type StoredPoll } from "./metadata"
+import { purgedList, readStoredPoll, type MessageRow, type PurgedList, type StoredPoll } from "./metadata"
 
 /**
  * Where the Discord sync keeps what it reads (design §3.3): DiscordChannel, DiscordMessage, DiscordMember,
@@ -29,20 +29,31 @@ export type MemberInput = { id: string; username: string; displayName: string | 
 
 export type DailyCount = { channelId: string; messages: number; activeAuthors: number }
 
+/** One page read from a channel or thread, as savePage writes it */
+export type PageWrite = {
+  /** Rows not stored yet (ids already stored are skipped) */
+  insert?: MessageRow[]
+  /** Rows seen again with changes: their metadata, lastSeenAt, and not deleted (anything seen exists) */
+  update?: MessageRow[]
+  /** Rows seen again unchanged: lastSeenAt stamped with `at` */
+  touch?: string[]
+  at?: Date
+  /** Where the channel's sync got to */
+  cursor?: Partial<Pick<StoredChannel, "lastMessageId" | "lastSyncedAt" | "rescanFrom">>
+}
+
 export type DiscordStore = {
   channels(): Promise<StoredChannel[]>
   /** Adds new channels (not synced) and updates the names and parents of known ones; never changes `synced` */
   saveChannels(channels: ChannelInput[]): Promise<void>
-  /** A channel's sync position */
-  saveCursor(id: string, cursor: Partial<Pick<StoredChannel, "lastMessageId" | "lastSyncedAt" | "rescanFrom">>): Promise<void>
+  /**
+   * Writes a page read from a channel or thread, only while it's opted in (a thread: while its channel
+   * is), in step with switching it off. Returns how many rows it added, or null, writing nothing, once
+   * it isn't opted in or a thread's row is gone
+   */
+  savePage(channelId: string, page: PageWrite): Promise<{ added: number } | null>
   /** The stored rows among these ids */
   messagesByIds(ids: string[]): Promise<Map<string, StoredMessage>>
-  /** Adds rows that aren't stored yet; returns how many it added */
-  insertMessages(rows: MessageRow[]): Promise<number>
-  /** Writes rows seen again with changes: their metadata, lastSeenAt, and not deleted (anything seen exists) */
-  updateMessages(rows: MessageRow[]): Promise<void>
-  /** Stamps lastSeenAt on rows seen again unchanged */
-  touchMessages(ids: string[], at: Date): Promise<void>
   /** Ids of a channel's rows created in [from, to], not marked deleted */
   liveMessageIds(channelId: string, from: Date, to: Date): Promise<string[]>
   markDeleted(ids: string[], at: Date): Promise<number>
@@ -50,8 +61,16 @@ export type DiscordStore = {
   openPolls(before: Date, limit: number): Promise<{ id: string; channelId: string; poll: StoredPoll }[]>
   /** Per top-level channel (threads count toward theirs): messages and distinct authors created in [start, end), deleted ones left out */
   dailyCounts(start: Date, end: Date): Promise<DailyCount[]>
-  /** Replaces one day's DiscordDailyStat rows */
+  /** Replaces one day's DiscordDailyStat rows. A channel that isn't opted in (any more) gets none */
   writeDailyStats(day: Date, counts: DailyCount[]): Promise<void>
+  /**
+   * Switches a channel off and deletes what's stored from it: its messages, its threads (rows and
+   * messages) and its daily counts, and resets its cursor. `gone` (Discord deleted the channel) removes
+   * its row too. Returns how many message rows went
+   */
+  switchOff(channelId: string, options?: { gone?: boolean }): Promise<number>
+  /** Deletes a thread Discord deleted, and its messages. Returns the span its messages were made in (for the stats), or null when it had none */
+  dropThread(threadId: string): Promise<{ from: Date; to: Date } | null>
   /** Members who haven't left */
   currentMemberIds(): Promise<string[]>
   saveMembers(members: MemberInput[], now: Date, linked: ReadonlyMap<string, string>): Promise<{ joined: number }>
@@ -60,8 +79,8 @@ export type DiscordStore = {
   writeGuildDay(day: Date, dayStart: Date, dayEnd: Date): Promise<{ memberCount: number; joinedCount: number; leftCount: number }>
   /** Discord user id → site user id, for linked accounts */
   linkedAccounts(): Promise<Map<string, string>>
-  /** The hashed ids of members whose Discord data was purged (never collected again) */
-  purgedAuthors(): Promise<Set<string>>
+  /** Members whose Discord data was purged (never collected again) */
+  purgedAuthors(): Promise<PurgedList>
 }
 
 /** Rows per statement, so a big page never makes one huge query */
@@ -75,17 +94,35 @@ function chunks<T>(items: T[], size = CHUNK): T[][] {
 
 const pollJson = (poll: StoredPoll | null) => (poll ? (poll as unknown as Prisma.InputJsonValue) : Prisma.DbNull)
 
-/** The SystemSetting key that holds the purged list (`{ "authors": [<hash>, …] }`). Not a credential; revoked from Jack like every SystemSetting */
+/**
+ * The SystemSetting key that holds the purged list (`{ "key": <random>, "authors": [<keyed hash>, …] }`).
+ * Not a credential, but its key must stay out of view: revoked from Jack like every SystemSetting, and
+ * shown on no page
+ */
 export const PURGED_SETTING = "discord_purged"
 
-export function readPurged(value: string | null | undefined): Set<string> {
+export type PurgedSetting = { key: string | null; authors: string[] }
+
+export function readPurged(value: string | null | undefined): PurgedSetting {
   try {
-    const parsed = JSON.parse(value ?? "{}") as { authors?: unknown }
-    return new Set(Array.isArray(parsed.authors) ? parsed.authors.filter((a): a is string => typeof a === "string") : [])
+    const parsed = JSON.parse(value ?? "{}") as { key?: unknown; authors?: unknown }
+    return {
+      key: typeof parsed.key === "string" && parsed.key ? parsed.key : null,
+      authors: Array.isArray(parsed.authors) ? parsed.authors.filter((a): a is string => typeof a === "string") : [],
+    }
   } catch {
-    return new Set()
+    return { key: null, authors: [] }
   }
 }
+
+/** The do-not-collect list from the setting's value */
+export function purgedFrom(value: string | null | undefined): PurgedList {
+  const { key, authors } = readPurged(value)
+  return purgedList(key, authors)
+}
+
+/** A page's or a switch-off's transaction: room for a page of updates, or for deleting a busy channel's rows, against the hosted database */
+const WRITE_TIMEOUT_MS = 30_000
 
 export const prismaDiscordStore: DiscordStore = {
   async channels() {
@@ -100,12 +137,33 @@ export const prismaDiscordStore: DiscordStore = {
     for (const channel of channels) {
       const was = known.get(channel.id)
       if (!was || (was.name === channel.name && was.type === channel.type && was.parentId === channel.parentId && was.parentName === channel.parentName)) continue
-      await prisma.discordChannel.update({ where: { id: channel.id }, data: { name: channel.name, type: channel.type, parentId: channel.parentId, parentName: channel.parentName } })
+      await prisma.discordChannel.updateMany({ where: { id: channel.id }, data: { name: channel.name, type: channel.type, parentId: channel.parentId, parentName: channel.parentName } })
     }
   },
 
-  async saveCursor(id, cursor) {
-    await prisma.discordChannel.update({ where: { id }, data: cursor })
+  async savePage(channelId, page) {
+    return prisma.$transaction(
+      async (tx) => {
+        // The opted-in channel's row (a thread's channel), locked: switching it off updates that row first, so it waits for this page, or this page sees it off
+        const [owner] = await tx.$queryRaw<{ synced: boolean }[]>(Prisma.sql`
+          SELECT o.synced FROM "DiscordChannel" c JOIN "DiscordChannel" o ON o.id = coalesce(c."parentId", c.id)
+          WHERE c.id = ${channelId}
+          FOR SHARE OF o`)
+        if (!owner?.synced) return null
+        let added = 0
+        for (const part of chunks(page.insert ?? [])) added += (await tx.discordMessage.createMany({ data: part.map((row) => ({ ...row, poll: pollJson(row.poll) })), skipDuplicates: true })).count
+        for (const row of page.update ?? []) {
+          await tx.discordMessage.updateMany({
+            where: { id: row.id },
+            data: { editedAt: row.editedAt, contentLength: row.contentLength, attachments: row.attachments, isReply: row.isReply, poll: pollJson(row.poll), lastSeenAt: row.lastSeenAt, deletedAt: null },
+          })
+        }
+        if (page.at) for (const part of chunks(page.touch ?? [])) await tx.discordMessage.updateMany({ where: { id: { in: part } }, data: { lastSeenAt: page.at } })
+        if (page.cursor) await tx.discordChannel.updateMany({ where: { id: channelId }, data: page.cursor })
+        return { added }
+      },
+      { timeout: WRITE_TIMEOUT_MS },
+    )
   },
 
   async messagesByIds(ids) {
@@ -115,28 +173,6 @@ export const prismaDiscordStore: DiscordStore = {
       for (const row of rows) found.set(row.id, { ...row, poll: readStoredPoll(row.poll) })
     }
     return found
-  },
-
-  async insertMessages(rows) {
-    let added = 0
-    for (const part of chunks(rows)) {
-      const { count } = await prisma.discordMessage.createMany({ data: part.map((row) => ({ ...row, poll: pollJson(row.poll) })), skipDuplicates: true })
-      added += count
-    }
-    return added
-  },
-
-  async updateMessages(rows) {
-    for (const row of rows) {
-      await prisma.discordMessage.update({
-        where: { id: row.id },
-        data: { editedAt: row.editedAt, contentLength: row.contentLength, attachments: row.attachments, isReply: row.isReply, poll: pollJson(row.poll), lastSeenAt: row.lastSeenAt, deletedAt: null },
-      })
-    }
-  },
-
-  async touchMessages(ids, at) {
-    for (const part of chunks(ids)) await prisma.discordMessage.updateMany({ where: { id: { in: part } }, data: { lastSeenAt: at } })
   },
 
   async liveMessageIds(channelId, from, to) {
@@ -172,10 +208,40 @@ export const prismaDiscordStore: DiscordStore = {
   },
 
   async writeDailyStats(day, counts) {
-    await prisma.$transaction([
-      prisma.discordDailyStat.deleteMany({ where: { date: day } }),
-      prisma.discordDailyStat.createMany({ data: counts.map((c) => ({ date: day, channelId: c.channelId, messages: c.messages, activeAuthors: c.activeAuthors })) }),
-    ])
+    await prisma.$transaction(async (tx) => {
+      // Only channels still opted in, their rows locked as a page's are, so one switched off meanwhile gets no counts back
+      const ids = counts.map((c) => c.channelId)
+      const synced = new Set(
+        ids.length ? (await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT id FROM "DiscordChannel" WHERE id IN (${Prisma.join(ids)}) AND synced FOR SHARE`)).map((row) => row.id) : [],
+      )
+      await tx.discordDailyStat.deleteMany({ where: { date: day } })
+      await tx.discordDailyStat.createMany({ data: counts.filter((c) => synced.has(c.channelId)).map((c) => ({ date: day, channelId: c.channelId, messages: c.messages, activeAuthors: c.activeAuthors })) })
+    })
+  },
+
+  async switchOff(channelId, options = {}) {
+    return prisma.$transaction(
+      async (tx) => {
+        // The channel's row first: a page being written holds it, so this waits for that page, and every page after sees the channel off
+        await tx.discordChannel.update({ where: { id: channelId }, data: { synced: false, lastMessageId: null, lastSyncedAt: null, rescanFrom: null } })
+        const threads = (await tx.discordChannel.findMany({ where: { parentId: channelId }, select: { id: true } })).map((t) => t.id)
+        const { count } = await tx.discordMessage.deleteMany({ where: { channelId: { in: [channelId, ...threads] } } })
+        await tx.discordChannel.deleteMany({ where: { parentId: channelId } })
+        await tx.discordDailyStat.deleteMany({ where: { channelId } })
+        if (options.gone) await tx.discordChannel.delete({ where: { id: channelId } })
+        return count
+      },
+      { timeout: WRITE_TIMEOUT_MS },
+    )
+  },
+
+  async dropThread(threadId) {
+    return prisma.$transaction(async (tx) => {
+      const span = await tx.discordMessage.aggregate({ where: { channelId: threadId }, _min: { createdAt: true }, _max: { createdAt: true } })
+      await tx.discordMessage.deleteMany({ where: { channelId: threadId } })
+      await tx.discordChannel.deleteMany({ where: { id: threadId, parentId: { not: null } } })
+      return span._min.createdAt && span._max.createdAt ? { from: span._min.createdAt, to: span._max.createdAt } : null
+    })
   },
 
   async currentMemberIds() {
@@ -235,6 +301,6 @@ export const prismaDiscordStore: DiscordStore = {
 
   async purgedAuthors() {
     const row = await prisma.systemSetting.findUnique({ where: { key: PURGED_SETTING } })
-    return readPurged(row?.value)
+    return purgedFrom(row?.value)
   },
 }
