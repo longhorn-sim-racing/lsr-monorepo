@@ -266,21 +266,30 @@ export async function pauseRecurringQuestion(id: string, reason: string): Promis
   })
 }
 
-/** Deletes a question; the database deletes its job with it. Its notes and answers stay in the room */
+/**
+ * Deletes a question; the database deletes its job with it. Its notes and answers stay in the room. In
+ * one transaction with its audit entry; a second delete (or its job's) that got there first reads as gone
+ */
 export async function deleteRecurringQuestion(id: string, actor: ServiceActor): Promise<{ ok: true; title: string } | { ok: false; error: string }> {
-  const question = await prisma.recurringQuestion.findUnique({ where: { id }, include: { scheduledJob: true } })
-  if (!question) return { ok: false, error: GONE.error }
-  await prisma.recurringQuestion.delete({ where: { id } })
-  await createAuditLog({
-    actorUserId: actor.userId,
-    actionType: "DELETE",
-    entityType: "RECURRING_QUESTION",
-    entityId: id,
-    summary: `Deleted the recurring question “${question.title}”`,
-    before: brief(question, question.scheduledJob.schedule, question.scheduledJob.enabled),
-    metadata: withActorMetadata(actor, { jobKey: question.scheduledJob.key }),
+  return prisma.$transaction(async (tx) => {
+    const question = await lockQuestion(tx, id)
+    if (!question) return { ok: false, error: GONE.error }
+    const { count } = await tx.recurringQuestion.deleteMany({ where: { id } })
+    if (!count) return { ok: false, error: GONE.error }
+    await createAuditLog(
+      {
+        actorUserId: actor.userId,
+        actionType: "DELETE",
+        entityType: "RECURRING_QUESTION",
+        entityId: id,
+        summary: `Deleted the recurring question “${question.title}”`,
+        before: brief(question, question.scheduledJob.schedule, question.scheduledJob.enabled),
+        metadata: withActorMetadata(actor, { jobKey: question.scheduledJob.key }),
+      },
+      tx,
+    )
+    return { ok: true, title: question.title }
   })
-  return { ok: true, title: question.title }
 }
 
 /** Asks an on question at the next tick (its next run moves to now) */

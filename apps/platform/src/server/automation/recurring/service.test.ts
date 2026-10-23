@@ -5,7 +5,7 @@ const db = vi.hoisted(() => ({
   $queryRaw: vi.fn(),
   jackRoom: { findUnique: vi.fn() },
   scheduledJob: { create: vi.fn(), update: vi.fn() },
-  recurringQuestion: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  recurringQuestion: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
   user: { findMany: vi.fn() },
 }))
 const audit = vi.hoisted(() => ({ createAuditLog: vi.fn() }))
@@ -163,10 +163,23 @@ describe("switching", () => {
 })
 
 describe("deleting and asking now", () => {
-  it("deletes the question (its job goes with it) and audits what it was", async () => {
+  it("deletes the question (its job goes with it) and audits what it was, in one transaction", async () => {
+    db.recurringQuestion.deleteMany.mockResolvedValue({ count: 1 })
     expect(await deleteRecurringQuestion("q-1", actor)).toEqual({ ok: true, title: "Weekly signups" })
-    expect(db.recurringQuestion.delete).toHaveBeenCalledWith({ where: { id: "q-1" } })
+    expect(db.$transaction).toHaveBeenCalledTimes(1)
+    expect(db.$queryRaw).toHaveBeenCalled()
+    expect(db.recurringQuestion.deleteMany).toHaveBeenCalledWith({ where: { id: "q-1" } })
     expect(audit.createAuditLog.mock.calls[0][0]).toMatchObject({ actionType: "DELETE", before: { title: "Weekly signups", schedule: "0 9 * * 1" } })
+    expect(audit.createAuditLog.mock.calls[0][1]).toBe(db)
+  })
+
+  it("says it's gone, without an audit entry, when another delete got there first", async () => {
+    db.recurringQuestion.findUnique.mockResolvedValue(null)
+    expect(await deleteRecurringQuestion("q-1", actor)).toEqual({ ok: false, error: expect.stringMatching(/doesn't exist anymore/) })
+    db.recurringQuestion.findUnique.mockResolvedValue(question())
+    db.recurringQuestion.deleteMany.mockResolvedValue({ count: 0 })
+    expect(await deleteRecurringQuestion("q-1", actor)).toEqual({ ok: false, error: expect.stringMatching(/doesn't exist anymore/) })
+    expect(audit.createAuditLog).not.toHaveBeenCalled()
   })
 
   it("asks one that's on at the next tick, and refuses one that's off", async () => {
