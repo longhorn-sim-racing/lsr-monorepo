@@ -63,7 +63,7 @@ async function main() {
   const sync = await import("../src/server/connectors/discord/sync");
   const queries = await import("../src/server/queries/discord");
   const { purgeDiscordData } = await import("../src/server/services/discord-link.service");
-  const { authorHash } = await import("../src/server/connectors/discord/metadata");
+  const { pruneDiscord } = await import("../src/server/scheduler/jobs/discord-read");
 
   // The fake, in-process: requests to its origin are answered by its routes, anything else is refused
   const router = createFakeRouter([discordFake]);
@@ -98,23 +98,30 @@ async function main() {
   const savedStats = await prisma.discordDailyStat.findMany({ where: { date: { in: days } } });
   const savedGuild = await prisma.discordGuildDaily.findMany({ where: { date: { in: days } } });
   const savedPurged = await prisma.systemSetting.findUnique({ where: { key: PURGED_SETTING } });
-  const purgedHashes: string[] = [];
+  const purgeReferences: string[] = [];
 
   try {
     const { channels } = await sync.refreshChannels(ctx);
     const general = channels.find((c) => c.id === FAKE_CHANNELS.general);
-    const thread = channels.find((c) => c.parentId === FAKE_CHANNELS.setups);
     check("new channels arrive switched off, with their category", general?.synced === false && general.parentName === "Club", JSON.stringify(general));
-    check("an active thread is stored under its channel", Boolean(thread), JSON.stringify(channels.map((c) => c.name)));
+    check("no thread is kept from a channel that isn't opted in", !channels.some((c) => c.parentId === FAKE_CHANNELS.setups), JSON.stringify(channels.map((c) => c.name)));
 
     await prisma.discordChannel.updateMany({ where: { id: { in: [FAKE_CHANNELS.general, FAKE_CHANNELS.lscChat, FAKE_CHANNELS.setups] } }, data: { synced: true } });
     const first = await sync.syncMessages(ctx, { backfillDays: 60 });
+    const thread = await prisma.discordChannel.findFirst({ where: { parentId: FAKE_CHANNELS.setups } });
+    check("an active thread is stored under its channel once that's opted in", thread?.id === FAKE_CHANNELS.monzaThread, JSON.stringify(thread));
     const stored = await prisma.discordMessage.count({ where: { channelId: { in: channelIds } } });
     check("the sync stores the opted-in channels' messages", first.added > 50 && first.added === stored && first.problems.length === 0, JSON.stringify(first));
     const columns = await prisma.$queryRaw<{ column_name: string }[]>`SELECT column_name FROM information_schema.columns WHERE table_name = 'DiscordMessage'`;
     check("DiscordMessage has no column for text", !columns.some((c) => /content$|text|body/i.test(c.column_name)), columns.map((c) => c.column_name).join(", "));
     const announcements = await prisma.discordMessage.count({ where: { channelId: FAKE_CHANNELS.announcements } });
     check("a channel that isn't opted in isn't read", announcements === 0);
+    const sample = { id: "1300000000000000001", channelId: FAKE_CHANNELS.announcements, authorId: "1300000000000000002", createdAt: now, editedAt: null, contentLength: 1, attachments: 0, isReply: false, poll: null, lastSeenAt: now };
+    const refused = await prismaDiscordStore.savePage(FAKE_CHANNELS.announcements, { insert: [sample], cursor: { lastMessageId: sample.id } });
+    const announcementsRow = await prisma.discordChannel.findUnique({ where: { id: FAKE_CHANNELS.announcements } });
+    check("a page for a channel that isn't opted in writes nothing", refused === null && !(await prisma.discordMessage.findUnique({ where: { id: sample.id } })) && announcementsRow?.lastMessageId === null, JSON.stringify(refused));
+    const threadPage = await prismaDiscordStore.savePage(FAKE_CHANNELS.monzaThread, { cursor: { lastSyncedAt: now } });
+    check("a thread's page is written while its channel is opted in", threadPage?.added === 0, JSON.stringify(threadPage));
 
     const again = await sync.syncMessages(ctx, { backfillDays: 60 });
     check("a second sync adds nothing", again.added === 0, JSON.stringify(again));
@@ -137,6 +144,19 @@ async function main() {
     const afterStats = await prisma.discordDailyStat.aggregate({ where: { channelId: { in: channelIds } }, _sum: { messages: true } });
     check("and the day's count drops", afterStats._sum.messages === statTotal - 1, String(afterStats._sum.messages));
 
+    // A member deletes their forum post: the re-scan drops the thread and its messages, and doesn't fail
+    const monzaMessages = await prisma.discordMessage.count({ where: { channelId: FAKE_CHANNELS.monzaThread } });
+    await hook("DELETE", `channels/${FAKE_CHANNELS.monzaThread}`);
+    const dropped = await sync.rescan(ctx);
+    const monzaLeft = await prisma.discordMessage.count({ where: { channelId: FAKE_CHANNELS.monzaThread } });
+    check(
+      "a thread deleted in Discord is dropped with its messages, without a problem",
+      monzaMessages > 0 && dropped.threadsGone === 1 && dropped.problems.length === 0 && monzaLeft === 0 && !(await prisma.discordChannel.findUnique({ where: { id: FAKE_CHANNELS.monzaThread } })),
+      JSON.stringify({ monzaMessages, monzaLeft, dropped }),
+    );
+    const setupsStats = await prisma.discordDailyStat.aggregate({ where: { channelId: FAKE_CHANNELS.setups }, _sum: { messages: true } });
+    check("and its channel's daily counts drop with it", (setupsStats._sum.messages ?? 0) === (await prisma.discordMessage.count({ where: { channelId: FAKE_CHANNELS.spaThread, deletedAt: null } })), JSON.stringify(setupsStats));
+
     const members = await sync.syncMembers(ctx);
     check("the member sync stores the members, never the bot", members.memberCount >= 40 && !(await prisma.discordMember.findUnique({ where: { id: FAKE_DISCORD.botUserId } })), JSON.stringify(members));
 
@@ -153,15 +173,61 @@ async function main() {
     // A purge: everything about one author goes, and the next sync doesn't bring it back
     const author = await prisma.discordMessage.findFirst({ where: { channelId: FAKE_CHANNELS.general, deletedAt: null }, select: { authorId: true } });
     if (author && actor) {
-      purgedHashes.push(authorHash(author.authorId));
       const result = await purgeDiscordData(author.authorId, { userId: actor.id });
+      purgeReferences.push(result.reference);
       const left = await prisma.discordMessage.count({ where: { authorId: author.authorId } });
       check("a purge deletes the author's messages and member row", result.messages > 0 && left === 0 && !(await prisma.discordMember.findUnique({ where: { id: author.authorId } })), JSON.stringify(result));
+      const entry = await prisma.auditLog.findFirst({ where: { entityType: "DISCORD_MEMBER", entityId: result.reference } });
+      check("the purge's audit entry names neither the account nor its hash", Boolean(entry) && !JSON.stringify(entry).includes(author.authorId), JSON.stringify(entry));
       await prisma.discordChannel.updateMany({ where: { id: { in: channelIds } }, data: { lastMessageId: null } });
       await sync.syncMessages(ctx, { backfillDays: 60 });
       await sync.syncMembers(ctx);
       check("and a fresh sync never collects them again", (await prisma.discordMessage.count({ where: { authorId: author.authorId } })) === 0 && !(await prisma.discordMember.findUnique({ where: { id: author.authorId } })));
     } else check("a purge (needs a user to act as)", false, "no user in the local database");
+
+    // Switching a channel off: everything stored from it goes, its threads included
+    const lscStored = await prisma.discordMessage.count({ where: { channelId: FAKE_CHANNELS.lscChat } });
+    const switched = await prismaDiscordStore.switchOff(FAKE_CHANNELS.lscChat);
+    const lscRow = await prisma.discordChannel.findUnique({ where: { id: FAKE_CHANNELS.lscChat } });
+    check(
+      "switching a channel off deletes its records and daily counts and resets it",
+      switched === lscStored &&
+        lscStored > 0 &&
+        (await prisma.discordMessage.count({ where: { channelId: FAKE_CHANNELS.lscChat } })) === 0 &&
+        (await prisma.discordDailyStat.count({ where: { channelId: FAKE_CHANNELS.lscChat } })) === 0 &&
+        lscRow?.synced === false &&
+        lscRow.lastMessageId === null,
+      JSON.stringify({ lscStored, switched, lscRow }),
+    );
+
+    // The prune's SQL, in a transaction rolled back at the end (it deletes across the whole table): a thread
+    // and a message record left under a channel that isn't opted in go; what's opted in stays
+    const stray = { id: "1300000000000000003", name: "Stray thread", type: 11, parentId: FAKE_CHANNELS.announcements, parentName: "announcements", synced: false };
+    await prisma.discordChannel.create({ data: stray });
+    await prisma.discordMessage.create({ data: { id: "1300000000000000004", channelId: stray.id, authorId: sample.authorId, createdAt: now, lastSeenAt: now } });
+    const generalBefore = await prisma.discordMessage.count({ where: { channelId: FAKE_CHANNELS.general } });
+    const ROLLBACK = new Error("rollback");
+    const seen: { result?: { pruned: unknown; strayThread: boolean; strayMessage: boolean; generalAfter: number } } = {};
+    await prisma
+      .$transaction(
+        async (tx) => {
+          const pruned = await pruneDiscord(tx, new Date(now.getTime() - 365 * 86_400_000));
+          seen.result = {
+            pruned,
+            strayThread: Boolean(await tx.discordChannel.findUnique({ where: { id: stray.id } })),
+            strayMessage: Boolean(await tx.discordMessage.findUnique({ where: { id: "1300000000000000004" } })),
+            generalAfter: await tx.discordMessage.count({ where: { channelId: FAKE_CHANNELS.general } }),
+          };
+          throw ROLLBACK;
+        },
+        { timeout: 30_000 },
+      )
+      .catch((error) => {
+        if (error !== ROLLBACK) throw error;
+      });
+    const pruned = seen.result;
+    check("the prune removes what's left from channels that aren't opted in, and keeps opted-in ones", Boolean(pruned && !pruned.strayThread && !pruned.strayMessage && pruned.generalAfter === generalBefore), JSON.stringify(pruned));
+    check("and the prune's transaction was rolled back", Boolean(await prisma.discordChannel.findUnique({ where: { id: stray.id } })));
   } finally {
     globalThis.fetch = realFetch;
     await cleanFakeRows();
@@ -171,7 +237,7 @@ async function main() {
     if (savedGuild.length) await prisma.discordGuildDaily.createMany({ data: savedGuild });
     if (savedPurged) await prisma.systemSetting.upsert({ where: { key: PURGED_SETTING }, update: { value: savedPurged.value }, create: { key: PURGED_SETTING, value: savedPurged.value } });
     else await prisma.systemSetting.deleteMany({ where: { key: PURGED_SETTING } });
-    await prisma.auditLog.deleteMany({ where: { entityType: "DISCORD_MEMBER", entityId: { in: purgedHashes.map((h) => h.slice(0, 16)) } } });
+    await prisma.auditLog.deleteMany({ where: { entityType: "DISCORD_MEMBER", entityId: { in: purgeReferences } } });
     await prisma.$disconnect();
   }
   console.log(`\n${pass} passed, ${fail} failed`);
