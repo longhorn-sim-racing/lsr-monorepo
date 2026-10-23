@@ -20,7 +20,10 @@ import type { JackToolDisplay, JackToolPart, JackWebSourcesDisplay } from "@/lib
 export const WEB_SEARCH = "web_search"
 export const WEB_FETCH = "web_fetch"
 export const TOOL_SEARCH = "tool_search_tool_bm25"
-/** The one client tool whose results web_fetch may follow (tools/web-links.ts): it only returns earlier search and fetch results */
+/**
+ * The one client tool whose results web_fetch may follow (tools/web-links.ts): its result is only links
+ * from earlier search and fetch results, never text the model wrote
+ */
 export const WEB_LINKS = "web_links"
 
 /** Names the API gives its server tools. No Jack tool may take one (the request would be rejected) */
@@ -43,7 +46,11 @@ export function webToolsOn(): boolean {
   return process.env.JACK_WEB_TOOLS?.trim().toLowerCase() === "on"
 }
 
-/** Per API call; a reply makes one call per tool round, and REPLY_LIMITS caps the whole reply */
+/**
+ * Per API call; a reply makes one call per tool round. REPLY_LIMITS caps the whole reply, but softly: it's
+ * checked after each call, so the call that crosses it can use all of these (see maxWebSearches). Not
+ * changed partway through a reply: the tools start the cached prefix
+ */
 export const WEB_LIMITS = {
   searchMaxUses: 5,
   fetchMaxUses: 3,

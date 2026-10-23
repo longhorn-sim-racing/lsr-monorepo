@@ -10,9 +10,12 @@ import type { JackTool } from "./types"
 /**
  * web_links (#188, design §7.1): the links earlier replies in this room found on the web. Earlier
  * replies come back as text, without their search results, so web_fetch can't open a page they found
- * ("open the second link") until this puts its link back in the conversation. It reads only the parts
- * the model loop built from web search and fetch results, so it never hands web_fetch a link from club
- * data, which is why web_fetch may follow its results (and no other client tool's)
+ * ("open the second link") until this puts its link back in the conversation.
+ *
+ * web_fetch may follow any link in its result (and no other client tool's), so the result holds only what
+ * came back from the web: each page's title and address, from the parts the model loop built from search
+ * and fetch results, and each reply's time. Never text the model wrote (its search queries, or `match`):
+ * a link in that text would become fetchable, with whatever the model put in it
  */
 
 const input = z.object({
@@ -41,11 +44,8 @@ export const webLinksTool: JackTool<z.infer<typeof input>> = {
 
     const found = rows.flatMap((row) => {
       const parts = parseToolParts(row.toolCalls).filter((part) => part.name === WEB_SEARCH || part.name === WEB_FETCH)
-      const searched: string[] = []
       const links: { n: number; title: string; url: string }[] = []
       for (const part of parts) {
-        const query = (part.input as { query?: unknown } | null)?.query
-        if (part.name === WEB_SEARCH && typeof query === "string") searched.push(query)
         for (const display of Array.isArray(part.displays) ? part.displays : []) {
           if (display.kind !== "web_sources" || !Array.isArray(display.sources)) continue
           for (const source of display.sources) {
@@ -56,15 +56,16 @@ export const webLinksTool: JackTool<z.infer<typeof input>> = {
       }
       // Numbered before filtering, so "the second link" keeps its number
       const shown = needle ? links.filter((link) => link.title.toLowerCase().includes(needle) || link.url.toLowerCase().includes(needle)) : links
-      return shown.length ? [{ reply: ct(row.createdAt), searched, links: shown }] : []
+      return shown.length ? [{ reply: ct(row.createdAt), links: shown }] : []
     })
 
     const total = found.reduce((sum, reply) => sum + reply.links.length, 0)
     if (!total) {
       return {
+        // Never `match` itself (see above)
         forModel: !rows.length
           ? "No reply in this room has used the web yet."
-          : `No ${match ? `links matching "${match}"` : "web links"} in this room's last ${plural(rows.length, "reply", "replies")} that used the web.`,
+          : `${match ? "No links match that text" : "No web links"} in this room's last ${plural(rows.length, "reply", "replies")} that used the web.`,
         label: "No earlier web links",
         displays: [],
       }
