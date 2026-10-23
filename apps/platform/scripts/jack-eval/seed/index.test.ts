@@ -6,9 +6,9 @@ import type { EvalSeeder } from "./types";
 const seeder = (name: string): EvalSeeder => ({ name, run: async () => "done" });
 
 describe("the eval seeder slots", () => {
-  it("have one slot per track, empty until each track adds its fake data", () => {
+  it("have one slot per track, each seeder tagged with the track whose slot it's in", () => {
     expect(Object.keys(SEED_SLOTS).sort()).toEqual([...SLOT_TRACKS].sort());
-    expect(EVAL_SEEDERS).toEqual([]);
+    for (const s of EVAL_SEEDERS) expect(SEED_SLOTS[s.track].map((t) => t.name), s.name).toContain(s.name);
   });
 
   it("join in track order, each tagged with its track", () => {
