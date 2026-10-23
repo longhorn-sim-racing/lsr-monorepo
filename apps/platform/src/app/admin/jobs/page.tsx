@@ -103,7 +103,7 @@ export default async function ScheduledJobsPage({ searchParams }: { searchParams
   return (
     <>
       <PageHeader title="Scheduled jobs" description="Syncs and clean-ups that run on a schedule. Every job ships switched off; an admin turns it on." />
-      <SchedulerHeartbeatPanel health={health} enabledJobs={enabled.length} now={now} />
+      <SchedulerHeartbeatPanel health={health} enabledJobs={enabled.length} now={now} className="mb-4" />
       <StatRow>
         <Stat label="Jobs on" value={`${enabled.length} of ${jobs.length}`} hint={enabled.length === 0 ? "None runs until it's switched on" : undefined} />
         <Stat label="Failing" value={failing} hint={failing ? "Last run failed" : "Every job on is fine"} />

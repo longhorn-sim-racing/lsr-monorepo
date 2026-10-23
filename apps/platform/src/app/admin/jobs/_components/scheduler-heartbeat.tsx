@@ -1,4 +1,5 @@
-import { Badge, DetailList, Notice, Panel, PanelBody, PanelHeader, ToneText, type Tone } from "@/components/admin/kit"
+import Link from "next/link"
+import { Badge, Button, DetailList, Notice, Panel, PanelBody, PanelHeader, ToneText, type Tone } from "@/components/admin/kit"
 import { prisma } from "@/server/db"
 import { getSchedulerHealth, type SchedulerHealth } from "@/server/scheduler/heartbeat"
 import { describeSchedule } from "@/server/scheduler/schedule"
@@ -6,9 +7,23 @@ import { relative, when } from "./format"
 
 /**
  * Whether the scheduler is alive: the last tick from pg_cron, pg_cron's own view of its tick job, and how
- * the site answered pg_net lately. On the Scheduled jobs page, and ready for the Connections page.
+ * the site answered pg_net lately. On the Scheduled jobs page, and ready for the Connections page's
+ * scheduler slot (render <SchedulerHeartbeat jobsLink />, which loads its own data).
  */
-export function SchedulerHeartbeatPanel({ health, enabledJobs, now }: { health: SchedulerHealth; enabledJobs: number; now: Date }) {
+export function SchedulerHeartbeatPanel({
+  health,
+  enabledJobs,
+  now,
+  jobsLink = false,
+  className,
+}: {
+  health: SchedulerHealth
+  enabledJobs: number
+  now: Date
+  /** Adds a link to the Scheduled jobs page, for other pages */
+  jobsLink?: boolean
+  className?: string
+}) {
   const badge: { tone: Tone; label: string } =
     health.state === "ok"
       ? { tone: "success", label: "Ticking" }
@@ -37,8 +52,21 @@ export function SchedulerHeartbeatPanel({ health, enabledJobs, now }: { health: 
   if (health.delivery) items.push({ label: "Site's answers (6 h)", value: <DeliveryLine delivery={health.delivery} now={now} /> })
 
   return (
-    <Panel className="mb-4">
-      <PanelHeader title="Scheduler" description="pg_cron ticks every minute and calls the site when a job is due. Times are Central." actions={<Badge tone={badge.tone}>{badge.label}</Badge>} />
+    <Panel className={className}>
+      <PanelHeader
+        title="Scheduler"
+        description="pg_cron ticks every minute and calls the site when a job is due. Times are Central."
+        actions={
+          <>
+            <Badge tone={badge.tone}>{badge.label}</Badge>
+            {jobsLink && (
+              <Button size="sm" variant="ghost" asChild>
+                <Link href="/admin/jobs">Scheduled jobs</Link>
+              </Button>
+            )}
+          </>
+        }
+      />
       <PanelBody className="flex flex-col gap-3">
         {health.state === "stale" && enabledJobs > 0 && (
           <Notice tone="danger" title="The scheduler stopped ticking">
@@ -96,8 +124,8 @@ function DeliveryLine({ delivery, now }: { delivery: NonNullable<SchedulerHealth
 }
 
 /** The panel with its own data, for pages that don't load the scheduler's health themselves (Connections) */
-export async function SchedulerHeartbeat() {
+export async function SchedulerHeartbeat({ jobsLink = false, className }: { jobsLink?: boolean; className?: string } = {}) {
   const now = new Date()
   const [health, enabledJobs] = await Promise.all([getSchedulerHealth(now), prisma.scheduledJob.count({ where: { enabled: true } })])
-  return <SchedulerHeartbeatPanel health={health} enabledJobs={enabledJobs} now={now} />
+  return <SchedulerHeartbeatPanel health={health} enabledJobs={enabledJobs} now={now} jobsLink={jobsLink} className={className} />
 }
