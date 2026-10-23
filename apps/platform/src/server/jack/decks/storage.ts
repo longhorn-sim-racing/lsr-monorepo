@@ -69,7 +69,8 @@ export function storeKindFor(env: StoreEnv): JackFileStoreKind {
   const choice = env.JACK_FILE_STORE?.trim().toLowerCase()
   if (choice === "supabase" && supabase) return "supabase"
   if (choice === "blob" && blob) return "blob"
-  if (choice === "files") return "files"
+  // A folder on disk is for local development: Vercel's file system is read-only
+  if (choice === "files" && !env.VERCEL) return "files"
   if (supabase) return "supabase"
   if (blob) return "blob"
   return env.VERCEL ? "none" : "files"

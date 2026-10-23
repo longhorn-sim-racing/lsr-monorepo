@@ -22,6 +22,9 @@ describe("storeKindFor: which store the environment picks", () => {
     expect(storeKindFor({ ...supabase, JACK_FILE_STORE: "files" })).toBe("files")
     expect(storeKindFor({ ...blob, JACK_FILE_STORE: "Supabase" })).toBe("blob")
     expect(storeKindFor({ ...supabase, JACK_FILE_STORE: "s3" })).toBe("supabase")
+    // Never the local folder on Vercel (read-only, and it would open the development upload route)
+    expect(storeKindFor({ ...supabase, JACK_FILE_STORE: "files", VERCEL: "1" })).toBe("supabase")
+    expect(storeKindFor({ JACK_FILE_STORE: "files", VERCEL: "1" })).toBe("none")
   })
 })
 
