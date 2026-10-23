@@ -1,14 +1,16 @@
 "use client"
 
 import { useCallback, useMemo } from "react"
+import { AttachButton, filesFromDrop, filesFromPaste, renderMessageFiles, UploadChips } from "@/components/jack/attachments"
 import { ProposalRoomContext, type ProposalRoom } from "@/components/jack/parts/proposal-context"
 import { JackRoomView } from "@/components/jack/room-view"
 import { useJackRoom } from "@/components/jack/use-jack-room"
+import { useJackUploads } from "@/components/jack/use-jack-uploads"
 import { unexpectedError } from "@/lib/action-result"
 import type { RoomSnapshotData } from "@/lib/jack/room-state"
 import type { JackSpend } from "@/lib/jack/spend"
 import { JACK_EVENT, type JackPresence, type JackRoomPersonaKey, type JackRoomSummary } from "@/lib/jack/types"
-import { loadJackRoomSnapshot, postJackMessage, renameJackRoom, resumeJackRoom, setJackRoomPersona } from "../actions"
+import { createJackUpload, loadJackRoomSnapshot, postJackMessage, removeJackUpload, renameJackRoom, resumeJackRoom, setJackRoomPersona } from "../actions"
 import { applyJackProposal, discardJackProposal, type ProposalActionResult } from "../proposals/actions"
 
 type JackRoomClientProps = {
@@ -30,10 +32,17 @@ export function JackRoomClient({ initial, rooms, me, spend }: JackRoomClientProp
     rename: renameJackRoom,
     resume: resumeJackRoom,
   })
+  const uploads = useJackUploads({ roomId: initial.room.id, createUpload: createJackUpload, removeUpload: removeJackUpload })
 
   async function send(content: string) {
     try {
-      const result = await room.send(content)
+      // Files still uploading go with this message once they're done (Send shows it's working meanwhile);
+      // files added during the wait stay in the composer for the next message
+      const files = await uploads.settle()
+      if (!files.ok) return files.error
+      if (!content.trim() && !files.fileIds.length) return "Type a message first"
+      const result = await room.send(content, files.fileIds)
+      if (result.ok) uploads.clear(files.keys)
       return result.ok ? null : result.error
     } catch (error) {
       return unexpectedError(error, "Couldn't send that")
@@ -118,6 +127,25 @@ export function JackRoomClient({ initial, rooms, me, spend }: JackRoomClientProp
         onSwitchPersona={switchPersona}
         onRename={rename}
         onContinue={continueRoom}
+        renderAttachments={renderMessageFiles}
+        composer={{
+          addons: <AttachButton onFiles={uploads.add} />,
+          attachments: <UploadChips items={uploads.items} notice={uploads.notice} onRemove={uploads.remove} />,
+          onPaste: (event) => {
+            const files = filesFromPaste(event)
+            if (!files.length) return
+            event.preventDefault()
+            uploads.add(files)
+          },
+          onDrop: (event) => {
+            // Dropped text goes into the message box as usual; dropped files would otherwise open in the tab
+            const files = filesFromDrop(event)
+            if (!files.length) return
+            event.preventDefault()
+            uploads.add(files)
+          },
+          canSendEmpty: uploads.items.length > 0,
+        }}
       />
     </ProposalRoomContext.Provider>
   )

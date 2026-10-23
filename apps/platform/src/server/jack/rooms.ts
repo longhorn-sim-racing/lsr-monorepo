@@ -3,6 +3,7 @@ import { JACK_EVENT, JACK_PERSONA_NAME } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
 import { runAfterResponse } from "@/server/after-response"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
+import { linkAttachments } from "./files/attach"
 import { jackMessageInclude, jackRoomViewSelect, toMessageView, toRoomView } from "./messages"
 import { roomProposalStates } from "./proposals/service"
 import { defaultReplyDeps, runRoom, type ReplyLoopDeps } from "./reply-loop"
@@ -72,21 +73,25 @@ export type RunRequest = { startedAt?: number; replyDeps?: ReplyLoopDeps }
 /**
  * Saves an officer's message, then (after the response) shows it to the room and gets the room's
  * persona answering: if a run is already going, it picks this message up on its next pass.
- * Null when the room doesn't exist or is archived.
+ * `fileIds` are the officer's READY uploads to post with it (G5): checked first with
+ * attachmentProblem(), then claimed in the same transaction, which throws AttachmentError (and saves
+ * nothing) if one was taken meanwhile. Null when the room doesn't exist or is archived.
  */
 export async function postOfficerMessage(
   roomId: string,
   authorUserId: string,
   content: string,
-  { startedAt = Date.now(), replyDeps = defaultReplyDeps }: RunRequest = {}
+  { startedAt = Date.now(), replyDeps = defaultReplyDeps, fileIds = [] }: RunRequest & { fileIds?: string[] } = {}
 ): Promise<JackMessageView | null> {
   const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: { id: true } })
   if (!room) return null
 
-  const [row] = await prisma.$transaction([
-    prisma.jackMessage.create({ data: { roomId, kind: "user", authorUserId, content }, include: jackMessageInclude }),
-    prisma.jackRoom.update({ where: { id: roomId }, data: { updatedAt: new Date() } }),
-  ])
+  const row = await prisma.$transaction(async (tx) => {
+    const created = await tx.jackMessage.create({ data: { roomId, kind: "user", authorUserId, content } })
+    await linkAttachments(tx, { messageId: created.id, roomId, officerId: authorUserId, fileIds })
+    await tx.jackRoom.update({ where: { id: roomId }, data: { updatedAt: new Date() } })
+    return tx.jackMessage.findUniqueOrThrow({ where: { id: created.id }, include: jackMessageInclude })
+  })
   const message = toMessageView(row)
 
   await runAfterResponse(async () => {

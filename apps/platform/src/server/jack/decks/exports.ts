@@ -38,7 +38,11 @@ export function exportPath(deck: Pick<DeckView, "id" | "title" | "version">, for
 export async function getDeckExport(deck: DeckView, format: DeckExportFormat): Promise<{ pathname: string; body: Buffer; stored: boolean }> {
   const store = jackFileStore()
   const pathname = exportPath(deck, format)
-  const stored = await store.get(pathname)
+  // A store that can't be read (a missing bucket fails loudly) doesn't stop the download either
+  const stored = await store.get(pathname).catch((error) => {
+    console.error(`[jack] Couldn't read export ${pathname} from the store:`, error)
+    return null
+  })
   if (stored) return { pathname, body: stored, stored: true }
   const { body, transient } = await buildDeckExport(deck, format)
   // An export with a slide that may render better next time isn't kept. Nor does a store that can't be

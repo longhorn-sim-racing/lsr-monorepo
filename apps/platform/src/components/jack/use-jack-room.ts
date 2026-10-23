@@ -30,7 +30,8 @@ type Options = {
   /** The room as the server rendered it */
   initial: RoomSnapshotData
   loadSnapshot: (roomId: string) => Promise<ActionResult<RoomSnapshotData>>
-  postMessage: (roomId: string, content: string) => Promise<ActionResult<JackMessageView>>
+  /** `fileIds`: READY uploads to post with the message (G5) */
+  postMessage: (roomId: string, content: string, fileIds?: string[]) => Promise<ActionResult<JackMessageView>>
   setPersona: (
     roomId: string,
     persona: JackRoomPersonaKey
@@ -233,8 +234,8 @@ export function useJackRoom({ roomId, me, initial, loadSnapshot, postMessage, se
   }, [waitingNote, streaming, roomId, resume, autoRetry])
 
   const send = useCallback(
-    async (content: string) => {
-      const result = await postMessage(roomId, content)
+    async (content: string, fileIds: string[] = []) => {
+      const result = await postMessage(roomId, content, fileIds)
       if (result.ok) {
         dispatch({ type: JACK_EVENT.created, message: result.data })
         setLastEventAt(Date.now())
