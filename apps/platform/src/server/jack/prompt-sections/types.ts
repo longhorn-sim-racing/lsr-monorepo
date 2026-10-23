@@ -10,7 +10,10 @@ export type PromptSlot = {
    * how to use the track's tools and its rules. Notes on new tables go to describe_schema instead.
    */
   section: string
-  /** Lines for "Where officers make changes", one per admin page, without the leading "- " */
+  /**
+   * Lines for "Where officers make changes", one per admin page, without the leading "- ". A track
+   * adds its page's line in the PR that ships the page, so Jack never names a page that isn't there.
+   */
   pages: string[]
 }
 
