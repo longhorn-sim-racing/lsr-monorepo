@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { Button, Field, Input, useConfirm } from "@/components/admin/kit"
 import type { PurgeResult } from "@/server/services/discord-link.service"
 import { purgeDiscordMemberAction } from "./actions"
+import type { PurgeRoles } from "@/server/discord-post/role-takeback"
 
 const done = ({ messages, threads, unlinkedUserId }: PurgeResult) =>
   `Deleted ${messages} message ${messages === 1 ? "record" : "records"}${threads ? `, ${threads} thread ${threads === 1 ? "title" : "titles"}` : ""}${unlinkedUserId ? " and the member's account link" : ""}. They won't be collected again.`
@@ -39,6 +40,7 @@ export function PurgeForm() {
         toast.success(done(result.data))
         setWho("")
         router.refresh()
+        rolesToast(result.data.roles)
       } catch {
         toast.error("Couldn't delete it. Try again.")
       }
@@ -75,6 +77,7 @@ export function PurgeLinkedButton({ userId, username }: { userId: string; userna
         }
         toast.success(done(result.data))
         router.refresh()
+        rolesToast(result.data.roles)
       } catch {
         toast.error("Couldn't delete it. Try again.")
       }
@@ -86,4 +89,14 @@ export function PurgeLinkedButton({ userId, username }: { userId: string; userna
       Delete Discord data
     </Button>
   )
+}
+
+/** What role sync took back from the account; when it couldn't, the admin removes the roles in Discord */
+function rolesToast(roles: PurgeRoles) {
+  if (!roles) return
+  if (roles.error) {
+    const which = roles.left.length ? roles.left.join(", ") : "the roles it gave them"
+    const remove = roles.left.length === 1 ? "that role" : roles.left.length ? "those roles" : "its roles"
+    toast.warning(`Role sync couldn't take back ${which}${roles.taken.length ? ` (it took ${roles.taken.join(", ")})` : ""}: ${roles.error.replace(/\.?$/, ".")} Remove ${remove} from them in Discord.`, { duration: 15_000 })
+  } else if (roles.taken.length) toast.success(`Role sync took back ${roles.taken.join(", ")}.`)
 }

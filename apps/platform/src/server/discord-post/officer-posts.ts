@@ -92,8 +92,12 @@ export async function createOfficerPost(raw: unknown, actor: Actor, posting: Dis
   return { ok: true, status: "WAITING", url: null, summary: `It goes out in #${channel.name} within a few minutes.` }
 }
 
+/** One post's id: never a filter object, which would act on every post at once with no audit entry */
+const isPostId = (id: unknown): id is string => typeof id === "string" && id.length > 0
+
 /** Cancels a scheduled post (any officer). A rule won't make it again */
 export async function cancelScheduledPost(id: string, actor: Actor): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!isPostId(id)) return { ok: false, error: "That isn't a post. Reload the page." }
   const count = await cancelPosts({ id }, `Cancelled by ${actor.displayName}.`, { release: false })
   if (!count) return { ok: false, error: "It isn't waiting to be sent anymore. Reload the page." }
   await createAuditLog({ actorUserId: actor.userId, actionType: "CANCEL", entityType: "DISCORD_POST", entityId: id, summary: "Cancelled a scheduled Discord post" })
@@ -108,6 +112,7 @@ export async function cancelScheduledPost(id: string, actor: Actor): Promise<{ o
  * is on
  */
 export async function retryFailedPost(id: string, actor: Actor, posting: DiscordPosting | null): Promise<OfficerPostResult> {
+  if (!isPostId(id)) return { ok: false, error: "That isn't a post. Reload the page." }
   const { count } = await prisma.discordPost.updateMany({ where: { id, status: "FAILED" }, data: { status: "SCHEDULED", scheduledFor: new Date(), claimedAt: null, error: null } })
   if (!count) return { ok: false, error: "It isn't a failed post anymore. Reload the page." }
   const queued = await prisma.discordPost.findUniqueOrThrow({ where: { id } })

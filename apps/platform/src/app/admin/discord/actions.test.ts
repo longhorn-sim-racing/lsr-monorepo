@@ -16,7 +16,9 @@ const guards = vi.hoisted(() => ({ requireOfficer: vi.fn() }))
 const audit = vi.hoisted(() => ({ createAuditLog: vi.fn() }))
 const cache = vi.hoisted(() => ({ revalidatePath: vi.fn() }))
 const service = vi.hoisted(() => ({ purgeDiscordData: vi.fn() }))
+const takeback = vi.hoisted(() => ({ takeBackAfterPurge: vi.fn() }))
 vi.mock("@/server/db", () => ({ prisma: db }))
+vi.mock("@/server/discord-post/role-takeback", () => takeback)
 vi.mock("@/server/auth/guards", () => guards)
 vi.mock("@/server/audit/log", () => audit)
 vi.mock("next/cache", () => cache)
@@ -36,6 +38,7 @@ beforeEach(() => {
   db.discordChannel.findMany.mockResolvedValue([{ id: THREAD }])
   db.discordMessage.deleteMany.mockResolvedValue({ count: 240 })
   service.purgeDiscordData.mockResolvedValue({ messages: 12, member: true, unlinkedUserId: null })
+  takeback.takeBackAfterPurge.mockResolvedValue(null)
 })
 
 describe("setDiscordChannelSyncedAction", () => {
@@ -92,8 +95,20 @@ describe("purgeDiscordMemberAction", () => {
   })
 
   it("purges by Discord id, as the admin", async () => {
-    expect(await purgeDiscordMemberAction({ discordUserId: ` ${DISCORD_ID} ` })).toEqual({ ok: true, data: { messages: 12, member: true, unlinkedUserId: null } })
+    expect(await purgeDiscordMemberAction({ discordUserId: ` ${DISCORD_ID} ` })).toEqual({ ok: true, data: { messages: 12, member: true, unlinkedUserId: null, roles: null } })
     expect(service.purgeDiscordData).toHaveBeenCalledWith(DISCORD_ID, { userId: "admin-1" })
+  })
+
+  it("takes back the roles role sync gave the account right after the purge, and says what happened", async () => {
+    const order: string[] = []
+    service.purgeDiscordData.mockImplementation(async () => (order.push("purge"), { messages: 3, member: true, unlinkedUserId: "user-9" }))
+    takeback.takeBackAfterPurge.mockImplementation(async () => (order.push("take back"), { taken: ["@LSC Driver"], left: [], error: null }))
+    expect(await purgeDiscordMemberAction({ discordUserId: DISCORD_ID })).toMatchObject({ ok: true, data: { unlinkedUserId: "user-9", roles: { taken: ["@LSC Driver"], left: [], error: null } } })
+    expect(takeback.takeBackAfterPurge).toHaveBeenCalledWith(DISCORD_ID, { wasLinked: true, targetUserId: "user-9" })
+    expect(order).toEqual(["purge", "take back"])
+
+    takeback.takeBackAfterPurge.mockResolvedValue({ taken: [], left: [], error: "Discord isn't connected." })
+    expect(await purgeDiscordMemberAction({ discordUserId: DISCORD_ID })).toMatchObject({ ok: true, data: { roles: { taken: [], left: [], error: "Discord isn't connected." } } })
   })
 
   it("finds the account by a unique username, or by a member's link", async () => {

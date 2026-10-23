@@ -11,9 +11,11 @@
  * It writes: the posting channels setting (#announcements and #general), four standing rules and a role
  * sync rule (fixed ids), a sample public event ("Try: GM 2", slug try-discord-post-gm-2), the posts the
  * rules queue plus a few in every state, and DiscordEventMirror rows for the upcoming public events.
- * --clean removes all of that, every DiscordEventMirror row (only this track writes them), and the posting
- * setting. It leaves the `discord` connector as it is. Refuses unless DATABASE_URL points at 127.0.0.1 or
- * localhost.
+ * The database is shared, so it touches only what it writes: it saves the posting setting it replaces
+ * (SystemSetting `try-discord-post:saved`, with the mirror rows it made) and --clean puts it back, and it
+ * refuses to run while other standing rules are switched on or other mirrored events exist (the rule
+ * runner and the event mirror would act on those too). --clean removes the rest of what it made. It
+ * leaves the `discord` connector as it is. Refuses unless DATABASE_URL points at 127.0.0.1 or localhost.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -50,6 +52,9 @@ const RULES = {
 const ROLE_RULE = "7a7d1500-0000-4000-8000-00000000d805";
 const EVENT_SLUG = "try-discord-post-gm-2";
 const KEY = "try-discord-post:";
+/** What this script replaced or made in shared rows: the posting setting from before it ran (null: there was none) and the mirror rows' Discord event ids */
+const SAVED = "try-discord-post:saved";
+type Saved = { posting: string | null; mirrors: string[] };
 
 async function main() {
   const { localDatabaseProblem } = await import("../src/server/jack/eval-support");
@@ -61,18 +66,38 @@ async function main() {
   const { prisma } = await import("../src/server/db");
   const { POSTING_SETTING } = await import("../src/server/discord-post/channels");
 
-  const clean = async () => {
+  const readSaved = async (): Promise<Saved | null> => {
+    const row = await prisma.systemSetting.findUnique({ where: { key: SAVED } });
+    if (!row) return null;
+    const value = JSON.parse(row.value) as { posting?: unknown; mirrors?: unknown };
+    return { posting: typeof value.posting === "string" ? value.posting : null, mirrors: Array.isArray(value.mirrors) ? value.mirrors.filter((id): id is string => typeof id === "string") : [] };
+  };
+  const writeSaved = async (saved: Saved) => {
+    const value = JSON.stringify(saved);
+    await prisma.systemSetting.upsert({ where: { key: SAVED }, update: { value }, create: { key: SAVED, value } });
+  };
+
+  /** Removes what this script made. `restore` also puts the posting setting back as it was before the first run */
+  const clean = async ({ restore }: { restore: boolean }) => {
+    const saved = await readSaved();
     const ruleIds = Object.values(RULES);
     const posts = await prisma.discordPost.deleteMany({ where: { OR: [{ ruleId: { in: ruleIds } }, { dedupeKey: { startsWith: KEY } }] } });
     await prisma.discordRule.deleteMany({ where: { id: { in: ruleIds } } });
     await prisma.discordRoleRule.deleteMany({ where: { id: ROLE_RULE } });
-    const mirrors = await prisma.discordEventMirror.deleteMany({});
+    const mirrors = saved?.mirrors.length ? await prisma.discordEventMirror.deleteMany({ where: { discordEventId: { in: saved.mirrors } } }) : { count: 0 };
     await prisma.event.deleteMany({ where: { slug: EVENT_SLUG } });
-    await prisma.systemSetting.deleteMany({ where: { key: POSTING_SETTING } });
-    console.log(`Removed ${posts.count} posts, the rules, ${mirrors.count} mirrored events, the sample event and the posting channels.`);
+    if (!saved) {
+      console.log(`Removed ${posts.count} posts, the rules and the sample event. No saved posting channels to put back.`);
+      return;
+    }
+    if (!restore) return writeSaved({ ...saved, mirrors: [] });
+    if (saved.posting === null) await prisma.systemSetting.deleteMany({ where: { key: POSTING_SETTING } });
+    else await prisma.systemSetting.upsert({ where: { key: POSTING_SETTING }, update: { value: saved.posting }, create: { key: POSTING_SETTING, value: saved.posting } });
+    await prisma.systemSetting.delete({ where: { key: SAVED } });
+    console.log(`Removed ${posts.count} posts, the rules, ${mirrors.count} mirrored events and the sample event, and put the posting channels back as they were.`);
   };
   if (CLEAN) {
-    await clean();
+    await clean({ restore: true });
     await prisma.$disconnect();
     return;
   }
@@ -100,12 +125,29 @@ async function main() {
     console.error("The fake server's channels aren't in the database. Run scripts/try-discord.ts first.");
     process.exit(1);
   }
-  await clean();
+  // The rule runner and the event mirror act on every rule that's on and every mirror row, so other people's would change too
+  const known = (await readSaved())?.mirrors ?? [];
+  const [otherRules, otherMirrors] = await Promise.all([
+    prisma.discordRule.count({ where: { enabled: true, id: { notIn: Object.values(RULES) } } }),
+    prisma.discordEventMirror.count({ where: { discordEventId: { notIn: known } } }),
+  ]);
+  if (otherRules || otherMirrors) {
+    const others = [otherRules && `${otherRules} other standing ${otherRules === 1 ? "rule" : "rules"} switched on`, otherMirrors && `${otherMirrors} other mirrored ${otherMirrors === 1 ? "event" : "events"}`].filter(Boolean);
+    console.error(`Refusing to run: this database has ${others.join(" and ")}, which this script's rule runner and event mirror would change. Switch those rules off on Announcements (or remove those mirror rows) first.`);
+    process.exit(1);
+  }
+
+  // Save the posting setting this replaces, once: a second run keeps the first run's copy, unless someone picked other channels since
+  const fakePosting = JSON.stringify({ channels: [FAKE_CHANNELS.announcements, FAKE_CHANNELS.general] });
+  const current = (await prisma.systemSetting.findUnique({ where: { key: POSTING_SETTING } }))?.value ?? null;
+  const saved = (await readSaved()) ?? { posting: current === fakePosting ? null : current, mirrors: [] };
+  await writeSaved({ ...saved, posting: current !== null && current !== fakePosting ? current : saved.posting });
+  await clean({ restore: false });
   const officer = await prisma.user.findFirst({ where: { roles: { some: { role: { key: { in: ["admin", "officer"] } } } } }, select: { id: true } });
   const now = new Date();
   const HOUR = 3_600_000;
 
-  await prisma.systemSetting.create({ data: { key: POSTING_SETTING, value: JSON.stringify({ channels: [FAKE_CHANNELS.announcements, FAKE_CHANNELS.general] }) } });
+  await prisma.systemSetting.upsert({ where: { key: POSTING_SETTING }, update: { value: fakePosting }, create: { key: POSTING_SETTING, value: fakePosting } });
   const start = new Date(now.getTime() + 3 * 24 * HOUR);
   start.setUTCHours(23, 30, 0, 0);
   await prisma.event.create({
@@ -147,7 +189,9 @@ async function main() {
   }
 
   const mirror = await runEventMirror(writer, { now, log: (line) => console.log(`  mirror: ${line}`) });
+  // There were none before (checked above): every row now is this run's
   const mirrored = await prisma.discordEventMirror.findMany();
+  await writeSaved({ ...((await readSaved()) ?? saved), mirrors: mirrored.map((m) => m.discordEventId) });
   for (const [i, m] of mirrored.entries()) await fetch(`${FAKES_ORIGIN}/discord/_fake/interested`, { method: "POST", body: JSON.stringify({ eventId: m.discordEventId, count: 4 + i * 3 }) });
   await runEventMirror(writer, { now, log: () => {} });
   console.log(`Mirrored ${mirror.created} upcoming public events to the fake's Events list, with interested counts.`);

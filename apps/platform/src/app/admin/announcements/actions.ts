@@ -20,6 +20,11 @@ import type { ActionResult } from "@/lib/action-result"
 
 const SIGNED_OUT = "You're signed out or no longer an officer. Sign in again and retry."
 const ADMINS_ONLY = "Only admins can set up, change or switch on standing rules, or pick the posting channels."
+const NO_RULE = "That rule isn't in the list. Reload the page."
+const NO_POST = "That post isn't in the list. Reload the page."
+
+/** A row's id as the page sends it. Server action arguments aren't typed at runtime: anything else (an object a Prisma filter would take, say) stops here */
+const validId = (id: unknown): id is string => typeof id === "string" && id.length > 0 && id.length <= 64
 
 async function officer(): Promise<{ user: User; admin: boolean } | null> {
   let user: User
@@ -91,6 +96,7 @@ export async function updateRuleAction(id: string, raw: unknown): Promise<Action
   const me = await officer()
   if (!me) return { ok: false, error: SIGNED_OUT }
   if (!me.admin) return { ok: false, error: ADMINS_ONLY }
+  if (!validId(id)) return { ok: false, error: NO_RULE }
   const input = await toRuleInput(raw)
   if (!input.ok) return input
   const result = await updateRule(id, input.input, { userId: me.user.id })
@@ -103,6 +109,7 @@ export async function updateRuleAction(id: string, raw: unknown): Promise<Action
 export async function setRuleEnabledAction(id: string, enabled: boolean): Promise<ActionResult> {
   const me = await officer()
   if (!me) return { ok: false, error: SIGNED_OUT }
+  if (!validId(id) || typeof enabled !== "boolean") return { ok: false, error: NO_RULE }
   if (enabled && !me.admin) return { ok: false, error: ADMINS_ONLY }
   const result = await setRuleEnabled(id, enabled, { userId: me.user.id })
   if (!result.ok) return { ok: false, error: result.error }
@@ -114,6 +121,7 @@ export async function deleteRuleAction(id: string): Promise<ActionResult> {
   const me = await officer()
   if (!me) return { ok: false, error: SIGNED_OUT }
   if (!me.admin) return { ok: false, error: ADMINS_ONLY }
+  if (!validId(id)) return { ok: false, error: NO_RULE }
   const result = await deleteRule(id, { userId: me.user.id })
   if (!result.ok) return { ok: false, error: result.error }
   refresh()
@@ -146,6 +154,7 @@ export async function createPostAction(raw: unknown): Promise<ActionResult<{ sum
 export async function cancelPostAction(id: string): Promise<ActionResult> {
   const me = await officer()
   if (!me) return { ok: false, error: SIGNED_OUT }
+  if (!validId(id)) return { ok: false, error: NO_POST }
   const result = await cancelScheduledPost(id, { userId: me.user.id, displayName: me.user.displayName })
   if (!result.ok) return result
   refresh()
@@ -155,6 +164,7 @@ export async function cancelPostAction(id: string): Promise<ActionResult> {
 export async function retryPostAction(id: string): Promise<ActionResult<{ summary: string; url: string | null }>> {
   const me = await officer()
   if (!me) return { ok: false, error: SIGNED_OUT }
+  if (!validId(id)) return { ok: false, error: NO_POST }
   const result = await retryFailedPost(id, { userId: me.user.id, displayName: me.user.displayName }, await discordPostingForPage())
   refresh()
   if (!result.ok) return result

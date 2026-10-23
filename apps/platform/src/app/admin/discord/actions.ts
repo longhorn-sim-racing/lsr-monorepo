@@ -8,6 +8,7 @@ import { createAuditLog } from "@/server/audit/log"
 import { isSnowflake } from "@/server/connectors/discord/snowflake"
 import { prismaDiscordStore } from "@/server/connectors/discord/store"
 import { SYNCABLE_CHANNEL_TYPES } from "@/server/connectors/discord/types"
+import { takeBackAfterPurge, type PurgeRoles } from "@/server/discord-post/role-takeback"
 import { purgeDiscordData, type PurgeResult } from "@/server/services/discord-link.service"
 import type { ActionResult } from "@/lib/action-result"
 
@@ -60,9 +61,11 @@ export async function setDiscordChannelSyncedAction(channelId: string, synced: b
 
 /**
  * Deletes everything held about one Discord account, on request: by its Discord user id, its username
- * as the member list has it, or (from Members) a site member's linked account. See purgeDiscordData
+ * as the member list has it, or (from Members) a site member's linked account. See purgeDiscordData.
+ * Role sync never sees a purged account again, so the roles it gave are taken back right after (see
+ * takeBackAfterPurge); when that fails the admin is told to remove them in Discord
  */
-export async function purgeDiscordMemberAction(input: { discordUserId?: string; username?: string; userId?: string }): Promise<ActionResult<PurgeResult>> {
+export async function purgeDiscordMemberAction(input: { discordUserId?: string; username?: string; userId?: string }): Promise<ActionResult<PurgeResult & { roles: PurgeRoles }>> {
   const admin = await requireAdminAction()
   if (!admin) return { ok: false, error: ADMINS_ONLY }
 
@@ -85,7 +88,8 @@ export async function purgeDiscordMemberAction(input: { discordUserId?: string; 
   }
 
   const result = await purgeDiscordData(discordUserId, admin)
+  const roles = await takeBackAfterPurge(discordUserId, { wasLinked: Boolean(result.unlinkedUserId), targetUserId: result.unlinkedUserId })
   revalidatePath("/admin/discord")
   if (result.unlinkedUserId) revalidatePath(`/admin/users/${result.unlinkedUserId}/edit`)
-  return { ok: true, data: result }
+  return { ok: true, data: { ...result, roles } }
 }

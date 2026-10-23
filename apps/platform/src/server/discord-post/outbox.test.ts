@@ -278,6 +278,20 @@ describe("the posts job", () => {
     expect(posts(fakes)).toHaveLength(1)
   })
 
+  it("sends the text the post holds when it's claimed, not the copy read at the start of the run", async () => {
+    const { fakes, writer } = setup()
+    const now = new Date()
+    table.rows.push(postRow({ id: "reminder", channelId: CHANNEL, content: body("GM 2 is in room 1.100"), nonce: "n-reminder", scheduledFor: new Date(now.getTime() - 30_000) }))
+    // A rules run refreshes the reminder (the venue changed) after this run read it, before it claims it
+    const check = async (post: { id: string }) => {
+      await table.updateMany({ where: { id: post.id, status: "SCHEDULED" }, data: { content: body("GM 2 is in room 2.200") } })
+      return null
+    }
+    expect((await sendDuePosts(writer, { now, deadline: Date.now() + 60_000, log: () => {}, check, pause: noPause })).sent).toBe(1)
+    expect(posts(fakes).map((r) => JSON.parse(r.body).content)).toEqual(["GM 2 is in room 2.200"])
+    expect(table.rows[0]).toMatchObject({ status: "SENT", content: body("GM 2 is in room 2.200") })
+  })
+
   it("sends at most 10 a run, oldest first", async () => {
     const { fakes, writer } = setup()
     const now = new Date()
