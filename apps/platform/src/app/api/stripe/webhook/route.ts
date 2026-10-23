@@ -9,7 +9,9 @@ export async function POST(req: NextRequest) {
     await handleStripeWebhook(rawBody, signature);
     return NextResponse.json({ received: true });
   } catch (error) {
-    console.error("[Stripe Webhook] Error:", error);
+    // The stack only: Stripe's signature error carries the raw request body (and its header), so logging
+    // the error object would put whatever anyone posted here into the function log
+    console.error("[Stripe Webhook] Error:", error instanceof Error ? (error.stack ?? error.message) : "Unknown error");
     return NextResponse.json(
       {
         message:
