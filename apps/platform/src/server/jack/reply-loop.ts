@@ -93,10 +93,16 @@ function deadline(ms: number, reason: string) {
 }
 
 /**
- * What a reply answers: officer messages, notes asking Jack to keep going on a deck (#177), and notes a
+ * What a reply answers: officer messages that expect an answer (in a mention-mode room, only the ones
+ * that mention Jack, design §10), notes asking Jack to keep going on a deck (#177), and notes a
  * scheduled run posted (`scheduled`, a recurring question)
  */
-const ANSWERABLE = [{ kind: "user" as const }, { kind: "system" as const, continues: true }, { kind: "system" as const, scheduled: true }]
+const ANSWERABLE = [{ kind: "user" as const, expectsAnswer: true }, { kind: "system" as const, continues: true }, { kind: "system" as const, scheduled: true }]
+
+/** Messages waiting for a reply. None wait in an archived room, so no answer starts there (design §10) */
+function waitingIn(roomId: string) {
+  return { roomId, answeredById: null, room: { archivedAt: null }, OR: ANSWERABLE }
+}
 
 /**
  * The messages the next reply answers, from the waiting ones (oldest first): a scheduled note on its own,
@@ -120,7 +126,7 @@ function replyRequestType(answering: JackMessageRow[]): JackRequestType {
 /** Messages nobody has answered yet, oldest first (other room notes don't get answers) */
 function findUnanswered(roomId: string) {
   return prisma.jackMessage.findMany({
-    where: { roomId, answeredById: null, OR: ANSWERABLE },
+    where: waitingIn(roomId),
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     include: jackMessageInclude,
   })
@@ -128,10 +134,24 @@ function findUnanswered(roomId: string) {
 
 async function hasUnanswered(roomId: string) {
   const first = await prisma.jackMessage.findFirst({
-    where: { roomId, answeredById: null, OR: ANSWERABLE },
+    where: waitingIn(roomId),
     select: { id: true },
   })
   return first !== null
+}
+
+/**
+ * Mention mode (design §10): officer messages that didn't mention Jack and no reply has taken yet, up to
+ * `last` (the newest message a reply answers). The reply takes them as context, so its turn holds the
+ * conversation the mention came out of; ones posted after `last` wait for the next mention.
+ */
+async function waitingAsides(roomId: string, last: JackMessageRow): Promise<string[]> {
+  const asides = await prisma.jackMessage.findMany({
+    where: { roomId, kind: "user", expectsAnswer: false, answeredById: null },
+    select: { id: true, createdAt: true },
+  })
+  const at = last.createdAt.getTime()
+  return asides.filter((m) => m.createdAt.getTime() < at || (m.createdAt.getTime() === at && m.id < last.id)).map((m) => m.id)
 }
 
 /**
@@ -141,6 +161,8 @@ async function hasUnanswered(roomId: string) {
  *
  * Each pass answers every officer message that's waiting, together in one reply, so messages posted
  * mid-answer are picked up by the next pass; a scheduled note gets a reply of its own (nextReplyBatch).
+ * In a mention-mode room only messages that mention Jack wait; the others go into the next reply to
+ * officers as context (waitingAsides). Nothing waits in an archived room, so no answer starts there.
  * When nothing is waiting the run lets go of the lock, then looks once more: a message posted just
  * before that found the lock taken and left it to this run, so if one is there the run takes the lock
  * back (or sees that a newer run has it). That way nothing is left unanswered while the run has time.
@@ -232,6 +254,9 @@ type AnswerTiming = { runSignal: AbortSignal; deadlineAt: number; leftMs: number
 /** One reply to every message in `waiting`, from the room's persona as it is now */
 async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoopDeps, sideJobs: Promise<void>[], timing: AnswerTiming) {
   const requestType = replyRequestType(waiting)
+  // A reply to officers also takes what they said among themselves meanwhile (mention mode) as its turn's context
+  const asides = requestType === "room" && waiting.some((m) => m.kind === "user") ? await waitingAsides(roomId, waiting[waiting.length - 1]) : []
+  const taken = [...waiting.map((m) => m.id), ...asides]
   const reply = await prisma.$transaction(async (tx) => {
     const room = await tx.jackRoom.findUnique({ where: { id: roomId }, select: { persona: true } })
     const created = await tx.jackMessage.create({
@@ -239,12 +264,12 @@ async function answer(roomId: string, waiting: JackMessageRow[], deps: ReplyLoop
       include: jackMessageInclude,
     })
     await tx.jackMessage.updateMany({
-      where: { id: { in: waiting.map((m) => m.id) }, answeredById: null },
+      where: { id: { in: taken }, answeredById: null },
       data: { answeredById: created.id },
     })
     return created
   })
-  await deps.broadcast(roomId, { type: JACK_EVENT.created, message: toMessageView(reply), answers: waiting.map((m) => m.id) })
+  await deps.broadcast(roomId, { type: JACK_EVENT.created, message: toMessageView(reply), answers: taken })
 
   const persona: JackRoomPersonaKey = isJackRoomPersona(reply.persona) ? reply.persona : "jack"
   const usage = new UsageTally(JACK_MODELS[persona].model)
@@ -448,6 +473,9 @@ async function produce(
  * reply's own hand-off note tells officers to ask him to keep going.
  */
 async function leaveContinueNote(roomId: string, persona: JackRoomPersonaKey, waiting: JackMessageRow[], deps: ReplyLoopDeps) {
+  // Archived while the reply was running: nobody can answer it there, and unarchiving shouldn't start a deck job
+  const room = await prisma.jackRoom.findUnique({ where: { id: roomId }, select: { archivedAt: true } })
+  if (!room || room.archivedAt) return
   const recent = await prisma.jackMessage.findMany({
     where: { roomId, OR: ANSWERABLE },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],

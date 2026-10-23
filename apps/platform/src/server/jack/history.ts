@@ -17,6 +17,8 @@ export type HistoryRow = {
   /** Notes a reply answers, like an officer message: a deck's continue note, a scheduled run's question */
   continues?: boolean
   scheduled?: boolean
+  /** False for an officer message in a mention-mode room that didn't mention Jack: context, not a question */
+  expectsAnswer?: boolean
   model: string | null
   createdAt: Date
   author: { displayName: string } | null
@@ -43,6 +45,8 @@ const EARLIER_LEFT_OUT = "(Earlier messages in this room aren't included.)"
  *   Central Time timestamp, so several officers posting during one answer become one turn. Notes a
  *   reply answers (a deck's continue note, a scheduled question) go in that reply's turn the same way;
  *   other room notes (a persona switch) go in the turn they came before, as context.
+ * - In a mention-mode room, officer messages that didn't mention Jack go in the turn of the reply that
+ *   took them as context (the reply loop's waitingAsides), each marked ASIDE_MARK.
  * - A reply Claude didn't write (a "not connected" or "budget used up" notice, or a placeholder
  *   from before the model) is left out, so the questions it got carry into the next turn.
  * - An earlier reply is its text plus a one-line note of the tools it used. Its thinking and raw
@@ -80,7 +84,7 @@ export function buildHistory(rows: HistoryRow[], replyId: string, limits: Histor
   const entries: { role: "user" | "assistant"; text: string }[] = []
   turns.slice(start).forEach((turn, index) => {
     const lead = index === 0 && start > 0 ? `${EARLIER_LEFT_OUT}\n` : ""
-    const officers = renderOfficerTurn(turn.items)
+    const officers = renderOfficerTurn(turn.items.map(markAside))
     if (officers || lead) entries.push({ role: "user", text: lead + officers })
     const reply = turn.reply && !isNotice(turn.reply) ? renderReply(turn.reply) : ""
     if (reply) entries.push({ role: "assistant", text: reply })
@@ -139,6 +143,17 @@ function renderOfficerTurn(items: HistoryRow[]): string {
     item.kind === "system" ? `(Room note: ${item.content})` : `${item.author?.displayName ?? FORMER_OFFICER}: ${item.content}`
   )
   return `[${formatTurnTime(items[items.length - 1].createdAt)}]\n${lines.join("\n")}`
+}
+
+/** Starts an officer line that didn't mention Jack in a mention-mode room; the prompt says what it means (prompt-sections/decks-rooms.ts) */
+export const ASIDE_MARK = "(not addressed to you)"
+
+/**
+ * Mention mode (design §10): a reply's turn also holds what officers said among themselves since the
+ * last reply, as context. Those lines are marked, so the reply answers only what's addressed to Jack
+ */
+function markAside(row: HistoryRow): HistoryRow {
+  return row.kind === "user" && row.expectsAnswer === false ? { ...row, content: `${ASIDE_MARK} ${row.content}` } : row
 }
 
 /** A finished reply with no model never reached Claude: a notice, or a pre-model placeholder */

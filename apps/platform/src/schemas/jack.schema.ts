@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FEEDBACK_NOTE_MAX } from "@/lib/jack/feedback";
 import { MAX_FILES_PER_MESSAGE } from "@/lib/jack/files";
 
 export const JACK_MESSAGE_MAX = 8_000;
@@ -49,6 +50,28 @@ export const jackRoomTitleSchema = z
 export const jackPersonaSwitchSchema = z.object({
   roomId: jackRoomIdSchema,
   persona: z.enum(["jack", "lift", "stand"], "Pick Jack, Lift or Stand"),
+});
+
+/** Archive or unarchive, pin or unpin, and mention mode (design §10) */
+export const jackRoomArchiveSchema = z.object({ roomId: jackRoomIdSchema, archived: z.boolean() });
+
+export const jackRoomPinSchema = z.object({ roomId: jackRoomIdSchema, pinned: z.boolean() });
+
+export const jackAnswerModeSchema = z.object({
+  roomId: jackRoomIdSchema,
+  mode: z.enum(["always", "mention"], "Pick every message or mentions only"),
+});
+
+/** A thumbs up or down on a reply (null takes it back), with an optional short note */
+export const jackFeedbackSchema = z.object({
+  messageId: z.uuid("That reply doesn't exist anymore."),
+  rating: z.enum(["up", "down"], "Pick thumbs up or down").nullable(),
+  note: z
+    .string()
+    .trim()
+    .max(FEEDBACK_NOTE_MAX, `Keep the note under ${FEEDBACK_NOTE_MAX} characters`)
+    .nullish()
+    .transform((note) => note || null),
 });
 
 export const jackRoomRenameSchema = z.object({
