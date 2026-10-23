@@ -11,7 +11,7 @@ afterEach(() => {
 })
 
 const CLUB = TWITCH_FAKE.broadcasterId
-const sub = (type: string, status: string, callback = PRODUCTION_CALLBACK, broadcaster = CLUB): Subscription => ({ id: `${type}-${status}-${callback}`, type, status, callback, condition: { broadcaster_user_id: broadcaster } })
+const sub = (type: string, status: string, callback: string = PRODUCTION_CALLBACK, broadcaster: string = CLUB): Subscription => ({ id: `${type}-${status}-${callback}`, type, status, callback, condition: { broadcaster_user_id: broadcaster } })
 
 describe("planning the subscriptions", () => {
   it("creates both when there are none", () => {
