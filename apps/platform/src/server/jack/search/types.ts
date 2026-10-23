@@ -25,6 +25,19 @@ export type SearchHit = {
   meta: SearchMeta
   /** Full-text rank from 0 to 1 (ts_rank_cd, normalization 32); hits from every source merge by it */
   rank: number
+  /**
+   * The snippet goes to the model only: the room's link shows no snippet, so none of it is saved with
+   * the reply. For live sources whose text the club doesn't keep (Discord, design §12.1)
+   */
+  modelOnly?: boolean
+}
+
+/** A source that couldn't search for a reason worth telling the model ("Discord is still indexing"); any other error reads as "couldn't be searched just now" */
+export class SearchSourceError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "SearchSourceError"
+  }
 }
 
 /** What every source is asked */

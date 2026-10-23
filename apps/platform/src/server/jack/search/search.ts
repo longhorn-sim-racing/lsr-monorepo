@@ -1,5 +1,5 @@
 import { SEARCH_SOURCES } from "./registry"
-import type { SearchHit, SearchSource } from "./types"
+import { SearchSourceError, type SearchHit, type SearchSource } from "./types"
 
 /**
  * One search over many sources (design §7.1): each named source (or every default one) is searched
@@ -49,7 +49,7 @@ export async function search({ query, sources, limit, includeJackReplies = false
         return { outcome: { source: source.key, status: "searched", hits: hits.length }, hits }
       } catch (error) {
         console.error(`[jack] Searching ${source.key} failed:`, error)
-        return { outcome: { source: source.key, status: "failed", reason: "It couldn't be searched just now." }, hits: [] }
+        return { outcome: { source: source.key, status: "failed", reason: error instanceof SearchSourceError ? error.message : "It couldn't be searched just now." }, hits: [] }
       }
     }),
   )

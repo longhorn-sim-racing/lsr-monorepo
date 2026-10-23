@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   },
 }
 
-const LAST_UPDATED = "October 10, 2026"
+const LAST_UPDATED = "October 23, 2026"
 const EFFECTIVE_DATE = "May 16, 2026"
 const CONTACT_EMAIL = "info@longhornsimracing.org"
 
@@ -204,6 +204,62 @@ export default function PrivacyPage() {
                 public iRacing profile or social media link you add to your bio).
               </P>
             </SubSection>
+
+            <SubSection id="discord" title="2.4 Our Discord server">
+              <P>
+                LSR runs a bot in the club&apos;s Discord server. It records only{" "}
+                <span className="font-bold text-white">metadata</span>, and only in the channels our
+                admins choose to sync (the privacy note pinned in the server lists them):
+              </P>
+              <UL>
+                <li>
+                  For each message: who posted it (their Discord user ID), when, how long it is, how
+                  many attachments it has and whether it&apos;s a reply. For a poll, its question,
+                  answers and vote totals.
+                </li>
+                <li>
+                  For each public thread or forum post in those channels: its title, so its activity
+                  can be counted under its channel.
+                </li>
+                <li>
+                  For the member list: each member&apos;s Discord user ID, username, display name, roles
+                  and the date they joined, so we can count members, joins and leaves.
+                </li>
+              </UL>
+              <P>
+                We never store the text of messages, attachments, direct messages, private threads, or
+                who voted in a poll. Our officers&apos; pages and Jack are set up to show this as totals
+                only &mdash; messages per channel and day, how many members were active, members over
+                time and poll results &mdash; and not as a profile or ranking of any one person.
+              </P>
+              <P>
+                When an officer asks Jack, our officers&apos; assistant (powered by Anthropic&apos;s
+                Claude), a question, Jack may search messages in the synced channels through
+                Discord&apos;s own search and read the conversation around a match. Those messages are
+                sent to Anthropic to answer the question; they aren&apos;t used to train models. We
+                don&apos;t store the messages themselves, but Jack&apos;s answer, which may summarize or
+                quote them, is kept in our officers&apos; workspace.
+              </P>
+              <P>
+                <span className="font-bold text-white">Linking your account.</span> You can link your
+                Discord account on your profile. Discord then shares only your user ID and username
+                with us (the &ldquo;identify&rdquo; permission); we throw Discord&apos;s access token away
+                immediately and keep only your Discord user ID, username and when you linked. You can
+                unlink at any time from your profile, and deleting your account removes the link.
+              </P>
+              <P>
+                Message records and thread titles are deleted after 12 months; daily totals, which
+                identify no one, are kept. Everything recorded from a channel, totals included, is
+                deleted when it stops being synced. To have your Discord data deleted, email{" "}
+                <a href={`mailto:${CONTACT_EMAIL}`} className="text-lsr-orange hover:underline font-medium">
+                  {CONTACT_EMAIL}
+                </a>{" "}
+                with &ldquo;Discord Deletion Request&rdquo; in the subject and your Discord username. We
+                delete your message records, member record and account link, and the bot stops
+                recording your activity. Discord&apos;s own handling of your data is covered by
+                Discord&apos;s privacy policy.
+              </P>
+            </SubSection>
           </Section>
 
           <Section id="how-we-use" title="3. How We Use Information">
@@ -300,6 +356,11 @@ export default function PrivacyPage() {
                       <td className="p-4">Cart and order information, payment, shipping address</td>
                     </tr>
                     <tr>
+                      <td className="p-4 font-bold text-white">Anthropic</td>
+                      <td className="p-4">Jack, the officers&apos; AI assistant</td>
+                      <td className="p-4">Club records officers ask about, including Discord messages Jack searches or reads (see 2.4)</td>
+                    </tr>
+                    <tr>
                       <td className="p-4 font-bold text-white">Printful</td>
                       <td className="p-4">Print-on-demand merchandise manufacturing and fulfillment</td>
                       <td className="p-4">Order details, shipping address</td>
@@ -358,6 +419,11 @@ export default function PrivacyPage() {
               <li>
                 <span className="font-bold text-white">Authentication cookies</span> &mdash; HttpOnly
                 cookies set by Supabase keep you signed in.
+              </li>
+              <li>
+                <span className="font-bold text-white">Discord linking cookie</span> &mdash; a
+                short-lived HttpOnly cookie, kept for at most 10 minutes while you link your Discord
+                account, so the link goes to your account and no one else&apos;s.
               </li>
               <li>
                 <span className="font-bold text-white">Cart storage</span> &mdash; your browser&apos;s
@@ -468,6 +534,7 @@ export default function PrivacyPage() {
                   payment records and audit logs) are retained for the periods described in
                   Section 10
                 </li>
+                <li>Your Discord account link, if you made one, is removed</li>
                 <li>
                   You will be permanently signed out and unable to log in to the deleted account
                 </li>
@@ -616,6 +683,15 @@ export default function PrivacyPage() {
                   <tr>
                     <td className="p-4 font-bold text-white">Email delivery logs</td>
                     <td className="p-4">Up to 1 year (Resend manages its own retention)</td>
+                  </tr>
+                  <tr>
+                    <td className="p-4 font-bold text-white">Discord activity records</td>
+                    <td className="p-4">
+                      12 months (message records; thread titles, 12 months after the thread was last
+                      active; members who left, 12 months after leaving). Daily totals, which identify
+                      no one, are kept. A channel&apos;s records, totals included, are deleted when it
+                      stops being synced
+                    </td>
                   </tr>
                   <tr>
                     <td className="p-4 font-bold text-white">Communications with us</td>
