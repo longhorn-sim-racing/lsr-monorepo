@@ -1,9 +1,9 @@
 import { Prisma, type InstagramPublish } from "@prisma/client"
-import { ACTIVE_STATUSES, MEDIA_TYPE, PUBLISH_HISTORY, TYPE_LABEL, type InstagramShape, type PublishMediaType, type PublishStatus, type PublishType } from "@/lib/jack/publish"
+import { ACTIVE_STATUSES, MEDIA_TYPE, PUBLISH_HISTORY, PUBLISH_STATUS, TYPE_LABEL, type InstagramShape, type PublishMediaType, type PublishStatus, type PublishType } from "@/lib/jack/publish"
 import { JACK_EVENT } from "@/lib/jack/types"
 import { redactSecrets } from "@/lib/redact"
 import { createAuditLog } from "@/server/audit/log"
-import { uploadImageBytes } from "@/server/cloudinary"
+import { destroyImage, uploadImageBytes } from "@/server/cloudinary"
 import { isLimitReached, isNotReady, isTransient, type ContainerStatus } from "@/server/connectors/instagram/publish"
 import type { InstagramPublishClient } from "@/server/connectors/instagram/publish-connector"
 import { prisma } from "@/server/db"
@@ -29,14 +29,17 @@ import { slideImage, type PickedSlide } from "./slides"
  *                container's status (PUBLISHED: find the post; FINISHED: the call didn't take) before
  *                ever calling it again
  *   published    with the post's id and link
- *   failed       with why (redacted); nothing was posted unless the error says otherwise
+ *   failed       with why (redacted); nothing was posted unless the error says otherwise. Its slide
+ *                copies are taken off Cloudinary, so only what's posted stays public
  *
  * Applying waits up to about 45 s for Instagram to process the images (Meta suggests checking for up to
  * 5 minutes). A post still processing then is left to the instagram-publish.finish job (every 5
  * minutes), or an officer's "Check now" on Content → Instagram. Whoever works a row holds its lease
  * (`claimedAt`) first, so two never work one row. The day's quota (content_publishing_limit) is read
  * before the containers are made and again before publishing, and the site keeps its own cap well under
- * Meta's (CLUB_DAILY_POSTS).
+ * Meta's (CLUB_DAILY_POSTS). A post that still isn't out PUBLISH_CUTOFF_MS after it was approved fails
+ * instead of going up late. The deck page's button refuses the same pick while it's on its way or
+ * after it went out in the last day, unless the officer confirms posting it again (`refuseRepeat`).
  */
 
 export const SHAPE: Record<PublishType, InstagramShape> = { post: "feed", carousel: "feed", story: "story" }
@@ -52,6 +55,14 @@ export const APPLY_WAIT_MS = 45_000
 export const LEASE_MS = 6 * 60_000
 /** After a publish call that got no answer, how long to wait before checking whether it went out and trying again */
 export const SETTLE_MS = 2 * 60_000
+/**
+ * An approved post that still isn't out this long after it was approved fails instead of going up late:
+ * it may be about something that's over by then ("GM tonight at 6"), and nobody confirmed it again
+ */
+export const PUBLISH_CUTOFF_MS = 2 * 60 * 60_000
+const TOO_LATE = "Nothing was posted: Instagram took too long (it still wasn't out 2 hours after it was approved), so it wasn't sent late. Ask again to post it."
+/** How far before a publish call a captioned post's timestamp may be and still be ours (Instagram's clock and ours differ a little) */
+const CLOCK_SLACK_MS = 2 * 60_000
 const POLLS_MS = [2_000, 3_000, 5_000, 5_000, 8_000]
 const DAY = 86_400_000
 
@@ -86,12 +97,25 @@ export class PublishRefused extends Error {
   }
 }
 
+/** The deck page's press for a pick that's already on its way or went out in the last day: nothing new was made */
+export class PublishRepeat extends Error {
+  constructor(
+    message: string,
+    readonly publishId: string,
+  ) {
+    super(message)
+    this.name = "PublishRepeat"
+  }
+}
+
 export type PublishDeps = {
   client: InstagramPublishClient
   /** A slide's full-size render (rendered on a cache miss) */
   slidePng(source: SlideSource): Promise<Buffer>
   /** Puts a JPEG on Cloudinary and returns its public link */
   upload(body: Buffer, publicId: string, signal?: AbortSignal): Promise<{ secureUrl: string }>
+  /** Takes a copy off Cloudinary (a post that failed); false when it couldn't */
+  remove(publicId: string): Promise<boolean>
   sleep(ms: number, signal?: AbortSignal): Promise<void>
   now(): Date
 }
@@ -101,6 +125,7 @@ export function publishDeps(client: InstagramPublishClient): PublishDeps {
     client,
     slidePng: async (source) => (await getRenderFile(source, "png")).body,
     upload: (body, publicId, signal) => uploadImageBytes(body, { publicId, filename: "slide.jpg", contentType: "image/jpeg", signal }),
+    remove: (publicId) => destroyImage(publicId),
     sleep: (ms, signal) =>
       new Promise((resolve) => {
         const timer = setTimeout(resolve, ms)
@@ -124,6 +149,12 @@ export type StartPublish = {
   approvedById: string
   /** Added to the audit entry: where the approval came from */
   auditMetadata: Record<string, unknown>
+  /**
+   * The deck page's press (no proposal): refused with PublishRepeat when the same slides of this version
+   * are already on their way as the same type, or went out in the last day, unless the officer confirmed
+   * posting them again
+   */
+  refuseRepeat?: boolean
 }
 
 export type PublishOutcome = { row: InstagramPublish; state: "published" | "waiting" }
@@ -134,6 +165,37 @@ export function describePublish(row: Pick<InstagramPublish, "mediaType" | "slide
   if (row.status === "published") return `Posted ${what} on Instagram.${row.error ? ` ${row.error}` : ""}`
   if (row.status === "failed") return `Couldn't post ${what} on Instagram: ${row.error ?? "it failed."}`
   return `Sent ${what} to Instagram. Instagram is still processing the images; it goes up within a few minutes (Content → Instagram shows when).`
+}
+
+/** A slide's public JPEG copy on Cloudinary, by the row and the slide's place in the post */
+const copyId = (rowId: string, n: number) => `jack/instagram/${rowId}/${n}`
+
+/** "Oct 23, 3:04 PM" in Central time (newer ICU puts a narrow space before PM) */
+const centralTime = (at: Date) => at.toLocaleString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\u202f/g, " ")
+
+/** A post of the same slides of this version as the same type, on its way or sent in the last day */
+async function findRepeat(db: Prisma.TransactionClient, input: StartPublish, now: Date): Promise<InstagramPublish | null> {
+  const slideIds = input.slides.map((s) => s.id)
+  const rows = await db.instagramPublish.findMany({
+    where: { deckId: input.deck.id, version: input.deck.version, mediaType: MEDIA_TYPE[input.type], OR: [{ status: { in: ACTIVE_STATUSES } }, { status: "published", createdAt: { gt: new Date(now.getTime() - DAY) } }] },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+  })
+  return rows.find((row) => row.slideIds.length === slideIds.length && row.slideIds.every((id, i) => id === slideIds[i])) ?? null
+}
+
+/** The new row; for the deck page's press, under a lock on the deck so two presses at once take turns, and refused when it's a repeat */
+async function createRow(data: Prisma.InstagramPublishUncheckedCreateInput, input: StartPublish, now: Date): Promise<InstagramPublish> {
+  if (!input.refuseRepeat) return prisma.instagramPublish.create({ data })
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`instagram-publish:${input.deck.id}`}))`
+    const repeat = await findRepeat(tx, input, now)
+    if (repeat) {
+      const status = PUBLISH_STATUS[repeat.status as PublishStatus]?.label ?? repeat.status
+      throw new PublishRepeat(`${input.slides.length === 1 ? "This slide" : "These slides"} already went to Instagram as ${TYPE_LABEL[repeat.mediaType as PublishMediaType] ?? "a post"} at ${centralTime(repeat.createdAt)} (${status}). See Content → Instagram.`, repeat.id)
+    }
+    return tx.instagramPublish.create({ data })
+  })
 }
 
 /**
@@ -157,8 +219,8 @@ export async function startInstagramPublish(input: StartPublish, deps: PublishDe
   const mediaType = MEDIA_TYPE[input.type]
   let row: InstagramPublish
   try {
-    row = await prisma.instagramPublish.create({
-      data: {
+    row = await createRow(
+      {
         deckId: input.deck.id,
         version: input.deck.version,
         slideIds: input.slides.map((s) => s.id),
@@ -171,7 +233,9 @@ export async function startInstagramPublish(input: StartPublish, deps: PublishDe
         createdById: input.createdById,
         approvedById: input.approvedById,
       },
-    })
+      input,
+      now,
+    )
   } catch (error) {
     // Another apply of the same proposal made the row first
     if (input.proposalId && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -186,7 +250,7 @@ export async function startInstagramPublish(input: StartPublish, deps: PublishDe
     const shape = SHAPE[input.type]
     const urls = await mapLimit(input.slides, 3, async (slide, i) => {
       const jpeg = await instagramJpeg(await slideImage(deps, input.deck, slide), shape)
-      return (await deps.upload(jpeg.body, `jack/instagram/${rowId}/${i + 1}`, signal)).secureUrl
+      return (await deps.upload(jpeg.body, copyId(rowId, i + 1), signal)).secureUrl
     })
     row = await prisma.instagramPublish.update({ where: { id: rowId }, data: { imageUrls: urls } })
 
@@ -207,7 +271,7 @@ export async function startInstagramPublish(input: StartPublish, deps: PublishDe
     row = await prisma.instagramPublish.update({ where: { id: rowId }, data: { status: "containers" } })
   } catch (error) {
     // No publish call was made: nothing went out
-    const failed = await failRow(rowId, `Nothing was posted: ${message(error)}`)
+    const failed = await failRow(rowId, `Nothing was posted: ${message(error)}`, deps)
     await auditPublish(rowId, input)
     throw new Error(failed.error ?? "Nothing was posted.")
   }
@@ -293,48 +357,54 @@ export async function advanceInstagramPublish(id: string, deps: PublishDeps, { u
 async function stepOnce(row: InstagramPublish, deps: PublishDeps, signal?: AbortSignal): Promise<Step> {
   const { client } = deps
   const containers = readContainers(row.containerIds)
+  const late = deps.now().getTime() - row.createdAt.getTime() > PUBLISH_CUTOFF_MS
 
   // Only an apply moves a row out of queued; one still queued here was left by a function that died
-  if (row.status === "queued") return { done: await failRow(row.id, "It stopped before its images reached Instagram, so nothing was posted. Ask again to post it.") }
+  if (row.status === "queued") return { done: await failRow(row.id, "It stopped before its images reached Instagram, so nothing was posted. Ask again to post it.", deps) }
 
   if (row.status === "containers") {
     if (!row.imageUrls.length || containers.items.length < row.imageUrls.length) {
-      return { done: await failRow(row.id, "It stopped before every image reached Instagram, so nothing was posted. Ask again to post it.") }
+      return { done: await failRow(row.id, "It stopped before every image reached Instagram, so nothing was posted. Ask again to post it.", deps) }
     }
     const statuses = await Promise.all(containers.items.map((cid) => client.containerStatus(cid, signal)))
     // A single image or story that's already PUBLISHED: a publish nobody recorded. Find the post
     if (row.mediaType !== "CAROUSEL" && statuses[0].code === "PUBLISHED") return { done: await reconcile(row, deps, signal) }
     const problem = containerProblem(statuses, row.mediaType === "CAROUSEL")
-    if (problem) return { done: await failRow(row.id, problem) }
+    if (problem) return { done: await failRow(row.id, problem, deps) }
+    // The carousel's own container, once made, is checked before anything else is decided
+    const carousel = containers.carousel ? await client.containerStatus(containers.carousel, signal) : null
+    if (carousel?.code === "PUBLISHED") return { done: await reconcile(row, deps, signal) }
+    const carouselProblem = carousel ? containerProblem([carousel], false) : null
+    if (carouselProblem) return { done: await failRow(row.id, carouselProblem, deps) }
+    // Not out, and too late to go out now
+    if (late) return { done: await failRow(row.id, TOO_LATE, deps) }
     if (statuses.some((s) => s.code === "IN_PROGRESS")) return { next: "wait" }
 
     if (row.mediaType !== "CAROUSEL") return publishOnce(row, containers.items[0], deps, signal)
     if (!containers.carousel) {
-      const carousel = await client.createContainer({ kind: "carousel", children: containers.items, caption: row.caption || undefined, aiGenerated: containers.aiGenerated }, signal)
-      await prisma.instagramPublish.update({ where: { id: row.id }, data: { containerIds: asJson({ ...containers, carousel }) } })
+      const made = await client.createContainer({ kind: "carousel", children: containers.items, caption: row.caption || undefined, aiGenerated: containers.aiGenerated }, signal)
+      await prisma.instagramPublish.update({ where: { id: row.id }, data: { containerIds: asJson({ ...containers, carousel: made }) } })
       return { next: "again" }
     }
-    const status = await client.containerStatus(containers.carousel, signal)
-    if (status.code === "PUBLISHED") return { done: await reconcile(row, deps, signal) }
-    const carouselProblem = containerProblem([status], false)
-    if (carouselProblem) return { done: await failRow(row.id, carouselProblem) }
-    if (status.code === "IN_PROGRESS") return { next: "wait" }
+    if (carousel?.code === "IN_PROGRESS") return { next: "wait" }
     return publishOnce(row, containers.carousel, deps, signal)
   }
 
   // publishing: a publish call was made. Check the container before anything else
   const creation = containers.carousel ?? containers.items[0]
-  if (!creation) return { done: await failRow(row.id, "Its Instagram container is missing, so it can't be checked. Look on Instagram before posting it again.") }
+  if (!creation) return { done: await failRow(row.id, "Its Instagram container is missing, so it can't be checked. Look on Instagram before posting it again.", deps) }
   const status = await client.containerStatus(creation, signal)
   if (status.code === "PUBLISHED") return { done: await reconcile(row, deps, signal) }
   const problem = containerProblem([status], false)
-  if (problem) return { done: await failRow(row.id, problem) }
-  if (status.code === "IN_PROGRESS") return { next: "wait" }
-  // FINISHED: the last call didn't take, or hasn't shown yet. Give it time, look for the post, then try again
+  if (problem) return { done: await failRow(row.id, problem, deps) }
+  // FINISHED (or still processing): the last call didn't take, or hasn't shown yet. Give it time, look for the post, then try again unless it's too late
   const attempt = containers.publishAttemptAt ? new Date(containers.publishAttemptAt).getTime() : 0
   if (deps.now().getTime() - attempt < SETTLE_MS) return { next: "wait" }
-  const found = await findPost(row, deps, signal)
+  // Without a caption a post can't be told from another caption-less one; a container still FINISHED this long after the call wasn't published
+  const found = row.caption.trim() ? await findPost(row, deps, signal) : null
   if (found) return { done: await markPublished(row, deps, { mediaId: found.id, permalink: found.permalink }, signal) }
+  if (late) return { done: await failRow(row.id, TOO_LATE, deps) }
+  if (status.code === "IN_PROGRESS") return { next: "wait" }
   return publishOnce(row, creation, deps, signal)
 }
 
@@ -352,7 +422,7 @@ function containerProblem(statuses: { code: ContainerStatus; detail: string | nu
 /** One media_publish call, with the row marked "publishing" first so nobody calls it again without checking */
 async function publishOnce(row: InstagramPublish, creation: string, deps: PublishDeps, signal?: AbortSignal): Promise<Step> {
   const quota = await deps.client.quota(signal)
-  if (quota.used >= quota.total) return { done: await failRow(row.id, `Instagram's limit of ${quota.total} API posts a day was used up before it could go out, so nothing was posted. Ask again tomorrow.`) }
+  if (quota.used >= quota.total) return { done: await failRow(row.id, `Instagram's limit of ${quota.total} API posts a day was used up before it could go out, so nothing was posted. Ask again tomorrow.`, deps) }
 
   const containers = readContainers(row.containerIds)
   const { count } = await prisma.instagramPublish.updateMany({
@@ -369,23 +439,39 @@ async function publishOnce(row: InstagramPublish, creation: string, deps: Publis
       await prisma.instagramPublish.updateMany({ where: { id: row.id, status: "publishing" }, data: { status: "containers" } })
       return { next: "wait" }
     }
-    if (isLimitReached(error)) return { done: await failRow(row.id, `Instagram's daily publishing limit was reached, so nothing was posted. Ask again tomorrow. (${message(error)})`) }
+    if (isLimitReached(error)) return { done: await failRow(row.id, `Instagram's daily publishing limit was reached, so nothing was posted. Ask again tomorrow. (${message(error)})`, deps) }
     // No answer, or Instagram's own trouble: it may have gone out. The next look checks before trying again
     if (isTransient(error)) return { next: "wait" }
     const status = await deps.client.containerStatus(creation, signal).catch(() => null)
     if (status?.code === "PUBLISHED") return { done: await reconcile(row, deps, signal) }
-    return { done: await failRow(row.id, `Instagram refused the post, so nothing was posted: ${message(error)}`) }
+    return { done: await failRow(row.id, `Instagram refused the post, so nothing was posted: ${message(error)}`, deps) }
   }
 }
 
-/** The post a publish call made when its answer was lost: the newest feed post with this caption since the call (stories aren't listed) */
+/** How /me/media names a row's post type (stories aren't listed) */
+const LISTED_TYPE: Partial<Record<string, string>> = { IMAGE: "IMAGE", CAROUSEL: "CAROUSEL_ALBUM" }
+
+/**
+ * The post a publish call made when its answer was lost, among the newest feed posts (stories aren't
+ * listed): of the row's type, made since the call. With a caption, the newest with that caption (a little
+ * before the call counts, for clocks that differ). Without one a caption can't tell ours from another
+ * caption-less post (one Media made in the app), so only a single caption-less post of that type made at
+ * or after the call counts
+ */
 async function findPost(row: InstagramPublish, deps: PublishDeps, signal?: AbortSignal): Promise<{ id: string; permalink: string | null } | null> {
-  if (row.mediaType === "STORIES") return null
+  const type = LISTED_TYPE[row.mediaType]
+  if (!type) return null
   const attempt = readContainers(row.containerIds).publishAttemptAt
-  const since = (attempt ? new Date(attempt) : row.createdAt).getTime() - 120_000
+  const from = (attempt ? new Date(attempt) : row.createdAt).getTime()
+  const caption = row.caption.trim()
   const recent = await deps.client.recentMedia(10, signal).catch(() => [])
-  const match = recent.find((m) => (m.caption ?? "").trim() === row.caption.trim() && (!m.timestamp || Date.parse(m.timestamp.replace(/\+0000$/, "Z")) >= since))
-  return match ? { id: match.id, permalink: match.permalink } : null
+  const at = (timestamp: string | null) => (timestamp ? Date.parse(timestamp.replace(/\+0000$/, "Z")) : Number.NaN)
+  if (caption) {
+    const match = recent.find((m) => (m.caption ?? "").trim() === caption && (!m.mediaType || m.mediaType === type) && (!m.timestamp || at(m.timestamp) >= from - CLOCK_SLACK_MS))
+    return match ? { id: match.id, permalink: match.permalink } : null
+  }
+  const bare = recent.filter((m) => !(m.caption ?? "").trim() && m.mediaType === type && at(m.timestamp) >= from)
+  return bare.length === 1 ? { id: bare[0].id, permalink: bare[0].permalink } : null
 }
 
 /** Instagram says it's published: record the post, or that its link couldn't be found */
@@ -401,8 +487,25 @@ async function markPublished(row: InstagramPublish, deps: PublishDeps, post: { m
   return finish(row.id, { status: "published", igMediaId: post.mediaId, permalink, error: note })
 }
 
-function failRow(id: string, text: string): Promise<InstagramPublish> {
-  return finish(id, { status: "failed", error: text })
+/** Ends a row failed (nothing went out), and takes its slide copies off Cloudinary so only what's posted stays public */
+async function failRow(id: string, text: string, deps: PublishDeps): Promise<InstagramPublish> {
+  return dropCopies(await finish(id, { status: "failed", error: text }), deps)
+}
+
+/**
+ * Deletes a failed row's JPEG copies, best effort: by their names, so copies uploaded before the row
+ * listed them go too. A copy that won't delete stays listed on the row (and is logged)
+ */
+async function dropCopies(row: InstagramPublish, deps: PublishDeps): Promise<InstagramPublish> {
+  const count = Math.max(row.slideIds.length, row.imageUrls.length)
+  if (!count) return row
+  const removed = await mapLimit(
+    Array.from({ length: count }, (_, i) => copyId(row.id, i + 1)),
+    3,
+    (publicId) => deps.remove(publicId).catch(() => false),
+  )
+  if (removed.some((ok) => !ok)) console.error(`[jack] Couldn't delete every Cloudinary copy of the failed Instagram post ${row.id}`)
+  return prisma.instagramPublish.update({ where: { id: row.id }, data: { imageUrls: row.imageUrls.filter((_, i) => !removed[i]) } })
 }
 
 /** Ends a row, published or failed, and lets it go; its error is redacted */

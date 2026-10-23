@@ -3,8 +3,9 @@ import { matches } from "@/server/connectors/sources-b-test-db"
 
 /**
  * TESTS ONLY: InstagramPublish in memory, answering the Prisma calls the publish flow makes (claims,
- * conditional updates, the proposal's unique row), plus the few rows it reads around it (the proposal's
- * and the deck's room, the outcome notes), so the tests check what ends up stored.
+ * conditional updates, the proposal's unique row, the deck page's lock and repeat check in a
+ * transaction), plus the few rows it reads around it (the proposal's and the deck's room, the outcome
+ * notes), so the tests check what ends up stored.
  */
 
 type Row = Record<string, unknown>
@@ -67,11 +68,21 @@ export function fakePublishDb(now: () => Date = () => new Date()) {
 
   const proposals = new Map<string, { roomId: string }>()
   const decks = new Map<string, { roomId: string | null; title: string }>()
-  return {
+  /** The advisory lock keys taken (the deck page's repeat check) */
+  const locks: string[] = []
+  const db = {
     instagramPublish,
     notes,
     proposals,
     decks,
+    locks,
+    async $transaction<T>(work: (tx: unknown) => Promise<T>): Promise<T> {
+      return work(db)
+    },
+    async $executeRaw(_sql: TemplateStringsArray, ...values: unknown[]) {
+      locks.push(String(values[0]))
+      return 1
+    },
     jackProposal: { findUnique: async ({ where }: { where: { id: string } }) => proposals.get(where.id) ?? null },
     jackDeck: { findUnique: async ({ where }: { where: { id: string } }) => decks.get(where.id) ?? null },
     jackMessage: {
@@ -82,6 +93,7 @@ export function fakePublishDb(now: () => Date = () => new Date()) {
       },
     },
   }
+  return db
 }
 
 export type FakePublishDb = ReturnType<typeof fakePublishDb>

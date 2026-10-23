@@ -7,6 +7,9 @@
  * - one row per proposal (the unique key), and of five claims on one row at once exactly one wins;
  * - a post Instagram is still processing waits, and the follow-up posts it and leaves a room note;
  * - a publish call whose answer was lost is found, never posted twice;
+ * - a post Instagram can't use fails, and its slide copies are deleted from the Cloudinary fake;
+ * - two presses of the deck page's Publish for the same pick at once make one row (the advisory lock
+ *   and the repeat check), and the second is told it was already sent;
  * - the site's daily cap and the history, digest and deck page queries run in SQL (Jack's newest
  *   caption draft in the room, found through the JSON tool calls);
  * - gallery.add's album and images: a new album with a free slug, at the end of the order, a slide
@@ -75,7 +78,7 @@ async function main() {
   const { prisma } = await import("../src/server/db")
   const { instagramGraph } = await import("../src/server/connectors/instagram/graph")
   const { instagramPublisher } = await import("../src/server/connectors/instagram/publish")
-  const { uploadImageBytes } = await import("../src/server/cloudinary")
+  const { destroyImage, uploadImageBytes } = await import("../src/server/cloudinary")
   const publish = await import("../src/server/jack/publish/instagram")
   const { addToGallery, galleryPublicId } = await import("../src/server/jack/publish/gallery")
   const { getDeck } = await import("../src/server/jack/decks/service")
@@ -91,6 +94,7 @@ async function main() {
     client: { ...instagramPublisher(instagramGraph(INSTAGRAM_FAKE.publishToken), INSTAGRAM_FAKE.userId), username: INSTAGRAM_FAKE.username },
     slidePng: async () => png,
     upload: (body, publicId) => uploadImageBytes(body, { publicId }),
+    remove: (publicId) => destroyImage(publicId),
     sleep: (ms) => new Promise((done) => setTimeout(done, Math.min(ms, 50))),
     now: () => new Date(),
   })
@@ -156,6 +160,28 @@ async function main() {
     const dropped = await track(publish.startInstagramPublish(input({ caption: `${tag} dropped` }), deps()))
     check("a post whose publish answer was lost is found, not posted twice", dropped.state === "published" && Boolean(dropped.row.igMediaId) && (await instagramState()).posts.length === 3, JSON.stringify({ state: dropped.state, posts: (await instagramState()).posts.length }))
 
+    // A post Instagram can't use: nothing goes out, and its copies are deleted
+    await knob({ errorNext: 1 })
+    const broken = await publish.startInstagramPublish(input({ proposalId: `${proposalBase}-broken` }), deps()).catch((error: Error) => error)
+    const brokenRow = await prisma.instagramPublish.findUnique({ where: { proposalId: `${proposalBase}-broken` } })
+    if (brokenRow) publishIds.push(brokenRow.id)
+    const cloud = (await (await fetch(`${fakes.url}/cloudinary/_fake/state`)).json()) as { assets: { publicId: string }[] }
+    check("a post Instagram can't use fails, and its copies come off Cloudinary", broken instanceof Error && brokenRow?.status === "failed" && brokenRow.imageUrls.length === 0 && !cloud.assets.some((a) => a.publicId.startsWith(`jack/instagram/${brokenRow.id}/`)), JSON.stringify({ status: brokenRow?.status, urls: brokenRow?.imageUrls }))
+
+    // The deck page's Publish pressed twice at once for the same pick: one row, under the lock
+    await knob({ processingReads: 1_000 })
+    const press = () => publish.startInstagramPublish(input({ type: "story", slides: [slides[2]], refuseRepeat: true }), deps(), { waitMs: 300 })
+    const presses = await Promise.allSettled([press(), press()])
+    for (const outcome of presses) if (outcome.status === "fulfilled") publishIds.push(outcome.value.row.id)
+    const repeated = presses.filter((o): o is PromiseRejectedResult => o.status === "rejected")
+    const stories = await prisma.instagramPublish.count({ where: { deckId: deck.id, mediaType: "STORIES" } })
+    check(
+      "two presses of the deck page's Publish at once make one post; the second is told it was already sent",
+      presses.filter((o) => o.status === "fulfilled").length === 1 && repeated.length === 1 && repeated[0].reason instanceof publish.PublishRepeat && stories === 1,
+      JSON.stringify({ presses: presses.map((o) => (o.status === "fulfilled" ? o.value.state : String(o.reason))), stories }),
+    )
+    await knob({ ready: true })
+
     // The queries the pages and the digest run
     const history = await listPublishes({ limit: 50 })
     const listed = history.filter((h) => publishIds.includes(h.id))
@@ -163,7 +189,8 @@ async function main() {
     const digest = await instagramPublishNeedsAttention.run({ now: new Date() })
     check("the digest check runs", typeof digest.count === "number")
     const sinceDay = await prisma.instagramPublish.count({ where: { createdAt: { gt: new Date(Date.now() - 86_400_000) }, status: { not: "failed" } } })
-    check("the daily cap's count reads the last 24 hours", sinceDay >= publishIds.length, String(sinceDay))
+    const ours = await prisma.instagramPublish.count({ where: { id: { in: publishIds }, status: { not: "failed" } } })
+    check("the daily cap's count reads the last 24 hours, failed posts left out", sinceDay >= ours && ours === publishIds.length - 1, JSON.stringify({ sinceDay, ours }))
 
     // The deck page's dialogs start from the newest caption Jack drafted in the deck's room
     const draft = (body: string, draftKind = "caption") => [{ id: "t1", name: "draft_text", label: "Drafted", status: "done", at: 0, input: {}, displays: [{ kind: "text_draft", draftKind, body }] }]
@@ -172,6 +199,7 @@ async function main() {
     const { deckPublishOptions } = await import("../src/server/jack/publish/deck-options")
     const options = await deckPublishOptions(deck)
     check("the deck page finds Jack's newest caption draft in the room, past other drafts", options.captionDraft === "Older caption", JSON.stringify(options.captionDraft))
+    check("the deck page's dialog lists this deck's recent posts, the waiting story among them", options.recent.length === 5 && options.recent.some((r) => r.mediaType === "STORIES" && r.status === "containers") && options.recent.some((r) => r.status === "failed"), JSON.stringify(options.recent.map((r) => [r.mediaType, r.status])))
     await prisma.jackMessage.create({ data: { roomId: room.id, kind: "assistant", persona: "jack", content: "", toolCalls: draft("GM 2 recap! #LSR") } })
     const newer = await deckPublishOptions(deck)
     check("…and the newest one wins; the slides' fit is described", newer.captionDraft === "GM 2 recap! #LSR" && /16:9/.test(newer.fit.feed ?? "") && Array.isArray(newer.gallery.albums), JSON.stringify({ caption: newer.captionDraft, fit: newer.fit }))

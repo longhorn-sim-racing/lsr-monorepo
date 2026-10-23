@@ -84,7 +84,7 @@ export async function destroyImage(publicId: string): Promise<boolean> {
   form.append("signature", signParams(params, apiSecret))
 
   try {
-    const res = await fetch(`${cloudinaryApiUrl()}/v1_1/${cloud}/image/destroy`, { method: "POST", body: form })
+    const res = await fetch(`${cloudinaryApiUrl()}/v1_1/${cloud}/image/destroy`, { method: "POST", body: form, signal: AbortSignal.timeout(15_000) })
     const json = (await res.json()) as { result?: string }
     return res.ok && (json.result === "ok" || json.result === "not found")
   } catch {

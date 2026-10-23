@@ -11,14 +11,14 @@ vi.mock("@/server/jack/messages", () => ({ jackMessageInclude: {}, toMessageView
 vi.mock("@/server/jack/decks/renders", () => ({ getRenderFile: vi.fn() }))
 
 import { JACK_EVENT } from "@/lib/jack/types"
-import { uploadImageBytes } from "@/server/cloudinary"
+import { destroyImage, uploadImageBytes } from "@/server/cloudinary"
 import { CLOUDINARY_FAKE, cloudinaryFake } from "@/server/connectors/cloudinary/fake/handlers"
 import { mountFakes, type MountedFakes } from "@/server/connectors/fakes/testing"
 import { INSTAGRAM_FAKE, instagramFake } from "@/server/connectors/instagram/fake/handlers"
 import { instagramGraph } from "@/server/connectors/instagram/graph"
 import { instagramPublisher } from "@/server/connectors/instagram/publish"
 import type { DeckView } from "@/server/jack/decks/service"
-import { claimPublish, describePublish, finishInstagramPublishes, LEASE_MS, PublishRefused, readContainers, SETTLE_MS, startInstagramPublish, type PublishDeps, type StartPublish } from "./instagram"
+import { claimPublish, describePublish, finishInstagramPublishes, LEASE_MS, PUBLISH_CUTOFF_MS, PublishRefused, PublishRepeat, readContainers, SETTLE_MS, startInstagramPublish, type PublishDeps, type StartPublish } from "./instagram"
 import { fakePublishDb, type FakePublishDb } from "./test-db"
 
 // Before any real clock this runs on, so the fake's own timestamps (real time) always come after it
@@ -48,6 +48,7 @@ function deps(over: Partial<PublishDeps> = {}): PublishDeps {
     client: { ...instagramPublisher(instagramGraph(INSTAGRAM_FAKE.publishToken), INSTAGRAM_FAKE.userId), username: INSTAGRAM_FAKE.username },
     slidePng: () => png(),
     upload: (body, publicId) => uploadImageBytes(body, { publicId }),
+    remove: (publicId) => destroyImage(publicId),
     // Waiting moves the clock on, so a wait past its end stops the loop
     sleep: async (ms) => {
       clock += ms
@@ -78,6 +79,8 @@ type FakeState = {
 const instagramState = async (): Promise<FakeState> => (await fetch(`${fakes.origin}/instagram/_fake/publish`)).json()
 const knob = (body: Record<string, unknown>) => fetch(`${fakes.origin}/instagram/_fake/publish`, { method: "POST", body: JSON.stringify(body) })
 const publishCalls = () => fakes.requests.filter((r) => r.service === "instagram" && r.path.endsWith("/media_publish")).length
+/** The slide copies on the Cloudinary fake for a row */
+const copies = async (rowId: string) => ((await (await fetch(`${fakes.origin}/cloudinary/_fake/state`)).json()) as { assets: { publicId: string }[] }).assets.filter((a) => a.publicId.startsWith(`jack/instagram/${rowId}/`))
 const stored = (id: string) => store.instagramPublish.rows.get(id)!
 
 beforeEach(() => {
@@ -163,6 +166,9 @@ describe("startInstagramPublish", () => {
     expect((await instagramState()).posts).toHaveLength(0)
     expect(publishCalls()).toBe(0)
     expect(audit.createAuditLog.mock.calls[0][0].summary).toMatch(/^Couldn't post/)
+    // Nothing went out, so its public copies are gone
+    expect(row.imageUrls).toEqual([])
+    expect(await copies(row.id as string)).toEqual([])
   })
 
   it("says which slide couldn't be made into an image (a function without Chromium, a slide never rendered)", async () => {
@@ -175,13 +181,25 @@ describe("startInstagramPublish", () => {
     expect((await instagramState()).containers).toHaveLength(0)
   })
 
-  it("fails before any container when Cloudinary won't take the images", async () => {
+  it("fails before any container when Cloudinary won't take the images, and deletes the copies that did go up", async () => {
     await fetch(`${fakes.origin}/cloudinary/_fake/state`, { method: "POST", body: JSON.stringify({ fail: 1 }) })
-    await expect(startInstagramPublish(input(), deps())).rejects.toThrow(/Cloudinary didn't take the image \(500/)
+    // One upload fails while the others of the carousel go up
+    const removed: string[] = []
+    const tracked = deps({ remove: async (publicId) => (removed.push(publicId), destroyImage(publicId)) })
+    await expect(startInstagramPublish(input({ type: "carousel", slides }), tracked)).rejects.toThrow(/Cloudinary didn't take the image \(500/)
     const [row] = store.instagramPublish.rows.values()
     expect(row.status).toBe("failed")
     expect(row.error).toMatch(/^Nothing was posted: Cloudinary didn't take the image/)
     expect((await instagramState()).containers).toHaveLength(0)
+    expect(removed.sort()).toEqual([1, 2, 3].map((n) => `jack/instagram/${row.id}/${n}`))
+    expect(await copies(row.id as string)).toEqual([])
+  })
+
+  it("keeps a copy listed on the row when Cloudinary won't delete it", async () => {
+    await knob({ errorNext: 1 })
+    await expect(startInstagramPublish(input(), deps({ remove: async () => false }))).rejects.toThrow(/Instagram couldn't use the image/)
+    const [row] = store.instagramPublish.rows.values()
+    expect(row).toMatchObject({ status: "failed", imageUrls: [expect.stringContaining(`/jack/instagram/${row.id}/1.jpg`)] })
   })
 
   it("leaves a post Instagram is still processing to the follow-up, which posts it and tells the room", async () => {
@@ -199,6 +217,29 @@ describe("startInstagramPublish", () => {
     expect(stored(row.id)).toMatchObject({ status: "published" })
     expect(store.notes).toEqual([expect.objectContaining({ roomId: "room-9", kind: "system", content: "Posted “GM 2 recap” as a post on Instagram. → /admin/instagram#publishing" })])
     expect(broadcast.broadcastRoomEvent).toHaveBeenCalledWith("room-9", expect.objectContaining({ type: JACK_EVENT.created }))
+  })
+
+  it("doesn't take someone else's caption-less post for ours when the answer to a caption-less post was lost", async () => {
+    // Media posted a caption-less photo from the app around the same time
+    const foreign = { id: "18000000000000777", permalink: "https://www.instagram.com/p/SOMEONE/", timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, "+0000"), caption: null, mediaType: "IMAGE" }
+    const withForeign = (over: Partial<PublishDeps> = {}) => {
+      const base = deps(over)
+      return { ...base, client: { ...base.client, recentMedia: async (limit?: number, signal?: AbortSignal) => [foreign, ...(await base.client.recentMedia(limit, signal))] } }
+    }
+    // The post went out but its answer was lost: the container says PUBLISHED, but two caption-less posts can't be told apart
+    await knob({ dropPublish: 1 })
+    const lost = await startInstagramPublish(input({ caption: "" }), withForeign())
+    expect(lost.row).toMatchObject({ status: "published", igMediaId: null, permalink: null, error: expect.stringMatching(/its link couldn't be found here/) })
+
+    // A call that got no answer and didn't take: after the settle time it's posted, never matched to the other post
+    await knob({ publishError: { code: 2, message: "Service temporarily unavailable" } })
+    const waiting = await startInstagramPublish(input({ caption: "", proposalId: "prop-bare" }), withForeign(), { waitMs: 5_000 })
+    expect(waiting.row.status).toBe("publishing")
+    clock += SETTLE_MS
+    await finishInstagramPublishes(withForeign(), { deadline: clock + 60_000 })
+    expect(stored(waiting.row.id)).toMatchObject({ status: "published", igMediaId: expect.stringMatching(/^18099/) })
+    expect(stored(waiting.row.id).igMediaId).not.toBe(foreign.id)
+    expect((await instagramState()).posts).toHaveLength(2)
   })
 
   it("never posts twice: a publish whose answer was lost is found through the container's status", async () => {
@@ -259,7 +300,83 @@ describe("startInstagramPublish", () => {
   })
 })
 
+describe("startInstagramPublish from the deck page (refuseRepeat)", () => {
+  it("refuses the same pick while it's on its way or after it went out in the last day, under a lock on the deck, and makes nothing", async () => {
+    await knob({ processingReads: 50 })
+    const pick = input({ type: "carousel", slides: slides.slice(0, 2), proposalId: undefined, refuseRepeat: true })
+    const first = await startInstagramPublish(pick, deps(), { waitMs: 3_000 })
+    expect(first.state).toBe("waiting")
+    expect(store.locks).toEqual([`instagram-publish:${deck.id}`])
+
+    const containersBefore = (await instagramState()).containers.length
+    const repeat = startInstagramPublish(pick, deps(), { waitMs: 3_000 })
+    await expect(repeat).rejects.toThrow(PublishRepeat)
+    await expect(startInstagramPublish(pick, deps(), { waitMs: 3_000 })).rejects.toThrow(/^These slides already went to Instagram as a carousel at Jan 5, 11:00 AM \(Instagram is processing\)\. See Content → Instagram\.$/)
+    expect(store.instagramPublish.rows.size).toBe(1)
+    expect((await instagramState()).containers).toHaveLength(containersBefore)
+
+    // Other slides, another type, or the officer confirming it again: posted
+    await knob({ ready: true })
+    await startInstagramPublish({ ...pick, slides: slides.slice(1) }, deps())
+    await startInstagramPublish({ ...pick, type: "post", slides: [slides[0]] }, deps())
+    await startInstagramPublish({ ...pick, refuseRepeat: false }, deps())
+    expect(store.instagramPublish.rows.size).toBe(4)
+  })
+
+  it("lets the pick go again once the last one failed, or went out over a day ago", async () => {
+    const pick = input({ refuseRepeat: true })
+    const old = await startInstagramPublish(pick, deps())
+    expect(old.row.status).toBe("published")
+    await expect(startInstagramPublish(pick, deps())).rejects.toThrow(/^This slide already went to Instagram as a post at .* \(Posted\)/)
+    clock += 86_400_000 + 1
+    const again = await startInstagramPublish(pick, deps())
+    expect(again.row.status).toBe("published")
+
+    stored(again.row.id).status = "failed"
+    stored(old.row.id).status = "failed"
+    expect((await startInstagramPublish(pick, deps())).row.status).toBe("published")
+  })
+})
+
 describe("finishInstagramPublishes", () => {
+  it("fails a post that still isn't out 2 hours after it was approved, instead of posting it late", async () => {
+    store.proposals.set("prop-late", { roomId: "room-9" })
+    await knob({ processingReads: 50 })
+    const { row } = await startInstagramPublish(input({ proposalId: "prop-late" }), deps(), { waitMs: 3_000 })
+    expect(row.status).toBe("containers")
+    clock += PUBLISH_CUTOFF_MS + 1
+    // Instagram is ready only now: too late
+    await knob({ ready: true })
+    const counts = await finishInstagramPublishes(deps(), { deadline: clock + 60_000 })
+    expect(counts).toMatchObject({ published: 0, failed: 1 })
+    expect(stored(row.id)).toMatchObject({ status: "failed", error: expect.stringMatching(/^Nothing was posted: Instagram took too long .* Ask again to post it\.$/), imageUrls: [] })
+    expect(publishCalls()).toBe(0)
+    expect((await instagramState()).posts).toHaveLength(0)
+    expect(store.notes.at(-1)?.content).toMatch(/^Couldn't post “GM 2 recap” as a post on Instagram: Nothing was posted: Instagram took too long/)
+  })
+
+  it("still records a late post that did go out: the container is checked before the cutoff", async () => {
+    await knob({ dropPublish: 1, processingReads: 0 })
+    // The answer is lost and the apply stops waiting before it looks again
+    const { row } = await startInstagramPublish(input(), deps(), { waitMs: 1_000 })
+    expect(row.status).toBe("publishing")
+    clock += PUBLISH_CUTOFF_MS + 1
+    await finishInstagramPublishes(deps(), { deadline: clock + 60_000 })
+    expect(stored(row.id)).toMatchObject({ status: "published", igMediaId: expect.stringMatching(/^18099/) })
+    expect(publishCalls()).toBe(1)
+  })
+
+  it("fails a late post whose publish call didn't take, after looking for it once more, without calling again", async () => {
+    await knob({ publishError: { code: 2, message: "Service temporarily unavailable" } })
+    const { row } = await startInstagramPublish(input(), deps(), { waitMs: 5_000 })
+    expect(row.status).toBe("publishing")
+    clock += PUBLISH_CUTOFF_MS + 1
+    await finishInstagramPublishes(deps(), { deadline: clock + 60_000 })
+    expect(stored(row.id)).toMatchObject({ status: "failed", error: expect.stringMatching(/took too long/) })
+    expect(publishCalls()).toBe(1)
+    expect((await instagramState()).posts).toHaveLength(0)
+  })
+
   it("fails a row a dead function left queued (nothing went out), and skips rows someone holds", async () => {
     const dead = await store.instagramPublish.create({ data: { status: "queued", claimedAt: new Date(clock - LEASE_MS - 1), deckId: deck.id, mediaType: "IMAGE", slideIds: ["slide1"] } })
     const held = await store.instagramPublish.create({ data: { status: "containers", claimedAt: new Date(clock - 1_000), deckId: deck.id } })
