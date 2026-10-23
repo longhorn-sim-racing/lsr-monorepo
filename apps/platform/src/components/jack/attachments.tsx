@@ -7,9 +7,9 @@ import { ACCEPT_ATTRIBUTE, MAX_FILES_PER_MESSAGE } from "@/lib/jack/files"
 import { formatFileSize, partLink } from "@/lib/jack/links"
 import type { JackFileItem, JackFileKindKey } from "@/lib/jack/parts"
 import type { JackMessageView } from "@/lib/jack/types"
+import type { PendingUpload } from "@/lib/jack/upload-queue"
 import { cn } from "@/lib/utils"
 import { FilesView } from "./parts/files-view"
-import type { PendingUpload } from "./use-jack-uploads"
 
 /*
  * Files in a room (G5, design §5): the composer's attach button and the chips of files waiting to go,

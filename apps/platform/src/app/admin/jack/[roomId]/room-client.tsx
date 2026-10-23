@@ -95,8 +95,11 @@ export function JackRoomClient({ initial, rooms, me, spend }: JackRoomClientProp
           uploads.add(files)
         },
         onDrop: (event) => {
+          // Dropped text goes into the message box as usual; dropped files would otherwise open in the tab
+          const files = filesFromDrop(event)
+          if (!files.length) return
           event.preventDefault()
-          uploads.add(filesFromDrop(event))
+          uploads.add(files)
         },
         canSendEmpty: uploads.items.length > 0,
       }}
