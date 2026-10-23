@@ -43,8 +43,11 @@ The working record for Jack 2.0 (#188): what's done, what's next, and every call
 | T8: Discord posting (posts, polls, standing rules, event mirror, role sync, Announcements) | Merged | #221 |
 | T11: automation (recurring questions, weekly digest, Needs attention) | Merged | #220 |
 | T9b: Instagram publish and gallery add | Merged | #219 |
-| Security fixes: Jack's reply surface; privacy (Discord purges, account deletion); change proposals | In review | #222–#224 |
-| Eval, security pass, docs, launch post | Not started | |
+| Security fixes: Jack's reply surface; privacy (Discord purges, account deletion); change proposals | Merged | #222–#224 |
+| Docs folded in, and the release runbook | Merged | #226, #225 |
+| Security fixes, wave 2b: the digest and recurring questions; Instagram publishing; Discord posting | Merged | #227–#229 |
+| Eval fixes (harness checks, prompt and tool fixes from the paid run) | Merged | #230 |
+| Launch post | Drafted (with Gray) | |
 
 ## Decisions
 Calls made during the build, for Gray to review. Newest last.
@@ -145,6 +148,9 @@ Calls made during the build, for Gray to review. Newest last.
 | Date | What | Cost |
 |---|---|---|
 | 10/23 | Live checks before the full eval: one reply with a deferred tool, web tools on Sonnet and Haiku, the web search question (twice), three attached-file questions with Claude Files on, the planted-PDF question with web fetch on, two direct web probes and the PDF link probe | about $1.00 |
+| 10/23 | Paid eval v30, every track on Jack (Sonnet), 120 questions: $4.60 for answers, $5.60 for the judge (Opus) | $10.20 |
+| 10/23 | Reruns of the failed questions after fixes (v31, v32, v34, one regrade) | about $2.20 |
+| 10/23 | v33: the core track again with every fix in, plus the fixed track questions | $4.46 |
 
 ## Log
 - **10/22:**
@@ -229,3 +235,34 @@ Calls made during the build, for Gray to review. Newest last.
   - Merged #217, #221, #220 and #219. The combined branch passes lint, typecheck, 3,408 tests and the build; the drift check is clean.
   - Browser-checked: Announcements, Recurring questions, Instagram publishing, Usage (the automation cap), the deck page's new buttons and the Discord page's role sync and posting sections, light and dark, 390 px.
   - **Vercel's Hobby build rate limit** was hit by the night's pushes: recent previews show "build-rate-limit" instead of a result. The function count gets checked again on the release PR.
+- **10/23 (morning):**
+  - **Security review of wave 2b:** 18 confirmed findings (3 major, 15 minor; a few found by two lenses), fixed in #227 (digest and recurring questions), #228 (Instagram) and #229 (Discord posting), each reviewed.
+    - Major: Instagram alt text was posted without showing on the card; role sync never took back the roles it gave when a member unlinked, deleted their account or was purged; a URL glued to a word character got through every link filter.
+    - Minor, among others: the digest's Discord copy skipped the posting channels and the last check before sending; the $10 automation cap was checked before spend was recorded; Instagram's daily cap and the posts job had check-then-act races; Cancel and Send again took any value as a post id.
+  - Merged #227, #228 and #229. `jack-2` passes lint, typecheck, 3,549 tests, the build and the drift check. Browser-checked Recurring questions, Gallery, Discord and Announcements.
+  - **Paid eval, every track on Jack (Sonnet), v30:** 105 of 120 (88%). The eval process didn't exit after its summary, which stalled the loop over tracks for an hour; it exits explicitly now.
+  - **Triage of the 15 failures** (#230):
+    - Eval checks and harness (8):
+      - a bolded count ("**15** forms") never matched its noun;
+      - the GM chart check wanted a chart of two zero bars;
+      - planted results and sign-up files weren't posted with a message, so `room_files` never listed them;
+      - the planted results file named a track and date no round matched;
+      - "the last 30 days" for Twitch accepts whole Central days too;
+      - "by Friday" asked on a Friday may be asked about;
+      - a recurring question's earlier run was dated a minute back instead of a week;
+      - and later the email question's guard, which demanded a card although its expectation allows asking first.
+    - Jack (prompt and tools):
+      - text written between tool calls shows in the room, so no notes to himself;
+      - a query's table is the list, even when someone asks for every row;
+      - site pages and news are read with `read`, not `run_sql` (which cuts long text and gives no link);
+      - a recurring run reports a different number as a change, not a conflict;
+      - the digest summary is at most four sentences;
+      - counts and bests come from a query or a tool's counts, never by eye; the member roster now carries its own counts (emails, EIDs, LSC status and more);
+      - unpaid event fees name their event from the checkout's metadata.
+    - Model slips that reruns passed: date windows, a week count in a chart answer.
+  - **Reruns:** 10 of the 15 passed after the first round of fixes, and 4 of the other 5 after the second. **v33** (the core track with everything in): 50 of 52 on core (96%, up from 44 of 52), and 5 of the 6 fixed track questions. Its three failures: the email question's guard (fixed), a wrong fastest lap in every-lap (the counts prompt line came after; a last rerun passed), and the digest summary (below).
+  - **Still failing:** the digest summary runs about six short sentences where the note asks for at most four (accurate and in the right order). Left for later; the check wasn't loosened.
+  - **Reviewed:** #230 was reviewed independently: 7 minor findings, all fixed (event fee names now come from the title each checkout saves, in every payments view; the prompt rules apply only past a handful of rows and when a table shows).
+  - **Still seen:** Sonnet sometimes opens with a line like "Let me size it first." before a tool call, despite the prompt. It shows in the room above the tool card; left as is.
+  - **Not run:** Lift (Opus) and Stand (Haiku). A full run on all three models doesn't fit the $25 test budget; the runbook's gate says all three, so that's for Gray (run them, or accept Jack only).
+  - **Test spend so far:** about $18 of $25.
