@@ -69,7 +69,7 @@ export function attachmentLine(files: HistoryFile[]): string {
  * dots (evil。example) and a trailing dot (evil.example./x)
  */
 const LINK =
-  /\b(?:[a-z][a-z0-9+.-]*:\/\/|https?:|www\.)[^\s<>"'`]+|(?<![\p{L}\p{M}\p{N}\p{Cf}_-])(?:[\p{L}\p{M}\p{N}\p{Cf}_-]+[.。．｡])+(?:xn--[a-z0-9-]+|\p{L}[\p{L}\p{M}\p{Cf}]+)[.。．｡]?(?::\d+)?(?:\/[^\s<>"'`]*|[?#][^\s<>"'`]+)|\b(?:\d{1,3}[.。．｡]){3}\d{1,3}(?::\d+(?:[/?#][^\s<>"'`]*)?|[/?#][^\s<>"'`]*)/giu
+  /\b(?:[a-z][a-z0-9+.-]*:\/\/|https?:|www\.)[^\s<>"'`]+|(?<![\p{L}\p{M}\p{N}\p{Cf}_-])(?:[\p{L}\p{M}\p{N}\p{Cf}_-]+[.\u3002\uff0e\uff61])+(?:xn--[a-z0-9-]+|\p{L}[\p{L}\p{M}\p{Cf}]+)[.\u3002\uff0e\uff61]?(?::\d+)?(?:\/[^\s<>"'`]*|[?#][^\s<>"'`]+)|\b(?:\d{1,3}[.\u3002\uff0e\uff61]){3}\d{1,3}(?::\d+(?:[/?#][^\s<>"'`]*)?|[/?#][^\s<>"'`]*)/giu
 /** Punctuation after a link that isn't part of it, closing quotes (“…”) and CJK punctuation included */
 const TRAILING = /[.,;:!?)\]}>'"”’»）。、]+$/
 

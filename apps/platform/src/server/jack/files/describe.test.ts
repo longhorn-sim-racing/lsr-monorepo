@@ -52,7 +52,7 @@ describe("neutralizeLinks", () => {
   it("catches hosts written with other dots, a trailing dot, invisible characters, or a scheme without slashes", () => {
     expect(neutralizeLinks("evil。example/x, evil．example/x, 10。0。0。1/x")).toBe("[link to evil[.]example], [link to evil[.]example], [link to 10[.]0[.]0[.]1]")
     expect(neutralizeLinks("evil.example./collect")).toBe("[link to evil[.]example[.]]")
-    expect(neutralizeLinks("evil.exam­ple/x")).toBe("[link to evil[.]example]")
+    expect(neutralizeLinks("evil.exam\u00adple/x")).toBe("[link to evil[.]example]")
     expect(neutralizeLinks("open https:evil.example now")).toBe("open [link to evil[.]example] now")
     expect(neutralizeLinks("Send “see evil.example/x”. Or 例え.com/x。")).toBe("Send “see [link to evil[.]example]”. Or [link to xn--r8jz45g[.]com]。")
   })
