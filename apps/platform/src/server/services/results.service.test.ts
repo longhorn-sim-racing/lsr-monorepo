@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-// A stand-in for the Prisma client. The transaction runs its callback against the same fakes (`db` is
-// also the transaction client), so a test sees every write in one place.
-const db = vi.hoisted(() => {
-  const client = {
+// Stand-ins for the Prisma client (`db`) and the transaction client (`tx`) that `db.$transaction` hands its
+// callback. They're separate fakes, so a test can tell what runs under the row lock from what runs before it.
+const { db, tx } = vi.hoisted(() => {
+  const client = () => ({
     rawResultUpload: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     raceSession: { count: vi.fn(), create: vi.fn() },
     driverIdentity: { upsert: vi.fn(), findMany: vi.fn() },
@@ -17,8 +17,8 @@ const db = vi.hoisted(() => {
     raceEvent: { createMany: vi.fn() },
     $queryRaw: vi.fn(),
     $transaction: vi.fn(),
-  }
-  return client
+  })
+  return { db: client(), tx: client() }
 })
 const audit = vi.hoisted(() => ({ createAuditLog: vi.fn() }))
 
@@ -69,9 +69,16 @@ const raceFile = () => ({
   ],
 })
 
+/** The order calls were made in, across fakes: `callOrder(a) < callOrder(b)` means a's first call came first */
+const callOrder = (fn: { mock: { invocationCallOrder: number[] } }) => fn.mock.invocationCallOrder[0] ?? Infinity
+
+/** The SQL of a tagged-template $queryRaw call, with its values as "?" */
+const sqlOf = (call: unknown[]) => (call[0] as string[]).join("?")
+
 beforeEach(() => {
-  db.$transaction.mockImplementation(async (fn: (tx: typeof db) => unknown) => fn(db))
+  db.$transaction.mockImplementation(async (fn: (client: typeof tx) => unknown) => fn(tx))
   db.raceSession.count.mockResolvedValue(0)
+  tx.raceSession.count.mockResolvedValue(0)
   db.driverIdentity.findMany.mockResolvedValue([])
 })
 
@@ -273,9 +280,20 @@ describe("bindUpload", () => {
   it("links the upload under the row lock, audits it and refreshes the upload page", async () => {
     const result = await bindUpload({ uploadId: "up1", eventId: "ev1", pointsSystem: "HALF", sessionLabel: "RACE" }, officer)
 
-    expect(db.$queryRaw).toHaveBeenCalled()
-    expect(db.$queryRaw.mock.calls[0][0].join("?")).toContain('FROM "RawResultUpload" WHERE id = ? FOR UPDATE')
-    expect(db.rawResultUpload.update).toHaveBeenCalledWith({ where: { id: "up1" }, data: { eventId: "ev1", pointsSystem: "HALF", sessionLabel: "RACE" } })
+    // In the transaction: lock the row, check it isn't ingested, then write the link
+    expect(db.$transaction).toHaveBeenCalledTimes(1)
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1)
+    expect(sqlOf(tx.$queryRaw.mock.calls[0])).toContain('FROM "RawResultUpload" WHERE id = ? FOR UPDATE')
+    expect(tx.$queryRaw.mock.calls[0][1]).toBe("up1")
+    expect(tx.raceSession.count).toHaveBeenCalledWith({ where: { uploadId: "up1" } })
+    expect(tx.rawResultUpload.update).toHaveBeenCalledWith({ where: { id: "up1" }, data: { eventId: "ev1", pointsSystem: "HALF", sessionLabel: "RACE" } })
+    expect(callOrder(tx.$queryRaw)).toBeLessThan(callOrder(tx.raceSession.count))
+    expect(callOrder(tx.raceSession.count)).toBeLessThan(callOrder(tx.rawResultUpload.update))
+    // Nothing on the outer client, and the audit entry comes after the transaction
+    expect(db.$queryRaw).not.toHaveBeenCalled()
+    expect(db.raceSession.count).not.toHaveBeenCalled()
+    expect(db.rawResultUpload.update).not.toHaveBeenCalled()
+    expect(callOrder(tx.rawResultUpload.update)).toBeLessThan(callOrder(audit.createAuditLog))
     expect(audit.createAuditLog).toHaveBeenCalledWith({
       actorUserId: "officer-1",
       actionType: "UPDATE",
@@ -293,20 +311,25 @@ describe("bindUpload", () => {
 
   it.each(["PRACTICE", "QUALIFYING"])("never awards points for %s", async (sessionLabel) => {
     await bindUpload({ uploadId: "up1", eventId: "ev1", pointsSystem: "F1", sessionLabel }, officer)
-    expect(db.rawResultUpload.update.mock.calls[0][0].data).toEqual({ eventId: "ev1", pointsSystem: "NONE", sessionLabel })
+    expect(tx.rawResultUpload.update.mock.calls[0][0].data).toEqual({ eventId: "ev1", pointsSystem: "NONE", sessionLabel })
   })
 
   it("defaults the points system and label to none", async () => {
     await bindUpload({ uploadId: "up1", eventId: "ev1" }, officer)
-    expect(db.rawResultUpload.update.mock.calls[0][0].data).toEqual({ eventId: "ev1", pointsSystem: null, sessionLabel: null })
+    expect(tx.rawResultUpload.update.mock.calls[0][0].data).toEqual({ eventId: "ev1", pointsSystem: null, sessionLabel: null })
   })
 
-  it("refuses a missing event or an ingested upload", async () => {
+  it("refuses a missing event before the transaction", async () => {
     db.event.findUnique.mockResolvedValueOnce(null)
     expect(await bindUpload({ uploadId: "up1", eventId: "gone" }, officer)).toEqual({ ok: false, error: "That event no longer exists. Refresh and pick another." })
+    expect(db.$transaction).not.toHaveBeenCalled()
+  })
 
-    db.raceSession.count.mockResolvedValue(1)
+  it("refuses an ingested upload, checked under the lock", async () => {
+    tx.raceSession.count.mockResolvedValue(1)
     expect(await bindUpload({ uploadId: "up1", eventId: "ev1" }, officer)).toEqual({ ok: false, error: "These results are already ingested, so the event can't change." })
+    expect(callOrder(tx.$queryRaw)).toBeLessThan(callOrder(tx.raceSession.count))
+    expect(tx.rawResultUpload.update).not.toHaveBeenCalled()
     expect(db.rawResultUpload.update).not.toHaveBeenCalled()
     expect(audit.createAuditLog).not.toHaveBeenCalled()
   })
@@ -332,25 +355,52 @@ describe("ingestUpload", () => {
     ...extra,
   })
 
+  /** The upload as the pre-check reads it, and its link as the transaction reads it again under the lock */
+  const stored = (extra: Record<string, unknown> = {}) => {
+    const row = upload(extra)
+    db.rawResultUpload.findUnique.mockResolvedValue(row)
+    tx.rawResultUpload.findUnique.mockResolvedValue({ eventId: row.eventId, pointsSystem: row.pointsSystem, sessionLabel: row.sessionLabel })
+  }
+
   beforeEach(() => {
-    db.rawResultUpload.findUnique.mockImplementation(async ({ select }: { select?: object }) => {
-      const row = upload()
-      return select ? { eventId: row.eventId, pointsSystem: row.pointsSystem, sessionLabel: row.sessionLabel } : row
-    })
-    db.raceSession.create.mockResolvedValue({ id: "s1" })
-    db.driverIdentity.findMany.mockResolvedValue([{ driverGuid: "gA", userId: "user-ana" }, { driverGuid: "gB", userId: null }])
-    db.carMapping.findMany.mockResolvedValue([{ id: "cm-mx5", gameCarName: "ks_mazda_mx5_cup" }])
-    db.raceParticipant.create.mockImplementation(async ({ data }: { data: { driverGuid: string } }) => ({ id: `p-${data.driverGuid}` }))
+    stored()
+    tx.raceSession.create.mockResolvedValue({ id: "s1" })
+    tx.driverIdentity.findMany.mockResolvedValue([{ driverGuid: "gA", userId: "user-ana" }, { driverGuid: "gB", userId: null }])
+    tx.carMapping.findMany.mockResolvedValue([{ id: "cm-mx5", gameCarName: "ks_mazda_mx5_cup" }])
+    tx.raceParticipant.create.mockImplementation(async ({ data }: { data: { driverGuid: string } }) => ({ id: `p-${data.driverGuid}` }))
     db.event.findUnique.mockResolvedValue({ slug: "lsc-r3" })
     vi.spyOn(console, "warn").mockImplementation(() => {})
+  })
+
+  it("checks once outside, then locks the row and checks again before creating anything", async () => {
+    await ingestUpload("up1", officer)
+
+    // The pre-check runs once, on the outer client, before the transaction starts
+    expect(db.raceSession.count).toHaveBeenCalledTimes(1)
+    expect(callOrder(db.raceSession.count)).toBeLessThan(callOrder(db.$transaction))
+    expect(db.$transaction).toHaveBeenCalledTimes(1)
+    expect(db.$transaction.mock.calls[0][1]).toEqual({ maxWait: 20000, timeout: 20000 })
+
+    // In the transaction: the FOR UPDATE lock, then the ingest check, then the link check, then the writes
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1)
+    expect(sqlOf(tx.$queryRaw.mock.calls[0])).toContain('FROM "RawResultUpload" WHERE id = ? FOR UPDATE')
+    expect(tx.$queryRaw.mock.calls[0][1]).toBe("up1")
+    expect(tx.raceSession.count).toHaveBeenCalledWith({ where: { uploadId: "up1" } })
+    expect(tx.rawResultUpload.findUnique).toHaveBeenCalledWith({ where: { id: "up1" }, select: { eventId: true, pointsSystem: true, sessionLabel: true } })
+    expect(callOrder(tx.$queryRaw)).toBeLessThan(callOrder(tx.raceSession.count))
+    expect(callOrder(tx.raceSession.count)).toBeLessThan(callOrder(tx.rawResultUpload.findUnique))
+    expect(callOrder(tx.rawResultUpload.findUnique)).toBeLessThan(callOrder(tx.raceSession.create))
+
+    // Nothing locks or writes on the outer client
+    expect(db.$queryRaw).not.toHaveBeenCalled()
+    expect(db.raceSession.create).not.toHaveBeenCalled()
+    expect(db.rawResultUpload.update).not.toHaveBeenCalled()
   })
 
   it("creates the session, participants, results, laps and events, then marks the upload INGESTED", async () => {
     const result = await ingestUpload("up1", officer)
 
-    expect(db.$queryRaw.mock.calls[0][0].join("?")).toContain('FROM "RawResultUpload" WHERE id = ? FOR UPDATE')
-    expect(db.$transaction.mock.calls[0][1]).toEqual({ maxWait: 20000, timeout: 20000 })
-    expect(db.raceSession.create).toHaveBeenCalledWith({
+    expect(tx.raceSession.create).toHaveBeenCalledWith({
       data: {
         uploadId: "up1",
         eventId: "ev1",
@@ -361,11 +411,11 @@ describe("ingestUpload", () => {
         pointsSystem: "F1",
       },
     })
-    expect(db.driverIdentity.findMany).toHaveBeenCalledWith({ where: { driverGuid: { in: ["gA", "gB", "gZ"] } } })
-    expect(db.carMapping.findMany).toHaveBeenCalledWith({ where: { gameCarName: { in: ["ks_mazda_mx5_cup", "unmapped_car"] } } })
+    expect(tx.driverIdentity.findMany).toHaveBeenCalledWith({ where: { driverGuid: { in: ["gA", "gB", "gZ"] } } })
+    expect(tx.carMapping.findMany).toHaveBeenCalledWith({ where: { gameCarName: { in: ["ks_mazda_mx5_cup", "unmapped_car"] } } })
 
     // One participant per driver: car 3 is Ana again; the car without a GUID gets a placeholder
-    expect(db.raceParticipant.create.mock.calls.map(([args]) => args.data)).toEqual([
+    expect(tx.raceParticipant.create.mock.calls.map(([args]) => args.data)).toEqual([
       {
         sessionId: "s1", driverGuid: "gA", displayName: "Ana", carName: "ks_mazda_mx5_cup", carMappingId: "cm-mx5", carClass: "mx5",
         teamName: "LSR", userId: "user-ana", carIdInSession: 0, nation: "USA", skin: "red", ballastKg: 0, restrictor: 0,
@@ -381,7 +431,7 @@ describe("ingestUpload", () => {
     ])
 
     // Results in file order; the GUID-less row matches by car; the unknown driver is skipped
-    expect(db.raceResult.create.mock.calls.map(([args]) => args.data)).toEqual([
+    expect(tx.raceResult.create.mock.calls.map(([args]) => args.data)).toEqual([
       {
         sessionId: "s1", participantId: "p-gB", position: 1, classPosition: 0, bestLapTime: 101000, totalTime: 1500000, lapsCompleted: 15,
         status: "FINISHED", gap: "", points: 25, penaltyTime: undefined, lapPenalty: undefined, isDisqualified: false,
@@ -398,7 +448,7 @@ describe("ingestUpload", () => {
     expect(console.warn).toHaveBeenCalledWith("Result entry for guid gZ / carId 9 has no matching participant.")
 
     // Laps in time order, numbered per driver; car 3's lap is Ana's
-    expect(db.raceLap.createMany).toHaveBeenCalledWith({
+    expect(tx.raceLap.createMany).toHaveBeenCalledWith({
       data: [
         { sessionId: "s1", participantId: "p-gA", lapNumber: 1, lapTime: 103000, sector1: null, sector2: null, sector3: null, valid: false, cuts: 1, tyre: undefined, timestamp: 100 },
         { sessionId: "s1", participantId: "p-gB", lapNumber: 1, lapTime: 102000, sector1: 31000, sector2: 40000, sector3: 31000, valid: false, cuts: 2, tyre: "SM", timestamp: 150 },
@@ -408,7 +458,7 @@ describe("ingestUpload", () => {
     })
 
     // Collisions: Ana hit Ben (one each), then Ben hit a wall
-    expect(db.raceEvent.createMany).toHaveBeenCalledWith({
+    expect(tx.raceEvent.createMany).toHaveBeenCalledWith({
       data: [
         {
           sessionId: "s1", type: "COLLISION_WITH_CAR", carId: 0, driverGuid: "gA", participantId: "p-gA", otherCarId: 1, otherDriverGuid: "gB",
@@ -422,14 +472,15 @@ describe("ingestUpload", () => {
     })
 
     // Backfills: laps and cuts per driver, then collisions
-    expect(db.raceResult.updateMany.mock.calls.map(([args]) => args)).toEqual([
+    expect(tx.raceResult.updateMany.mock.calls.map(([args]) => args)).toEqual([
       { where: { sessionId: "s1", participantId: "p-gA" }, data: { lapsCompleted: 3, totalCuts: 1 } },
       { where: { sessionId: "s1", participantId: "p-gB" }, data: { lapsCompleted: 1, totalCuts: 2 } },
       { where: { sessionId: "s1", participantId: "p-gA" }, data: { collisionCount: 1 } },
       { where: { sessionId: "s1", participantId: "p-gB" }, data: { collisionCount: 2 } },
     ])
 
-    expect(db.rawResultUpload.update).toHaveBeenCalledWith({ where: { id: "up1" }, data: { status: "INGESTED" } })
+    // The status and the audit entry are written in the same transaction
+    expect(tx.rawResultUpload.update).toHaveBeenCalledWith({ where: { id: "up1" }, data: { status: "INGESTED" } })
     expect(audit.createAuditLog).toHaveBeenCalledWith(
       {
         actorUserId: "officer-1",
@@ -439,7 +490,7 @@ describe("ingestUpload", () => {
         summary: "Ingested result upload up1 into event ev1",
         metadata: { eventId: "ev1", pointsSystem: "F1" },
       },
-      db,
+      tx,
     )
     expect(result).toEqual({
       ok: true,
@@ -450,28 +501,22 @@ describe("ingestUpload", () => {
   })
 
   it("awards no points outside a race, and HALF points in a HALF race", async () => {
-    db.rawResultUpload.findUnique.mockImplementation(async ({ select }: { select?: object }) =>
-      select ? { eventId: "ev1", pointsSystem: "NONE", sessionLabel: "QUALIFYING" } : upload({ pointsSystem: "NONE", sessionLabel: "QUALIFYING" }),
-    )
+    stored({ pointsSystem: "NONE", sessionLabel: "QUALIFYING" })
     await ingestUpload("up1", officer)
-    expect(db.raceSession.create.mock.calls[0][0].data).toMatchObject({ sessionType: "QUALIFYING", pointsSystem: "NONE" })
-    expect(db.raceResult.create.mock.calls.map(([args]) => args.data.points)).toEqual([0, 0, 0])
+    expect(tx.raceSession.create.mock.calls[0][0].data).toMatchObject({ sessionType: "QUALIFYING", pointsSystem: "NONE" })
+    expect(tx.raceResult.create.mock.calls.map(([args]) => args.data.points)).toEqual([0, 0, 0])
 
-    db.raceResult.create.mockClear()
-    db.rawResultUpload.findUnique.mockImplementation(async ({ select }: { select?: object }) =>
-      select ? { eventId: "ev1", pointsSystem: "HALF", sessionLabel: "RACE" } : upload({ pointsSystem: "HALF" }),
-    )
+    tx.raceResult.create.mockClear()
+    stored({ pointsSystem: "HALF" })
     await ingestUpload("up1", officer)
-    expect(db.raceResult.create.mock.calls.map(([args]) => args.data.points)).toEqual([13, 9, 7.5])
+    expect(tx.raceResult.create.mock.calls.map(([args]) => args.data.points)).toEqual([13, 9, 7.5])
   })
 
   it("defaults to an F1 race when the upload has no points system or label", async () => {
-    db.rawResultUpload.findUnique.mockImplementation(async ({ select }: { select?: object }) =>
-      select ? { eventId: "ev1", pointsSystem: null, sessionLabel: null } : upload({ pointsSystem: null, sessionLabel: null }),
-    )
+    stored({ pointsSystem: null, sessionLabel: null })
     await ingestUpload("up1", officer)
-    expect(db.raceSession.create.mock.calls[0][0].data).toMatchObject({ sessionType: "RACE", pointsSystem: "F1" })
-    expect(db.raceResult.create.mock.calls[0][0].data.points).toBe(25)
+    expect(tx.raceSession.create.mock.calls[0][0].data).toMatchObject({ sessionType: "RACE", pointsSystem: "F1" })
+    expect(tx.raceResult.create.mock.calls[0][0].data.points).toBe(25)
   })
 
   it("adds a proposal's ids to the audit entry", async () => {
@@ -492,25 +537,37 @@ describe("ingestUpload", () => {
   })
 
   it("stops when another ingest got there first (checked again under the lock)", async () => {
-    db.raceSession.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1)
+    // The pre-check saw no sessions; the check under the lock finds the other ingest's
+    tx.raceSession.count.mockResolvedValue(1)
+
     expect(await ingestUpload("up1", officer)).toEqual({ ok: false, error: ALREADY_INGESTED })
-    expect(db.raceSession.create).not.toHaveBeenCalled()
+    expect(db.raceSession.count).toHaveBeenCalledTimes(1)
+    expect(callOrder(tx.$queryRaw)).toBeLessThan(callOrder(tx.raceSession.count))
+    expect(tx.raceSession.create).not.toHaveBeenCalled()
+    expect(tx.rawResultUpload.update).not.toHaveBeenCalled()
+    expect(audit.createAuditLog).not.toHaveBeenCalled()
   })
 
-  it("stops when the event link changed before the lock", async () => {
-    db.rawResultUpload.findUnique.mockImplementation(async ({ select }: { select?: object }) =>
-      select ? { eventId: "ev2", pointsSystem: "F1", sessionLabel: "RACE" } : upload(),
-    )
+  it.each([
+    ["the event", { eventId: "ev2", pointsSystem: "F1", sessionLabel: "RACE" }],
+    ["the points system", { eventId: "ev1", pointsSystem: "HALF", sessionLabel: "RACE" }],
+    ["the session label", { eventId: "ev1", pointsSystem: "F1", sessionLabel: "QUALIFYING" }],
+    ["everything (the upload was deleted)", null],
+  ])("stops when %s changed before the lock", async (_label, current) => {
+    tx.rawResultUpload.findUnique.mockResolvedValue(current)
     expect(await ingestUpload("up1", officer)).toEqual({
       ok: false,
       error: "Someone changed this upload's event link while it was ingesting. Reload the page and try again.",
     })
-    expect(db.raceSession.create).not.toHaveBeenCalled()
+    expect(callOrder(tx.$queryRaw)).toBeLessThan(callOrder(tx.rawResultUpload.findUnique))
+    expect(tx.raceSession.create).not.toHaveBeenCalled()
+    expect(audit.createAuditLog).not.toHaveBeenCalled()
   })
 
-  it("throws other failures, rolling the transaction back", async () => {
-    db.raceLap.createMany.mockRejectedValue(new Error("deadlock"))
+  it("throws other failures and writes no audit entry", async () => {
+    tx.raceLap.createMany.mockRejectedValue(new Error("deadlock"))
     await expect(ingestUpload("up1", officer)).rejects.toThrow("deadlock")
+    expect(tx.rawResultUpload.update).not.toHaveBeenCalled()
     expect(audit.createAuditLog).not.toHaveBeenCalled()
   })
 })
