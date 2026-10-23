@@ -34,11 +34,11 @@ vi.mock("@/server/db", () => {
   return {
     prisma: {
       jackFile: {
-        findMany: vi.fn(async ({ where: w, take, select }: { where: Record<string, unknown>; take: number; select: Record<string, unknown> }) =>
+        findMany: vi.fn(async ({ where: w, skip = 0, take, select }: { where: Record<string, unknown>; skip?: number; take: number; select: Record<string, unknown> }) =>
           state.files
             .filter((row) => where(row, w))
             .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-            .slice(0, take)
+            .slice(skip, skip + take)
             .map((row) => pick(row, select))
         ),
         count: vi.fn(async ({ where: w }: { where: Record<string, unknown> }) => state.files.filter((row) => where(row, w)).length),
@@ -141,10 +141,28 @@ describe("room_files: listing", () => {
     expect(out.displays).toEqual([{ kind: "files", files: [expect.objectContaining({ id: pic.id, thumbUrl: expect.stringContaining("variant=thumb") }), expect.objectContaining({ id: csv.id })] }])
   })
 
-  it("says when there are more than it listed, and when there are none", async () => {
+  it("pages through the files with offset, and says when there are none", async () => {
     expect(await run({})).toMatchObject({ label: "No files in this room yet" })
     for (let i = 0; i < 3; i++) add({ kind: "TEXT", filename: `${i}.txt` })
-    expect(JSON.parse((await run({ limit: 2 })).forModel)).toMatchObject({ total: 3, note: "The newest 2 of 3; raise limit to see more." })
+    const first = await run({ limit: 2 })
+    expect(JSON.parse(first.forModel)).toMatchObject({ total: 3, offset: 0, nextOffset: 2, note: "Files 1–2 of 3, newest first. For older ones, call again with offset 2." })
+    expect(JSON.parse(first.forModel).files.map((f: { name: string }) => f.name)).toEqual(["2.txt", "1.txt"])
+    expect(first.label).toBe("Listed files 1–2 of 3 in this room")
+    const rest = JSON.parse((await run({ limit: 2, offset: 2 })).forModel)
+    expect(rest).toMatchObject({ total: 3, offset: 2, nextOffset: null })
+    expect(rest.files.map((f: { name: string }) => f.name)).toEqual(["0.txt"])
+    expect(rest.note).toBeUndefined()
+    expect(JSON.parse((await run({ offset: 5 })).forModel)).toMatchObject({ files: [], note: "That's past the end: the room has 3 files." })
+  })
+
+  it("keeps a long listing under the result cap, and its nextOffset where the files that fit end", async () => {
+    for (let i = 0; i < 100; i++) add({ kind: "TEXT", filename: `${"long name ".repeat(20)}${i}.txt` })
+    const out = await run({ limit: 100 })
+    const result = JSON.parse(out.forModel)
+    expect(out.forModel.length).toBeLessThanOrEqual(20_000)
+    expect(result.files.length).toBeLessThan(100)
+    expect(result.nextOffset).toBe(result.files.length)
+    expect(out.displays?.[0]).toMatchObject({ kind: "files" })
   })
 })
 
