@@ -9,6 +9,7 @@ import { knowledgeEntryPath, roomMessagePath } from "@/lib/jack/knowledge"
 import { partLink } from "@/lib/jack/links"
 import { formatMeetingTime, meetingAgendaPath, meetingTimeInput, meetingTypeLabel } from "@/lib/meetings"
 import { requireOfficerPage } from "@/server/auth/guards"
+import { DOCUMENT_SOURCE_LABEL } from "@/server/connectors/documents/sources"
 import { getMeetingDetail } from "@/server/queries/meetings"
 import { listOfficers } from "@/server/services/officers"
 import { ActionItemList, AddActionItemForm } from "../../action-items/_components/action-items"
@@ -32,6 +33,13 @@ function DocumentLink({ name, url }: { name: string; url: string }) {
       {name} <span className="text-xs font-normal text-admin-subtle">({link.internal ? "this site" : link.host})</span>
     </a>
   )
+}
+
+/** Where a synced transcript lives: "Synced from Google Drive · Club/Meetings/Transcripts", or that it's gone there */
+function transcriptSource(doc: { source: string; path: string; deletedAt: Date | null }): string {
+  const from = DOCUMENT_SOURCE_LABEL[doc.source] ?? doc.source
+  if (doc.deletedAt) return `Removed from ${from} since`
+  return `Synced from ${from}${doc.path ? ` · ${doc.path}` : ""}`
 }
 
 /** One meeting: agenda, summary, decisions and action items, with the meeting's details to edit */
@@ -154,14 +162,29 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
                           {
                             label: "Transcript",
                             value: (
-                              <a href={`/api/admin/jack/files/${detail.transcript.id}`} className="break-all font-medium hover:underline">
-                                {detail.transcript.filename}
-                              </a>
+                              <span className="flex flex-col gap-0.5">
+                                <a href={`/api/admin/jack/files/${detail.transcript.id}`} className="break-all font-medium hover:underline">
+                                  {detail.transcript.filename}
+                                </a>
+                                <span className="text-xs text-admin-subtle">Attached in a Jack room</span>
+                              </span>
                             ),
                           },
                         ]
                       : []),
-                    ...(detail.transcriptDocument ? [{ label: "Transcript", value: <DocumentLink name={detail.transcriptDocument.name} url={detail.transcriptDocument.webUrl} /> }] : []),
+                    ...(detail.transcriptDocument
+                      ? [
+                          {
+                            label: "Transcript",
+                            value: (
+                              <span className="flex flex-col gap-0.5">
+                                <DocumentLink name={detail.transcriptDocument.name} url={detail.transcriptDocument.webUrl} />
+                                <span className="break-words text-xs text-admin-subtle">{transcriptSource(detail.transcriptDocument)}</span>
+                              </span>
+                            ),
+                          },
+                        ]
+                      : []),
                     ...(detail.room
                       ? [
                           {
