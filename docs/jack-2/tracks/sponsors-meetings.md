@@ -58,7 +58,7 @@ Shared behavior:
 - **Partial approval:** every row is a checkbox. Apply writes the picked rows (and, for a meeting, the meeting itself) **in one transaction**, all or none.
 - **Staleness is checked at apply, per picked row** (`checkStale` returns null): each change is written with the fields it was proposed against as `expected`, so a row an officer left out never blocks the rest, and a picked row that moved on makes the whole proposal STALE (`StaleProposalError`). A company added meanwhile, a deleted record, or an owner who stopped being an officer is stale too.
 - Each change's own audit entry carries `ctx.auditMetadata` (`via: "jack"`, `proposalId`, `roomId`, `proposedFor`); the framework adds its own `JACK_PROPOSAL` entry. Paths are revalidated after the apply.
-- A proposal that changes one record targets it (`targetId`), so a newer one supersedes it.
+- A proposal that changes one record targets it (`targetId`), so a newer one supersedes it. A `meeting.record` that only adds decisions or action items to a meeting doesn't, so two of those both stand.
 - New meetings and action items made by a proposal keep the room (`roomId`), and decision-log versions keep it too, so the eval's cleanup finds them by room.
 
 ### Import targets (`proposals/sponsors-meetings/import-targets.ts`)

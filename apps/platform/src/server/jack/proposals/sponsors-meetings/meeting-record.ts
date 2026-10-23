@@ -214,7 +214,8 @@ export const meetingRecordKind: ProposalKind<MeetingRecord> = {
 
     return {
       before,
-      ...(meeting.id ? { targetId: meeting.id } : {}),
+      // A newer change to the meeting's own fields replaces this one; adding decisions or items alone doesn't, so two of those both stand
+      ...(meeting.id && Object.keys(before.fields).length ? { targetId: meeting.id } : {}),
       ...(file?.sha256 ? { fileSha256: file.sha256 } : {}),
       view: { title, summary, diff, ...(rows.length ? { rows } : {}), ...(links.length ? { links } : {}), ...(people.size ? { people: [...people.values()] } : {}) },
     }

@@ -108,6 +108,8 @@ describe("meeting.record", () => {
     expect(prepared.view.diff).toEqual([{ field: "summaryMd", label: "Summary", before: null, after: "We went over sponsors.", format: "markdown" }])
     expect(prepared.before).toEqual({ meetingId: "m-1", fields: { summaryMd: null } })
     expect(prepared.targetId).toBe("m-1")
+    // Only adding decisions or items: no target, so two such proposals for one meeting both stand
+    expect((await meetingRecordKind.prepare({ meetingId: "m-1", decisions: [{ text: "Keep the four tiers." }] }, ctx)).targetId).toBeUndefined()
     await expect(meetingRecordKind.prepare({ meetingId: "m-1", agenda: "1. Sponsors" }, ctx)).rejects.toBeInstanceOf(ProposalInputError)
     db.meeting.findUnique.mockResolvedValueOnce(null)
     await expect(meetingRecordKind.prepare({ meetingId: "m-gone", summary: "x" }, ctx)).rejects.toThrow(/no meeting with id m-gone/)
