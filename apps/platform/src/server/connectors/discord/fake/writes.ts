@@ -21,7 +21,8 @@ import { FAKE_DISCORD, fakeSnowflake, type FakeServer } from "./data"
  * Test hooks under /_fake: `drop` { path?, times?, when? "before" | "after" } makes writes fail like a
  * dropped connection (after: the write happened, the caller never hears back); `fail` { path?, method?,
  * status, code, message?, times? } answers writes with an error; `clock` { advanceMs } moves the fake's
- * clock; `interested` { eventId, count }; `PATCH roles/:roleId`; `GET writes`.
+ * clock; `interested` { eventId, count }; `PATCH roles/:roleId`; `PUT overwrites/:channelId` (a channel's
+ * permission overwrites, as a list); `GET writes`.
  */
 
 /** How long Discord dedupes a nonce: "the past few minutes" (research §3 W1); the fake keeps 3 */
@@ -381,6 +382,17 @@ export function fakeWriteRoutes(server: FakeServer, { api, readable, error }: Fa
         const body = (await request.json().catch(() => ({}))) as Partial<typeof target>
         Object.assign(target, body, { id: target.id })
         return Response.json(target)
+      },
+    },
+    {
+      method: "PUT",
+      path: "/_fake/overwrites/:channelId",
+      async handle(request, { params }) {
+        const channel = server.channels.find((c) => c.id === params.channelId)
+        if (!channel) return error(404, 10003, "Unknown Channel")
+        const body = (await request.json().catch(() => [])) as FakeServer["channels"][number]["permission_overwrites"]
+        channel.permission_overwrites = Array.isArray(body) ? body : []
+        return Response.json(channel)
       },
     },
     {

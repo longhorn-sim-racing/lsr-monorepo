@@ -3,16 +3,18 @@ import { prisma } from "@/server/db"
 import { createAuditLog } from "@/server/audit/log"
 import { DISCORD_ERROR, DiscordApiError, type DiscordClient } from "@/server/connectors/discord/client"
 import { prismaDiscordStore } from "@/server/connectors/discord/store"
-import { botStanding, roleSyncRefusal, type DiscordRole, type DiscordWriter } from "@/server/connectors/discord/write"
+import { botStanding, roleSyncRefusal, type DiscordRole, type DiscordWriter, type RoleSafety } from "@/server/connectors/discord/write"
 import { DEFAULT_LEAGUE, resolveLeagueSeason } from "@/server/jack/tools/seasons"
 import { listSeasonEntrants } from "@/server/services/league-entry.service"
 
 /**
  * Role sync (design §12.1): linked members (User.discordUserId) get a Discord role while they meet a
  * condition on the site, and lose it when they stop. Hourly (`discord.role-sync`), after the member sync.
- * - Plain roles only: never @everyone, a managed role, a role with any moderation permission, or one at
- *   or above the bot's own highest role (roleSyncRefusal; checked live every run, so a role someone gives
- *   Kick Members later is refused from then on).
+ * - Plain roles only: never @everyone, a managed role, a role with any moderation permission (server-wide,
+ *   or in a channel the bot can see through a permission overwrite), one with Create Events or Create
+ *   Expressions that @everyone doesn't have, or one at or above the bot's own highest role
+ *   (roleSyncRefusal; checked live every run, so a role someone gives Kick Members later is refused from
+ *   then on).
  * - Only linked members, never anyone on the purged list, and only members the member sync has seen in
  *   the server (DiscordMember.roles is what they hold now).
  * - At most MAX_ROLE_CHANGES_PER_RUN changes a run; the rest wait for the next.
@@ -82,6 +84,13 @@ export async function readRoles(client: DiscordClient, writer: DiscordWriter, si
   return { roles, botTop: standing.top, botRoleIds: bot.roles, mentionEveryone: standing.mentionEveryone }
 }
 
+/** Everything role sync checks a role against, read live: the roles, the bot's place, @everyone's permissions and the channels' overwrites */
+export async function readRoleSafety(client: DiscordClient, writer: DiscordWriter, signal?: AbortSignal): Promise<RoleSafety & { roles: DiscordRole[] }> {
+  const [live, channels] = await Promise.all([readRoles(client, writer, signal), writer.channelPermissions(signal)])
+  const everyone = live.roles.find((r) => r.id === writer.guildId)
+  return { roles: live.roles, botTop: live.botTop, guildId: writer.guildId, everyonePermissions: everyone?.permissions ?? null, channels }
+}
+
 export type RoleSyncRun = { rules: number; added: number; removed: number; refused: number; skipped: number; waiting: number }
 
 /** One role sync run over the switched-on rules */
@@ -89,7 +98,8 @@ export async function runRoleSync({ client, writer }: { client: DiscordClient; w
   const run: RoleSyncRun = { rules: 0, added: 0, removed: 0, refused: 0, skipped: 0, waiting: 0 }
   const rules = await prisma.discordRoleRule.findMany({ where: { enabled: true }, orderBy: { roleId: "asc" } })
   if (!rules.length) return run
-  const { roles, botTop } = await readRoles(client, writer, ctx.signal)
+  const live = await readRoleSafety(client, writer, ctx.signal)
+  const { roles } = live
   const members = await linkedMembers()
   const inServer = await prisma.discordMember.findMany({ where: { id: { in: members.map((m) => m.discordUserId) }, leftAt: null }, select: { id: true, roles: true } })
   const current = new Map(inServer.map((m) => [m.id, [...m.roles]]))
@@ -98,7 +108,7 @@ export async function runRoleSync({ client, writer }: { client: DiscordClient; w
   for (const rule of rules) {
     if (ctx.signal?.aborted) break
     const role = roles.find((r) => r.id === rule.roleId)
-    const refusal = roleSyncRefusal(role, { guildId: writer.guildId, botTop })
+    const refusal = roleSyncRefusal(role, live)
     if (refusal || !role) {
       run.refused++
       ctx.log(`Refused a rule: ${refusal}`)
@@ -173,10 +183,10 @@ async function audit(actor: Actor, actionType: string, rule: DiscordRoleRule, su
 }
 
 /** Adds a rule, refusing an unsafe role (checked against the live roles) and a role that already has one */
-export async function createRoleRule(input: { roleId: string; condition: string; enabled: boolean }, actor: Actor, live: { roles: DiscordRole[]; botTop: number; guildId: string }): Promise<{ ok: true; rule: DiscordRoleRule } | { ok: false; error: string }> {
+export async function createRoleRule(input: { roleId: string; condition: string; enabled: boolean }, actor: Actor, live: RoleSafety & { roles: DiscordRole[] }): Promise<{ ok: true; rule: DiscordRoleRule } | { ok: false; error: string }> {
   if (!isRoleCondition(input.condition)) return { ok: false, error: "Pick a condition from the list." }
   const role = live.roles.find((r) => r.id === input.roleId)
-  const refusal = roleSyncRefusal(role, { guildId: live.guildId, botTop: live.botTop })
+  const refusal = roleSyncRefusal(role, live)
   if (refusal || !role) return { ok: false, error: refusal ?? "Pick a role." }
   if (await prisma.discordRoleRule.count({ where: { roleId: role.id } })) return { ok: false, error: `@${role.name} already has a rule. Change or delete that one.` }
   const rule = await prisma.discordRoleRule.create({ data: { roleId: role.id, condition: input.condition, enabled: input.enabled, createdById: actor.userId } })

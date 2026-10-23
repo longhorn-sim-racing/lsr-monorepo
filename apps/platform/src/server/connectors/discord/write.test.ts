@@ -97,6 +97,31 @@ describe("role safety", () => {
     expect(roleSyncRefusal(role({ position: 2 }), { guildId, botTop: 3 })).toBeNull()
   })
 
+  it("refuses Pin Messages, moderation given in a channel's overwrite, and Create Events or Expressions that @everyone doesn't have", () => {
+    const b = (n: number) => String(BigInt(1) << BigInt(n))
+    expect(roleSyncRefusal(role({ name: "Pinners", permissions: b(51) }), { guildId, botTop: 3 })).toMatch(/moderation permissions \(Pin Messages\)/)
+    const channels = [
+      { id: "c1", name: "lsc-chat", type: 0, permission_overwrites: [{ id: "300000000000000001", type: 0, allow: b(13), deny: "0" }] },
+      { id: "c2", name: "general", type: 0, permission_overwrites: [{ id: "300000000000000001", type: 1, allow: b(1), deny: "0" }] },
+    ]
+    expect(roleSyncRefusal(role({ name: "Helpers" }), { guildId, botTop: 3, channels })).toBe("@Helpers has moderation permissions in a channel (Manage Messages in #lsc-chat); role sync only hands out plain roles.")
+    // A member overwrite with the same id, or a deny, isn't the role's
+    expect(roleSyncRefusal(role({ name: "Helpers" }), { guildId, botTop: 3, channels: [channels[1], { id: "c3", name: "x", type: 0, permission_overwrites: [{ id: "300000000000000001", type: 0, allow: "0", deny: b(13) }] }] })).toBeNull()
+    const creators = role({ name: "Creators", permissions: b(44) })
+    expect(roleSyncRefusal(creators, { guildId, botTop: 3, everyonePermissions: b(10) })).toMatch(/has Create Events, which @everyone doesn't/)
+    expect(roleSyncRefusal(creators, { guildId, botTop: 3, everyonePermissions: String((BigInt(1) << BigInt(44)) | (BigInt(1) << BigInt(43))) })).toBeNull()
+  })
+
+  it("reads the channels' overwrites from Discord, the channels the bot can see", async () => {
+    const { fakes, writer } = setup()
+    const listed = await writer.channelPermissions()
+    expect(listed.find((c) => c.id === FAKE_CHANNELS.announcements)?.permission_overwrites).toHaveLength(2)
+    expect(listed.some((c) => c.id === FAKE_CHANNELS.officers)).toBe(false)
+    await hook(fakes, "PUT", `overwrites/${FAKE_CHANNELS.lscChat}`, [{ id: FAKE_DISCORD.roles.lscDriver, type: 0, allow: String(BigInt(1) << BigInt(13)), deny: "0" }])
+    const lscDriver = fakeRoles().find((r) => r.id === FAKE_DISCORD.roles.lscDriver)
+    expect(roleSyncRefusal(lscDriver, { guildId: FAKE_DISCORD.guildId, botTop: 3, channels: await writer.channelPermissions() })).toMatch(/Manage Messages in #lsc-chat/)
+  })
+
   it("checks the bot's place for the smoke test: below the admin roles, without Administrator", () => {
     const roles = fakeRoles()
     const bot = [FAKE_DISCORD.roles.bot]

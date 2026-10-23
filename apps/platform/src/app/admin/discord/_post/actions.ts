@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache"
 import { prisma } from "@/server/db"
 import { requireOfficer } from "@/server/auth/guards"
 import { discordPostingForPage, NOT_CONNECTED } from "@/server/discord-post/connection"
-import { createRoleRule, deleteRoleRule, readRoles, setRoleRuleEnabled } from "@/server/discord-post/role-sync"
+import { createRoleRule, deleteRoleRule, readRoleSafety, setRoleRuleEnabled } from "@/server/discord-post/role-sync"
 import { roleSyncRefusal } from "@/server/connectors/discord/write"
 import type { ActionResult } from "@/lib/action-result"
 
@@ -25,8 +25,7 @@ async function requireAdmin(): Promise<{ userId: string } | null> {
 async function liveRoles() {
   const posting = await discordPostingForPage()
   if (!posting) return null
-  const live = await readRoles(posting.client, posting.writer).catch(() => null)
-  return live ? { ...live, guildId: posting.writer.guildId } : null
+  return readRoleSafety(posting.client, posting.writer).catch(() => null)
 }
 
 export async function createRoleRuleAction(input: { roleId: string; condition: string; enabled: boolean }): Promise<ActionResult> {
@@ -49,7 +48,7 @@ export async function setRoleRuleEnabledAction(id: string, enabled: boolean): Pr
   const role = live?.roles.find((r) => r.id === rule.roleId)
   if (enabled) {
     if (!live) return { ok: false, error: `${NOT_CONNECTED} Role sync reads the server's roles from Discord.` }
-    const refusal = roleSyncRefusal(role, { guildId: live.guildId, botTop: live.botTop })
+    const refusal = roleSyncRefusal(role, live)
     if (refusal) return { ok: false, error: refusal }
   }
   const result = await setRoleRuleEnabled(id, enabled, admin, role?.name)

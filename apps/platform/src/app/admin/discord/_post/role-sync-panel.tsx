@@ -56,7 +56,7 @@ function AddRuleDialog({ roles, conditions, onClose }: { roles: { id: string; na
       }
     >
       <div className="flex flex-col gap-3">
-        <Field label="Discord role" htmlFor="sync-role" hint="Only plain roles below the bot's own: roles with moderation permissions aren't listed.">
+        <Field label="Discord role" htmlFor="sync-role" hint="Only plain roles below the bot's own. Not listed: roles with moderation permissions (server-wide, or in a channel through its permission overrides) and roles with Create Events or Create Expressions that @everyone doesn't have. Overrides in channels the bot can't see can't be checked.">
           <Select id="sync-role" value={roleId} onChange={(e) => setRoleId(e.target.value)}>
             {roles.map((r) => (
               <option key={r.id} value={r.id}>

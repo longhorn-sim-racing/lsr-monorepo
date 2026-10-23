@@ -1,6 +1,6 @@
 import { DISCORD_EPOCH_MS } from "../snowflake"
 import { CHANNEL_TYPE, type DiscordChannel, type DiscordMember, type DiscordMessage, type DiscordPoll, type DiscordUser } from "../types"
-import type { DiscordRole } from "../write"
+import type { DiscordPermissionOverwrite, DiscordRole } from "../write"
 
 /**
  * The Discord fake's made-up server (research §7): a few channels (text, announcement, a forum with
@@ -133,8 +133,8 @@ function random(seed: number) {
 export type FakeServer = {
   guild: { id: string; name: string }
   bot: DiscordUser
-  /** Every channel, including the hidden one; threads too */
-  channels: (DiscordChannel & { hidden?: boolean })[]
+  /** Every channel, including the hidden one; threads too. Overwrites as Get Guild Channels returns them (discord-post: role sync's safety check) */
+  channels: (DiscordChannel & { hidden?: boolean; permission_overwrites?: DiscordPermissionOverwrite[] })[]
   /** Per channel, oldest first */
   messages: Map<string, DiscordMessage[]>
   /** In user id order */
@@ -179,7 +179,18 @@ export function buildFakeServer(now = Date.now()): FakeServer {
     { id: FAKE_CHANNELS.clubCategory, type: CHANNEL_TYPE.category, name: "Club", position: 0 },
     { id: FAKE_CHANNELS.racingCategory, type: CHANNEL_TYPE.category, name: "Racing", position: 1 },
     { id: FAKE_CHANNELS.general, type: CHANNEL_TYPE.text, name: "general", parent_id: FAKE_CHANNELS.clubCategory, position: 0 },
-    { id: FAKE_CHANNELS.announcements, type: CHANNEL_TYPE.announcement, name: "announcements", parent_id: FAKE_CHANNELS.clubCategory, position: 1 },
+    {
+      id: FAKE_CHANNELS.announcements,
+      type: CHANNEL_TYPE.announcement,
+      name: "announcements",
+      parent_id: FAKE_CHANNELS.clubCategory,
+      position: 1,
+      // Only officers post here: @everyone denied Send Messages, Officer allowed it (no moderation bits)
+      permission_overwrites: [
+        { id: FAKE_DISCORD.guildId, type: 0, allow: "0", deny: String(BigInt(1) << BigInt(11)) },
+        { id: FAKE_DISCORD.roles.officer, type: 0, allow: String(BigInt(1) << BigInt(11)), deny: "0" },
+      ],
+    },
     { id: FAKE_CHANNELS.voiceLounge, type: CHANNEL_TYPE.voice, name: "Lounge", parent_id: FAKE_CHANNELS.clubCategory, position: 2 },
     { id: FAKE_CHANNELS.lscChat, type: CHANNEL_TYPE.text, name: "lsc-chat", parent_id: FAKE_CHANNELS.racingCategory, position: 0 },
     { id: FAKE_CHANNELS.setups, type: CHANNEL_TYPE.forum, name: "setups", parent_id: FAKE_CHANNELS.racingCategory, position: 1 },

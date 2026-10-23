@@ -2,7 +2,7 @@ import type { DiscordPost, DiscordPostStatus, Prisma } from "@prisma/client"
 import { roomMessageUrl } from "@/lib/jack/proposals"
 import { prisma } from "@/server/db"
 import { FORMER_OFFICER } from "@/server/jack/messages"
-import { discordEventUrl, roleSyncRefusal, type DiscordRole } from "@/server/connectors/discord/write"
+import { discordEventUrl, roleSyncRefusal, type DiscordRole, type RoleSafety } from "@/server/connectors/discord/write"
 import { postableChannels, postingChannels, type PostingChannel } from "./channels"
 import { postUrl, readBody } from "./outbox"
 import { isRoleCondition, linkedMembers, qualifying, ROLE_CONDITIONS } from "./role-sync"
@@ -260,7 +260,7 @@ export type RoleSyncView = {
   lastRun: { at: string; status: string | null; summary: string | null } | null
 }
 
-export async function roleSyncView(live: { roles: DiscordRole[]; botTop: number; guildId: string } | null): Promise<RoleSyncView> {
+export async function roleSyncView(live: (RoleSafety & { roles: DiscordRole[] }) | null): Promise<RoleSyncView> {
   const [rules, members, job] = await Promise.all([
     prisma.discordRoleRule.findMany({ orderBy: { roleId: "asc" } }),
     linkedMembers(),
@@ -278,7 +278,7 @@ export async function roleSyncView(live: { roles: DiscordRole[]; botTop: number;
       condition: rule.condition,
       conditionLabel: isRoleCondition(rule.condition) ? ROLE_CONDITIONS[rule.condition].label : rule.condition,
       enabled: rule.enabled,
-      refusal: live ? roleSyncRefusal(role, { guildId: live.guildId, botTop: live.botTop }) : null,
+      refusal: live ? roleSyncRefusal(role, live) : null,
       qualifying: want ? want.size : null,
       holders: inServer.filter((m) => m.roles.includes(rule.roleId)).length,
     })
@@ -286,7 +286,7 @@ export async function roleSyncView(live: { roles: DiscordRole[]; botTop: number;
   const taken = new Set(rules.map((r) => r.roleId))
   const safeRoles = live
     ? live.roles
-        .filter((r) => !taken.has(r.id) && !roleSyncRefusal(r, { guildId: live.guildId, botTop: live.botTop }))
+        .filter((r) => !taken.has(r.id) && !roleSyncRefusal(r, live))
         .sort((a, b) => b.position - a.position)
         .map((r) => ({ id: r.id, name: r.name }))
     : []

@@ -4,16 +4,15 @@ import { Badge, EmptyState, Panel, PanelBody, PanelHeader } from "@/components/a
 import { getCachedSessionUser } from "@/server/auth/cached-session"
 import { discordPostingForPage } from "@/server/discord-post/connection"
 import { mirroredEvents, roleSyncView, ruleSummary } from "@/server/discord-post/queries"
-import { readRoles, ROLE_CONDITIONS } from "@/server/discord-post/role-sync"
+import { readRoleSafety, ROLE_CONDITIONS } from "@/server/discord-post/role-sync"
 import { RoleSyncPanel } from "../_post/role-sync-panel"
 import type { DiscordSection } from "./types"
 
-/** The server's roles as the bot sees them, or null while Discord is off or can't be read */
+/** The server's roles and channel overwrites as the bot sees them, or null while Discord is off or can't be read */
 async function liveRoles() {
   const posting = await discordPostingForPage()
   if (!posting) return null
-  const live = await readRoles(posting.client, posting.writer).catch(() => null)
-  return live ? { roles: live.roles, botTop: live.botTop, guildId: posting.writer.guildId } : null
+  return readRoleSafety(posting.client, posting.writer).catch(() => null)
 }
 
 /** Role sync rules: which Discord role linked members get, and when (admins change them) */

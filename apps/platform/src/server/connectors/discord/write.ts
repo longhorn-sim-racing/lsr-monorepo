@@ -1,6 +1,6 @@
 import { DISCORD_LIMITS } from "@/lib/discord/text"
 import type { DiscordClient, DiscordRest } from "./client"
-import type { DiscordMember, DiscordMessage } from "./types"
+import type { DiscordChannel, DiscordMember, DiscordMessage } from "./types"
 
 /**
  * What the club's bot writes to Discord (design §12.1, research/discord.md §3 W1 to W4): messages and
@@ -161,6 +161,9 @@ export const PERMISSION = {
   manageThreads: bit(34),
   moderateMembers: bit(40),
   viewCreatorMonetizationAnalytics: bit(41),
+  createGuildExpressions: bit(43),
+  createEvents: bit(44),
+  pinMessages: bit(51),
 } as const
 
 /**
@@ -188,7 +191,31 @@ export const MODERATION_PERMISSIONS: { bit: bigint; name: string }[] = [
   { bit: PERMISSION.manageThreads, name: "Manage Threads" },
   { bit: PERMISSION.moderateMembers, name: "Timeout Members" },
   { bit: PERMISSION.viewCreatorMonetizationAnalytics, name: "View Creator Monetization Analytics" },
+  { bit: PERMISSION.pinMessages, name: "Pin Messages" },
 ]
+
+/**
+ * Permissions that aren't moderation but still let a member add to the server for everyone (events,
+ * emoji and stickers). Many servers give them to @everyone (then a role holding them adds nothing);
+ * role sync refuses a role that holds one @everyone doesn't
+ */
+export const EXTRA_PERMISSIONS: { bit: bigint; name: string }[] = [
+  { bit: PERMISSION.createEvents, name: "Create Events" },
+  { bit: PERMISSION.createGuildExpressions, name: "Create Expressions" },
+]
+
+/** A channel's permission overwrite (type 0 a role, 1 a member); allow and deny are bitfields as decimal strings */
+export type DiscordPermissionOverwrite = { id: string; type: number; allow: string; deny: string }
+
+/** A channel with its permission overwrites, as Get Guild Channels returns it */
+export type DiscordChannelPermissions = Pick<DiscordChannel, "id" | "name" | "type"> & { permission_overwrites?: DiscordPermissionOverwrite[] }
+
+/**
+ * What role sync checks a role against, read live: the bot's highest position, @everyone's permissions,
+ * and the channels the bot can see with their overwrites (a role can get Manage Messages in one channel
+ * without having it server-wide). Channels the bot can't see aren't listed, so they can't be checked
+ */
+export type RoleSafety = { guildId: string; botTop: number; everyonePermissions?: string | null; channels?: DiscordChannelPermissions[] }
 
 function permissionBits(permissions: string | undefined): bigint {
   try {
@@ -204,6 +231,25 @@ export function moderationPermissions(role: Pick<DiscordRole, "permissions">): s
   const bits = permissionBits(role.permissions)
   if (bits & PERMISSION.administrator) return ["Administrator"]
   return MODERATION_PERMISSIONS.filter((p) => bits & p.bit).map((p) => p.name)
+}
+
+/** Create Events and Create Expressions when a role holds them and @everyone doesn't (unknown @everyone: when the role holds them) */
+export function extraPermissions(role: Pick<DiscordRole, "permissions">, everyonePermissions?: string | null): string[] {
+  const bits = permissionBits(role.permissions)
+  const everyone = everyonePermissions === undefined || everyonePermissions === null ? BigInt(0) : permissionBits(everyonePermissions)
+  return EXTRA_PERMISSIONS.filter((p) => bits & p.bit && !(everyone & p.bit)).map((p) => p.name)
+}
+
+/** The moderation permissions a role is allowed in single channels through their overwrites: "Manage Messages in #lsc-chat" */
+export function overwriteModeration(roleId: string, channels: readonly DiscordChannelPermissions[]): string[] {
+  const found: string[] = []
+  for (const channel of channels) {
+    const overwrite = channel.permission_overwrites?.find((o) => Number(o.type) === 0 && o.id === roleId)
+    if (!overwrite) continue
+    const allow = permissionBits(overwrite.allow)
+    for (const p of MODERATION_PERMISSIONS) if (allow & p.bit) found.push(`${p.name} in #${channel.name ?? channel.id}`)
+  }
+  return found
 }
 
 /** Whether a role has a permission (Administrator has them all) */
@@ -227,17 +273,24 @@ export function botStanding(roles: DiscordRole[], botRoleIds: readonly string[])
   }
 }
 
+const someOf = (names: string[]) => `${names.slice(0, 3).join(", ")}${names.length > 3 ? ", …" : ""}`
+
 /**
  * Why role sync may not manage a role, or null when it may (design §12.1: non-moderation roles only,
- * below the bot's own). @everyone, managed roles (a bot's, boosters'), roles with a moderation
- * permission, and roles at or above the bot's highest role are refused
+ * below the bot's own). Refused: @everyone, managed roles (a bot's, boosters'), roles with a moderation
+ * permission (server-wide, or in a channel the bot can see through an overwrite), roles with Create
+ * Events or Create Expressions that @everyone doesn't have, and roles at or above the bot's highest role
  */
-export function roleSyncRefusal(role: DiscordRole | undefined, { guildId, botTop }: { guildId: string; botTop: number }): string | null {
+export function roleSyncRefusal(role: DiscordRole | undefined, { guildId, botTop, everyonePermissions, channels }: RoleSafety): string | null {
   if (!role) return "The role no longer exists in Discord."
   if (role.id === guildId || role.name === "@everyone") return "@everyone can't be synced."
   if (role.managed) return `@${role.name} belongs to an integration or a bot, so nobody can hand it out.`
   const moderation = moderationPermissions(role)
-  if (moderation.length) return `@${role.name} has moderation permissions (${moderation.slice(0, 3).join(", ")}${moderation.length > 3 ? ", …" : ""}); role sync only hands out plain roles.`
+  if (moderation.length) return `@${role.name} has moderation permissions (${someOf(moderation)}); role sync only hands out plain roles.`
+  const inChannels = channels ? overwriteModeration(role.id, channels) : []
+  if (inChannels.length) return `@${role.name} has moderation permissions in a channel (${someOf(inChannels)}); role sync only hands out plain roles.`
+  const extra = extraPermissions(role, everyonePermissions)
+  if (extra.length) return `@${role.name} has ${extra.join(" and ")}, which @everyone doesn't; role sync only hands out plain roles.`
   if (role.position >= botTop) return `@${role.name} sits at or above the bot's own role; move the bot's role above it in Server Settings → Roles.`
   return null
 }
@@ -300,6 +353,8 @@ export function discordWriter(rest: DiscordRest, guildId: string) {
     expirePoll: async (channelId: string, messageId: string, signal?: AbortSignal) => (await rest.request<DiscordMessage>("POST", `/channels/${id(channelId)}/polls/${id(messageId)}/expire`, { signal })).data,
     /** The server's roles, with positions and permissions */
     roles: (signal?: AbortSignal) => rest.get<DiscordRole[]>(`/guilds/${guild}/roles`, { signal }),
+    /** The channels the bot can see, with their permission overwrites (role sync's safety check; the sync reads channels through client.ts) */
+    channelPermissions: (signal?: AbortSignal) => rest.get<DiscordChannelPermissions[]>(`/guilds/${guild}/channels`, { signal }),
     /** One member, roles included (404 10007 when they aren't in the server) */
     member: (userId: string, signal?: AbortSignal) => rest.get<DiscordMember>(`/guilds/${guild}/members/${id(userId)}`, { signal }),
     /** Gives a member a role (W4); Discord answers 204, and nothing changes if they have it */

@@ -43,7 +43,7 @@ vi.mock("@/server/services/league-entry.service", () => ({ listSeasonEntrants: a
 
 import { mountFakes, type MountedFakes } from "@/server/connectors/fakes/testing"
 import { discordClient } from "@/server/connectors/discord/client"
-import { FAKE_DISCORD } from "@/server/connectors/discord/fake/data"
+import { FAKE_CHANNELS, FAKE_DISCORD } from "@/server/connectors/discord/fake/data"
 import { discordFake } from "@/server/connectors/discord/fake/handlers"
 import { purgedHash } from "@/server/connectors/discord/metadata"
 import { DiscordRateLimiter } from "@/server/connectors/discord/rate-limit"
@@ -113,6 +113,16 @@ describe("role sync", () => {
     const result = await run()
     expect(result).toMatchObject({ rules: 0, refused: 3, added: 0, removed: 0 })
     expect(fakes.requests.some((r) => r.method === "PUT" || r.method === "DELETE")).toBe(false)
+  })
+
+  it("refuses a plain role that gets moderation permissions in a channel through an overwrite", async () => {
+    await fetch(`${fakes.origin}/discord/_fake/overwrites/${FAKE_CHANNELS.lscChat}`, { method: "PUT", body: JSON.stringify([{ id: R.lscDriver, type: 0, allow: String(BigInt(1) << BigInt(13)), deny: "0" }]) })
+    state.rules = [{ id: "rr-1", roleId: R.lscDriver, condition: "lsc_driver", enabled: true, createdById: null }]
+    const lines: string[] = []
+    const result = await runRoleSync(posting, { now: new Date(), log: (line) => lines.push(line) })
+    expect(result).toMatchObject({ rules: 0, refused: 1, added: 0 })
+    expect(lines.join("\n")).toMatch(/Manage Messages in #lsc-chat/)
+    expect(fakes.requests.some((r) => r.method === "PUT" && r.path.includes("/members/"))).toBe(false)
   })
 
   it("changes nothing when it can't tell who qualifies (no open LSC season)", async () => {
