@@ -11,7 +11,8 @@ import { bucketSignups, compactRow, membersForModel, monthsBefore, tierCounts } 
 import { forModelWithList, forModelWithLists, MAX_MODEL_CHARS } from "./display"
 import { formatSchema, parseConstraints, typeName } from "./describe-schema"
 import { summarizeEvent, searchWhere, type EventRow } from "./events-overview"
-import { JACK_TOOLS, findJackTool } from "./index"
+import { CORE_JACK_TOOLS, JACK_TOOLS, findJackTool } from "./index"
+import { SLOT_TOOLS } from "./registry"
 import { checkoutOutcome, driverRow, entrantSummary, schoolOf } from "./lsc-entries"
 import { rankActivity } from "./member-activity"
 import { itemName, purchaseKey, summarizePayments, unpaidCheckouts, type PaymentRow } from "./payments-summary"
@@ -345,6 +346,16 @@ describe("describe_schema formatting", () => {
     expect(text).toContain("Not found, or not readable by Jack: SystemSetting")
     expect(text).not.toContain("How the club's data fits together")
   })
+
+  it("adds the tracks' notes after the core notes, only for the full schema, and their table notes beside the columns", () => {
+    const trackNotes = ["Discord\n- DiscordMessage keeps no message text."]
+    const full = formatSchema(columns, constraints, enums, { tableNotes: { Venue: "Where an event happens." }, trackNotes }).text
+    expect(full).toContain('"Venue" (Where an event happens.)')
+    expect(full.indexOf("DiscordMessage keeps no message text")).toBeGreaterThan(full.indexOf("How the club's data fits together"))
+    const some = formatSchema(columns, constraints, enums, { tables: ["Venue"], tableNotes: { Venue: "Where an event happens." }, trackNotes }).text
+    expect(some).toContain('"Venue" (Where an event happens.)')
+    expect(some).not.toContain("DiscordMessage")
+  })
 })
 
 describe("forModelWithList", () => {
@@ -406,8 +417,9 @@ describe("raceSessionsCount", () => {
 })
 
 describe("the tool list", () => {
-  it("has unique snake_case names in a fixed order, and finds tools by name", () => {
-    const names = JACK_TOOLS.map((t) => t.name)
+  it("starts with today's 21 tools, unchanged in name and order (the order is part of the cached prompt)", () => {
+    const names = JACK_TOOLS.slice(0, 21).map((t) => t.name)
+    expect(CORE_JACK_TOOLS.map((t) => t.name)).toEqual(names)
     expect(names).toEqual([
       "club_members",
       "member_activity",
@@ -431,14 +443,21 @@ describe("the tool list", () => {
       "deck_restore",
       "deck_screenshot",
     ])
+  })
+
+  it("follows them with the tracks' slot tools, and every name is unique snake_case", () => {
+    expect(JACK_TOOLS.slice(CORE_JACK_TOOLS.length)).toEqual(SLOT_TOOLS)
+    const names = JACK_TOOLS.map((t) => t.name)
+    expect(new Set(names).size).toBe(names.length)
     for (const name of names) expect(name).toMatch(/^[a-z][a-z_]*$/)
     expect(findJackTool("run_sql")?.name).toBe("run_sql")
     expect(findJackTool("nope")).toBeUndefined()
   })
 
-  it("marks only draft_event and the deck changes as writing; only draft_event touches club data", () => {
-    expect(JACK_TOOLS.filter((t) => t.writes).map((t) => t.name)).toEqual(["draft_event", "deck_create", "deck_write", "deck_edit", "deck_arrange", "deck_restore"])
-    expect(JACK_TOOLS.filter((t) => t.design).map((t) => t.name)).toEqual(JACK_TOOLS.filter((t) => t.name.startsWith("deck_")).map((t) => t.name))
+  it("marks only draft_event and the deck changes as writing among today's tools; only draft_event touches club data", () => {
+    expect(CORE_JACK_TOOLS.filter((t) => t.writes).map((t) => t.name)).toEqual(["draft_event", "deck_create", "deck_write", "deck_edit", "deck_arrange", "deck_restore"])
+    expect(CORE_JACK_TOOLS.filter((t) => t.design).map((t) => t.name)).toEqual(CORE_JACK_TOOLS.filter((t) => t.name.startsWith("deck_")).map((t) => t.name))
+    expect(CORE_JACK_TOOLS.some((t) => t.deferred)).toBe(false)
   })
 
   it("gives every tool an input the model loop can send as JSON Schema, and defaults that parse from {}", () => {

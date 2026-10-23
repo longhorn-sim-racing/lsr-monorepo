@@ -2,6 +2,7 @@ import { z } from "zod"
 import { getJackSqlClient, JACK_SQL_MISSING } from "@/server/jack/sql-client"
 import { describeSqlError } from "./run-sql"
 import { JACK_SCHEMA_NOTES, TABLE_NOTES } from "./schema-notes"
+import { mergeTableNotes, SLOT_SCHEMA_NOTES, SLOT_TABLE_NOTES } from "./schema-notes/registry"
 import type { JackTool } from "./types"
 
 /**
@@ -52,6 +53,9 @@ export function typeName(column: Pick<SchemaColumn, "dt" | "udt">): string {
 
 const unquote = (name: string) => name.trim().replace(/^"|"$/g, "")
 
+/** The core table notes with the Jack 2.0 tracks' notes appended (schema-notes/<track>.ts) */
+const ALL_TABLE_NOTES = mergeTableNotes(TABLE_NOTES, SLOT_TABLE_NOTES)
+
 /** Columns that are the primary key, and where each foreign key points, from pg_get_constraintdef */
 export function parseConstraints(rows: SchemaConstraint[]) {
   const primary = new Map<string, Set<string>>()
@@ -73,13 +77,17 @@ export function parseConstraints(rows: SchemaConstraint[]) {
   return { primary, foreign }
 }
 
-/** The text the model reads: one block per table, then the enums, then (for the full schema) the notes */
+/**
+ * The text the model reads: one block per table, then the enums, then (for the full schema) the notes:
+ * the core notes, then each track's. `tableNotes` and `trackNotes` default to the real ones (tests pass their own)
+ */
 export function formatSchema(
   columns: SchemaColumn[],
   constraints: SchemaConstraint[],
   enums: SchemaEnum[],
-  options: { tables?: string[] } = {},
+  options: { tables?: string[]; tableNotes?: Record<string, string>; trackNotes?: string[] } = {},
 ): { text: string; tables: string[]; missing: string[] } {
+  const { tableNotes = ALL_TABLE_NOTES, trackNotes = SLOT_SCHEMA_NOTES } = options
   const { primary, foreign } = parseConstraints(constraints)
   const byTable = new Map<string, SchemaColumn[]>()
   for (const column of columns) byTable.set(column.t, [...(byTable.get(column.t) ?? []), column])
@@ -98,7 +106,7 @@ export function formatSchema(
       const fk = foreign.get(table)?.get(column.c)
       return `${column.c} ${type}${column.nullable ? "?" : ""}${pk}${fk ? ` -> ${fk}` : ""}`
     })
-    const note = TABLE_NOTES[table]
+    const note = tableNotes[table]
     return `"${table}"${note ? ` (${note})` : ""}\n  ${cols.join(", ")}`
   })
 
@@ -111,7 +119,7 @@ export function formatSchema(
   ]
   if (enumLines.length) parts.push(`Enums\n${enumLines.join("\n")}`)
   if (missing.length) parts.push(`Not found, or not readable by Jack: ${missing.join(", ")}`)
-  if (!wanted) parts.push(JACK_SCHEMA_NOTES)
+  if (!wanted) parts.push(JACK_SCHEMA_NOTES, ...trackNotes)
   return { text: parts.join("\n\n"), tables: names, missing }
 }
 
