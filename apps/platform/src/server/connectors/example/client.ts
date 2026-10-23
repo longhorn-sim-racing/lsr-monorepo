@@ -11,6 +11,9 @@ import type { ConnectorEnv } from "../types"
 
 export const EXAMPLE_REAL_URL = "https://api.example.com"
 
+/** The longest any one call may take, even when the caller passes its own signal */
+export const EXAMPLE_TIMEOUT_MS = 20_000
+
 export class ExampleApiError extends Error {
   constructor(
     readonly status: number,
@@ -25,11 +28,12 @@ export function exampleClient(token: string, env: ConnectorEnv = process.env) {
   const base = serviceBaseUrl("example", EXAMPLE_REAL_URL, env)
 
   async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await fetch(`${base}${path}`, {
-      ...init,
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      signal: init.signal ?? AbortSignal.timeout(20_000),
-    })
+    // The caller's headers, plus the key; the caller's signal, plus the timeout
+    const headers = new Headers(init.headers)
+    headers.set("authorization", `Bearer ${token}`)
+    if (!headers.has("content-type")) headers.set("content-type", "application/json")
+    const timeout = AbortSignal.timeout(EXAMPLE_TIMEOUT_MS)
+    const response = await fetch(`${base}${path}`, { ...init, headers, signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout })
     if (!response.ok) throw new ExampleApiError(response.status, path)
     return (await response.json()) as T
   }

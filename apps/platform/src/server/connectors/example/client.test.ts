@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { mountFakes } from "../fakes/testing"
 import { runConnectorSmoke } from "../status"
 import { EXAMPLE_FAKE_TOKEN, exampleFake } from "./fake/handlers"
-import { ExampleApiError, exampleClient, exampleConnector } from "./client"
+import { EXAMPLE_TIMEOUT_MS, ExampleApiError, exampleClient, exampleConnector } from "./client"
 
 // The template connector test: the real client against the fake, through the fetch interceptor
 const state = vi.hoisted(() => ({ enabled: false }))
@@ -39,6 +39,22 @@ describe("the example client against its fake", () => {
     expect(error).toBeInstanceOf(ExampleApiError)
     expect(error).toMatchObject({ status: 401, message: "Example API answered 401 on /v1/notes" })
   })
+
+  it("stops when the caller's signal aborts", async () => {
+    const fakes = mountFakes([exampleFake])
+    const controller = new AbortController()
+    controller.abort()
+    await expect(exampleClient(EXAMPLE_FAKE_TOKEN).notes(controller.signal)).rejects.toMatchObject({ name: "AbortError" })
+    expect(fakes.requests).toHaveLength(0)
+  })
+
+  it("keeps its own timeout when the caller passes a signal too", async () => {
+    mountFakes([exampleFake])
+    const timedOut = new DOMException("The operation was aborted due to timeout", "TimeoutError")
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(AbortSignal.abort(timedOut))
+    await expect(exampleClient(EXAMPLE_FAKE_TOKEN).notes(new AbortController().signal)).rejects.toBe(timedOut)
+    expect(timeout).toHaveBeenCalledWith(EXAMPLE_TIMEOUT_MS)
+  })
 })
 
 describe("the example connector", () => {
@@ -58,7 +74,7 @@ describe("the example connector", () => {
     expect(await runConnectorSmoke(exampleConnector)).toMatchObject({ ok: true, summary: "Read 0 notes" })
   })
 
-  it("fails its smoke test with a redacted reason", async () => {
+  it("fails its smoke test with the API's status", async () => {
     mountFakes([exampleFake])
     vi.stubEnv("EXAMPLE_TOKEN", "a-wrong-key")
     expect(await runConnectorSmoke(exampleConnector)).toMatchObject({ ok: false, summary: "ExampleApiError: Example API answered 401 on /v1/notes" })
