@@ -34,13 +34,14 @@ const CURRENT_TEXT_CHARS = 15_000
 const PROVENANCE_TOOLS = 12
 const PROVENANCE_INPUT_CHARS = 200
 
-const uuid = z.string().uuid()
+/** An entry or version id (a uuid; a wrong one is "doesn't exist", so the schema stays short) */
+const id = z.string().trim().min(1).max(64)
 
 const input = z
   .object({
-    action: z.enum(["save", "update", "archive"]),
-    id: uuid.optional().describe("update, archive: the entry's id (from search, read or an earlier save)"),
-    baseVersionId: uuid.optional().describe("update: the entry's versionId as you last read or saved it"),
+    action: z.enum(["save", "update", "archive"]).describe("save a new entry, update one you've read, or archive one (only when an officer asks)"),
+    id: id.optional().describe("update, archive: the entry's id (from search, read or an earlier save)"),
+    baseVersionId: id.optional().describe("update: the entry's versionId as you last read or saved it"),
     title: z.string().trim().min(3).max(KNOWLEDGE_LIMITS.titleMax).optional().describe("save: required; a clear, specific title. update: a new title"),
     body: z
       .string()
@@ -63,7 +64,7 @@ const input = z
     sourceNote: z.string().trim().min(1).max(KNOWLEDGE_LIMITS.sourceNoteMax).optional().describe('Where it came from, e.g. "Dylan, GM 2 planning room" (default: the officer who asked)'),
     sourceDate: centralDateInput.optional().describe("The Central date the source said it, YYYY-MM-DD (default: today)"),
     owner: z.string().trim().min(1).max(80).optional().describe("Handle of the officer who keeps it current (default: the officer who asked)"),
-    notDuplicateOf: z.array(uuid).min(1).max(10).optional().describe("save: ids of entries the duplicate check named that this is really different from"),
+    notDuplicateOf: z.array(id).min(1).max(10).optional().describe("save: ids of entries the duplicate check named that this is really different from"),
     reason: z.string().trim().min(1).max(300).optional().describe("archive: why, in the officer's words"),
   })
   .superRefine((value, ctx) => {

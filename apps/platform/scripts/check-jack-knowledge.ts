@@ -137,6 +137,24 @@ async function main() {
       check(stale.some((s) => s.id === different.entry.id) && !stale.some((s) => s.id === dues.entry.id), "the stale view holds an entry with an old source date", stale)
     }
 
+    console.log("\nThe Knowledge page's reads and the digest checks")
+    const page = await queries.listKnowledgeEntries({ q: `semester ${MARK}`, view: "unreviewed" })
+    check(page.rows.length === 1 && page.rows[0].id === dues.entry.id && page.rows[0].unreviewed && page.counts.unreviewed >= 1, "a search within the not-reviewed view finds Jack's change", page.rows)
+    const all = await queries.listKnowledgeEntries({ view: "active" })
+    check(all.rows.some((r) => r.id === dues.entry.id) && all.total === all.counts.active, "the full list pages through the active view", { total: all.total, counts: all.counts })
+    const detail = await queries.getKnowledgeEntryDetail(dues.entry.id)
+    check(
+      // Newest first: the race's winner, Jack's edit, the reviewed edit, the first save
+      detail !== null && detail.versions.map((v) => v.via).join(",") === "admin,jack,admin,admin" && detail.latestVersionId === detail.versions[0].id && detail.unreviewed,
+      "an entry's page gets its versions newest first",
+      detail?.versions.map((v) => v.via),
+    )
+    const { CHECKS } = await import("../src/server/automation/checks/memory")
+    for (const digest of CHECKS) {
+      const result = await digest.run({ now: new Date() })
+      check(result.count >= 0 && result.items.every((item) => item.href.startsWith("/admin/knowledge/")), `the "${digest.label}" digest check runs`, result)
+    }
+
     console.log("\nArchive and delete")
     const archived = await service.setKnowledgeArchived(dues.entry.id, true, admin)
     const dupAfterArchive = await service.findKnowledgeDuplicates({ title: `Membership dues this semester ${MARK}`, body: "x" }, { exclude: anyway.ok ? [anyway.entry.id] : [] })
