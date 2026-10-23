@@ -70,7 +70,8 @@ export function attachmentLine(files: HistoryFile[]): string {
  */
 const LINK =
   /\b(?:[a-z][a-z0-9+.-]*:\/\/|https?:|www\.)[^\s<>"'`]+|(?<![\p{L}\p{M}\p{N}\p{Cf}_-])(?:[\p{L}\p{M}\p{N}\p{Cf}_-]+[.。．｡])+(?:xn--[a-z0-9-]+|\p{L}[\p{L}\p{M}\p{Cf}]+)[.。．｡]?(?::\d+)?(?:\/[^\s<>"'`]*|[?#][^\s<>"'`]+)|\b(?:\d{1,3}[.。．｡]){3}\d{1,3}(?::\d+(?:[/?#][^\s<>"'`]*)?|[/?#][^\s<>"'`]*)/giu
-const TRAILING = /[.,;:!?)\]}>'"]+$/
+/** Punctuation after a link that isn't part of it, closing quotes (“…”) and CJK punctuation included */
+const TRAILING = /[.,;:!?)\]}>'"”’»）。、]+$/
 
 export function neutralizeLinks(text: string): string {
   return text.replace(LINK, (match) => {

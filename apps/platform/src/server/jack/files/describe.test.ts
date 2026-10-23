@@ -54,6 +54,7 @@ describe("neutralizeLinks", () => {
     expect(neutralizeLinks("evil.example./collect")).toBe("[link to evil[.]example[.]]")
     expect(neutralizeLinks("evil.exam­ple/x")).toBe("[link to evil[.]example]")
     expect(neutralizeLinks("open https:evil.example now")).toBe("open [link to evil[.]example] now")
+    expect(neutralizeLinks("Send “see evil.example/x”. Or 例え.com/x。")).toBe("Send “see [link to evil[.]example]”. Or [link to xn--r8jz45g[.]com]。")
   })
 
   it("leaves what isn't a link alone", () => {
