@@ -1,6 +1,6 @@
 import type { Prisma, ScheduledJob } from "@prisma/client"
 import { z } from "zod"
-import { cronFor, DIGEST_DEFAULT_SCHEDULE, DIGEST_JOB_KEY, scheduleFromCron, WEEKDAYS, type Weekday } from "@/lib/jack/recurring"
+import { cronFor, DIGEST_DEFAULT_SCHEDULE, DIGEST_JOB_KEY, scheduleFromCron, WEEKDAYS, type DigestSettingsInput, type Weekday } from "@/lib/jack/recurring"
 import { createAuditLog } from "@/server/audit/log"
 import { prisma } from "@/server/db"
 import { nextRunAfter } from "@/server/scheduler/schedule"
@@ -14,17 +14,7 @@ import { readDigestConfig, type DigestConfig } from "./config"
  * the job's updatedById) and is audited.
  */
 
-export type DigestSettingsInput = {
-  enabled: boolean
-  roomId: string
-  day: Weekday
-  /** "09:00", Central */
-  time: string
-  summary: boolean
-  /** "" for none */
-  discordChannelId: string
-  teams: boolean
-}
+export type { DigestSettingsInput }
 
 const inputSchema = z.object({
   enabled: z.boolean(),

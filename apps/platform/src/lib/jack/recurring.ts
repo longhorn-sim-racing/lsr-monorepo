@@ -149,3 +149,16 @@ export function clockLabel(time: string): string {
   const [hour, minute] = parsed
   return `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${hour < 12 ? "AM" : "PM"}`
 }
+
+/** The weekly digest's settings as the page edits them (the job's config, schedule and switch) */
+export type DigestSettingsInput = {
+  enabled: boolean
+  roomId: string
+  day: Weekday
+  /** "09:00", Central */
+  time: string
+  summary: boolean
+  /** "" for none */
+  discordChannelId: string
+  teams: boolean
+}
