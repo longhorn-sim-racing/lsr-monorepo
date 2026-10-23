@@ -9,7 +9,8 @@
  *   - the recruiting pipeline: drafts never load, an officer's application loses its team, status
  *     and reviews under Jack's rule, and only the viewer's reviews go under the page's rule
  *   - race data: public-only loads leave out a draft event's sessions, and the numbers add up
- *   - a room snapshot opened at an old message (?m=) holds it, what's before it, and the newest
+ *   - a room snapshot opened at an old message (?m=) holds it and what's around it, and the gap
+ *     before the newest
  *
  *   cd apps/platform
  *   NODE_ENV=production pnpm exec tsx scripts/check-jack-club-data.ts
@@ -113,7 +114,10 @@ async function main() {
     remember("post", (await prisma.post.create({ data: { title: `Draft news ${tag}`, slug: `${tag}-draft`, bodyMd: `Secret ${tag}`, publishedAt: null } })).id);
     const publicEvent = remember("event", (await prisma.event.create({ data: { slug: `${tag}-round`, title: `LSC Round 1 ${tag}`, description: `Race night ${tag}`, startsAtUtc: minute(100), endsAtUtc: minute(220), timezone: "America/Chicago", status: "PUBLISHED", meetingUrl: `https://meet.example/${tag}-private` } })).id);
     const draftEvent = remember("event", (await prisma.event.create({ data: { slug: `${tag}-draft-event`, title: `Draft event ${tag}`, startsAtUtc: minute(300), endsAtUtc: minute(400), timezone: "America/Chicago", status: "DRAFT" } })).id);
-    remember("album", (await prisma.galleryAlbum.create({ data: { slug: `${tag}-album`, title: `Fall social ${tag}` } })).id);
+    const album = remember("album", (await prisma.galleryAlbum.create({ data: { slug: `${tag}-album`, title: `Fall social ${tag}` } })).id);
+    remember("galleryImage", (await prisma.galleryImage.create({ data: { publicId: `${tag}-photo`, albumId: album } })).id);
+    // An album with no photos yet: the gallery doesn't list it, so neither does search
+    const emptyAlbum = remember("album", (await prisma.galleryAlbum.create({ data: { slug: `${tag}-empty`, title: `Empty album ${tag}` } })).id);
     remember("instagram", (await prisma.instagramPost.create({ data: { id: `${tag}-ig1`, permalink: "https://www.instagram.com/p/abc/", caption: `Race day ${tag}!`, mediaType: "IMAGE", postedAt: now } })).id);
     remember("instagram", (await prisma.instagramPost.create({ data: { id: `${tag}-ig2`, permalink: "https://www.instagram.com/p/def/", caption: `Hidden ${tag}`, mediaType: "IMAGE", postedAt: now, hidden: true } })).id);
 
@@ -124,7 +128,7 @@ async function main() {
     check("documents: found; deleted left out", titles.includes(`document:Budget ${tag}.docx`) && !titles.some((t) => t.includes("Deleted")));
     check("rooms: the officer's message and the room note, not Jack's answers or a streaming reply", byDefault.hits.some((h) => h.id === officerMessage.id) && titles.some((t) => t.includes("Room note")) && !byDefault.hits.some((h) => h.title.includes(JACK_ANSWER_LABEL)) && !titles.some((t) => t.includes("Still streaming")));
     check("site: the published post, public event, album and visible Instagram post", ["post:Season news", "event:LSC Round 1", "album:Fall social", "instagram:Instagram: Race day"].every((prefix) => titles.some((t) => t.startsWith(prefix))));
-    check("site: no draft post, draft event or hidden Instagram post", !titles.some((t) => /Draft news|Draft event|Hidden/.test(t)));
+    check("site: no draft post, draft event, hidden Instagram post or album without photos", !titles.some((t) => /Draft news|Draft event|Hidden|Empty album/.test(t)));
     check("snippets come from ts_headline", byDefault.hits.every((h) => h.snippet.length > 0) && byDefault.hits.find((h) => h.type === "document")!.snippet.includes("tires"), byDefault.hits.map((h) => h.snippet).join(" | "));
     check("ranks are in 0..1 and sorted", byDefault.hits.every((h, i, all) => h.rank >= 0 && h.rank <= 1 && (i === 0 || all[i - 1].rank >= h.rank)));
 
@@ -149,6 +153,7 @@ async function main() {
     const eventRead = await read("event", publicEvent);
     check("read event: public details, never the meeting link", eventRead.ok && !eventRead.doc.text.includes("meet.example"));
     check("read event: a draft event isn't readable", !(await read("event", draftEvent)).ok);
+    check("read album: one with photos, not one without", (await read("album", album)).ok && !(await read("album", emptyAlbum)).ok);
     const docRead = await read("document", ids.document[0]);
     check("read document: its text", docRead.ok && docRead.doc.text.includes("tires"));
     check("read document: a deleted one says its text is gone", !(await read("document", ids.document[1])).ok);
@@ -160,10 +165,16 @@ async function main() {
     const latest = await getRoomSnapshot(room);
     const anchored = await getRoomSnapshot(room, { around: early!.id });
     check("snapshot: without an anchor, the latest 500 (the old message isn't there)", latest!.messages.length === 500 && !latest!.messages.some((m) => m.id === early!.id));
+    // 524 messages: the window is the 10 before filler 10, it and the 459 after it (to filler 469); the other 54 are the gap
     check(
-      "snapshot at an old message: it, the 10 before it, and up to the newest, in order",
-      anchored!.messages.some((m) => m.id === early!.id) && anchored!.messages[0].content === "Filler message 0" && anchored!.messages.at(-1)!.content.startsWith("Still streaming") && anchored!.messages.length === 524,
+      "snapshot at an old message: it, the 10 before it and 459 after, in order, no bigger than a normal snapshot",
+      anchored!.messages.some((m) => m.id === early!.id) && anchored!.messages[0].content === "Filler message 0" && anchored!.messages.at(-1)!.content === "Filler message 469" && anchored!.messages.length === 470,
       `${anchored!.messages.length} messages`,
+    );
+    check(
+      "snapshot at an old message: the gap after it runs to the newest",
+      anchored!.gap?.count === 54 && anchored!.gap.after.id === anchored!.messages.at(-1)!.id && anchored!.gap.through.id === latest!.messages.at(-1)!.id,
+      JSON.stringify(anchored!.gap),
     );
 
     // ----- recruiting -----
@@ -244,6 +255,7 @@ async function cleanup(prisma: (typeof import("../src/server/db"))["prisma"], id
     ["applications", () => prisma.application.deleteMany({ where: { id: { in: ids.application ?? [] } } })],
     ["round", () => prisma.recruitingCycle.deleteMany({ where: { id: { in: ids.cycle ?? [] } } })],
     ["Instagram posts", () => prisma.instagramPost.deleteMany({ where: { id: { in: ids.instagram ?? [] } } })],
+    ["photos", () => prisma.galleryImage.deleteMany({ where: { id: { in: ids.galleryImage ?? [] } } })],
     ["albums", () => prisma.galleryAlbum.deleteMany({ where: { id: { in: ids.album ?? [] } } })],
     ["events", () => prisma.event.deleteMany({ where: { id: { in: ids.event ?? [] } } })],
     ["posts", () => prisma.post.deleteMany({ where: { id: { in: ids.post ?? [] } } })],

@@ -58,7 +58,7 @@ describe("search", () => {
     const quiet = await searchTool.run(searchTool.input.parse({ query: "sponsor tiers" }), ctx)
     expect(JSON.parse(quiet.forModel)).toMatchObject({ searched: ["knowledge"] })
     expect(JSON.parse(quiet.forModel).notSearched).toBeUndefined()
-    expect(quiet.displays[0]).toMatchObject({ kind: "links", caption: undefined })
+    expect(quiet.displays?.[0]).toMatchObject({ kind: "links", caption: undefined })
 
     fake.search.mockResolvedValue({ hits: [], outcomes: [off] })
     const asked = await searchTool.run(searchTool.input.parse({ query: "budget", sources: ["rooms"] }), ctx)
@@ -68,7 +68,7 @@ describe("search", () => {
     fake.search.mockResolvedValue({ hits: [sponsorHit], outcomes: [{ source: "knowledge", status: "searched", hits: 1 }, { source: "rooms", status: "failed", reason: "It couldn't be searched just now." }] })
     const failed = await searchTool.run(searchTool.input.parse({ query: "sponsor tiers" }), ctx)
     expect(JSON.parse(failed.forModel).notSearched).toEqual(["rooms: It couldn't be searched just now."])
-    expect(failed.displays[0]).toMatchObject({ caption: "Not searched: rooms: It couldn't be searched just now." })
+    expect(failed.displays?.[0]).toMatchObject({ caption: "Not searched: rooms: It couldn't be searched just now." })
   })
 
   it("says how to search again when nothing matched", async () => {
