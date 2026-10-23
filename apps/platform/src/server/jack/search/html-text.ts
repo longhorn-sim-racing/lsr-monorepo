@@ -68,7 +68,7 @@ export function htmlToText(html: string): string {
     const heading = /^h([1-6])$/.exec(name)
     if (heading) return closing ? "\n\n" : `\n\n${"#".repeat(Number(heading[1]))} `
     if (name === "br") return "\n"
-    if (name === "li") return closing ? "\n" : "\n- "
+    if (name === "li") return closing ? "" : "\n- "
     if (name === "td" || name === "th") return closing ? " | " : ""
     if (BLOCK.test(name)) return "\n\n"
     return ""

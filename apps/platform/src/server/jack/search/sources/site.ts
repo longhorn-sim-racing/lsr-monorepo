@@ -1,6 +1,5 @@
 import { Prisma } from "@prisma/client"
 import { getEffectiveEventStatus, isEventPublic } from "@/lib/events"
-import { isPostPublished } from "@/lib/news"
 import { prisma } from "@/server/db"
 import { ct } from "../../tools/time"
 import { albumHref, eventHref, instagramHref, pageHref, postHref, PUBLIC_PAGE_SLUGS } from "../links"
@@ -39,6 +38,15 @@ function siteUrl(type: SiteType, key: string): string | null {
 
 const notFound = (what: string, id: string): ReadResult => ({ ok: false, error: `No public ${what} ${id}: it may be a draft, hidden, or deleted.` })
 
+/**
+ * A post the public sees: public, with a publish date that has passed. The same rule as
+ * isPostPublished in lib/news, which isn't imported here: it loads the MDX compiler, and scripts
+ * (the eval) load these tools
+ */
+export function isPublishedPost(post: { publishedAt: Date | null; visibility: string }, now = new Date()): boolean {
+  return post.visibility === "public" && !!post.publishedAt && post.publishedAt <= now
+}
+
 const readers: SearchReader[] = [
   {
     type: "post",
@@ -48,7 +56,7 @@ const readers: SearchReader[] = [
         where: { id },
         select: { id: true, title: true, slug: true, excerpt: true, bodyMd: true, publishedAt: true, visibility: true, author: { select: { displayName: true } } },
       })
-      if (!post || !isPostPublished(post)) return notFound("news post", id)
+      if (!post || !isPublishedPost(post)) return notFound("news post", id)
       return {
         ok: true,
         doc: {
