@@ -22,6 +22,9 @@ const ENTITY_PAGES: Record<string, (id: string) => string> = {
   DRIVER_IDENTITY: () => "/admin/drivers",
   CAR_MAPPING: () => "/admin/cars",
   KNOWLEDGE_ENTRY: (id) => `/admin/knowledge/${id}`,
+  SPONSOR_PROSPECT: (id) => `/admin/sponsors/${id}`,
+  MEETING: (id) => `/admin/meetings/${id}`,
+  ACTION_ITEM: () => "/admin/action-items?status=all",
 }
 
 export function entityHref(entityType: string, entityId: string): string | null {
