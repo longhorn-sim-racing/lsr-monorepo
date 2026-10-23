@@ -88,6 +88,28 @@ describe("cleanupRoomFiles", () => {
     expect(await cleanupRoomFiles({ now: fake.now(), store, claude: null })).toMatchObject({ deleted: 1, claudeErrors: ["file_b"] })
   })
 
+  it("deletes each copy before its row: one the time limit cuts short keeps its row, and the next run deletes both", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const claude = memoryClaudeFiles()
+    const { id } = await claude.client.upload({ name: "a.jpg", bytes: Buffer.from("x"), type: "image/jpeg" })
+    file("plain", 10 * DAY, { status: "FAILED" })
+    file("photo", 10 * DAY, { status: "READY", anthropicFileId: id })
+    const job = new AbortController()
+    const remove = claude.client.remove
+    claude.client.remove = async () => {
+      job.abort() // the job's time limit, while the copy is being deleted
+      throw new Error("This operation was aborted")
+    }
+    expect(await cleanupRoomFiles({ now: fake.now(), store, claude: claude.client, signal: job.signal })).toMatchObject({ deleted: 1, claudeFiles: 0, claudeErrors: [], more: true })
+    expect(fake.file("photo")?.anthropicFileId).toBe(id)
+    expect(claude.files.has(id)).toBe(true)
+
+    claude.client.remove = remove
+    expect(await cleanupRoomFiles({ now: fake.now(), store, claude: claude.client })).toMatchObject({ deleted: 1, claudeFiles: 1, claudeErrors: [], more: false })
+    expect(fake.state.files).toEqual([])
+    expect(claude.files.size).toBe(0)
+  })
+
   it("keeps a file that was posted after it was picked, and its bytes", async () => {
     file("late", 10 * DAY, { status: "READY" })
     const findMany = fake.jackFile.findMany

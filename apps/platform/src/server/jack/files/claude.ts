@@ -85,7 +85,7 @@ export async function uploadToClaude(client: ClaudeFilesClient, file: { id: stri
 }
 
 /** Deletes sent at once (the Files API allows about 500 file requests a minute) */
-const DELETES_AT_ONCE = 8
+export const DELETES_AT_ONCE = 8
 /** How long deleting may take when the caller gives no signal (removing a chip, a registration cleaning up): the SDK's retries could take minutes */
 const DELETE_BUDGET_MS = 15_000
 

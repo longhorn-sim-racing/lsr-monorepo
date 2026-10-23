@@ -20,6 +20,12 @@ export const CLAUDE_FILES_CONNECTOR = "claude-files"
 export const CLAUDE_FILES_TIMEOUT_MS = 30_000
 /** Ids per list call: the API takes at most 100 */
 const IDS_PER_LIST = 100
+/**
+ * How long an upload lasts on Claude Files: 30 days (the API takes 1 hour to 90 days). Officers'
+ * photos and PDFs can show members, so no copy stays for good, even one nothing deletes (a posted file,
+ * an archived room). A turn or a room_files read uploads an expired copy again (ensureClaudeIds)
+ */
+export const CLAUDE_FILES_EXPIRY_S = 30 * 24 * 60 * 60
 
 export type ClaudeFilesClient = {
   upload(file: { name: string; bytes: Uint8Array; type: string }, options?: { signal?: AbortSignal }): Promise<{ id: string }>
@@ -42,7 +48,7 @@ export function claudeFilesClient(apiKey: string, env: ConnectorEnv = process.en
   return {
     async upload({ name, bytes, type }, { signal } = {}) {
       const file = await toFile(bytes, name, { type })
-      const uploaded = await client.files.upload({ file }, { signal })
+      const uploaded = await client.files.upload({ file, expires_in_seconds: CLAUDE_FILES_EXPIRY_S }, { signal })
       return { id: uploaded.id }
     },
     async remove(id, { signal } = {}) {

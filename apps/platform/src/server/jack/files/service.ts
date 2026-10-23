@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { Prisma } from "@prisma/client"
 import { checkFile, MAX_FILE_BYTES, type JackUploadTicket } from "@/lib/jack/files"
 import { redactSecrets } from "@/lib/redact"
 import { prisma } from "@/server/db"
@@ -104,14 +105,22 @@ export async function removeUpload(fileId: string, officerId: string, store: Jac
   if (!row) return ok(null)
   if (row.uploadedById !== officerId) return problem("forbidden", "Only the officer who attached a file can remove it.")
   if (row.messageId) return problem("bad_request", "This file is already posted in the room.")
-  const { count } = await prisma.jackFile.deleteMany({ where: { id: fileId, messageId: null } })
-  if (!count) return problem("bad_request", "This file is already posted in the room.")
+  // The row as it was deleted: a registration may have recorded its Claude Files copy since it was read
+  let removed: typeof row
+  try {
+    removed = await prisma.jackFile.delete({ where: { id: fileId, messageId: null } })
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025")) throw error
+    // Posted meanwhile, or removed by another request
+    const still = await prisma.jackFile.findUnique({ where: { id: fileId }, select: { id: true } })
+    return still ? problem("bad_request", "This file is already posted in the room.") : ok(null)
+  }
   // Photo copies too, recorded or not (registration stores them before recording them, and deletes any it stores after this)
-  await store.delete(filePaths(row)).catch((error) => {
+  await store.delete(filePaths(removed)).catch((error) => {
     // The row is gone; the cleanup job's sweep deletes them later
-    console.error(`[jack] Couldn't delete the stored copies of removed file ${row.id}:`, error)
+    console.error(`[jack] Couldn't delete the stored copies of removed file ${removed.id}:`, error)
   })
-  // A registration still uploading deletes its own copy when it finds the row gone (register.ts)
-  if (row.anthropicFileId) await deleteClaudeFiles([row.anthropicFileId], { client: claude === undefined ? claudeFilesForCleanup() : claude })
+  // A registration that records its copy after this finds the row gone and deletes the copy itself (register.ts)
+  if (removed.anthropicFileId) await deleteClaudeFiles([removed.anthropicFileId], { client: claude === undefined ? claudeFilesForCleanup() : claude })
   return ok(null)
 }

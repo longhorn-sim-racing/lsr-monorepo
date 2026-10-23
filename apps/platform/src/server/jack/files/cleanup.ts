@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client"
 import { prisma } from "@/server/db"
 import type { ClaudeFilesClient } from "@/server/connectors/anthropic/files"
 import { jackFileStore, type JackFileStore } from "@/server/jack/decks/storage"
-import { claudeFilesForCleanup, deleteClaudeFiles } from "./claude"
+import { claudeFilesForCleanup, DELETES_AT_ONCE, deleteClaudeFiles } from "./claude"
 import { fileIdOfPath, filePaths, storedPaths } from "./paths"
 
 /**
@@ -13,7 +13,9 @@ import { fileIdOfPath, filePaths, storedPaths } from "./paths"
  * the `files.cleanup` job (scheduler/jobs/files.ts).
  *
  * There's no sweep for Claude Files: the key's workspace can hold other environments' files (a local
- * database doesn't know production's), so only copies whose rows are deleted here are deleted.
+ * database doesn't know production's), so only copies whose rows are deleted here are deleted. Each
+ * copy goes before its row, so none is left that no row points at; and every copy expires by itself
+ * anyway (CLAUDE_FILES_EXPIRY_S).
  */
 
 export const ABANDONED_UPLOAD_MS = 24 * 60 * 60 * 1000
@@ -36,7 +38,8 @@ export function cleanupWhere(now: Date): Prisma.JackFileWhereInput {
 /**
  * `objects` counts the copies the deleted rows recorded; photo copies a registration stored but never
  * recorded are deleted too. `claudeFiles` counts their copies deleted from Claude Files, and
- * `claudeErrors` the ids that couldn't be (logged: nothing points at them any more)
+ * `claudeErrors` the ids of deleted rows whose copy couldn't be (the API failed, or there's no key;
+ * logged, and they expire by themselves)
  */
 export type CleanupResult = { deleted: number; objects: number; objectErrors: number; claudeFiles: number; claudeErrors: string[]; more: boolean }
 
@@ -55,21 +58,33 @@ export async function cleanupRoomFiles({
     select: { id: true, roomId: true, storagePath: true, modelCopyPath: true, thumbPath: true, anthropicFileId: true },
   })
   const paths = new Set<string>()
-  const claudeIds: string[] = []
+  const claudeErrors: string[] = []
   let deleted = 0
   let objects = 0
-  for (const file of due.slice(0, limit)) {
-    if (signal?.aborted) break
-    // The row goes first, and only if it's still due (posted since? kept): a posted file never loses its bytes
-    const { count } = await prisma.jackFile.deleteMany({ where: { AND: [{ id: file.id }, where] } })
-    if (!count) continue
-    deleted++
-    objects += storedPaths(file).length
-    for (const path of [...storedPaths(file), ...filePaths(file)]) paths.add(path)
-    if (file.anthropicFileId) claudeIds.push(file.anthropicFileId)
+  let claudeFiles = 0
+  const batch = due.slice(0, limit)
+  for (let i = 0; i < batch.length && !signal?.aborted; i += DELETES_AT_ONCE) {
+    const chunk = batch.slice(i, i + DELETES_AT_ONCE)
+    // Copies on Claude Files go before their rows. One the time limit cut short keeps its row, and the
+    // next run deletes both; a file posted meanwhile keeps its row, and its next turn uploads it again.
+    // A registration still uploading when its row goes deletes its own copy (register.ts)
+    const copies = await deleteClaudeFiles(chunk.flatMap((file) => (file.anthropicFileId ? [file.anthropicFileId] : [])), { client: claude, signal })
+    claudeFiles += copies.deleted
+    const stopped = signal?.aborted ?? false
+    const failed = new Set(copies.failed)
+    for (const file of chunk) {
+      const copyLeft = file.anthropicFileId !== null && failed.has(file.anthropicFileId)
+      if (copyLeft && stopped) continue
+      // Only if it's still due (posted since? kept): a posted file never loses its bytes
+      const { count } = await prisma.jackFile.deleteMany({ where: { AND: [{ id: file.id }, where] } })
+      if (!count) continue
+      deleted++
+      objects += storedPaths(file).length
+      for (const path of [...storedPaths(file), ...filePaths(file)]) paths.add(path)
+      // The API failed, or there's no key: the row goes anyway, so these can't fill every batch, and the copy expires by itself
+      if (copyLeft) claudeErrors.push(file.anthropicFileId!)
+    }
   }
-  // A registration still uploading when its row went deletes its own copy (register.ts)
-  const claudeResult = await deleteClaudeFiles(claudeIds, { client: claude, signal })
   let objectErrors = 0
   if (paths.size) {
     try {
@@ -83,8 +98,8 @@ export async function cleanupRoomFiles({
     deleted,
     objects: objects - objectErrors,
     objectErrors,
-    claudeFiles: claudeResult.deleted,
-    claudeErrors: claudeResult.failed,
+    claudeFiles,
+    claudeErrors,
     more: due.length > limit || (signal?.aborted ?? false),
   }
 }

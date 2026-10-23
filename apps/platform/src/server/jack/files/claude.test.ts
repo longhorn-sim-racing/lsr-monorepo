@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { anthropicFake } from "@/server/connectors/anthropic/fake/handlers"
+import { CLAUDE_FILES_EXPIRY_S, claudeFilesClient } from "@/server/connectors/anthropic/files"
+import { mountFakes } from "@/server/connectors/fakes/testing"
 import { memoryStore, type MemoryStore } from "@/server/jack/decks/memory-store"
 import { createFakeFileDb } from "./test-db"
 
@@ -22,6 +25,10 @@ beforeEach(() => {
   store = memoryStore()
   claude = memoryClaudeFiles()
   vi.spyOn(console, "error").mockImplementation(() => {})
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe("what goes to Claude Files", () => {
@@ -113,5 +120,23 @@ describe("ensureClaudeIds", () => {
     const file = candidate({ id: "x", kind: "IMAGE", modelCopyPath: "m/x.jpg", anthropicFileId: "file_recorded" })
     claude.state.failChecks = true
     expect((await ensureClaudeIds(claude.client, [file], { store })).get("x")).toBe("file_recorded")
+  })
+
+  it("uploads copies that expire in 30 days, and uploads one again once it has expired (the HTTP fake)", async () => {
+    const fakes = mountFakes([anthropicFake])
+    const client = claudeFilesClient("sk-ant-" + "test-" + "x".repeat(20))
+    const file = candidate({ id: "photo", kind: "IMAGE", modelCopyPath: "m/photo.jpg" })
+    await store.put("m/photo.jpg", Buffer.from("jpeg"), "image/jpeg")
+
+    const first = (await ensureClaudeIds(client, [file], { store })).get("photo")!
+    expect(first).toMatch(/^file_fake_image_/)
+    expect(CLAUDE_FILES_EXPIRY_S).toBe(2_592_000)
+    expect(fakes.requests[0].body).toMatch(/name="expires_in_seconds"\s+2592000\s/)
+
+    await fetch(`${fakes.origin}/anthropic/_fake/expire/${first}`, { method: "POST" })
+    const again = (await ensureClaudeIds(client, [{ ...file, anthropicFileId: first }], { store })).get("photo")
+    expect(again).toMatch(/^file_fake_image_/)
+    expect(again).not.toBe(first)
+    expect(fake.file("photo")!.anthropicFileId).toBe(again)
   })
 })

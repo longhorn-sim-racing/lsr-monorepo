@@ -276,6 +276,36 @@ describe("removeUpload", () => {
     expect(claude.files.size).toBe(0)
   })
 
+  it("deletes the copy a registration recorded while the file was being removed", async () => {
+    const claude = memoryClaudeFiles()
+    const row = await uploaded("packet.pdf", await pdfFile(["A"]))
+    const { id } = await claude.client.upload({ name: "late.pdf", bytes: Buffer.from("%PDF"), type: "application/pdf" })
+    const findUnique = fake.jackFile.findUnique
+    fake.jackFile.findUnique = async (args) => {
+      const found = await findUnique(args)
+      if (fake.file(row.id)) fake.file(row.id)!.anthropicFileId = id // recorded just after the read
+      return found
+    }
+    expect((await removeUpload(row.id, OFFICER, store, claude.client)).ok).toBe(true)
+    expect(fake.file(row.id)).toBeUndefined()
+    expect(claude.files.size).toBe(0)
+  })
+
+  it("says a file posted, or removed, while it was being removed is posted, or gone", async () => {
+    const [posted, removed] = [await uploaded("a.txt", Buffer.from("a")), await uploaded("b.txt", Buffer.from("b"))]
+    const findUnique = fake.jackFile.findUnique
+    // Each happens just after removeUpload reads the row
+    fake.jackFile.findUnique = async (args) => {
+      const found = await findUnique(args)
+      if (args.where.id === posted.id && fake.file(posted.id)) fake.file(posted.id)!.messageId = "msg-2"
+      if (args.where.id === removed.id) fake.state.files = fake.state.files.filter((f) => f.id !== removed.id)
+      return found
+    }
+    expect(await removeUpload(posted.id, OFFICER, store)).toMatchObject({ ok: false, error: expect.stringContaining("already posted") })
+    expect(fake.file(posted.id)).toBeDefined()
+    expect(await removeUpload(removed.id, OFFICER, store)).toEqual({ ok: true, data: null })
+  })
+
   it("deletes an unsent file and its stored copies; only its uploader can, and never a posted one", async () => {
     const row = await uploaded("photo.png", await imageFile("png"))
     await registerFile(row.id, OFFICER, store)
