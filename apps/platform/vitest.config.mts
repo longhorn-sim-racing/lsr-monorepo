@@ -8,7 +8,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    // scripts/: the eval harness's own tests (scripts/jack-eval)
+    include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
     mockReset: true,
     restoreMocks: true,
     unstubEnvs: true,
