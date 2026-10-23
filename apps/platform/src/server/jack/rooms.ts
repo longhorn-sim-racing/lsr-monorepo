@@ -1,9 +1,10 @@
-import type { JackMessageView, JackRoomPersonaKey, JackRoomSummary, JackRoomView } from "@/lib/jack/types"
+import type { JackMessageView, JackProposalState, JackRoomPersonaKey, JackRoomSummary, JackRoomView } from "@/lib/jack/types"
 import { JACK_EVENT, JACK_PERSONA_NAME } from "@/lib/jack/types"
 import { prisma } from "@/server/db"
 import { runAfterResponse } from "@/server/after-response"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
 import { jackMessageInclude, jackRoomViewSelect, toMessageView, toRoomView } from "./messages"
+import { roomProposalStates } from "./proposals/service"
 import { defaultReplyDeps, runRoom, type ReplyLoopDeps } from "./reply-loop"
 import { isRoomLockHeld } from "./room-lock"
 
@@ -42,18 +43,23 @@ export type RoomSnapshot = {
   room: JackRoomView
   /** Oldest first, including a reply still streaming (its text as last saved, with `streamSeq`) */
   messages: JackMessageView[]
+  /** The live status of each proposal made in the room, by id: the cards read it (#188) */
+  proposals: Record<string, JackProposalState>
 }
 
 export async function getRoomSnapshot(roomId: string): Promise<RoomSnapshot | null> {
   const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: jackRoomViewSelect })
   if (!room) return null
-  const latest = await prisma.jackMessage.findMany({
-    where: { roomId },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: SNAPSHOT_LIMIT,
-    include: jackMessageInclude,
-  })
-  return { room: toRoomView(room), messages: latest.reverse().map(toMessageView) }
+  const [latest, proposals] = await Promise.all([
+    prisma.jackMessage.findMany({
+      where: { roomId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: SNAPSHOT_LIMIT,
+      include: jackMessageInclude,
+    }),
+    roomProposalStates(roomId),
+  ])
+  return { room: toRoomView(room), messages: latest.reverse().map(toMessageView), proposals }
 }
 
 /**

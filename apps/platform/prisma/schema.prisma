@@ -1306,6 +1306,9 @@ model JackProposal {
   payload        Json
   /// What the changed fields were when it was proposed: the diff, and the staleness check
   before         Json?
+  /// The card as the kind described it when proposed (ProposalView: diff rows, people, links, rows for
+  /// list kinds). Saved because it can't be rebuilt later: the records it describes may have changed
+  view           Json?
   /// AuditLog entityType and id of what it changes
   targetType     String?
   targetId       String?

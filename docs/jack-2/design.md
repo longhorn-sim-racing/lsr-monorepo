@@ -778,7 +778,7 @@ These are the steps Gray (or the named owner) must do. Each is mirrored on Syste
 2. **Gray enables pg_cron and pg_net** in the Supabase dashboard.
 3. **Apply the 2.0 migrations to prod before merging** (they're additive, so main keeps working), by running `migrate.yml` through `workflow_dispatch` on `jack-2` or by merging a migrations-only PR to main. This matters because `getSessionUser` reads whole User rows: deploying the code first would break sign-in until the migrations land.
 4. **Merge `jack-2 → main`.** Vercel deploys.
-5. **Setup steps** (section 15), then **turn connectors on one at a time**, each after its smoke test. Turn on the scheduler, then the jobs.
+5. **Setup steps** (section 15), then **turn connectors on one at a time**, each after its smoke test. Turn on the scheduler, then the jobs. **Turn on `proposals.sweep` first:** until it runs, an apply whose function died stays APPLYING, and an expired proposal gets its "Stale" note only when someone acts on it.
 6. **Launch runbook** in `build-log.md`: the order, smoke checks, rollback (switch connectors off; code rollback is safe because the migrations are additive).
 
 ---
