@@ -49,6 +49,20 @@ describe("the fakes server", () => {
     expect(lines.join("\n")).not.toContain(EXAMPLE_FAKE_TOKEN)
   })
 
+  it("logs no query string, and masks a path segment that looks like a key", async () => {
+    const lines: string[] = []
+    server = await startFakeServer({ services: [exampleFake], port: 0, log: (line) => lines.push(line) })
+    const queryToken = "IGQVJ" + "Xk3pL9qRt2Vw7Yz4Bn6Mc8Df1Gh5Jk0".repeat(2)
+    const pathToken = "aB3dE5fG7hI9jK1lM3nO5pQ7" + "rS9tU1vW3xY5z"
+
+    expect((await fetch(`${server.url}/example/v1/ping?access_token=${queryToken}&key=${queryToken}`)).status).toBe(200)
+    expect((await fetch(`${server.url}/example/api/webhooks/1234/${pathToken}`)).status).toBe(404)
+    expect(lines[0]).toMatch(/^GET \/example\/v1\/ping → 200 \(\d+ ms\)$/)
+    expect(lines[1]).toMatch(/^GET \/example\/api\/webhooks\/1234\/\[redacted\] → 404 \(\d+ ms\)$/)
+    expect(lines.join("\n")).not.toContain(queryToken)
+    expect(lines.join("\n")).not.toContain(pathToken)
+  })
+
   it("passes status, headers and every cookie through", async () => {
     server = await startFakeServer({ services: [extras], port: 0 })
     const response = await fetch(`${server.url}/extras/cookies`)
