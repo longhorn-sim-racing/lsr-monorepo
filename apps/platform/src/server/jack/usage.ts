@@ -210,8 +210,9 @@ export type ThumbsDown = {
 
 const SNIPPET_CHARS = 280
 
+/** One line of a message, cut short, without the reply's bold and code marks (the room renders them; here they'd show as is) */
 function snippet(text: string): string {
-  const flat = text.replace(/\s+/g, " ").trim()
+  const flat = text.replace(/\*\*|`/g, "").replace(/\s+/g, " ").trim()
   return flat.length > SNIPPET_CHARS ? `${flat.slice(0, SNIPPET_CHARS - 1)}…` : flat
 }
 

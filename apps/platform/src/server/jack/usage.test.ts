@@ -154,7 +154,7 @@ describe("feedback", () => {
     db.jackFeedback.count.mockResolvedValue(1)
     const at = new Date("2026-10-20T15:00:00Z")
     db.jackFeedback.findMany.mockResolvedValue([
-      { id: "f1", note: "  Wrong date  ", createdAt: at, user: { displayName: "Dylan" }, message: { id: "r1", roomId: "room-1", content: "GM 2 is on   Thursday.", room: { title: "GM 2" }, answers: [{ content: "When is GM 2?" }] } },
+      { id: "f1", note: "  Wrong date  ", createdAt: at, user: { displayName: "Dylan" }, message: { id: "r1", roomId: "room-1", content: "GM 2 is on   **Thursday**.", room: { title: "GM 2" }, answers: [{ content: "When is GM 2?" }] } },
       { id: "f2", note: " ", createdAt: at, user: { displayName: "Gray" }, message: { id: "r2", roomId: "room-2", content: "x".repeat(400), room: { title: null }, answers: [] } },
     ])
     const month = monthFromKey("2026-10")!
