@@ -37,8 +37,13 @@ The working record for Jack 2.0 (#188): what's done, what's next, and every call
 | T6: documents (Drive, SharePoint, Teams; switchable) | Merged | #212 |
 | T5: Twitch and Instagram insights | Merged | #213 |
 | T7: Discord reading (sync, search, polls, activity, linking) | Merged | #214 |
-| Vercel function limit (narrow Chromium tracing, one time limit) | In review | #215 |
-| Wave 2b: T8 Discord posting, T9b Instagram publish and gallery, T11 automation, I2 wave-2a follow-ups | Building (workflow: build, review, fix) | |
+| Vercel function limit (narrow Chromium tracing, one time limit) | Merged | #215 |
+| Fixes from the live checks (web sources, PDFs with web fetch, eval checks) | Merged | #218 |
+| I2: wave-2a integration follow-ups | Merged | #217 |
+| T8: Discord posting (posts, polls, standing rules, event mirror, role sync, Announcements) | Merged | #221 |
+| T11: automation (recurring questions, weekly digest, Needs attention) | Merged | #220 |
+| T9b: Instagram publish and gallery add | Merged | #219 |
+| Security fixes: Jack's reply surface; privacy (Discord purges, account deletion); change proposals | In review | #222–#224 |
 | Eval, security pass, docs, launch post | Not started | |
 
 ## Decisions
@@ -110,6 +115,28 @@ Calls made during the build, for Gray to review. Newest last.
   - **Mention mode:** a turn keeps at most the newest 40 side messages (about 20,000 characters) and says how many it left out (T9a).
   - **Meetings:** recording the same meeting twice is refused at apply (one per title per day, under a lock); a new-meeting proposal replaces an earlier one for the same day and type in the room (T10).
   - **Vercel's Hobby plan allows 12 functions per deployment.** Since G5, previews failed at deploy (the build passed, so CI never saw it). Chromium is now traced only into the routes that render, the PDF worker only into those that read PDFs, and no page or route sets its own `maxDuration`: everything runs on the project default, 300 s (the 60 s and 120 s routes too). A test keeps new routes from adding settings (#215).
+- **Wave 2b calls (from the PRs):**
+  - **Discord posting (T8):**
+    - an unconfirmed send is never sent again blind: after its same-nonce retries it's looked for in the channel's history;
+    - a post more than 6 hours late is cancelled; switching a rule back on moves its cutoff to now; each run looks back at most 3 days;
+    - officers can post directly on Announcements and pause rules; creating, editing and switching on rules, posting channels and role sync are admin-only;
+    - role sync adds and removes roles for linked members only, one rule per role, and refuses roles with moderation powers (including through channel overwrites);
+    - a ping needs an officer to have asked for it in the room; @everyone and @here need a permission the install link doesn't grant;
+    - Twitch go-live is noticed by polling (up to about 5 minutes late), not through Twitch's webhook;
+    - Discord event interest counts show on Community → Discord.
+  - **Instagram (T9b):**
+    - pressing Publish or Add to gallery on a deck page is the officer's approval: it applies directly, audited, after a confirm;
+    - the site caps posts at 10 a rolling day;
+    - the AI label is an option, off by default (a policy question for Gray).
+  - **Automation (T11):**
+    - the digest's Discord copy goes through Discord posting (a `digest` post on Announcements);
+    - the Teams copy goes through a Workflows webhook connector (`teams-webhook`, off by default);
+    - recurring questions and digest summaries share a $10 a month cap (`JACK_AUTOMATION_BUDGET_USD`);
+    - notes posted by a job record its key (`JackMessage.jobKey`, one additive migration).
+  - **Integration:**
+    - T11's migration was renamed to `20261024020500_jack2_note_job_key`, because it had the same timestamp as I2's;
+    - the deck page gets the Chromium binary back: publishing renders slides a deck hasn't rendered yet;
+    - a flaky event-mirror test was fixed (same-millisecond timestamps).
 - **For Gray to sign off, two key exceptions to "read-only or restricted":**
   - Vercel offers no read-only analytics token. A project-scoped, read-write token is used only by a daily snapshot job, with a short expiry (§12.5).
   - Resend's production key stays send-only, and delivery data arrives by webhook instead.
@@ -178,3 +205,27 @@ Calls made during the build, for Gray to review. Newest last.
     - **PDF link probe (files.md step 5):** fetching a URL that's only inside a PDF document in the user turn fails with `url_not_in_prior_context`, so the gate that sent PDFs as text while web fetch was on came off. The planted-PDF question passes with web fetch on.
     - **Cost per cold reply:** the cached prefix (system prompt and always-loaded tools) is about 34,000 tokens. A reply after the 5-minute cache lapses pays about 8.5 cents to write it; replies within it read it for about a third of a cent. One web search adds 35,000 to 53,000 input tokens (dynamic filtering reads results in code execution).
   - Security review launched on everything merged (six lenses, each finding verified by skeptics); wave 2b gets its own pass after it merges.
+- **10/23 (early morning, continued):**
+  - **Review of #218 (the live-check fixes):** 1 major, 8 minor, all fixed before merging:
+    - the eval's judge now sees web searches and fetches;
+    - link matching starts from each search result's own URL;
+    - the PDF probe is a re-runnable script with a control (`scripts/check-jack-web-fetch-documents.ts`).
+  - **Security review of everything merged (waves 1 and 2a):** six lenses, each finding checked by skeptics trying to refute it.
+    - Access control was clean: every page, server action, webhook, OAuth flow and signed route checks out.
+    - 11 confirmed findings (2 major, 9 minor), fixed in three PRs (#222–#224), each independently reviewed.
+    - Major: room notes carried model-written text (and its links) back into later turns; links in Jack's replies didn't show where they go.
+    - Minor:
+      - link neutralizing missed non-ASCII hosts;
+      - deck render keys across rooms;
+      - full tool input in a log line;
+      - Discord purges (thread titles, a race with a running sync);
+      - account deletion left emails in delivery events;
+      - scheduled emails skipped the daily limit;
+      - stale audiences in email proposals;
+      - waitlist counts in event changes.
+  - **Wave 2b done:** T8, T9b, T11 and I2, each reviewed independently (25 findings: 3 major, 22 minor) and fixed.
+    - T8's fix agent stopped before pushing; its eight fix commits were checked and pushed by hand.
+    - It also left the shared build lock held for half an hour; the briefs now say how to spot a stale lock.
+  - Merged #217, #221, #220 and #219. The combined branch passes lint, typecheck, 3,408 tests and the build; the drift check is clean.
+  - Browser-checked: Announcements, Recurring questions, Instagram publishing, Usage (the automation cap), the deck page's new buttons and the Discord page's role sync and posting sections, light and dark, 390 px.
+  - **Vercel's Hobby build rate limit** was hit by the night's pushes: recent previews show "build-rate-limit" instead of a result. The function count gets checked again on the release PR.
