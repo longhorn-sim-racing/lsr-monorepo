@@ -19,7 +19,7 @@ export const SLIDES = "application/vnd.google-apps.presentation"
 export const FOLDER = "application/vnd.google-apps.folder"
 export const SHORTCUT = "application/vnd.google-apps.shortcut"
 const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-const PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+export const PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 /** The planted instruction in "Sponsor Outreach Notes" (the eval's Drive injection case) */
 export const DRIVE_INJECTION = {

@@ -1,6 +1,7 @@
+import { isUnchanged, saveDocument } from "../documents/saving"
 import type { DocumentMeta, DocumentStore } from "../documents/store"
 import { cleanDocumentName, DOCUMENT_LIMITS, documentReader, documentText, folderPath, type DocumentReader, type DocumentText } from "../documents/text"
-import { DriveApiError, FOLDER_TYPE, SHORTCUT_TYPE, type DriveChange, type DriveClient, type DriveFile } from "./client"
+import { DriveApiError, FOLDER_TYPE, isProjectLimit, SHORTCUT_TYPE, type DriveChange, type DriveClient, type DriveFile } from "./client"
 
 /**
  * Keeps ExternalDocument current with the club's Drive folder (design §12.7; research/google-drive.md
@@ -14,6 +15,10 @@ import { DriveApiError, FOLDER_TYPE, SHORTCUT_TYPE, type DriveChange, type Drive
  * - A folder renamed or moved within the tree has its subtree walked again (new paths); a folder that
  *   left the tree (moved out, trashed, unshared) makes the next walk a full one.
  * - Removed and trashed files are marked deleted and lose their text.
+ * - A root folder missing for a day (unshared, deleted) has everything from it removed, whatever the
+ *   feed reported; the full walk when it's back brings it all back.
+ * - One file never stops the sync: a reader that fails or text the database refuses makes it "error",
+ *   read again at the next walk. Rate limits and quotas stop the run instead (they're not about the file).
  * - Everything is resumable: the cursor (folders, the walk's queue, the feed's position) is saved after
  *   each page, and work stops at the deadline. A page left halfway is read again: every step is idempotent.
  *
@@ -75,9 +80,13 @@ export type DriveSyncOptions = {
   now?: () => Date
   /** How often a full walk reconciles the index (default a week) */
   walkEveryMs?: number
+  /** How long the root may be missing before what came from it is removed (default a day) */
+  rootGraceMs?: number
 }
 
 export const DRIVE_WALK_EVERY_MS = 7 * 86_400_000
+/** A brief 404 (a folder moved and shared again) shouldn't empty the index; a day missing does */
+export const DRIVE_ROOT_GRACE_MS = 86_400_000
 
 /** Folders the tree may hold; past it the sync stops with an error instead of walking forever */
 const MAX_FOLDERS = 5_000
@@ -92,6 +101,9 @@ const EXPORTS: Record<string, { mimeType: string; reader: DocumentReader }> = {
 }
 
 const WORKSPACE = "application/vnd.google-apps."
+
+/** 403 reasons that mean the service account may not download or export this file (the owner turned downloads off) */
+const NO_DOWNLOAD = new Set(["cannotDownloadFile", "cannotExportFile", "insufficientFilePermissions"])
 
 /** A link to open the file in Drive: Drive's own when it's an https Google link, else one built from the id */
 export function driveWebUrl(file: Pick<DriveFile, "id" | "webViewLink">): string {
@@ -110,6 +122,7 @@ export async function syncDrive(options: DriveSyncOptions): Promise<DriveSyncRes
   const { client, rootId, store, signal, deadline, log = () => {} } = options
   const now = options.now ?? (() => new Date())
   const walkEveryMs = options.walkEveryMs ?? DRIVE_WALK_EVERY_MS
+  const rootGraceMs = options.rootGraceMs ?? DRIVE_ROOT_GRACE_MS
   const counts: DriveSyncCounts = { indexed: 0, unchanged: 0, removed: 0, ignored: 0, folders: 0, changes: 0 }
   const timeLeft = () => !signal.aborted && Date.now() < deadline
   const save = async () => options.saveCursor?.(cursor)
@@ -156,7 +169,9 @@ export async function syncDrive(options: DriveSyncOptions): Promise<DriveSyncRes
       const file = await client.getFile(id, "id,name,mimeType,parents,trashed", signal)
       if (file.mimeType === FOLDER_TYPE && !file.trashed && file.parents?.[0]) folder = { name: cleanDocumentName(file.name), parent: file.parents[0] }
     } catch (error) {
-      if (!isApiError(error, 404) && !isApiError(error, 403)) throw error
+      // 404, or a 403 about the folder itself: not one we can see. A rate limit or quota says nothing
+      // about the folder, so the run stops (the next one tries again) instead of removing its files
+      if (!isApiError(error, 404) && !(isApiError(error, 403) && !isProjectLimit(error))) throw error
     }
     lookedUp.set(id, folder)
     return folder
@@ -196,11 +211,14 @@ export async function syncDrive(options: DriveSyncOptions): Promise<DriveSyncRes
       const body = await client.download(file.id, DOCUMENT_LIMITS.maxDownloadBytes, signal)
       return body ? documentText(reader, body) : { text: null, textStatus: "too_large" }
     } catch (error) {
-      if (error instanceof DriveApiError && error.status === 403) {
+      // Rate limits and quotas (the client retried the rate limits) stop the run: they're not about this file
+      if (error instanceof DriveApiError && error.status === 403 && !isProjectLimit(error)) {
         if (error.reason === "exportSizeLimitExceeded") return { text: null, textStatus: "too_large" }
         if (error.reason === "fileNotExportable" || error.reason === "fileNotDownloadable") return { text: null, textStatus: "unsupported" }
-        // Any other 403 that isn't a rate limit (those were retried in the client): downloads are off for viewers
-        if (!/rateLimit/i.test(error.reason)) return { text: null, textStatus: "restricted" }
+        if (NO_DOWNLOAD.has(error.reason)) return { text: null, textStatus: "restricted" }
+        // Another 403 about this file (the reason for restricted downloads isn't documented): read again at the next walk
+        log(`Drive refused "${cleanDocumentName(file.name)}" (403 ${error.reason || "with no reason"}); it's read again at the next walk.`)
+        return { text: null, textStatus: "error" }
       }
       throw error
     }
@@ -217,8 +235,7 @@ export async function syncDrive(options: DriveSyncOptions): Promise<DriveSyncRes
       sizeBytes: file.size ? Number(file.size) : null,
       version: file.version ?? null,
     }
-    const existing = await store.find(file.id)
-    if (existing && !existing.deletedAt && meta.version !== null && existing.version === meta.version) {
+    if (isUnchanged(await store.find(file.id), meta)) {
       // Unchanged; its folder may have been renamed. Touching it also marks it seen by this walk
       await store.touch(meta, now())
       counts.unchanged++
@@ -233,9 +250,10 @@ export async function syncDrive(options: DriveSyncOptions): Promise<DriveSyncRes
         if (await store.remove(file.id, now())) counts.removed++
         return
       }
+      // Anything else here is about Drive or the network, not the file: the run stops, and the next one reads this page again
       throw error
     }
-    await store.save(meta, text, now())
+    await saveDocument(store, meta, text, now(), log)
     counts.indexed++
   }
 
@@ -366,6 +384,17 @@ export async function syncDrive(options: DriveSyncOptions): Promise<DriveSyncRes
   if (rootMissing) {
     cursor.rootMissingAt ??= now().toISOString()
     log("The root folder is missing (gone, or no longer shared): nothing is walked; the changes feed still removes what left.")
+    if (now().getTime() - Date.parse(cursor.rootMissingAt) >= rootGraceMs) {
+      // Missing for a day: nothing from it stays searchable, whatever the feed reported (it isn't known to
+      // report every file under an unshared folder). The folder list goes too, so the feed can't put
+      // anything back, and any walk in progress, so the walk when the folder is back starts from the top
+      const removed = await store.removeUnseen(now(), now())
+      counts.removed += removed
+      cursor.folders = {}
+      cursor.walk = undefined
+      if (removed) log(`The root folder has been missing since ${cursor.rootMissingAt}: removed the ${removed} documents still indexed from it.`)
+      await save()
+    }
   } else {
     const walkStale = cursor.lastWalkAt ? now().getTime() - Date.parse(cursor.lastWalkAt) > walkEveryMs : true
     // Back after being missing: what changed meanwhile may not all be in the feed

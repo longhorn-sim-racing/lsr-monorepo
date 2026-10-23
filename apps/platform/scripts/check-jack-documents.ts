@@ -2,7 +2,8 @@
  * Checks the documents track (#188: Drive, SharePoint, Teams) against the LOCAL database: what the unit
  * tests can't see, because it lives in Postgres.
  *
- *   - the ExternalDocument store: upsert, touch, remove (text dropped), the walk's reconcile, BigInt sizes
+ *   - the ExternalDocument store: upsert, touch, remove (text dropped), the walk's reconcile, BigInt sizes,
+ *     and text Postgres refuses (a NUL) kept out without stopping the sync
  *   - the search index triggers on ExternalDocument and TeamsMessage, and the Knowledge tabs' searches
  *     (the `= ANY(...::text[])` filter, full text plus plain matches on names, folders and authors)
  *   - the Teams store: channels, messages, purges, dropping a channel (its messages go, in one transaction)
@@ -61,6 +62,7 @@ async function main() {
 
   const { prisma } = await import("../src/server/db");
   const { prismaDocumentStore } = await import("../src/server/connectors/documents/store");
+  const { saveDocument } = await import("../src/server/connectors/documents/saving");
   const { prismaTeamsStore, prismaSubscriptionStore } = await import("../src/server/connectors/teams/store");
   const { listDocuments, listTeamsMessages } = await import("../src/server/queries/documents");
   const { documentsSource } = await import("../src/server/jack/search/sources/documents");
@@ -109,6 +111,12 @@ async function main() {
     await store.save({ ...meta, externalId: `old-${tag}` }, { text: "old", textStatus: "ok" }, new Date(Date.now() - 86_400_000));
     await store.save({ ...meta, externalId: `new-${tag}` }, { text: "new", textStatus: "ok" }, new Date());
     check("the reconcile removes only what the walk didn't see", (await store.removeUnseen(new Date(Date.now() - 3_600_000), new Date())) === 1);
+
+    // Text Postgres refuses (a NUL character, error 22021) never stops a sync: the file is kept without it
+    const refused: string[] = [];
+    await saveDocument(store, { ...meta, externalId: `nul-${tag}` }, { text: "Budget\u0000 2026", textStatus: "ok" }, new Date(), (line) => refused.push(line));
+    const nulRow = await prisma.externalDocument.findFirst({ where: { source: docSource, externalId: `nul-${tag}` } });
+    check("text with a NUL is refused by Postgres, and the file is kept without it", nulRow?.textStatus === "error" && nulRow.text === null && refused.length === 1);
 
     // ---- The reader, against whatever ConnectorState says (never written here) ----
     const driveOn = (await prisma.connectorState.findUnique({ where: { id: "google-drive" } }))?.enabled ?? false;

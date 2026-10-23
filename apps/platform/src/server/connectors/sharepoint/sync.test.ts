@@ -3,7 +3,7 @@ import { memoryDocumentStore } from "../documents/testing"
 import { mountFakes } from "../fakes/testing"
 import { GRAPH_FAKE } from "../microsoft/fake/fixtures"
 import { microsoftGraphFake } from "../microsoft/fake/handlers"
-import { graphClient } from "../microsoft/graph"
+import { GraphApiError, graphClient } from "../microsoft/graph"
 import { namesFromGraphPath, syncSharePoint, type SharePointCursor, type SharePointSyncOptions } from "./sync"
 
 afterEach(() => {
@@ -103,6 +103,59 @@ describe("later SharePoint syncs", () => {
     const moved = await run({ ...first.cursor, driveId: "b!another" })
     expect(moved.cursor.driveId).toBe(GRAPH_FAKE.driveId)
     expect(moved.counts.unchanged).toBe(5)
+  })
+})
+
+describe("one file never stops the SharePoint sync", () => {
+  it("removes a file whose folder was deleted after the delta listed it, and goes on", async () => {
+    const { store, run, hook } = setup()
+    const first = await run(null)
+    await hook("mutate", { op: "upload", id: "sp-budget", text: "Category,Amount\nShowcase,450" })
+    await hook("mutate", { op: "upload", id: "sp-new", name: "Notes.txt", parentId: "sp-root", text: "Fresh notes." })
+    // The parent GET answers 404: the folder went between the delta page and the lookup
+    const real = graphClient({ tenantId: GRAPH_FAKE.tenantId, clientId: GRAPH_FAKE.clientId, clientSecret: GRAPH_FAKE.clientSecret }, { retryDelayMs: 0 })
+    const graph = {
+      ...real,
+      get: <T>(path: string, options?: { signal?: AbortSignal }) => (path.includes("/items/sp-general?") ? Promise.reject(new GraphApiError(404, "itemNotFound", path)) : real.get<T>(path, options)),
+    }
+    const second = await run(first.cursor, { graph })
+    expect(second.more).toBe(false)
+    expect(store.rows.get(id("sp-budget"))).toMatchObject({ text: null, deletedAt: expect.any(Date) })
+    expect(store.rows.get(id("sp-new"))).toMatchObject({ text: "Fresh notes.", path: "/" })
+    expect(second.cursor.deltaLink).not.toBe(first.cursor.deltaLink)
+  })
+
+  it("gives a file in a folder it may not read no path, instead of failing", async () => {
+    const { store, run, hook } = setup()
+    const first = await run(null)
+    await hook("mutate", { op: "upload", id: "sp-minutes", name: "Minutes.txt", parentId: "sp-general", mimeType: "text/plain", text: "Minutes (fixture)." })
+    const real = graphClient({ tenantId: GRAPH_FAKE.tenantId, clientId: GRAPH_FAKE.clientId, clientSecret: GRAPH_FAKE.clientSecret }, { retryDelayMs: 0 })
+    const graph = { ...real, get: <T>(path: string, options?: { signal?: AbortSignal }) => (path.includes("/items/sp-general?") ? Promise.reject(new GraphApiError(403, "accessDenied", path)) : real.get<T>(path, options)) }
+    await run(first.cursor, { graph })
+    expect(store.rows.get(id("sp-minutes"))).toMatchObject({ path: "/", text: "Minutes (fixture).", deletedAt: null })
+  })
+
+  it("keeps a file whose text the database refuses, without its text", async () => {
+    const { store, run } = setup()
+    const save = store.save.bind(store)
+    store.save = async (meta, text, at) => {
+      if (meta.externalId === id("sp-packet") && text.text !== null) throw new Error("refused")
+      return save(meta, text, at)
+    }
+    const { more } = await run(null)
+    expect(more).toBe(false)
+    expect(store.rows.get(id("sp-packet"))).toMatchObject({ text: null, textStatus: "error", deletedAt: null })
+    expect(store.live()).toHaveLength(5)
+  })
+
+  it("reads a file again at the weekly enumeration when its last read failed", async () => {
+    const { store, run } = setup()
+    const first = await run(null)
+    const row = store.rows.get(id("sp-rules"))!
+    store.rows.set(id("sp-rules"), { ...row, text: null, textStatus: "error" })
+    const later = await run({ ...first.cursor, lastFullAt: new Date(Date.now() - 8 * 86_400_000).toISOString() })
+    expect(later.counts).toMatchObject({ indexed: 1, unchanged: 4 })
+    expect(store.rows.get(id("sp-rules"))).toMatchObject({ textStatus: "ok", text: expect.stringContaining("Rules") })
   })
 })
 

@@ -2,7 +2,7 @@ import { createPublicKey, verify } from "node:crypto"
 import { strToU8 } from "fflate"
 import type { FakeRoute, FakeService } from "../../fakes/types"
 import { DRIVE_SCOPE, GOOGLE_TOKEN_AUDIENCE, JWT_BEARER_GRANT } from "../auth"
-import { DOC, DRIVE_FAKE_ROOT_ID, DRIVE_FAKE_SA_EMAIL, driveFixtures, FOLDER, SHEET, SLIDES, type FakeDriveItem } from "./fixtures"
+import { DOC, DRIVE_FAKE_ROOT_ID, DRIVE_FAKE_SA_EMAIL, driveFixtures, fakePptx, FOLDER, PPTX, SHEET, SLIDES, type FakeDriveItem } from "./fixtures"
 import { FakeQueryError, parseDriveQuery, parseFields, project } from "./query"
 
 /**
@@ -24,7 +24,8 @@ const EXPORTS: Record<string, string[]> = {
   [SLIDES]: ["text/plain", "application/pdf"],
 }
 
-type Failure = { status: number; reason: string; remaining: number; retryAfter?: number }
+/** An injected error; with `path`, only calls to that API path (e.g. "/drive/v3/files/fx-sponsors") get it */
+type Failure = { status: number; reason: string; remaining: number; retryAfter?: number; path?: string }
 
 const driveError = (status: number, reason: string, message: string, headers?: HeadersInit) =>
   Response.json({ error: { code: status, message, errors: [{ domain: "global", reason, message }] } }, { status, headers })
@@ -130,10 +131,11 @@ export const googleDriveFake: FakeService = {
     /** Auth and injected failures for the Drive API routes; null to go on */
     function gate(request: Request): Response | null {
       if (!authorized(request)) return unauthorized()
-      const failure = failures[0]
+      const pathname = new URL(request.url).pathname
+      const failure = failures.find((one) => !one.path || pathname.endsWith(one.path))
       if (failure) {
         failure.remaining--
-        if (failure.remaining <= 0) failures = failures.slice(1)
+        if (failure.remaining <= 0) failures = failures.filter((one) => one !== failure)
         return driveError(failure.status, failure.reason, `Injected ${failure.reason}`, failure.retryAfter !== undefined ? { "retry-after": String(failure.retryAfter) } : undefined)
       }
       return null
@@ -361,7 +363,13 @@ export const googleDriveFake: FakeService = {
                 version: 1,
                 modifiedTime: new Date().toISOString(),
                 text,
-                ...(mimeType === DOC ? { exports: { "text/markdown": text, "text/plain": text } } : mimeType === FOLDER ? {} : { bytes: async () => strToU8(text) }),
+                ...(mimeType === DOC
+                  ? { exports: { "text/markdown": text, "text/plain": text } }
+                  : mimeType === FOLDER
+                    ? {}
+                    : mimeType === PPTX
+                      ? { bytes: async () => fakePptx([{ lines: text.split("\n") }]) }
+                      : { bytes: async () => strToU8(text) }),
               }
               items.set(added.id, added)
               record(added)
@@ -371,7 +379,8 @@ export const googleDriveFake: FakeService = {
             case "share-root": {
               const root = items.get(DRIVE_FAKE_ROOT_ID)!
               root.shared = body.op === "share-root"
-              record(root, ...descendants(root.id))
+              // quiet: the feed reports nothing (whether the real feed reports every file under an unshared folder isn't verified)
+              if (!body.quiet) record(root, ...descendants(root.id))
               break
             }
             default:
@@ -381,12 +390,12 @@ export const googleDriveFake: FakeService = {
         },
       },
       {
-        // Test hook: the next `count` Drive API calls answer with this error
+        // Test hook: the next `count` Drive API calls (to `path`, when given) answer with this error
         method: "POST",
         path: "/_fake/fail",
         async handle(request) {
-          const body = (await request.json().catch(() => ({}))) as { status?: number; reason?: string; count?: number; retryAfter?: number }
-          failures.push({ status: body.status ?? 503, reason: body.reason ?? "backendError", remaining: body.count ?? 1, retryAfter: body.retryAfter })
+          const body = (await request.json().catch(() => ({}))) as { status?: number; reason?: string; count?: number; retryAfter?: number; path?: string }
+          failures.push({ status: body.status ?? 503, reason: body.reason ?? "backendError", remaining: body.count ?? 1, retryAfter: body.retryAfter, path: body.path })
           return Response.json({ ok: true })
         },
       },

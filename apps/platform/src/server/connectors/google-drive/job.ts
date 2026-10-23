@@ -52,7 +52,7 @@ export async function runDriveSyncJob({ signal, deadline, log }: Pick<JobContext
     })
     await recordConnectorSync(DRIVE_CONNECTOR_ID, { cursor: result.cursor })
     if (result.rootMissing) {
-      throw new Error(`${DRIVE_ROOT_MISSING} (404). Ask its owner to share it with the service account (the key's client_email) as Viewer again, or fix GOOGLE_DRIVE_FOLDER_ID.`)
+      throw new Error(`${DRIVE_ROOT_MISSING} (404). Ask its owner to share it with the service account (the key's client_email) as Viewer again, or fix GOOGLE_DRIVE_FOLDER_ID. After a day missing, its documents leave search until it's back.`)
     }
     return { summary: driveSummary(result), counts: { ...result.counts } }
   } catch (error) {

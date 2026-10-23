@@ -60,6 +60,18 @@ function retryable(status: number, reason: string): boolean {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504 || (status === 403 && RATE_LIMITED.has(reason))
 }
 
+/** 403 reasons about our project (rate limits, quotas, the API switched off or blocked), not about one file */
+const PROJECT_LIMITS = new Set([...RATE_LIMITED, "quotaExceeded", "dailyLimitExceeded", "dailyLimitExceededUnreg", "accessNotConfigured", "SERVICE_DISABLED", "domainPolicy"])
+
+/**
+ * Google said no because of a rate limit, a quota or the project's setup (still failing after the
+ * client's tries), so it says nothing about the file: a sync stops and tries again next run, instead of
+ * taking it as "no access" and removing or flagging files
+ */
+export function isProjectLimit(error: unknown): boolean {
+  return error instanceof DriveApiError && (error.status === 429 || (error.status === 403 && PROJECT_LIMITS.has(error.reason)))
+}
+
 /** Google's reason for an error (`error.errors[0].reason`, else `error.status`), from at most 16 KB of the body */
 async function errorReason(response: Response): Promise<string> {
   const text = (await response.text().catch(() => "")).slice(0, 16_384)

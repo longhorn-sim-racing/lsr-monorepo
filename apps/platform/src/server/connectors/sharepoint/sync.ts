@@ -1,3 +1,4 @@
+import { isUnchanged, saveDocument } from "../documents/saving"
 import type { DocumentMeta, DocumentStore } from "../documents/store"
 import { cleanDocumentName, DOCUMENT_LIMITS, documentReader, documentText, folderPath, type DocumentText } from "../documents/text"
 import { GraphApiError, type GraphClient } from "../microsoft/graph"
@@ -12,7 +13,10 @@ import { GraphApiError, type GraphClient } from "../microsoft/graph"
  *   folder only update then.
  * - Items with a `deleted` facet are marked removed and lose their text.
  * - Delta items have no path, so a file's folder comes from its parent folder (one GET per folder per run).
+ *   A parent that's gone by then (404) means the file went with it; one we may not read (403) gives no path.
  * - 410 Gone means "enumerate again": a full enumeration starts over.
+ * - One file never stops the sync: a reader that fails or text the database refuses makes it "error",
+ *   read again at the next enumeration.
  * - Resumable: the cursor (the delta link, or how far an enumeration got) is saved after each page.
  *
  * The cursor holds Graph's links (they carry a sync position, never a credential).
@@ -106,14 +110,23 @@ export async function syncSharePoint(options: SharePointSyncOptions): Promise<{ 
     cursor = { driveId }
   }
   const save = async () => options.saveCursor?.(cursor)
-  const folders = new Map<string, string[]>()
+  /** Folder names by folder id, this run (null: the folder is gone) */
+  const folders = new Map<string, string[] | null>()
 
-  async function folderNames(parentId: string | undefined): Promise<string[]> {
+  /** The folder names down to `parentId`; null when that folder was deleted after the delta page listed the file */
+  async function folderNames(parentId: string | undefined): Promise<string[] | null> {
     if (!parentId) return []
     const cached = folders.get(parentId)
-    if (cached) return cached
-    const folder = await graph.get<DriveItem>(`${drive}/items/${encodeURIComponent(parentId)}?$select=id,name,parentReference,root`, { signal })
-    const names = folder.root ? [] : [...namesFromGraphPath(folder.parentReference?.path), folder.name ?? ""]
+    if (cached !== undefined) return cached
+    let names: string[] | null
+    try {
+      const folder = await graph.get<DriveItem>(`${drive}/items/${encodeURIComponent(parentId)}?$select=id,name,parentReference,root`, { signal })
+      names = folder.root ? [] : [...namesFromGraphPath(folder.parentReference?.path), folder.name ?? ""]
+    } catch (error) {
+      if (!(error instanceof GraphApiError) || (error.status !== 404 && error.status !== 403)) throw error
+      // 404: deleted with its files (the delta reports them too); 403: a folder we may not read, so no path
+      names = error.status === 404 ? null : []
+    }
     folders.set(parentId, names)
     return names
   }
@@ -148,19 +161,24 @@ export async function syncSharePoint(options: SharePointSyncOptions): Promise<{ 
       counts.ignored++
       return
     }
+    const names = await folderNames(item.parentReference?.id)
+    if (names === null) {
+      if (await store.remove(externalId, now())) counts.removed++
+      else counts.ignored++
+      return
+    }
     const meta: DocumentMeta = {
       externalId,
       driveId,
       name: cleanDocumentName(item.name ?? ""),
-      path: folderPath(await folderNames(item.parentReference?.id)),
+      path: folderPath(names),
       mimeType: item.file.mimeType ?? "application/octet-stream",
       webUrl: safeWebUrl(item.webUrl),
       modifiedAt: item.lastModifiedDateTime ? new Date(item.lastModifiedDateTime) : now(),
       sizeBytes: typeof item.size === "number" ? item.size : null,
       version: item.eTag ?? item.cTag ?? null,
     }
-    const existing = await store.find(externalId)
-    if (existing && !existing.deletedAt && meta.version !== null && existing.version === meta.version) {
+    if (isUnchanged(await store.find(externalId), meta)) {
       await store.touch(meta, now())
       counts.unchanged++
       return
@@ -173,9 +191,10 @@ export async function syncSharePoint(options: SharePointSyncOptions): Promise<{ 
         if (await store.remove(externalId, now())) counts.removed++
         return
       }
+      // Anything else here is about Graph or the network, not the file: the run stops, and the next one reads this page again
       throw error
     }
-    await store.save(meta, text, now())
+    await saveDocument(store, meta, text, now(), log)
     counts.indexed++
   }
 

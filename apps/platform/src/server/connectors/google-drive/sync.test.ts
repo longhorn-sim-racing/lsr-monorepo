@@ -31,9 +31,13 @@ function setup() {
       ...extra,
     })
   const mutate = (body: Record<string, string>) => fetch(`${fakes.origin}/google-drive/_fake/mutate`, { method: "POST", body: JSON.stringify(body) })
+  const fail = (body: { status: number; reason: string; count?: number; path?: string }) => fetch(`${fakes.origin}/google-drive/_fake/fail`, { method: "POST", body: JSON.stringify(body) })
   const byName = (name: string) => [...store.rows.values()].find((row) => row.name === name)
-  return { fakes, store, saved, run, mutate, byName }
+  return { fakes, store, saved, run, mutate, fail, byName }
 }
+
+const PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+const DAY = 86_400_000
 
 describe("the first Drive sync", () => {
   it("walks the shared folder and reads every file's text the way room files are read", async () => {
@@ -153,6 +157,34 @@ describe("the changes feed", () => {
     expect(result.counts.indexed).toBe(0)
   })
 
+  it("doesn't take a rate-limited folder lookup as the file leaving the folder", async () => {
+    const { store, run, mutate, fail, byName } = setup()
+    const { cursor } = await run(null)
+    // As if the folder were new since the last walk, so placing the file needs a lookup
+    const before = structuredClone(cursor)
+    delete before.folders!["fx-sponsors"]
+    await mutate({ op: "edit", id: "fx-outreach", text: "Fixture Motors signed." })
+    // Still rate limited after the client's four tries
+    await fail({ status: 403, reason: "userRateLimitExceeded", count: 4, path: "/drive/v3/files/fx-sponsors" })
+    await expect(run(before)).rejects.toMatchObject({ status: 403, reason: "userRateLimitExceeded" })
+    expect(store.rows.get("fx-outreach")).toMatchObject({ deletedAt: null, textStatus: "ok" })
+
+    // The next run reads the same change again
+    await run(before)
+    expect(byName("Sponsor Outreach Notes")).toMatchObject({ deletedAt: null, text: "Fixture Motors signed.", path: "/Sponsors" })
+  })
+
+  it("still removes a file whose folder answers 403 for itself (no access)", async () => {
+    const { store, run, mutate, fail } = setup()
+    const { cursor } = await run(null)
+    const before = structuredClone(cursor)
+    delete before.folders!["fx-sponsors"]
+    await mutate({ op: "edit", id: "fx-outreach", text: "Fixture Motors signed." })
+    await fail({ status: 403, reason: "insufficientFilePermissions", count: 1, path: "/drive/v3/files/fx-sponsors" })
+    await run(before)
+    expect(store.rows.get("fx-outreach")).toMatchObject({ deletedAt: expect.any(Date), text: null })
+  })
+
   it("does a full walk when a folder leaves the tree, removing what was in it", async () => {
     const { store, run, mutate } = setup()
     const { cursor } = await run(null)
@@ -163,6 +195,53 @@ describe("the changes feed", () => {
     expect(store.rows.get("fx-gm-vtt")).toMatchObject({ deletedAt: expect.any(Date), text: null })
     expect(store.rows.get("fx-officer-notes")).toMatchObject({ deletedAt: expect.any(Date), text: null })
     expect(store.rows.get("fx-inventory")!.deletedAt).toBeNull()
+  })
+})
+
+describe("one file never stops the sync", () => {
+  it("drops NUL characters (Postgres refuses them) and carries on", async () => {
+    const { store, run, mutate, byName } = setup()
+    const { cursor } = await run(null)
+    await mutate({ op: "add", id: "fx-nul", name: "Budget.pptx", mimeType: PPTX, parent: "fx-sponsors", text: "Budget\u0000 2026" })
+    await mutate({ op: "add", id: "fx-after", name: "After", parent: "fx-sponsors", text: "Read after the deck." })
+    const result = await run(cursor)
+    expect(result.counts).toMatchObject({ indexed: 2 })
+    expect(byName("Budget.pptx")).toMatchObject({ textStatus: "ok", text: "--- Slide 1 ---\nBudget 2026" })
+    expect(byName("After")).toMatchObject({ text: "Read after the deck." })
+    expect(store.live()).toHaveLength(13)
+  })
+
+  it("keeps a file whose text the database refuses, without its text, and goes on", async () => {
+    const { store, run, byName } = setup()
+    const save = store.save.bind(store)
+    store.save = async (meta, text, at) => {
+      if (meta.externalId === "fx-venue" && text.text !== null) throw new Error("refused")
+      return save(meta, text, at)
+    }
+    const result = await run(null)
+    expect(result.cursor.walk).toBeUndefined()
+    expect(byName("Venue Contract.pdf")).toMatchObject({ text: null, textStatus: "error", deletedAt: null })
+    expect(store.live()).toHaveLength(11)
+  })
+
+  it("stops on a quota error (it's not about the file) and marks other refusals to be read again", async () => {
+    const { store, run, mutate, fail, byName } = setup()
+    const { cursor } = await run(null)
+    await mutate({ op: "add", id: "fx-new", name: "Notes.txt", mimeType: "text/plain", parent: "fx-sponsors", text: "Doors at noon." })
+
+    await fail({ status: 403, reason: "dailyLimitExceeded", count: 1, path: "/drive/v3/files/fx-new" })
+    await expect(run(cursor)).rejects.toMatchObject({ status: 403, reason: "dailyLimitExceeded" })
+    expect(store.rows.has("fx-new")).toBe(false)
+
+    // A 403 whose reason isn't known: "error", not "restricted", and the sync goes on
+    await fail({ status: 403, reason: "somethingNew", count: 1, path: "/drive/v3/files/fx-new" })
+    const next = await run(cursor)
+    expect(byName("Notes.txt")).toMatchObject({ textStatus: "error", text: null })
+
+    // Unchanged since, but read again at the next walk (as is the download-restricted file; the rest aren't)
+    const walked = await run({ ...next.cursor, lastWalkAt: new Date(Date.now() - 8 * DAY).toISOString() })
+    expect(byName("Notes.txt")).toMatchObject({ textStatus: "ok", text: "Doors at noon." })
+    expect(walked.counts).toMatchObject({ indexed: 2, unchanged: 10 })
   })
 })
 
@@ -184,12 +263,38 @@ describe("when the shared folder goes away", () => {
     expect(store.live()).toHaveLength(11)
   })
 
+  it("removes everything from it after a day, even when the feed reports nothing", async () => {
+    const { store, run, mutate, byName } = setup()
+    const { cursor } = await run(null)
+    await mutate({ op: "unshare-root", quiet: "true" })
+    const missing = await run(cursor)
+    expect(missing.rootMissing).toBe(true)
+    // A brief 404 doesn't empty the index
+    expect(store.live()).toHaveLength(11)
+
+    // A full walk was part way through when the folder went: only the Brand folder was left to list
+    const partWalked = { ...missing.cursor, walk: { full: true, startedAt: new Date().toISOString(), queue: [{ id: "fx-brand", names: ["Brand"] }], folders: {} } }
+    const dayLater = await run(partWalked, { now: () => new Date(Date.now() + DAY + 60_000) })
+    expect(dayLater.counts.removed).toBe(11)
+    expect(store.live()).toHaveLength(0)
+    expect([...store.rows.values()].every((row) => row.text === null)).toBe(true)
+    expect(dayLater.cursor).toMatchObject({ folders: {}, walk: undefined })
+
+    // Shared again: the full walk brings it all back
+    await mutate({ op: "share-root", quiet: "true" })
+    const back = await run(dayLater.cursor)
+    expect(back.rootMissing).toBe(false)
+    expect(store.live()).toHaveLength(11)
+    expect(byName("Storage Closet Inventory")!.text).toContain("7 Thrustmaster T300")
+  })
+
   it("starts over when the root folder id changes", async () => {
     const { run } = setup()
     const { cursor } = await run(null)
     const moved = await run({ ...cursor, rootId: "some-other-root" })
     expect(moved.cursor.rootId).toBe(DRIVE_FAKE_ROOT_ID)
-    expect(moved.counts.unchanged).toBe(11)
+    // The download-restricted file is looked at again (no download: its capability says so)
+    expect(moved.counts).toMatchObject({ unchanged: 10, indexed: 1 })
   })
 })
 

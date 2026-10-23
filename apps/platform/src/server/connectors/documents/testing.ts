@@ -27,6 +27,8 @@ export function memoryDocumentStore(source = "drive"): DocumentStore & { rows: M
       return row ? stored(row) : null
     },
     async save(meta, text, at) {
+      // As Postgres does (error 22021)
+      if (text.text?.includes("\u0000")) throw new Error('invalid byte sequence for encoding "UTF8": 0x00')
       const existing = rows.get(meta.externalId)
       rows.set(meta.externalId, { ...meta, id: existing?.id ?? `doc-${next++}`, text: text.text, textStatus: text.textStatus, syncedAt: at, deletedAt: null })
     },
