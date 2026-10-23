@@ -52,7 +52,7 @@ export function AttachButton({ onFiles, disabled }: { onFiles: (files: File[]) =
         variant="secondary"
         disabled={disabled}
         onClick={() => input.current?.click()}
-        className="size-8 md:size-8"
+        className="size-8"
       >
         <Paperclip className="size-4" aria-hidden />
       </IconButton>
