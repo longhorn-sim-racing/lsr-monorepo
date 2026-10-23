@@ -4,8 +4,8 @@ import { CHANNEL_TYPE } from "@/server/connectors/discord/types"
 
 /**
  * Where the bot may post (design §12.1: "channel must be an allowed posting channel"). Admins pick the
- * channels on Community → Announcements; every post, proposal and standing rule is checked against the
- * list, at propose time and again right before sending. The list is SystemSetting `discord_posting`
+ * channels on Community → Announcements; every post, proposal and standing rule (and the weekly digest,
+ * automation/digest) is checked against the list, at propose time and again right before sending. The list is SystemSetting `discord_posting`
  * (not a credential; revoked from Jack's SQL role like every setting), `{ "channels": [<id>, …] }`.
  * Channel names come from the Discord sync's channel list (DiscordChannel).
  */

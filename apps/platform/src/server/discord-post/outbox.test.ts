@@ -5,12 +5,12 @@ const db = vi.hoisted(() => ({ prisma: { discordPost: null as unknown as FakePos
 vi.mock("@/server/db", () => db)
 
 import { mountFakes, type MountedFakes } from "@/server/connectors/fakes/testing"
-import { DiscordApiError, discordClient } from "@/server/connectors/discord/client"
+import { DiscordApiError, DiscordRateLimitError, discordClient } from "@/server/connectors/discord/client"
 import { FAKE_CHANNELS, FAKE_DISCORD } from "@/server/connectors/discord/fake/data"
 import { discordFake } from "@/server/connectors/discord/fake/handlers"
 import { DiscordRateLimiter } from "@/server/connectors/discord/rate-limit"
 import { discordWriter } from "@/server/connectors/discord/write"
-import { cancelPosts, claimPost, deliverClaimed, LATE_LIMIT_MS, postNonce, queueDiscordPost, sendDuePosts, sendPostNow, STUCK_AFTER_MS } from "./outbox"
+import { cancelPosts, claimPost, deliverClaimed, isUnconfirmedFailure, LATE_LIMIT_MS, postNonce, queueDiscordPost, sendDuePosts, sendPostNow, STUCK_AFTER_MS } from "./outbox"
 
 const CHANNEL = FAKE_CHANNELS.announcements
 const body = (content = "GM 2 is Monday at 6") => ({ content, allowed_mentions: { parse: [] as [] } })
@@ -141,6 +141,61 @@ describe("sending", () => {
     const outcome = await deliverClaimed(post, writer, { pause: noPause })
     expect(outcome).toMatchObject({ status: "FAILED", error: expect.stringMatching(/isn't allowed to post/) })
     expect(posts(fakes)).toHaveLength(1)
+  })
+
+  it("marks every failure that may have posted as unconfirmed, and no other, so nothing sends one again by itself", async () => {
+    const { fakes, writer } = setup()
+    await hook(fakes, "drop", { path: "/messages", when: "before", times: 3 })
+    const notFound = await deliverClaimed(await claimed("Never arrived"), writer, { pause: noPause })
+    await hook(fakes, "drop", { path: "/messages", when: "before", times: 3 })
+    const noHistory = {
+      ...writer,
+      async messagesAfter(): ReturnType<typeof writer.messagesAfter> {
+        throw new DiscordApiError(500, null, "GET /channels/:id/messages", "Internal Server Error")
+      },
+    }
+    const unread = await deliverClaimed(await claimed("Never confirmed"), noHistory, { pause: noPause })
+    await hook(fakes, "fail", { path: "/messages", method: "POST", status: 403, code: 50013, message: "Missing Permissions", times: 1 })
+    const refused = await deliverClaimed(await claimed("Refused"), writer, { pause: noPause })
+    const unreadable = await deliverClaimed({ ...(await claimed("Garbled")), content: { nope: true } }, writer, { pause: noPause })
+
+    expect(notFound).toMatchObject({ status: "FAILED", error: expect.stringMatching(/isn't in the channel/) })
+    expect(unread).toMatchObject({ status: "FAILED", error: expect.stringMatching(/couldn't be read to check/) })
+    const errors = [notFound, unread, refused, unreadable].map((outcome) => (outcome.status === "FAILED" ? outcome.error : null))
+    expect(errors.map(isUnconfirmedFailure)).toEqual([true, true, false, false])
+    expect(table.rows.map((row) => isUnconfirmedFailure(row.error))).toEqual([true, true, false, false])
+  })
+
+  it("checks the channel, never re-queues or plainly fails, when a refusal or rate limit follows a try that got no answer", async () => {
+    const { fakes, writer } = setup()
+    /** The first try gets no answer (after posting it, when `posts`), the next an answer that alone would mean nothing was posted */
+    const flaky = (then: Error, posts = false) => {
+      let tries = 0
+      return {
+        ...writer,
+        async createMessage(...args: Parameters<typeof writer.createMessage>): ReturnType<typeof writer.createMessage> {
+          if (tries++ > 0) throw then
+          if (posts) await writer.createMessage(...args)
+          throw new TypeError("fetch failed")
+        },
+      }
+    }
+    const missingPermissions = new DiscordApiError(403, 50013, "POST /channels/:id/messages", "Missing Permissions")
+    const rateLimited = new DiscordRateLimitError("POST /channels/:id/messages", 30_000)
+
+    const refused = await deliverClaimed(await claimed("Dropped, then refused"), flaky(missingPermissions), { pause: noPause })
+    const limited = await deliverClaimed(await claimed("Dropped, then rate-limited"), flaky(rateLimited), { pause: noPause })
+    const landed = await deliverClaimed(await claimed("Posted, dropped, then rate-limited"), flaky(rateLimited, true), { pause: noPause })
+
+    for (const outcome of [refused, limited]) expect(outcome).toMatchObject({ status: "FAILED", error: expect.stringMatching(/fetch failed.*isn't in the channel/) })
+    expect([refused, limited].map((outcome) => outcome.status === "FAILED" && isUnconfirmedFailure(outcome.error))).toEqual([true, true])
+    expect(landed.status).toBe("SENT")
+    expect(table.rows.map((row) => [row.status, isUnconfirmedFailure(row.error)])).toEqual([
+      ["FAILED", true],
+      ["FAILED", true],
+      ["SENT", false],
+    ])
+    expect(await botMessages(fakes, "Posted, dropped, then rate-limited")).toHaveLength(1)
   })
 
   it("puts a post back for the next run when Discord rate-limits past what the client waits (it wasn't taken)", async () => {

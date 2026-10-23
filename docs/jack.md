@@ -362,7 +362,7 @@ Details: [`jack-2/tracks/discord-post.md`](./jack-2/tracks/discord-post.md) and 
 
 ### Recurring questions
 
-A question Jack (or Stand) is asked on a schedule in a room, answered as the officer who set it up (`src/server/automation/recurring/`).
+A question Jack (or Stand) is asked on a schedule in a room, answered as its owner: the officer who set it up, or the one who last changed its title, question, room or who answers (a change takes it over, so a run is never credited to someone who didn't write it) (`src/server/automation/recurring/`).
 - Set up on **Admin → Recurring questions** (`/admin/jack/recurring`) or through a `recurring.upsert` proposal. At most daily, Central Time. Off until someone turns it on.
 - Each run: it pauses itself (with a room note) if its room is archived or its owner isn't an officer any more; skips (with a note once a month) if automations are over their cap; otherwise posts the question as a scheduled note and runs the room. The reply has no web tools, saves no knowledge, and sees only the question and its last answer.
 - When the room is busy with another answer, the run tries again 3 minutes later, for up to 45 minutes.
@@ -373,7 +373,7 @@ A question Jack (or Stand) is asked on a schedule in a room, answered as the off
 Every area's "needs attention" check (`src/server/automation/checks/<track>.ts`), run at once and posted from a template (job `digest.weekly`, `src/server/automation/digest/`):
 - **The room** gets the full list as one note, plus an optional short summary from Jack (a scheduled reply, counted toward the automation cap).
 - **Discord and Teams** get only each check's label, count and console link: no names, no error text, no pings. Discord's copy goes through the outbox; Teams' through a Workflows webhook (connector `teams-webhook`).
-- Off until an officer sets it up. Any officer sets the room, day, time and summary on the Recurring questions page; only admins turn on Discord or Teams. It posts at most once a day per place, so Run now or a retry fills in only what's missing.
+- Off until an officer sets it up. Any officer sets the room, day, time and summary on the Recurring questions page; only admins turn on Discord (a posting channel only, like every post) or Teams. It posts at most once a day per place, so Run now or a retry fills in only what's missing, and never sends a copy again that may already have gone out (a Discord send that wasn't confirmed waits for an officer on Announcements; a Teams post with no answer isn't retried that day).
 
 ### Needs attention
 
@@ -440,7 +440,7 @@ The **spend meter** on the rooms page and in each room's header shows this calen
 
 When the month's total reaches `JACK_MONTHLY_BUDGET_USD` (default $50), Jack stops calling Claude and says the budget is used up until the 1st, Central Time. Set a spend limit in the Anthropic Console as well, a little above it, as the hard backstop; it also covers eval runs.
 
-**The automation cap:** replies to scheduled notes (recurring questions and the digest's summary) may spend at most `JACK_AUTOMATION_BUDGET_USD` (default $10) of that each month (`src/server/automation/cap.ts`). Past it, recurring questions skip and the digest goes out without Jack's summary until the 1st; officers' questions still get the rest of the budget.
+**The automation cap:** replies to scheduled notes (recurring questions and the digest's summary) may spend at most `JACK_AUTOMATION_BUDGET_USD` (default $10) of that each month (`src/server/automation/cap.ts`). Past it, recurring questions skip and the digest goes out without Jack's summary until the 1st; officers' questions still get the rest of the budget. Runs under way count toward it (each at a typical run's cost), and runs check it one at a time under a database lock, so questions due in the same minute can't all pass it at once.
 
 **Admin → Usage** (`/admin/jack/usage`): this month's spend against the cap, the automations' share against theirs, cost by month and persona for the last twelve months, cost by officer and automation, recent thumbs-down with their notes, and the common questions of the month.
 

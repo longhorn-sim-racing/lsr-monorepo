@@ -9,18 +9,19 @@ import { chicagoMonth } from "@/server/jack/spend"
 import type { JobContext, JobResult } from "@/server/scheduler/types"
 import { officerIdSet } from "@/server/services/officers"
 import { answerScheduledNote, defaultRunRoom, RETRY_AFTER_MS, RETRY_WINDOW_MS, retryJobAt, type RunRoom } from "../answer"
-import { automationBudget, type AutomationBudget } from "../cap"
-import { postAutomationNote } from "../notes"
+import { underWay, withAutomationCap, type AutomationBudget, type AutomationGate } from "../cap"
+import { announceAutomationNote, insertAutomationNote, postAutomationNote } from "../notes"
 import { pauseRecurringQuestion } from "./service"
 
 /**
  * One run of a recurring question (design §11.1), handed off to /api/admin/jack/run by the dispatcher:
  *
  * 1. Its room archived, or its owner no longer an officer: pause it, with a room note, and stop.
- * 2. Automations over their $10 cap (or Jack over his monthly budget): skip, with a room note (once a
- *    month), and stop.
+ * 2. Automations over their $10 cap (or Jack over his monthly budget), counting the runs under way: skip,
+ *    with a room note (once a month), and stop.
  * 3. Post the question as a scheduled note, answered as its owner: "Recurring question “Weekly signups”
- *    (set up by Gray): …".
+ *    (set up by Gray): …". The cap check and this note go together under the cap's lock (cap.ts), so
+ *    questions due in the same minute can't all pass a cap only some of them fit under.
  * 4. Run the room. The reply gets a short history (the question and its last answer), no web tools and no
  *    knowledge saves (the reply loop and the tools see a scheduled request). When another run holds the
  *    room, that run answers the note after its current reply; this job looks again in a few minutes.
@@ -32,11 +33,12 @@ import { pauseRecurringQuestion } from "./service"
 export type RecurringRunDeps = {
   broadcast: RoomBroadcaster
   runRoom: RunRoom
-  budget: (now: Date) => Promise<AutomationBudget>
+  /** Checks the cap and posts the question under its lock */
+  withCap: AutomationGate
   now: () => Date
 }
 
-export const defaultRecurringRunDeps: RecurringRunDeps = { broadcast: broadcastRoomEvent, runRoom: defaultRunRoom, budget: (now) => automationBudget(now), now: () => new Date() }
+export const defaultRecurringRunDeps: RecurringRunDeps = { broadcast: broadcastRoomEvent, runRoom: defaultRunRoom, withCap: withAutomationCap, now: () => new Date() }
 
 const time = (date: Date) => `${formatInTimeZone(date, DEFAULT_TIMEZONE, "h:mm a")} CT`
 
@@ -50,7 +52,7 @@ const SKIPPED = "Skipped the recurring question"
 
 function skippedText(title: string, budget: AutomationBudget): string {
   return budget.stopped === "automation_cap"
-    ? `${SKIPPED} “${title}”: automations (recurring questions and digest summaries) have used this month's ${formatUsd(budget.capUsd, { wholeIfRound: true })}. They start again on the 1st → /admin/jack/usage`
+    ? `${SKIPPED} “${title}”: automations (recurring questions and digest summaries) have used this month's ${formatUsd(budget.capUsd, { wholeIfRound: true })}${underWay(budget)}. They start again on the 1st → /admin/jack/usage`
     : `${SKIPPED} “${title}”: Jack's monthly budget is used up (${formatUsd(budget.totalUsd)} of ${formatUsd(budget.budgetUsd, { wholeIfRound: true })}). He answers again on the 1st → /admin/jack/usage`
 }
 
@@ -90,14 +92,19 @@ export async function runRecurringQuestion(ctx: Pick<JobContext, "job" | "starte
   })
   let asked = waiting ?? null
   if (!asked) {
-    const budget = await deps.budget(now)
-    if (budget.stopped) {
+    const started = await deps.withCap(now, async (budget, db) => ({
+      budget,
+      note: budget.stopped ? null : await insertAutomationNote({ roomId: question.roomId, jobKey: ctx.job.key, content: askText(question, owner.displayName), scheduled: true, authorUserId: owner.id }, db),
+    }))
+    const { budget } = started
+    if (!started.note) {
       const { start } = chicagoMonth(now)
       const told = await prisma.jackMessage.count({ where: { roomId: question.roomId, jobKey: ctx.job.key, scheduled: false, content: { startsWith: SKIPPED }, createdAt: { gte: start } } })
       if (!told) await note(skippedText(question.title, budget))
-      return { status: "skipped", summary: budget.stopped === "automation_cap" ? `Skipped: automations used this month's ${formatUsd(budget.capUsd, { wholeIfRound: true })}.` : "Skipped: Jack's monthly budget is used up." }
+      return { status: "skipped", summary: budget.stopped === "automation_cap" ? `Skipped: automations used this month's ${formatUsd(budget.capUsd, { wholeIfRound: true })}${underWay(budget)}.` : "Skipped: Jack's monthly budget is used up." }
     }
-    asked = await note(askText(question, owner.displayName), true, owner.id)
+    await announceAutomationNote(started.note, deps.broadcast)
+    asked = started.note
     await prisma.recurringQuestion.updateMany({ where: { id: question.id }, data: { lastRunAt: now, pausedReason: null } })
   } else {
     ctx.log(`Its question from ${time(asked.createdAt)} was still waiting.`)

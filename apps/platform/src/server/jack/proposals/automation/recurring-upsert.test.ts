@@ -4,7 +4,8 @@ const db = vi.hoisted(() => ({
   $transaction: vi.fn(),
   recurringQuestion: { findUnique: vi.fn() },
   jackRoom: { findUnique: vi.fn() },
-  jackMessage: { findMany: vi.fn() },
+  jackMessage: { findMany: vi.fn(), count: vi.fn() },
+  jackProposal: { findUnique: vi.fn() },
   user: { findMany: vi.fn() },
 }))
 const service = vi.hoisted(() => ({ createRecurringQuestionTx: vi.fn(), updateRecurringQuestionTx: vi.fn(), setRecurringQuestionOnTx: vi.fn() }))
@@ -43,6 +44,9 @@ beforeEach(() => {
   db.recurringQuestion.findUnique.mockResolvedValue(question())
   db.jackRoom.findUnique.mockResolvedValue({ title: "Signups room", archivedAt: null })
   db.jackMessage.findMany.mockResolvedValue([])
+  // The reply that proposed it answered an officer's message, not a scheduled note
+  db.jackMessage.count.mockResolvedValue(0)
+  db.jackProposal.findUnique.mockResolvedValue({ messageId: "reply-1" })
   db.user.findMany.mockResolvedValue([{ id: "gray" }])
   service.createRecurringQuestionTx.mockResolvedValue({ ok: true, question: question(), changed: ["title"] })
   service.updateRecurringQuestionTx.mockResolvedValue({ ok: true, question: question(), changed: ["prompt"] })
@@ -145,11 +149,66 @@ describe("proposing a change", () => {
     const before = { title: "Weekly signups", prompt: "Old?", roomId: "room-here", persona: "jack", schedule: "0 9 * * 1", enabled: false }
     const result = await recurringUpsertKind.apply(recurringUpsertSchema.parse({ id: "q-1", prompt: "New?", on: true }), applyCtx(before))
     expect(db.$transaction).toHaveBeenCalledTimes(1)
-    expect(service.updateRecurringQuestionTx).toHaveBeenCalledWith(db, "q-1", { prompt: "New?" }, expect.objectContaining({ userId: "dylan" }), { expected: before })
+    expect(service.updateRecurringQuestionTx).toHaveBeenCalledWith(db, "q-1", { prompt: "New?" }, expect.objectContaining({ userId: "dylan" }), { expected: before, owner: "gray" })
     expect(service.setRecurringQuestionOnTx).toHaveBeenCalledWith(db, "q-1", true, expect.objectContaining({ userId: "dylan" }))
     expect(result.summary).toBe("Changed the recurring question “Weekly signups”.")
 
     service.updateRecurringQuestionTx.mockResolvedValue({ ok: false, reason: "changed", error: "It changed." })
     await expect(recurringUpsertKind.apply(recurringUpsertSchema.parse({ id: "q-1", prompt: "New?" }), applyCtx(before))).rejects.toBeInstanceOf(StaleProposalError)
+  })
+
+  it("hands a change to what it asks to the officer it was proposed for, or to whoever applied it once they aren't one", async () => {
+    const before = { title: "Weekly signups", prompt: "Old?", roomId: "room-here", persona: "jack", schedule: "0 9 * * 1", enabled: false }
+    db.user.findMany.mockResolvedValue([])
+    await recurringUpsertKind.apply(recurringUpsertSchema.parse({ id: "q-1", prompt: "New?" }), applyCtx(before))
+    expect(service.updateRecurringQuestionTx.mock.calls[0][4]).toEqual({ expected: before, owner: "dylan" })
+  })
+
+  it("shows on the card that changing someone else's question makes it the asker's", async () => {
+    db.recurringQuestion.findUnique.mockResolvedValue(question({ createdById: "dylan", createdBy: { displayName: "Dylan" } }))
+    const prepared = await recurringUpsertKind.prepare(recurringUpsertSchema.parse({ id: "q-1", prompt: "How many, by team?" }), ctx)
+    expect(prepared.view.diff.at(-1)).toEqual({ field: "createdById", label: "Asked as", before: "Dylan", after: "Gray", format: "value" })
+    // A new title too: the note that asks it starts with the title
+    const retitled = await recurringUpsertKind.prepare(recurringUpsertSchema.parse({ id: "q-1", title: "Signups, by team" }), ctx)
+    expect(retitled.view.diff.map((row) => row.label)).toEqual(["Title", "Asked as"])
+    // Not for a new schedule: that doesn't change what it asks
+    const rescheduled = await recurringUpsertKind.prepare(recurringUpsertSchema.parse({ id: "q-1", schedule: { every: "day", time: "08:00" } }), ctx)
+    expect(rescheduled.view.diff.map((row) => row.label)).toEqual(["When"])
+  })
+})
+
+describe("a proposal a scheduled run made", () => {
+  const scheduledCtx = { ...ctx, messageId: "reply-1" }
+  const before = { title: "Weekly signups", prompt: "Old?", roomId: "room-here", persona: "jack", schedule: "0 9 * * 1", enabled: false }
+
+  beforeEach(() => {
+    // The proposing reply answered a recurring question's note, asked as its owner (Gray), who never saw this
+    db.jackMessage.count.mockResolvedValue(1)
+  })
+
+  it("runs as whoever applies it, not as the owner of the question that was running", async () => {
+    await recurringUpsertKind.apply(recurringUpsertSchema.parse({ id: "q-1", prompt: "New?" }), applyCtx(before))
+    expect(db.jackProposal.findUnique).toHaveBeenCalledWith({ where: { id: "p-1" }, select: { messageId: true } })
+    expect(db.jackMessage.count).toHaveBeenCalledWith({ where: { answeredById: "reply-1", scheduled: true } })
+    expect(service.updateRecurringQuestionTx.mock.calls[0][4]).toEqual({ expected: before, owner: "dylan" })
+    // A new question the same
+    await recurringUpsertKind.apply(recurringUpsertSchema.parse(create), applyCtx(null))
+    expect(service.createRecurringQuestionTx.mock.calls[0][3]).toEqual({ createdById: "dylan", enabled: false })
+  })
+
+  it("says so on the card: asked as the officer who applies it, even when the owner is the officer it was made for", async () => {
+    db.recurringQuestion.findUnique.mockResolvedValue(question({ createdBy: { displayName: "Gray" } }))
+    const changed = await recurringUpsertKind.prepare(recurringUpsertSchema.parse({ id: "q-1", prompt: "How many, by team?" }), scheduledCtx)
+    expect(changed.view.diff.at(-1)).toEqual({ field: "createdById", label: "Asked as", before: "Gray", after: "the officer who applies it", format: "value" })
+    const created = await recurringUpsertKind.prepare(recurringUpsertSchema.parse(create), scheduledCtx)
+    expect(created.view.summary).toMatch(/answered by Jack as the officer who applies it with no web search/)
+  })
+
+  it("still runs as the officer it was for when the reply answered them", async () => {
+    db.jackMessage.count.mockResolvedValue(0)
+    await recurringUpsertKind.apply(recurringUpsertSchema.parse({ id: "q-1", prompt: "New?" }), applyCtx(before))
+    expect(service.updateRecurringQuestionTx.mock.calls[0][4]).toEqual({ expected: before, owner: "gray" })
+    const unchanged = await recurringUpsertKind.prepare(recurringUpsertSchema.parse({ id: "q-1", prompt: "How many, by team?" }), scheduledCtx)
+    expect(unchanged.view.diff.map((row) => row.label)).toEqual(["Question"])
   })
 })

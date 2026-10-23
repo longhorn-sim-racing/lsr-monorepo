@@ -50,7 +50,8 @@ export function DigestForm({ view, rooms, isAdmin }: { view: DigestFormView; roo
   const set = <K extends keyof DigestSettingsInput>(key: K, value: DigestSettingsInput[K]) => setForm((f) => ({ ...f, [key]: value }))
   // The saved room stays pickable even if it was archived since (saving then asks for another)
   const roomChoices = view.roomId && !rooms.some((r) => r.id === view.roomId) ? [{ id: view.roomId, title: "(its room, now archived or gone)" }, ...rooms] : rooms
-  const channels = view.discordChannelId && !view.discordChannels.some((c) => c.id === view.discordChannelId) ? [{ id: view.discordChannelId, name: "(its channel, no longer synced)" }, ...view.discordChannels] : view.discordChannels
+  // The saved channel stays pickable once it isn't a posting channel (the digest doesn't post there until an admin fixes it)
+  const channels = view.discordChannelId && !view.discordChannels.some((c) => c.id === view.discordChannelId) ? [{ id: view.discordChannelId, name: "(its channel, not a posting channel anymore)" }, ...view.discordChannels] : view.discordChannels
 
   async function save() {
     setSaving(true)
@@ -142,7 +143,13 @@ export function DigestForm({ view, rooms, isAdmin }: { view: DigestFormView; roo
         <Field
           label="Discord channel"
           htmlFor="digest-discord"
-          hint={view.discordConnected ? "A text or announcement channel the server sync knows" : "Discord isn't connected: the digest skips it until it is (System → Connections)"}
+          hint={
+            !view.discordConnected
+              ? "Discord isn't connected: the digest skips it until it is (System → Connections)"
+              : view.discordChannels.length
+                ? "One of the posting channels (admins pick them on Community → Announcements)"
+                : "No posting channels yet: an admin picks them on Community → Announcements"
+          }
         >
           <Select id="digest-discord" value={form.discordChannelId} disabled={!isAdmin} onChange={(e) => set("discordChannelId", e.target.value)}>
             <option value="">Don&apos;t post to Discord</option>

@@ -10,8 +10,12 @@
  *   - the room busy: the note waits, the job's next run moves up a few minutes, the retry answers that
  *     note without asking again
  *   - the cap (JACK_AUTOMATION_BUDGET_USD=0 for the check): skipped, with one note a month
+ *   - the cap's lock: questions due in the same moment, with room under the cap for one run, run at once
+ *     and exactly one asks (each run counts the notes the earlier ones posted as under way)
  *   - pausing itself: an archived room, an owner who isn't an officer
  *   - recurring.upsert's prepare and apply against the real tables
+ *   - another officer changing what a question asks takes it over (from the page, and from a proposal
+ *     applied by someone else: the officer it was proposed for)
  *   - the weekly digest: every registered check runs against this database's schema without an error,
  *     the room note and Jack's summary, once a day
  *
@@ -59,10 +63,11 @@ async function main() {
   const { prisma } = await import("../src/server/db");
   const { fakeClaude } = await import("../src/server/jack/fake-claude");
   const { runRoom } = await import("../src/server/jack/reply-loop");
-  const { createRecurringQuestion, deleteRecurringQuestion } = await import("../src/server/automation/recurring/service");
+  const { createRecurringQuestion, deleteRecurringQuestion, updateRecurringQuestion } = await import("../src/server/automation/recurring/service");
   const { runRecurringQuestion, defaultRecurringRunDeps } = await import("../src/server/automation/recurring/run");
   const { runWeeklyDigest, defaultDigestRunDeps } = await import("../src/server/automation/digest/run");
-  const { automationSpendUsd } = await import("../src/server/automation/cap");
+  const { automationBudget, automationSpendUsd } = await import("../src/server/automation/cap");
+  const { typicalRunUsd } = await import("../src/server/automation/recurring/estimate");
   const { failedChecks, runDigestChecks } = await import("../src/server/automation/run-checks");
   const { recurringUpsertKind, recurringUpsertSchema } = await import("../src/server/jack/proposals/automation/recurring-upsert");
 
@@ -91,6 +96,7 @@ async function main() {
       return user;
     };
     const gray = await person("gray", true);
+    const dylan = await person("dylan", true);
     const former = await person("former", false);
     const room = remember("room", (await prisma.jackRoom.create({ data: { title: `Automation check ${tag}`, createdById: gray.id, persona: "lift" } })).id);
 
@@ -152,6 +158,36 @@ async function main() {
       else process.env.JACK_AUTOMATION_BUDGET_USD = cap;
     }
 
+    // ----- the cap's lock: several questions due at once, room for one run -----
+    const monthly = process.env.JACK_MONTHLY_BUDGET_USD;
+    try {
+      const due = [];
+      for (const n of [1, 2, 3, 4]) {
+        const made = await createRecurringQuestion(
+          { title: `Due together ${n} ${tag}`, prompt: `Question ${n} ${tag}?`, roomId: room, persona: "jack", schedule: { every: "week", days: ["mon"], time: "09:00" } },
+          { userId: gray.id },
+          { enabled: true },
+        );
+        if (!made.ok) throw new Error(made.error);
+        remember("question", made.question.id);
+        due.push({ id: made.question.scheduledJobId, key: made.question.scheduledJob.key });
+      }
+      // Whatever this database has spent or has under way this month, plus half a run: room for one run, not two
+      const standing = await automationBudget();
+      process.env.JACK_AUTOMATION_BUDGET_USD = String(standing.spentUsd + standing.reservedUsd + typicalRunUsd("jack") / 2);
+      process.env.JACK_MONTHLY_BUDGET_USD = "100000";
+      // The room run does nothing, so each note asked stays under way (as while Jack is answering it)
+      const quiet = { ...runDeps, runRoom: async () => {} };
+      const results = await Promise.all(due.map((job) => runRecurringQuestion({ job, startedAt: Date.now(), log: () => {} }, quiet)));
+      const asked = await prisma.jackMessage.count({ where: { roomId: room, jobKey: { in: due.map((j) => j.key) }, scheduled: true } });
+      check("cap's lock: of four questions due at once with room for one run, exactly one asks", asked === 1 && results.filter((r) => r.status === "skipped").length === 3, results.map((r) => r.summary).join(" | "));
+    } finally {
+      if (cap === undefined) delete process.env.JACK_AUTOMATION_BUDGET_USD;
+      else process.env.JACK_AUTOMATION_BUDGET_USD = cap;
+      if (monthly === undefined) delete process.env.JACK_MONTHLY_BUDGET_USD;
+      else process.env.JACK_MONTHLY_BUDGET_USD = monthly;
+    }
+
     // ----- pausing itself -----
     await prisma.jackRoom.update({ where: { id: room }, data: { archivedAt: new Date() } });
     const archived = await runRecurringQuestion(ctx(), runDeps);
@@ -185,6 +221,32 @@ async function main() {
     if (createdId) remember("question", createdId);
     const created = createdId ? await prisma.recurringQuestion.findUnique({ where: { id: createdId }, include: { scheduledJob: true } }) : null;
     check("recurring.upsert: apply makes it off, as the officer it was for", created?.scheduledJob.enabled === false && created.createdById === gray.id && created.scheduledJob.schedule === "30 8 * * 1-5");
+
+    // ----- changing someone else's question takes it over -----
+    if (createdId) {
+      const edited = await updateRecurringQuestion(createdId, { prompt: `Any drafts, by team ${tag}?` }, { userId: dylan.id });
+      const owned = await prisma.recurringQuestion.findUnique({ where: { id: createdId } });
+      const entry = await prisma.auditLog.findFirst({ where: { entityType: "RECURRING_QUESTION", entityId: createdId, actionType: "UPDATE" }, orderBy: { createdAt: "desc" } });
+      check("takeover: another officer rewording it makes them its owner, audited", edited.ok && owned?.createdById === dylan.id && Boolean(entry?.summary.endsWith("and took it over")));
+      const rescheduled = await updateRecurringQuestion(createdId, { schedule: { every: "day", time: "07:30" } }, { userId: gray.id });
+      check("takeover: rescheduling it doesn't", rescheduled.ok && (await prisma.recurringQuestion.findUnique({ where: { id: createdId } }))?.createdById === dylan.id);
+      // Proposed for Gray, applied by Dylan: Gray asked for the wording, so it's asked as Gray
+      const change = recurringUpsertSchema.parse({ id: createdId, prompt: `Any drafts this week ${tag}?` });
+      const proposed = await recurringUpsertKind.prepare(change, { roomId: room, officer: { userId: gray.id, displayName: gray.displayName } });
+      check("takeover: the change's card says who it'll be asked as", proposed.view.diff.some((row) => row.label === "Asked as" && row.after === gray.displayName));
+      await recurringUpsertKind.apply(change, {
+        officer: { userId: dylan.id, displayName: dylan.displayName },
+        proposalId: `check-edit-${tag}`,
+        roomId: room,
+        idempotencyKey: `proposal:check-edit-${tag}`,
+        before: proposed.before,
+        auditMetadata: { via: "jack", proposalId: `check-edit-${tag}`, roomId: room, proposedFor: gray.id },
+      });
+      check("takeover: a proposal's change goes to the officer it was for, whoever applies it", (await prisma.recurringQuestion.findUnique({ where: { id: createdId } }))?.createdById === gray.id);
+      // The note that asks it starts with its title, and Jack reads that as part of the question
+      const renamed = await updateRecurringQuestion(createdId, { title: `Drafts ${tag}` }, { userId: dylan.id });
+      check("takeover: renaming it takes it over too", renamed.ok && (await prisma.recurringQuestion.findUnique({ where: { id: createdId } }))?.createdById === dylan.id);
+    }
 
     // ----- the weekly digest -----
     const report = await runDigestChecks();

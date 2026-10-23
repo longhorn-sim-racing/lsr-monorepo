@@ -36,7 +36,7 @@ export function ChannelsPanel({ allowed, choices, isAdmin }: { allowed: ChannelO
     <Panel>
       <PanelHeader
         title="Posting channels"
-        description="The only channels the bot posts in: standing rules, Jack's proposals and officers' posts alike."
+        description="The only channels the bot posts in: standing rules, Jack's proposals, officers' posts and the weekly digest alike."
         actions={
           isAdmin ? (
             <Button

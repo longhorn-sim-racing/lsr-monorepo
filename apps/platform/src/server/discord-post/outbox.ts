@@ -20,7 +20,8 @@ import { when } from "./time"
  *   history is checked for it: found means SENT, not found means FAILED for an officer to look at. Nothing
  *   is ever re-sent blind after that;
  * - **rate limits:** the REST client waits out each route's bucket; a longer limit puts the post back
- *   for the next run (Discord didn't take it);
+ *   for the next run (Discord didn't take it), unless an earlier try got no answer: then the channel is
+ *   checked, as for any unconfirmed send;
  * - **errors** are stored redacted on the post.
  * Posts that miss their time by more than LATE_LIMIT_MS are cancelled, not sent late.
  */
@@ -40,6 +41,19 @@ const SEND_TRIES = 3
 const RETRY_PAUSES_MS = [1_000, 3_000]
 /** Stored errors are cut to this */
 const ERROR_CHARS = 500
+
+/**
+ * How every FAILED error starts when the send may have gone out after all: Discord never answered and the
+ * channel's history didn't settle it. Every other failure (a 4xx refusal, a message that can't be sent)
+ * means nothing was posted. Code that sends a failed post again by itself leaves these to an officer,
+ * who looks in the channel first
+ */
+export const UNCONFIRMED_SEND = "Discord didn't confirm the send"
+
+/** Whether a failed post's error says it may be in the channel already (see UNCONFIRMED_SEND) */
+export function isUnconfirmedFailure(error: string | null | undefined): boolean {
+  return Boolean(error?.startsWith(UNCONFIRMED_SEND))
+}
 
 /** Discord's nonce for a post: from its id, so every try of one post carries the same one (at most 25 characters) */
 export function postNonce(postId: string): string {
@@ -197,16 +211,17 @@ export async function confirmFromHistory(post: Pick<DiscordPost, "id" | "channel
     const recent = (await writer.messagesAfter(post.channelId, snowflakeAt(since), deps.signal)) as (DiscordMessage & { embeds?: DiscordEmbed[] })[]
     const found = body ? recent.find((m) => samePost(m, body)) : undefined
     if (found) return markSent(post.id, found.id, new Date(found.timestamp))
-    return markFailed(post.id, `Discord didn't confirm the send (${why}), and the message isn't in the channel. Check the channel, then retry it from Announcements.`)
+    return markFailed(post.id, `${UNCONFIRMED_SEND} (${why}), and the message isn't in the channel. Check the channel, then retry it from Announcements.`)
   } catch (error) {
-    return markFailed(post.id, `Discord didn't confirm the send (${why}), and the channel couldn't be read to check (${describeSendError(error)}). Check the channel before retrying it from Announcements.`)
+    return markFailed(post.id, `${UNCONFIRMED_SEND} (${why}), and the channel couldn't be read to check (${describeSendError(error)}). Check the channel before retrying it from Announcements.`)
   }
 }
 
 /**
  * Sends a post this caller has claimed (it's SENDING). A 4xx refusal fails it (nothing was posted); a
  * longer rate limit puts it back for the next run; a send with no answer is tried again with the same
- * nonce, then checked against the channel
+ * nonce, then checked against the channel. Once a try got no answer, a later refusal or rate limit
+ * doesn't undo it (that try may have posted), so the channel settles it too
  */
 export async function deliverClaimed(post: DiscordPost, writer: DiscordWriter, deps: SendDeps = {}): Promise<SendOutcome> {
   const body = readBody(post.content)
@@ -221,13 +236,21 @@ export async function deliverClaimed(post: DiscordPost, writer: DiscordWriter, d
       const message = await writer.createMessage(post.channelId, body, nonce, deps.signal)
       return markSent(post.id, message.id, deps.now?.() ?? new Date())
     } catch (error) {
+      // A 4xx: a refusal, or (DiscordRateLimitError) a rate limit longer than the client waits
+      const refused = error instanceof DiscordApiError && error.status >= 400 && error.status < 500
+      // An earlier try got no answer and may have posted it, so this answer settles nothing: the channel does. Back to
+      // SCHEDULED, or a FAILED without UNCONFIRMED_SEND, would read as nothing posted and be sent again
+      if (cause !== null && refused) {
+        const outcome = await confirmFromHistory(post, writer, cause, deps)
+        return outcome.status === "FAILED" && (error as DiscordApiError).status === 401 ? { ...outcome, stop: true } : outcome
+      }
       if (error instanceof DiscordRateLimitError) {
         const text = stored(`Discord rate-limited the bot (${Math.ceil(error.retryAfterMs / 1000)} s); it goes out on the next run.`)
         await prisma.discordPost.updateMany({ where: { id: post.id, status: "SENDING" }, data: { status: "SCHEDULED", claimedAt: null, error: text } })
         return { status: "SCHEDULED", error: text }
       }
       // Discord answered and refused it: nothing was posted. A 2xx whose answer couldn't be read may have posted it, so that one is checked like a send with no answer
-      if (error instanceof DiscordApiError && error.status >= 400 && error.status < 500) {
+      if (refused) {
         const failed = await markFailed(post.id, describeSendError(error))
         return error.status === 401 ? { ...failed, stop: true } : failed
       }

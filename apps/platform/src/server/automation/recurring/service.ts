@@ -20,8 +20,10 @@ import { officerIdSet } from "@/server/services/officers"
  * - On and off is the job's `enabled`. A question starts off unless the caller turns it on. When a run
  *   pauses one itself (its owner isn't an officer any more, its room was archived), `pausedReason` says
  *   why; turning it back on clears that.
- * - It runs as `createdById`: whoever set it up. Turning a question back on whose owner isn't an officer
- *   any more makes the officer who turns it on its owner.
+ * - It runs as `createdById`: whoever set it up, or whoever last changed its title, what it asks, its room
+ *   or who answers (the room note, title included, and the reply's tools name them, so they must have
+ *   written it). Turning a question back on whose owner isn't an officer any more makes the officer who
+ *   turns it on its owner.
  * - With `expected` (a snapshot read earlier) a write locks the rows and refuses (reason "changed") when
  *   the question moved on since, so a stale proposal never overwrites an officer's edit.
  * Callers revalidate (RECURRING_PATHS): revalidatePath only works inside a request.
@@ -134,13 +136,23 @@ function movedFields(current: QuestionWithJob, expected: Partial<RecurringSnapsh
 
 const changedMessage = (title: string, moved: string[]) => `The recurring question “${title}” changed since this was read (${moved.join(", ")}).`
 
-/** Changes a question: only the fields given. A new schedule moves its next run (from now, when it's on) */
+/**
+ * The fields that make a run ask something else, somewhere else, or of someone else: changing one takes the
+ * question over. The title too: the note that asks it starts with it, and Jack reads that note as the question
+ */
+export const TAKES_OVER: readonly string[] = ["title", "prompt", "roomId", "persona"]
+
+/**
+ * Changes a question: only the fields given. A new schedule moves its next run (from now, when it's on).
+ * A change to its title, what it asks, its room or who answers makes `owner` (default: the actor) its
+ * owner, so its runs are asked as, and credited to, the officer who wrote that version, never someone else
+ */
 export async function updateRecurringQuestionTx(
   tx: Db,
   id: string,
   input: unknown,
   actor: ServiceActor,
-  options: { expected?: Partial<RecurringSnapshot>; now?: Date } = {},
+  options: { expected?: Partial<RecurringSnapshot>; now?: Date; owner?: string } = {},
 ): Promise<RecurringWriteResult> {
   const parsed = recurringChangesSchema.safeParse(input)
   if (!parsed.success) return { ok: false, reason: "invalid", error: firstIssue(parsed.error, "Check the recurring question.") }
@@ -166,6 +178,9 @@ export async function updateRecurringQuestionTx(
     const room = await roomProblem(tx, changes.roomId!)
     if (room) return { ok: false, reason: "room", error: ROOM_PROBLEM[room] }
   }
+  const owner = options.owner ?? actor.userId
+  const tookOver = owner !== current.createdById && changed.some((key) => TAKES_OVER.includes(key))
+  if (tookOver) data.createdBy = { connect: { id: owner } }
 
   const question = Object.keys(data).length ? await tx.recurringQuestion.update({ where: { id }, data }) : current
   const job = changed.includes("schedule")
@@ -180,14 +195,14 @@ export async function updateRecurringQuestionTx(
       actionType: "UPDATE",
       entityType: "RECURRING_QUESTION",
       entityId: id,
-      summary: `Changed the recurring question “${question.title}” (${changed.map((key) => RECURRING_FIELD_LABEL[key as keyof typeof RECURRING_FIELD_LABEL].toLowerCase()).join(", ")})`,
-      before: brief(current, current.scheduledJob.schedule, current.scheduledJob.enabled),
-      after: brief(question, job.schedule, job.enabled),
-      metadata: withActorMetadata(actor, { changedFields: changed }),
+      summary: `Changed the recurring question “${question.title}” (${changed.map((key) => RECURRING_FIELD_LABEL[key as keyof typeof RECURRING_FIELD_LABEL].toLowerCase()).join(", ")})${tookOver ? (owner === actor.userId ? " and took it over" : " and handed it to the officer who asked for the change") : ""}`,
+      before: { ...brief(current, current.scheduledJob.schedule, current.scheduledJob.enabled), ...(tookOver ? { createdById: current.createdById } : {}) },
+      after: { ...brief(question, job.schedule, job.enabled), ...(tookOver ? { createdById: owner } : {}) },
+      metadata: withActorMetadata(actor, { changedFields: tookOver ? [...changed, "createdById"] : changed }),
     },
     tx,
   )
-  return { ok: true, question: { ...question, scheduledJob: job }, changed }
+  return { ok: true, question: { ...question, scheduledJob: job }, changed: tookOver ? [...changed, "createdById"] : changed }
 }
 
 export function updateRecurringQuestion(id: string, input: unknown, actor: ServiceActor): Promise<RecurringWriteResult> {

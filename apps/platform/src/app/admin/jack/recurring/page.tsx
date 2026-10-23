@@ -17,6 +17,7 @@ import { runDigestChecks } from "@/server/automation/run-checks"
 import { discordConnector } from "@/server/connectors/discord/connector"
 import { teamsWebhookConnector } from "@/server/connectors/teams-webhook/connector"
 import { prisma } from "@/server/db"
+import { postingChannels } from "@/server/discord-post/channels"
 import { heartbeatState, HEARTBEAT_ID } from "@/server/scheduler/heartbeat"
 import { describeSchedule } from "@/server/scheduler/schedule"
 import { getSiteUrl } from "@/lib/site-url"
@@ -77,7 +78,8 @@ export default async function RecurringQuestionsPage({ searchParams }: { searchP
   // The digest: its settings, what it last posted, and (on request) what it would post now
   const [configuredBy, discordChannels, discordOn, teams, lastNote, previewReport] = await Promise.all([
     digest.config.configuredById ? userNames([digest.config.configuredById]).then((names) => names.get(digest.config.configuredById!)?.displayName ?? "a former officer") : null,
-    prisma.discordChannel.findMany({ where: { parentId: null, type: { in: [0, 5] } }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    // Only the posting channels: the digest posts where every other post may (Community → Announcements)
+    postingChannels().then((channels) => channels.map(({ id, name }) => ({ id, name }))),
     discordConnector.status().then((status) => status.state === "connected"),
     teamsWebhookConnector.status(),
     prisma.jackMessage.findFirst({ where: { jobKey: DIGEST_JOB_KEY }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, roomId: true, createdAt: true } }),
@@ -135,7 +137,7 @@ export default async function RecurringQuestionsPage({ searchParams }: { searchP
 
       <Panel className="mb-4">
         <PanelHeader title="Questions" description="Each is asked in its room as the officer who set it up, answered with no web search and without saving knowledge. Pick “Last runs” to see each answer and what it cost." />
-        <QuestionList questions={views} rooms={rooms} highlight={highlight ?? null} />
+        <QuestionList questions={views} rooms={rooms} highlight={highlight ?? null} viewerId={session.user?.id ?? null} />
       </Panel>
 
       <Panel id="digest" className="scroll-mt-4">
