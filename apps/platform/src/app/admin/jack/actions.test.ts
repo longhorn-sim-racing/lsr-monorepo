@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const guards = vi.hoisted(() => ({ requireOfficer: vi.fn() }))
-const rooms = vi.hoisted(() => ({ postOfficerMessage: vi.fn() }))
+const rooms = vi.hoisted(() => ({ postOfficerMessage: vi.fn(), getRoomSnapshot: vi.fn(), resumeRoom: vi.fn() }))
+const settings = vi.hoisted(() => ({ ROOM_GONE: "That room doesn't exist anymore.", unavailableMessage: vi.fn() }))
 const attach = vi.hoisted(() => {
   class AttachmentError extends Error {}
   return { AttachmentError, attachmentProblem: vi.fn() }
@@ -9,12 +10,13 @@ const attach = vi.hoisted(() => {
 const files = vi.hoisted(() => ({ createUpload: vi.fn(), removeUpload: vi.fn() }))
 vi.mock("@/server/auth/guards", () => guards)
 vi.mock("@/server/jack/rooms", () => rooms)
+vi.mock("@/server/jack/room-settings", () => settings)
 vi.mock("@/server/jack/files/attach", () => attach)
 vi.mock("@/server/jack/files/service", () => files)
 vi.mock("@/server/audit/log", () => ({ createAuditLog: vi.fn() }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
-import { createJackUpload, postJackMessage, removeJackUpload } from "./actions"
+import { createJackUpload, loadJackRoomSnapshot, postJackMessage, removeJackUpload, resumeJackRoom } from "./actions"
 
 const ROOM = "11111111-1111-4111-8111-111111111111"
 const FILE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -54,6 +56,24 @@ describe("postJackMessage with files", () => {
   it("reports a file taken while sending, and nothing was posted", async () => {
     rooms.postOfficerMessage.mockRejectedValue(new attach.AttachmentError("One of the files changed while sending"))
     expect(await postJackMessage(ROOM, "hi", [FILE])).toEqual({ ok: false, error: "One of the files changed while sending" })
+  })
+})
+
+describe("archived rooms", () => {
+  it("say the room is archived instead of gone when a post or a continue doesn't go through", async () => {
+    settings.unavailableMessage.mockResolvedValue("This room is archived. Unarchive it to continue.")
+    rooms.postOfficerMessage.mockResolvedValue(null)
+    rooms.resumeRoom.mockResolvedValue(null)
+    expect(await postJackMessage(ROOM, "Hello?")).toEqual({ ok: false, error: "This room is archived. Unarchive it to continue." })
+    expect(await resumeJackRoom(ROOM)).toEqual({ ok: false, error: "This room is archived. Unarchive it to continue." })
+    expect(settings.unavailableMessage).toHaveBeenCalledWith(ROOM)
+  })
+
+  it("load as snapshots, with the replies' ratings as this officer sees them", async () => {
+    const snapshot = { room: { id: ROOM, archivedAt: "2026-10-22T00:00:00.000Z" }, messages: [], proposals: {}, feedback: {} }
+    rooms.getRoomSnapshot.mockResolvedValue(snapshot)
+    expect(await loadJackRoomSnapshot(ROOM)).toEqual({ ok: true, data: snapshot })
+    expect(rooms.getRoomSnapshot).toHaveBeenCalledWith(ROOM, { viewerId: "officer-1" })
   })
 })
 

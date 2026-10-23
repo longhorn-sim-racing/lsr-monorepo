@@ -1,3 +1,5 @@
+import type { JackFeedbackSummary } from "@/lib/jack/feedback"
+import { mentionsAssistant } from "@/lib/jack/mentions"
 import type { SnapshotGap } from "@/lib/jack/room-gap"
 import type { JackMessageView, JackProposalState, JackRoomPersonaKey, JackRoomSummary, JackRoomView } from "@/lib/jack/types"
 import { JACK_EVENT, JACK_PERSONA_NAME } from "@/lib/jack/types"
@@ -5,8 +7,9 @@ import { prisma } from "@/server/db"
 import { runAfterResponse } from "@/server/after-response"
 import { broadcastRoomEvent, type RoomBroadcaster } from "./broadcast"
 import { EVAL_ROOM_PREFIX } from "./eval-support"
+import { roomFeedback } from "./feedback"
 import { linkAttachments } from "./files/attach"
-import { jackMessageInclude, jackRoomViewSelect, toMessageView, toRoomView } from "./messages"
+import { jackMessageInclude, jackRoomSummarySelect, jackRoomViewSelect, toMessageView, toRoomSummary, toRoomView } from "./messages"
 import { roomProposalStates } from "./proposals/service"
 import { defaultReplyDeps, runRoom, type ReplyLoopDeps } from "./reply-loop"
 import { isRoomLockHeld } from "./room-lock"
@@ -14,29 +17,47 @@ import { isRoomLockHeld } from "./room-lock"
 /** How much of a room a snapshot loads: the latest messages */
 export const SNAPSHOT_LIMIT = 500
 
-export async function listRooms(): Promise<JackRoomSummary[]> {
-  const rooms = await prisma.jackRoom.findMany({
-    // Not the eval's rooms (scripts/jack-eval.ts): they only last a question, and their ids aren't uuids
-    where: { archivedAt: null, NOT: { id: { startsWith: EVAL_ROOM_PREFIX } } },
-    orderBy: { updatedAt: "desc" },
-    take: 200,
-    select: {
-      id: true,
-      title: true,
-      persona: true,
-      createdAt: true,
-      updatedAt: true,
-      createdBy: { select: { displayName: true } },
-    },
-  })
-  return rooms.map((room) => ({
-    id: room.id,
-    title: room.title,
-    persona: room.persona,
-    createdByName: room.createdBy?.displayName ?? null,
-    createdAt: room.createdAt.toISOString(),
-    updatedAt: room.updatedAt.toISOString(),
-  }))
+/** How many rooms the list shows: pinned rooms, then the most recently active others */
+const LIST_LIMIT = 200
+const PINNED_LIMIT = 50
+
+// Not the eval's rooms (scripts/jack-eval.ts): they only last a question, and their ids aren't uuids
+const NOT_EVAL = { NOT: { id: { startsWith: EVAL_ROOM_PREFIX } } }
+
+/**
+ * The rooms list (and the rail beside a room): pinned rooms first, then the rest, each newest activity
+ * first (design §10). With `archived`, the archived rooms instead, most recently archived first.
+ */
+export async function listRooms({ archived = false }: { archived?: boolean } = {}): Promise<JackRoomSummary[]> {
+  if (archived) {
+    const rooms = await prisma.jackRoom.findMany({
+      where: { archivedAt: { not: null }, ...NOT_EVAL },
+      orderBy: [{ archivedAt: "desc" }, { id: "asc" }],
+      take: LIST_LIMIT,
+      select: jackRoomSummarySelect,
+    })
+    return rooms.map(toRoomSummary)
+  }
+  const [pinned, others] = await Promise.all([
+    prisma.jackRoom.findMany({
+      where: { archivedAt: null, pinnedAt: { not: null }, ...NOT_EVAL },
+      orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+      take: PINNED_LIMIT,
+      select: jackRoomSummarySelect,
+    }),
+    prisma.jackRoom.findMany({
+      where: { archivedAt: null, pinnedAt: null, ...NOT_EVAL },
+      orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+      take: LIST_LIMIT,
+      select: jackRoomSummarySelect,
+    }),
+  ])
+  return [...pinned, ...others].map(toRoomSummary)
+}
+
+/** How many rooms are archived, for the list's filter */
+export async function countArchivedRooms(): Promise<number> {
+  return prisma.jackRoom.count({ where: { archivedAt: { not: null }, ...NOT_EVAL } })
 }
 
 export async function createRoom(createdById: string, title: string | null) {
@@ -51,6 +72,8 @@ export type RoomSnapshot = {
   gap?: SnapshotGap
   /** The live status of each proposal made in the room, by id: the cards read it (#188) */
   proposals: Record<string, JackProposalState>
+  /** Officers' ratings of the replies, by message id, as the viewing officer sees them (design §10); only when asked for a viewer */
+  feedback?: Record<string, JackFeedbackSummary>
 }
 
 /** A snapshot opened at a message (?m=, design §10) also loads this many messages before it */
@@ -63,12 +86,18 @@ const placed = (message: { id: string; createdAt: Date }) => ({ id: message.id, 
  * holds that message with ANCHOR_BEFORE messages before it: the latest messages when they already
  * do, otherwise a window of the same size from a little before it on, and the `gap` it leaves before
  * the newest (the page links to the latest there). An `around` that isn't in the room is ignored.
+ * Archived rooms load too: their page shows them read-only. With `viewerId`, it also holds the replies'
+ * ratings as that officer sees them.
  */
-export async function getRoomSnapshot(roomId: string, { around }: { around?: string } = {}): Promise<RoomSnapshot | null> {
-  const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: jackRoomViewSelect })
+export async function getRoomSnapshot(roomId: string, { around, viewerId }: { around?: string; viewerId?: string } = {}): Promise<RoomSnapshot | null> {
+  const room = await prisma.jackRoom.findUnique({ where: { id: roomId }, select: jackRoomViewSelect })
   if (!room) return null
-  const [messages, proposals] = await Promise.all([snapshotMessages(roomId, around), roomProposalStates(roomId)])
-  return { room: toRoomView(room), ...messages, proposals }
+  const [messages, proposals, feedback] = await Promise.all([
+    snapshotMessages(roomId, around),
+    roomProposalStates(roomId),
+    viewerId ? roomFeedback(roomId, viewerId) : undefined,
+  ])
+  return { room: toRoomView(room), ...messages, proposals, ...(feedback ? { feedback } : {}) }
 }
 
 /** The snapshot's messages: the latest, or a window around `around` and the gap it leaves (see getRoomSnapshot) */
@@ -120,6 +149,9 @@ export type RunRequest = { startedAt?: number; replyDeps?: ReplyLoopDeps }
  * `fileIds` are the officer's READY uploads to post with it (G5): checked first with
  * attachmentProblem(), then claimed in the same transaction, which throws AttachmentError (and saves
  * nothing) if one was taken meanwhile. Null when the room doesn't exist or is archived.
+ *
+ * In a mention-mode room (design §10) a message that doesn't mention Jack is for the room: it's saved
+ * with expectsAnswer false and starts no run; the next reply to a mention takes it as context.
  */
 export async function postOfficerMessage(
   roomId: string,
@@ -127,11 +159,12 @@ export async function postOfficerMessage(
   content: string,
   { startedAt = Date.now(), replyDeps = defaultReplyDeps, fileIds = [] }: RunRequest & { fileIds?: string[] } = {}
 ): Promise<JackMessageView | null> {
-  const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: { id: true } })
+  const room = await prisma.jackRoom.findFirst({ where: { id: roomId, archivedAt: null }, select: { id: true, persona: true, answerMode: true } })
   if (!room) return null
+  const expectsAnswer = room.answerMode !== "mention" || mentionsAssistant(content, room.persona)
 
   const row = await prisma.$transaction(async (tx) => {
-    const created = await tx.jackMessage.create({ data: { roomId, kind: "user", authorUserId, content } })
+    const created = await tx.jackMessage.create({ data: { roomId, kind: "user", authorUserId, content, expectsAnswer } })
     await linkAttachments(tx, { messageId: created.id, roomId, officerId: authorUserId, fileIds })
     await tx.jackRoom.update({ where: { id: roomId }, data: { updatedAt: new Date() } })
     return tx.jackMessage.findUniqueOrThrow({ where: { id: created.id }, include: jackMessageInclude })
@@ -140,7 +173,7 @@ export async function postOfficerMessage(
 
   await runAfterResponse(async () => {
     await replyDeps.broadcast(roomId, { type: JACK_EVENT.created, message })
-    await runRoom(roomId, replyDeps, { startedAt })
+    if (expectsAnswer) await runRoom(roomId, replyDeps, { startedAt })
   }, `[jack] Answering room ${roomId} failed:`)
 
   return message
