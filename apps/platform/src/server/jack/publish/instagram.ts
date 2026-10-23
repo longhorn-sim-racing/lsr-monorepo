@@ -280,12 +280,14 @@ export async function advanceInstagramPublish(id: string, deps: PublishDeps, { u
       }
       if (step.next === "again") continue
       const wait = POLLS_MS[Math.min(polls++, POLLS_MS.length - 1)]
-      if (signal?.aborted || deps.now().getTime() + wait > until) return await prisma.instagramPublish.findUniqueOrThrow({ where: { id } })
+      if (signal?.aborted || deps.now().getTime() + wait > until) break
       await deps.sleep(wait, signal)
     }
   } finally {
     await prisma.instagramPublish.updateMany({ where: { id, status: { in: ACTIVE_STATUSES } }, data: { claimedAt: null } })
   }
+  // Still on its way, and let go
+  return prisma.instagramPublish.findUniqueOrThrow({ where: { id } })
 }
 
 async function stepOnce(row: InstagramPublish, deps: PublishDeps, signal?: AbortSignal): Promise<Step> {

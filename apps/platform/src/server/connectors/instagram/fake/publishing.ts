@@ -13,6 +13,7 @@ import { FakeNetworkError, type FakeRoute } from "../../fakes/types"
  *   @-tags 36004/2207010. At most 400 containers a rolling day.
  * - GET /<container id>?fields=status_code,status: IN_PROGRESS for the first `processingReads` reads
  *   (default 1), then FINISHED; EXPIRED 24 hours after it was made; ERROR when a test asked for it.
+ *   (Reading the status is the fake's clock for processing.)
  * - POST /<IG_ID>/media_publish { creation_id }: not finished (or in error) 9007/2207027, unknown or
  *   expired 24/2207008, over the day's quota 9/2207042, published already code 100 (Meta doesn't
  *   document it). It makes a post (/me/media lists posts and carousels, not stories) and the container
@@ -23,8 +24,8 @@ import { FakeNetworkError, type FakeRoute } from "../../fakes/types"
  * - Test hooks, POST /_fake/publish: { processingReads: N }, { errorNext: N } (the next N containers
  *   end in ERROR), { quotaTotal: N }, { quotaUsage: N } (that many posts already today), { dropPublish:
  *   N } (the next N media_publish calls publish, then the connection drops, as a timeout would), {
- *   publishError: { code, subcode, message } } (the next media_publish fails with it), { expire: [ids] };
- *   GET /_fake/publish shows the containers and posts.
+ *   publishError: { code, subcode, message } } (the next media_publish fails with it), { expire: [ids] },
+ *   { ready: true } (every container done processing); GET /_fake/publish shows the containers and posts.
  */
 
 type Kind = "IMAGE" | "CAROUSEL_ITEM" | "CAROUSEL" | "STORIES"
@@ -88,7 +89,7 @@ export function publishingFake(host: PublishingHost) {
   function statusOf(c: Container): StatusCode {
     if (c.mediaId) return "PUBLISHED"
     if (c.expired || Date.now() - c.createdAt > DAY) return "EXPIRED"
-    if (c.reads <= c.processingReads) return "IN_PROGRESS"
+    if (c.reads < c.processingReads) return "IN_PROGRESS"
     return c.error ? "ERROR" : "FINISHED"
   }
 
@@ -214,6 +215,7 @@ export function publishingFake(host: PublishingHost) {
         if (typeof input.dropPublish === "number") dropPublish = input.dropPublish
         if (input.publishError && typeof input.publishError === "object") publishError = input.publishError as typeof publishError
         if (Array.isArray(input.expire)) for (const id of input.expire) if (containers.has(String(id))) containers.get(String(id))!.expired = true
+        if (input.ready === true) for (const c of containers.values()) c.reads = Math.max(c.reads, c.processingReads)
       }
       return Response.json({
         quota: { used: quotaUsage(), total: quotaTotal },

@@ -21,8 +21,15 @@ async function edgeColour(png: Buffer, width: number, height: number, bars: "ver
     bars === "vertical"
       ? [{ left: 0, top: 0, width, height: 1 }, { left: 0, top: height - 1, width, height: 1 }]
       : [{ left: 0, top: 0, width: 1, height }, { left: width - 1, top: 0, width: 1, height }]
-  const means = await Promise.all(strips.map(async (region) => (await sharp(png).extract(region).removeAlpha().stats()).channels.map((c) => c.mean)))
-  const mean = (i: number) => Math.round((means[0][i] + means[1][i]) / 2)
+  // The strips' raw pixels (stats() would describe the whole input, not the extract)
+  const sums = [0, 0, 0]
+  let pixels = 0
+  for (const region of strips) {
+    const { data, info } = await sharp(png).extract(region).removeAlpha().toColorspace("srgb").raw().toBuffer({ resolveWithObject: true })
+    for (let i = 0; i < data.length; i += info.channels) for (let c = 0; c < 3; c++) sums[c] += data[i + Math.min(c, info.channels - 1)]
+    pixels += data.length / info.channels
+  }
+  const mean = (c: number) => Math.round(sums[c] / Math.max(1, pixels))
   return { r: mean(0), g: mean(1), b: mean(2) }
 }
 
