@@ -41,6 +41,19 @@ const RETRY_PAUSES_MS = [1_000, 3_000]
 /** Stored errors are cut to this */
 const ERROR_CHARS = 500
 
+/**
+ * How every FAILED error starts when the send may have gone out after all: Discord never answered and the
+ * channel's history didn't settle it. Every other failure (a 4xx refusal, a message that can't be sent)
+ * means nothing was posted. Code that sends a failed post again by itself leaves these to an officer,
+ * who looks in the channel first
+ */
+export const UNCONFIRMED_SEND = "Discord didn't confirm the send"
+
+/** Whether a failed post's error says it may be in the channel already (see UNCONFIRMED_SEND) */
+export function isUnconfirmedFailure(error: string | null | undefined): boolean {
+  return Boolean(error?.startsWith(UNCONFIRMED_SEND))
+}
+
 /** Discord's nonce for a post: from its id, so every try of one post carries the same one (at most 25 characters) */
 export function postNonce(postId: string): string {
   return createHash("sha256").update(`lsr-discord-post:${postId}`).digest("base64url").slice(0, 25)
@@ -197,9 +210,9 @@ export async function confirmFromHistory(post: Pick<DiscordPost, "id" | "channel
     const recent = (await writer.messagesAfter(post.channelId, snowflakeAt(since), deps.signal)) as (DiscordMessage & { embeds?: DiscordEmbed[] })[]
     const found = body ? recent.find((m) => samePost(m, body)) : undefined
     if (found) return markSent(post.id, found.id, new Date(found.timestamp))
-    return markFailed(post.id, `Discord didn't confirm the send (${why}), and the message isn't in the channel. Check the channel, then retry it from Announcements.`)
+    return markFailed(post.id, `${UNCONFIRMED_SEND} (${why}), and the message isn't in the channel. Check the channel, then retry it from Announcements.`)
   } catch (error) {
-    return markFailed(post.id, `Discord didn't confirm the send (${why}), and the channel couldn't be read to check (${describeSendError(error)}). Check the channel before retrying it from Announcements.`)
+    return markFailed(post.id, `${UNCONFIRMED_SEND} (${why}), and the channel couldn't be read to check (${describeSendError(error)}). Check the channel before retrying it from Announcements.`)
   }
 }
 
