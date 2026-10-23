@@ -477,7 +477,7 @@ type ProposalKind<P> = {
 - Tool results stay under the existing caps (`MAX_TOOL_RESULT_CHARS`), using `forModelWithLists`.
 
 ### 7.4 Model loop changes (G8)
-- **Server tools:** `server_tool_use` and result blocks become a part with a `web_sources` display built from the citations (`citations_delta` is saved).
+- **Server tools:** `server_tool_use` and result blocks become a part with a `web_sources` display built from the citations (`citations_delta` is saved) and from the results the text links to (dynamic filtering writes its own links instead of citations; checked live 10/23).
 - **Wrap-up** text is appended only when no server tool result is pending.
 - **Refusal fallback** drops server results together with their calls.
 - **Unknown block types** (dynamic filtering's code-execution results) pass back verbatim.

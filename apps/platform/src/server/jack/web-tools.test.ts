@@ -1,7 +1,7 @@
 import type { BetaContentBlock } from "@anthropic-ai/sdk/resources/beta/messages/messages"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { fakeCitedText, fakeWebFetch, fakeWebSearch } from "./fake-claude"
-import { addCitations, pendingServerCalls, recordWebResult, webErrorText, webPartFields, webServerTools, webToolsOn, type WebCall } from "./web-tools"
+import { addCitations, addLinkedPages, pendingServerCalls, recordWebResult, webErrorText, webPartFields, webServerTools, webToolsOn, type WebCall } from "./web-tools"
 
 const call = (fields: Partial<WebCall> & Pick<WebCall, "id" | "name">): WebCall => ({ input: null, found: null, error: null, startedAt: 1_000, ...fields })
 
@@ -50,6 +50,64 @@ describe("recordWebResult", () => {
     const odd = call({ id: "f", name: "web_fetch" })
     recordWebResult(odd, { type: "web_fetch_tool_result", tool_use_id: "f", content: null } as unknown as BetaContentBlock, 1_000)
     expect(odd).toMatchObject({ found: [], error: "unknown" })
+  })
+})
+
+describe("addLinkedPages", () => {
+  const acc = { url: "https://www.assettocorsa.net/forum/index.php?threads/acc-v1-10-4.123/", title: "ACC v1.10.4 OUT NOW" }
+  const news = { url: "https://traxion.gg/acc-update/", title: "ACC update" }
+  const searches = [call({ id: "s1", name: "web_search", input: { query: "acc latest version" }, found: [acc, news] })]
+
+  it("counts the search results the text links to as cited, with the result's title (dynamic filtering sends no citations)", () => {
+    const cited = new Map<string, string | null>()
+    addLinkedPages(cited, "It's **v1.10.4**, from the [official forum](https://www.AssettoCorsa.net/forum/index.php?threads/acc-v1-10-4.123#post-9).", searches)
+    expect([...cited]).toEqual([[acc.url, acc.title]])
+    expect(webPartFields(searches, cited).get("s1")).toMatchObject({
+      label: "Searched the web (2 results, 1 cited)",
+      displays: [{ sources: [{ title: "ACC v1.10.4 OUT NOW", url: acc.url, host: "assettocorsa.net" }] }],
+    })
+  })
+
+  it("matches a bare link without its trailing slash or sentence punctuation", () => {
+    const cited = new Map<string, string | null>()
+    addLinkedPages(cited, "See https://traxion.gg/acc-update.", searches)
+    expect([...cited.keys()]).toEqual([news.url])
+  })
+
+  it("leaves out links that no search found, and pages already cited keep their citation's title", () => {
+    const cited = new Map<string, string | null>([[news.url, "As cited"]])
+    addLinkedPages(cited, "From https://elsewhere.example/acc and https://traxion.gg/acc-update/", searches)
+    expect([...cited]).toEqual([[news.url, "As cited"]])
+  })
+
+  it("matches a link with parentheses, http for https, no www, or written out as typed", () => {
+    const wiki = { url: "https://en.wikipedia.org/wiki/Assetto_Corsa_(video_game)", title: "Assetto Corsa" }
+    const plain = { url: "https://en.wikipedia.org/wiki/Assetto_Corsa", title: "Not this one" }
+    const accents = { url: "https://www.example.com/caf%C3%A9-racing", title: "Café racing" }
+    const found = [call({ id: "s1", name: "web_search", found: [wiki, plain, accents, acc] })]
+    const cited = new Map<string, string | null>()
+    addLinkedPages(cited, "See [Wikipedia](https://en.wikipedia.org/wiki/Assetto_Corsa_(video_game)), http://example.com/café-racing and http://assettocorsa.net/forum/index.php?threads/acc-v1-10-4.123", found)
+    expect([...cited.keys()].sort()).toEqual([acc.url, accents.url, wiki.url].sort())
+  })
+
+  it("doesn't count a longer link, another host ending the same way, or a link with no scheme", () => {
+    const cited = new Map<string, string | null>()
+    addLinkedPages(cited, "https://traxion.gg/acc-update.html, https://traxion.gg/acc-update/more, https://traxion.gg/acc-update?page=2, https://not-traxion.gg/acc-update/ and traxion.gg/acc-update", searches)
+    expect(cited.size).toBe(0)
+  })
+
+  it("stays quick on a long run of punctuation, and does nothing without a search", () => {
+    const text = `https://traxion.gg/${".".repeat(100_000)}x`
+    const started = performance.now()
+    addLinkedPages(new Map(), text, searches)
+    addLinkedPages(new Map(), text, [])
+    expect(performance.now() - started).toBeLessThan(200)
+  })
+
+  it("only looks at searches: a fetched page shows as read already", () => {
+    const cited = new Map<string, string | null>()
+    addLinkedPages(cited, "From https://traxion.gg/acc-update/", [call({ id: "f1", name: "web_fetch", input: { url: news.url }, found: [news] })])
+    expect(cited.size).toBe(0)
   })
 })
 

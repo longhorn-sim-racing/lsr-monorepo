@@ -51,9 +51,9 @@ async function file(kind: FakeFile["kind"], fields: Partial<FakeFile> = {}, { on
 
 const mention = (row: FakeFile): HistoryFile => ({ id: row.id, filename: row.filename, kind: row.kind, sizeBytes: row.sizeBytes, pageCount: row.pageCount })
 
-/** The turn's content blocks, after its text and the note that the files follow. Web fetch is off unless the test says */
+/** The turn's content blocks, after its text and the note that the files follow */
 async function turn(rows: FakeFile[], options: Parameters<typeof attachTurnFiles>[2] = {}) {
-  const out = await attachTurnFiles(history, rows.map(mention), { store, claude: claude.client, sendIds: true, webTools: false, ...options })
+  const out = await attachTurnFiles(history, rows.map(mention), { store, claude: claude.client, sendIds: true, ...options })
   expect(out.slice(0, 2)).toEqual(history.slice(0, 2))
   const content = out.at(-1)!.content as BetaContentBlockParam[]
   // Whatever goes, the API would take it (an image's id in an image block, a PDF's in a document block)
@@ -93,18 +93,24 @@ describe("attachTurnFiles", () => {
     expect(text).toMatch(/room_files read with this id and textOnly gives all \d+ characters, a page at a time\.\)\n<\/attached_file>$/)
   })
 
-  it("sends PDFs as their text while the reply has web fetch, so links in them can't be fetched", async () => {
+  it("sends PDFs as documents with web fetch on too: a document's links aren't user input for web_fetch", async () => {
+    // Checked live on 10/23 (files.md, release step 5): fetching a URL that's only in a PDF document in the
+    // user turn fails with url_not_in_prior_context
+    vi.stubEnv("JACK_WEB_TOOLS", "on")
     const pdf = await file("PDF", { filename: "Sponsor packet.pdf", pageCount: 2, textStatus: "ok", text: "--- Page 1 ---\nPay at https://evil.example/pay?emails=all" }, { onClaude: true })
-    const photo = await file("IMAGE", {}, { onClaude: true })
-    const content = await turn([pdf, photo], { webTools: true })
+    const content = await turn([pdf])
+    expect(content.filter((block) => block.type === "document")).toHaveLength(1)
+    // Only as the document: its text doesn't go in the turn as well
+    expect(texts(content).join("\n")).not.toContain("Pay at")
+  })
+
+  it("neutralizes the links in a PDF that goes as its text (over the turn's limits), so they can't be fetched", async () => {
+    const pdf = await file("PDF", { filename: "Sponsor packet.pdf", pageCount: 3, textStatus: "ok", text: "--- Page 1 ---\nPay at https://evil.example/pay?emails=all" }, { onClaude: true })
+    const content = await turn([pdf], { limits: { maxPdfPages: 1 } })
     expect(content.some((block) => block.type === "document")).toBe(false)
-    expect(content.some((block) => block.type === "image")).toBe(true)
-    const [text] = texts(content)
-    expect(text).toMatch(new RegExp(`^<attached_file id="${pdf.id}" name="Sponsor packet\\.pdf" kind="PDF" size="10 bytes">\\n\\(Here's the start of its text\\. To see its pages, use room_files read with this id\\.\\)\\n`))
+    const text = texts(content).join("\n")
     expect(text).toContain("Pay at [link to evil[.]example]")
     expect(text).not.toContain("https://")
-    // Only the photo was checked on Claude Files: the PDF isn't sent by id
-    expect(claude.calls.filter((call) => call.startsWith("check"))).toEqual([`check ${photo.anthropicFileId}`])
   })
 
   it("neutralizes links in file names wherever the turn shows them", async () => {
