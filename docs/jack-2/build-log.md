@@ -47,6 +47,8 @@ The working record for Jack 2.0 (#188): what's done, what's next, and every call
 | Docs folded in, and the release runbook | Merged | #226, #225 |
 | Security fixes, wave 2b: the digest and recurring questions; Instagram publishing; Discord posting | Merged | #227–#229 |
 | Eval fixes (harness checks, prompt and tool fixes from the paid run) | Merged | #230 |
+| Main's fixes merged into `jack-2` (#190, #191, #195, #216) | Merged | |
+| Release decisions (runbook section 5) | Decided 10/25 | |
 | Launch post | Drafted (with Gray) | |
 
 ## Decisions
@@ -151,6 +153,8 @@ Calls made during the build, for Gray to review. Newest last.
 | 10/23 | Paid eval v30, every track on Jack (Sonnet), 120 questions: $4.60 for answers, $5.60 for the judge (Opus) | $10.20 |
 | 10/23 | Reruns of the failed questions after fixes (v31, v32, v34, one regrade) | about $2.20 |
 | 10/23 | v33: the core track again with every fix in, plus the fixed track questions | $4.46 |
+| 10/25 | v35: the core track on Lift ($3.82 answers, $2.64 judge) and Stand ($0.11 answers, $2.07 judge) | $8.65 |
+| | **Total, about $26.60: $1.60 over the $25 budget** (the Lift and Stand run was estimated at about $7) | |
 
 ## Log
 - **10/22:**
@@ -266,3 +270,23 @@ Calls made during the build, for Gray to review. Newest last.
   - **Still seen:** Sonnet sometimes opens with a line like "Let me size it first." before a tool call, despite the prompt. It shows in the room above the tool card; left as is.
   - **Not run:** Lift (Opus) and Stand (Haiku). A full run on all three models doesn't fit the $25 test budget; the runbook's gate says all three, so that's for Gray (run them, or accept Jack only).
   - **Test spend so far:** about $18 of $25.
+- **10/25:**
+  - **Main's four fixes** (#195 `ts_rewrite`, #190 cron fails closed, #216 the Stripe webhook log, #191 the Sonnet cache price) merged to main, then main into `jack-2`.
+    - #191's CI had failed: three tests elsewhere still priced Sonnet cache reads at $0.20. Fixed before the merge.
+    - The runbook's predicted conflicts came up and were resolved its way. `jack-2`'s copy of `docs/jack.md` lost #191's two edits, which were put back.
+    - The recurring-question estimate test moved from $0.54 to $0.51 a month with the new price.
+  - **The release preview deployed** (Vercel's daily limit had reset), so 2.0 fits Hobby's 12 functions.
+  - **Eval v35, core track on Lift and Stand:**
+    - Lift 49 of 51 (96%). Misses: one answer named no source, and one said "no refunds this year" from a lookup of failed payments only.
+    - Stand 38 of 51 (75%). Headline answers right, but slips in the details (a misread checkout count, made-up times or menu paths, no source). Fine for simple recurring counts; analysis stays on Jack.
+  - **Gray's release decisions** (runbook section 5):
+    - §12(a): the standard terms count.
+    - Instagram: AI label off by default, cap 10 a day.
+    - The Vercel token and Resend exceptions approved.
+    - @everyone given through the install link.
+    - Every public Discord channel.
+    - "Totals only" stays a convention (officers are trusted).
+    - Room notes keep names.
+    - Migrations through the workflow.
+    - `design.md` and `tracks/` stay; this log is deleted just before the merge.
+    - Twitch owner: Gray is finding them.

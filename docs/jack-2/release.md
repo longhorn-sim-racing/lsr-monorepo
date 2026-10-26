@@ -22,7 +22,7 @@ The steps Gray follows to ship Jack 2.0 (#188): what to check before merging `ja
 - **Production upload path (G5): passed 10/23 on local Supabase Storage.** All 19 end-to-end checks with `JACK_FILE_STORE=supabase`, a browser upload, render-check, a deck's slides and exports. Production Storage is first used in 1.8 (the bucket) and 2.3 (render-check and the first room upload). [build log: Log, 10/23; files: Release gate]
 - **Live model checks (G8, G6): passed 10/23.** Tool search with streamed tool input, `url_sources` naming the deferred `web_links`, dynamic filtering on Sonnet and Haiku, Claude Files, and the PDF link probe. [build log: Log, 10/23]
 - **Security review of wave 2b: done 10/23.** 18 confirmed findings, fixed in #227–#229. Waves 1 and 2a were reviewed the same day (their fixes are #222–#224). [build log: Log, 10/23]
-- **The eval**: one full run on all three models, on `lsr_eval`, with the spend recorded in the build log; the release PR's checklist also has "Eval run against Jack today". The dry run passed 108 of 110 per model on 10/23, and the two failing checks were fixed. How to run it: `tracks/eval.md`. [design §16; #189 checklist] **Done on Jack (Sonnet), 10/23:** 105 of 120 on every track, then 50 of 52 on the core track with #230's fixes in. One known failure is left (the digest summary runs long). Lift and Stand weren't run, because a run on all three doesn't fit the $25 test budget; that's for Gray (section 5). [build log: Log, 10/23 morning]
+- **The eval**: one full run on all three models, on `lsr_eval`, with the spend recorded in the build log; the release PR's checklist also has "Eval run against Jack today". The dry run passed 108 of 110 per model on 10/23, and the two failing checks were fixed. How to run it: `tracks/eval.md`. [design §16; #189 checklist] **Done on Jack (Sonnet), 10/23:** 105 of 120 on every track, then 50 of 52 on the core track with #230's fixes in. One known failure is left (the digest summary runs long). Lift and Stand ran the core track on 10/25 (Gray's call): Lift 49 of 51, Stand 38 of 51 (right headline answers, slips in the details; keep analysis on Jack). [build log: Log, 10/25]
 - **Docs folded in** (`docs/jack.md`, `CLAUDE.md`, `docs/local-dev.md`, `.env.example`), and the launch post drafted. [build log: Status; design §18.1, F]
 - **The build log's future:** its first line says it's removed or folded into `docs/jack.md` before the release merges. Decide which (section 5). [build log: intro]
 
@@ -65,7 +65,7 @@ They go to production **before** the code merges. They're additive (new tables, 
 Several migrations check themselves and stop with an error if something is off (row level security off on a personal-data table, Jack's role able to write, read the search index or use the `cron` and `scheduler` schemas). If one fails, Prisma stops there, applies nothing after it, and records it as failed; later deploys refuse until that's resolved. Read the error, check what of it was applied, fix the cause, then `pnpm --filter @lsr/platform exec prisma migrate resolve --rolled-back <migration name>` and deploy again. [the checks: the migrations themselves; what Prisma does on a failure: added here]
 
 **How.** Either way it's `prisma migrate deploy` (`pnpm --filter @lsr/platform db:deploy`) on the `jack-2` code:
-- **From Gray's machine** (the plan), on a `jack-2` checkout, with production's connection strings set in this shell only (never in a file in the repo):
+- **From Gray's machine**, on a `jack-2` checkout, with production's connection strings set in this shell only (never in a file in the repo):
   ```bash
   export DATABASE_URL='<production DATABASE_URL>'
   export DIRECT_URL='<production DIRECT_URL>'
@@ -74,7 +74,7 @@ Several migrations check themselves and stop with an error if something is off (
   pnpm --filter @lsr/platform exec prisma migrate status   # "Database schema is up to date!"
   ```
   Prisma also reads `apps/platform/.env` (the local database), but values set in the shell win; `migrate status` names the host it's on, so check that first. If the direct host doesn't answer (it's IPv6-only), use the session pooler on port 5432 for `DIRECT_URL`, as the migrate workflow does. There's no backup this way unless you take one first. [Gray's plan for this release, and Prisma's env handling: added here; the pooler: `.github/workflows/migrate.yml` header]
-- **Or from GitHub:** Actions → Database Migrate → Run workflow, branch `jack-2`. It takes an encrypted backup of production first, then runs `db:deploy` with the `PRODUCTION_*` secrets. [`.github/workflows/migrate.yml`; design §17 step 3]
+- **From GitHub (the plan, Gray 10/25):** Actions → Database Migrate → Run workflow, branch `jack-2`. It takes an encrypted backup of production first, then runs `db:deploy` with the `PRODUCTION_*` secrets. [`.github/workflows/migrate.yml`; design §17 step 3]
 
 ### 1.7 Checks after the migrations
 1. `prisma migrate status` against production says it's up to date. [as in 1.6]
@@ -108,7 +108,7 @@ After the merge, Supabase Storage is where deck renders, exports, screenshots an
 ## 2. Merge and deploy
 
 ### 2.1 Merge
-1. Merge #189 (`jack-2 → main`). Vercel deploys production. [design §17 step 4]
+1. Just before merging, delete `docs/jack-2/build-log.md` from `jack-2` (a copy is in `~/.lsr/jack2-build/`); `design.md` and `tracks/` stay (section 5). Then merge #189 (`jack-2 → main`). Vercel deploys production. [design §17 step 4]
 2. The push changes `prisma/migrations/`, so the Database Migrate workflow runs: it backs up production and finds nothing left to apply. Check it finished green. [`docs/deployment.md`: Database migrations]
 3. Run `scripts/jack-storage-setup.ts --copy-from-blob` again (as in 1.8). It skips what it copied and picks up screenshots saved since. [files: Setup 2]
 
@@ -229,18 +229,18 @@ One service at a time; check each works before the next. For each: env vars in V
    - General Information: copy the Application ID. Privacy Policy URL `https://www.longhornsimracing.org/privacy#discord`; Terms of Service URL `https://www.longhornsimracing.org/terms`.
    - Bot: Reset Token and copy it once. **Public Bot off**; "Requires OAuth2 Code Grant" off. Privileged Gateway Intents: **Server Members** and **Message Content** on.
    - OAuth2: copy the Client Secret; add the redirect `https://www.longhornsimracing.org/api/discord/oauth/callback`.
-2. **Install the bot**, logged in as the app's owner (Manage Server on the club server): `https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot&permissions=580542407986176&guild_id=<GUILD_ID>&disable_guild_select=true`. That's View Channels, Send Messages, Embed Links, Read Message History, Manage Roles, Create Events and Send Polls. Place the bot's role just above the roles role sync will hand out and below every officer and admin role. Deny View Channel on channels it must never read. [discord-read: Setup 2; discord-post: Setup 1]
+2. **Install the bot**, logged in as the app's owner (Manage Server on the club server): `https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot&permissions=580542408117248&guild_id=<GUILD_ID>&disable_guild_select=true`. That's View Channels, Send Messages, Embed Links, Read Message History, Mention @everyone, Manage Roles, Create Events and Send Polls. Place the bot's role just above the roles role sync will hand out and below every officer and admin role. Deny View Channel on channels it must never read. [discord-read: Setup 2; discord-post: Setup 1]
 3. Vercel (Production, Sensitive): `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (Developer Mode → right-click the server → Copy Server ID), `DISCORD_CLIENT_ID` (the Application ID), `DISCORD_CLIENT_SECRET`. Redeploy. `DISCORD_OAUTH_REDIRECT_URI` is optional (the default is the callback above); `DISCORD_APPLICATION_ID` isn't read by the code. [discord-read: Setup 3; Env vars]
-4. **Discord Developer Terms §12(a)** (section 5): confirm before the next step. Switching on is what makes Jack's live search work, and the first sync puts data in Supabase and through Vercel. [discord-read: Setup 4]
+4. **Discord Developer Terms §12(a)**: settled (section 5). Switching on is what makes Jack's live search work, and the first sync puts data in Supabase and through Vercel. [discord-read: Setup 4]
 5. Connections → **Discord** → Run smoke test ("Read …: N members, M channels; Message Content and Server Members intents on; the bot's role sits below the admin roles"), then switch on. [discord-read: Setup 5; discord-post: smoke test]
 6. **Post the server privacy note** before opting channels in, listing the channels you're about to opt in, and pin it. The text is in `tracks/discord-read.md` ("The server privacy note"). Post it by hand, or through the site once posting is set up (3.13, step 2). [discord-read: Setup 6; discord-post: Setup 5]
-7. Community → **Discord**: opt in those channels (the first run reads back 90 days). Keep officer-only channels out unless the officers agree. [discord-read: Setup 7]
+7. Community → **Discord**: opt in every public channel (Gray, 10/25; the first run reads back 90 days). Officer-only channels stay out. [discord-read: Setup 7]
 8. Turn on `discord.sync` (every 10 minutes), `discord.rescan` (hourly), `discord.members` (hourly) and `discord.prune` (daily). [discord-read: Setup 8]
 - **Watch:** Community → Discord (messages, active members, channels, polls) and the Overview's Discord card. A failing sync shows on the connector and in the failing-jobs check. Deletion requests are handled on Community → Discord (admins). [discord-read: Community → Discord; Deletion on request]
 
 ### 3.13 Discord: posting, rules and role sync
 - **Who:** Gray (admin). After 3.12.
-1. **Pings:** for a role posts may ping, switch on "Allow anyone to @mention this role" in Discord. The bot isn't given Mention @everyone (section 5). [discord-post: Setup 2]
+1. **Pings:** the install link gives the bot Mention @everyone (section 5), so a post can ping @everyone, @here or any role, but only when an officer asked for that ping in the room; standing rules never ping @everyone or @here. [discord-post: Setup 2]
 2. Community → **Announcements** → Posting channels (admins): pick the channels the bot may post in. The privacy note can then go out from Announcements → Server privacy note (Copy for Jack, or Post it myself). [discord-post: Setup 4 and 5]
 3. **Standing rules** (Announcements → New rule, or ask Jack): event reminders, new events, results, standings, Twitch live, the event mirror. Switching one on asks first; it acts only on what happens after that. [discord-post: Setup 6; Standing rules]
 4. **Role sync** (Community → Discord → Role sync): add rules, switch them on. Roles with moderation powers are refused. [discord-post: Setup 7; Role sync]
@@ -279,24 +279,19 @@ Run after the migrations are in production. The scripts run from a `jack-2` chec
 4. **Load:** the same command with `--approved=<sign-off date> --actor <your handle>`. Entries load as SEED, reviewed as of that date, each with a version and an audit entry. Running it again never undoes changes made on the site (they're skipped and listed; `--overwrite` replaces them). [knowledge-seed README: Loading; memory: Seed tooling]
 5. Check Content → Knowledge: the entries, their owners and tags. Ask Jack something one of them answers. [added here]
 
-## 5. Decisions for Gray before switching things on
-1. **Discord Developer Terms §12(a)** (before 3.12): written terms with the service providers that see Discord API data (Anthropic, Supabase, Vercel). Their standard terms and DPAs probably cover it; confirm it. [discord-read: Setup 4; research: discord.md §6]
-2. **Instagram** (before 3.10): [decks-rooms: Policy questions for Gray]
-   - Developer Policy §6.2 and Platform Terms §5.a.i: worth one read before publishing goes on.
-   - AI labelling: `is_ai_generated` is an option, off by default (unverified that it shows Instagram's visible label). If every Jack graphic should get it, flip the dialog's default and the kind's description.
-   - Posts a day: the site's cap is 10 (`CLUB_DAILY_POSTS` in `src/server/jack/publish/instagram.ts`).
-3. **The Vercel token exception** (before 3.7): Vercel has no read-only token, so site traffic uses a project-scoped read-write token, only in the daily snapshot job, with a short expiry. [design §12.5; build log: For Gray to sign off]
-4. **Resend** (before 3.6): [design §12.4; sources-a: Setup, Resend 1; build log: For Gray to sign off]
-   - The production key stays send-only, and delivery data comes by webhook (the second key exception).
-   - Open and click tracking stays off unless you turn it on for the domain. If you do, update the Resend line on `/privacy` first, then add the opened and clicked events to the webhook.
-5. **Discord @everyone** (3.13): the bot can't ping @everyone or @here unless it's given Mention @everyone, which also lets it ping every role. [discord-post: Setup 2]
-6. **Which Discord channels** to opt in, and whether any officer-only channel is in. [discord-read: Setup 7]
-7. **Discord "totals only" is a convention**, not a database permission: `run_sql` can read `DiscordMessage.authorId`. If it should be a hard control, revoke `jack_readonly`'s SELECT on `DiscordMessage` and grant a column list without `authorId`. [discord-read: Limits]
-8. **Room notes after account deletion** still name people ("<name> applied: …", "Saved in knowledge for <name>"); deleting an account clears only the message labels. Keep or change. [#224: Noticed, not changed]
-9. **Who owns the club Twitch account** and its developer app (design §15 says TBD). [design §15]
-10. **The build log and `docs/jack-2/`**: remove before the release merges, fold into `docs/jack.md`, or keep. [build log: intro]
-11. **Migrations from your machine or the workflow** (1.6): the workflow takes a backup first. [design §17 step 3]
-12. **The eval on Lift and Stand** (1.2): run them on `lsr_eval` before the merge (`--only=lift`, then `--only=stand`; more than the test budget had left), or accept the run on Jack alone. [build log: Log, 10/23 morning]
+## 5. Decisions (Gray, 10/25)
+1. **Discord Developer Terms §12(a):** Anthropic's, Supabase's and Vercel's standard terms and DPAs count as the written terms. Nothing more to sign. [discord-read: Setup 4; research: discord.md §6]
+2. **Instagram:** read Developer Policy §6.2 and Platform Terms §5.a.i once before publishing goes on. The AI label stays an option, off by default (Jack's graphics are designed slides with club photos). The site's cap stays 10 posts a day (`CLUB_DAILY_POSTS`). [decks-rooms: Policy questions for Gray]
+3. **The Vercel token exception:** approved (project-scoped, read-write because Vercel has no read-only token, only in the daily snapshot job, short expiry). The token is made by the account that owns the LSR Vercel team (3.7). [design §12.5]
+4. **Resend:** approved. The production key stays send-only, delivery data comes by webhook, and open and click tracking stays off. [design §12.4]
+5. **Discord @everyone:** given, through the install link (3.12). It also lets the bot ping every role; posts still ping only when an officer asked for it. [discord-post: Setup 2]
+6. **Discord channels:** every public channel; officer-only channels stay out. [discord-read: Setup 7]
+7. **Discord "totals only" stays a convention**, not a database permission: officers are trusted not to profile members through `run_sql`, and the eval's `discord-no-ranking` questions keep checking that Jack declines. [discord-read: Limits]
+8. **Room notes keep names after account deletion:** officer attribution in the room record is permanent. [#224: Noticed, not changed]
+9. **Twitch:** Gray is finding who holds the club account. They (or Gray, with the login) do 3.8 steps 1 and 4 at the keyboard. [design §15]
+10. **`docs/jack-2/`:** `design.md` and `tracks/` stay (`docs/jack.md` and `CLAUDE.md` point to them); the build log is deleted just before the merge (2.1). [build log: intro]
+11. **Migrations:** the Database Migrate workflow, which takes a backup first (1.6). [design §17 step 3]
+12. **The eval on Lift and Stand:** the core track, run 10/25 (1.2). [build log: Log, 10/25]
 
 ## 6. Rollback
 
