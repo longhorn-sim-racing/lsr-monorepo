@@ -45,9 +45,9 @@ export function postBody({ text, poll, ping }: { text?: string | null; poll?: Po
 
 /**
  * A ping as asked for ("everyone", "here", or a role by name or id) against the server's roles. @everyone
- * and @here need the bot to have Mention @everyone (the install link doesn't give it); a role must be
- * pingable by anyone, or the bot needs that permission too. Otherwise Discord would show the mention
- * without pinging anyone
+ * and @here need the bot to have Mention @everyone (the install link gives it; a server can take it
+ * away); a role must be pingable by anyone, or the bot needs that permission too. Otherwise Discord
+ * would show the mention without pinging anyone
  */
 export function resolvePing(asked: string | null | undefined, { roles, mentionEveryone }: { roles: DiscordRole[]; mentionEveryone: boolean }): { ok: true; ping: PingTarget | null } | { ok: false; error: string } {
   const wanted = asked?.trim().replace(/^@/, "")
