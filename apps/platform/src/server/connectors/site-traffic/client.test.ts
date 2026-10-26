@@ -33,7 +33,8 @@ describe("the site traffic client against the fake", () => {
       const params = new URL(request.url).searchParams
       expect(params.get("filter")).toBe(PUBLIC_PAGES_FILTER)
       expect(params.get("since")).toBe(String(range.since.getTime()))
-      expect(params.get("until")).toBe(String(range.until.getTime()))
+      // count gets the exclusive end (Vercel rounds its `until` down to the day); aggregate the last millisecond
+      expect(params.get("until")).toBe(String(range.until.getTime() + (request.path.endsWith("/count") ? 1 : 0)))
     }
     expect(fakes.requests[0].headers.get("authorization")).toBe(`Bearer ${SITE_TRAFFIC_FAKE_TOKEN}`)
   })
@@ -110,6 +111,25 @@ describe("the site traffic client against the fake", () => {
 })
 
 describe("the fake's checks", () => {
+  it("rounds until as Vercel does: count down to the day, aggregate up to the hour", async () => {
+    mountFakes([siteTrafficFake])
+    const base = "http://127.0.0.1:3999/site-traffic/v1/query/web-analytics/visits"
+    const day = yesterday()
+    const since = Date.parse(`${day}T00:00:00.000Z`)
+    const ask = async (path: string, until: number, extra = "") => {
+      const url = `${base}/${path}?projectId=${SITE_TRAFFIC_FAKE_PROJECT}&since=${since}&until=${until}${extra}`
+      return (await (await fetch(url, { headers: { authorization: `Bearer ${SITE_TRAFFIC_FAKE_TOKEN}` } })).json()) as { data: unknown }
+    }
+    const lastMs = since + 86_400_000 - 1
+    // count: the day's last millisecond rounds down to its start, an empty range (what hit production)
+    expect(((await ask("count", lastMs)).data as { pageviews: number }).pageviews).toBe(0)
+    const whole = ((await ask("count", lastMs + 1)).data as { pageviews: number }).pageviews
+    expect(whole).toBeGreaterThan(0)
+    // aggregate: the last millisecond rounds up to midnight, the same day
+    const rows = (await ask("aggregate", lastMs, "&by=country&limit=100")).data as { pageviews: number }[]
+    expect(rows.reduce((n, r) => n + r.pageviews, 0)).toBe(whole)
+  })
+
   it("answers Vercel's 400s for a bad query", async () => {
     mountFakes([siteTrafficFake])
     const base = `http://127.0.0.1:3999/site-traffic/v1/query/web-analytics/visits/aggregate?projectId=${SITE_TRAFFIC_FAKE_PROJECT}&since=2026-10-01&until=2026-10-02`

@@ -113,7 +113,10 @@ export function siteTrafficClient(token: string, projectId: string, env: Connect
   return {
     /** Page views and visitors over the range (visitors are counted per day by Vercel) */
     async count(range: TrafficRange, signal?: AbortSignal): Promise<{ pageviews: number; visitors: number }> {
-      const body = (await get("/v1/query/web-analytics/visits/count", rangeParams(range), signal)) as { data?: { pageviews?: unknown; visitors?: unknown } }
+      // Vercel's count rounds `until` down to the UTC day (and aggregate rounds it up to the hour), so a
+      // day ending at 23:59:59.999 counted nothing here: count gets the exclusive end, the next midnight
+      const exclusive = { since: range.since, until: new Date(range.until.getTime() + 1) }
+      const body = (await get("/v1/query/web-analytics/visits/count", rangeParams(exclusive), signal)) as { data?: { pageviews?: unknown; visitors?: unknown } }
       return { pageviews: count(body.data?.pageviews), visitors: count(body.data?.visitors) }
     },
     /** The top `limit` groups of one dimension over the range, by page views; Vercel folds the rest into one "Others" group */

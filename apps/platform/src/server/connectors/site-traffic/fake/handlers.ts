@@ -20,6 +20,7 @@ export const SITE_TRAFFIC_FAKE_PROJECT = "prj_" + "jackfakeproject01"
 const PROJECT_NAME = "lsr-monorepo"
 
 const DAY = 86_400_000
+const HOUR = 3_600_000
 const DAYS_OF_DATA = 45
 const TIME_BY = ["hour", "day", "week", "month", "year"] as const
 const MONTH = 30 * DAY
@@ -156,7 +157,9 @@ export const siteTrafficFake: FakeService = {
     let fault: { status: number; times: number } | null = null
 
     /** Auth, the project, faults, dates and the filter; the matching views, or the error */
-    const select = (request: Request, { requireDates }: { requireDates: boolean }): { views: PageView[]; params: URLSearchParams; since: number | null; until: number | null; filter: string | null } | Response => {
+    // How each real endpoint reads `until` (seen against Vercel on 10/26/2026): count rounds it down to
+    // the UTC day, aggregate up to the hour; either way the range ends there, exclusive
+    const select = (request: Request, { requireDates, roundUntil }: { requireDates: boolean; roundUntil: "day-down" | "hour-up" }): { views: PageView[]; params: URLSearchParams; since: number | null; until: number | null; filter: string | null } | Response => {
       if (fault && fault.times > 0) {
         fault.times -= 1
         if (fault.status === 429) {
@@ -182,8 +185,9 @@ export const siteTrafficFake: FakeService = {
       if (requireDates && (!rawSince || !rawUntil)) return fail(400, "bad_request", "One of the provided values in the request query is invalid: since and until are required.")
       if (Boolean(rawSince) !== Boolean(rawUntil)) return fail(400, "bad_request", "One of the provided values in the request query is invalid: pass since and until together.")
       let since = rawSince ? instant(rawSince, false) : null
-      const until = rawUntil ? instant(rawUntil, true) : null
-      if ((rawSince && since === null) || (rawUntil && until === null)) return fail(400, "bad_request", "One of the provided values in the request query is invalid: since and until take a timestamp in ms or a date.")
+      const given = rawUntil ? instant(rawUntil, true) : null
+      const until = given === null ? null : roundUntil === "day-down" ? Math.floor(given / DAY) * DAY : Math.ceil(given / HOUR) * HOUR
+      if ((rawSince && since === null) || (rawUntil && given === null)) return fail(400, "bad_request", "One of the provided values in the request query is invalid: since and until take a timestamp in ms or a date.")
       // Hobby's reporting window is one month
       if (since !== null && since < now - MONTH) {
         if (plan === "402") return fail(402, "payment_required", "The requested range is outside your plan's reporting window.")
@@ -203,7 +207,7 @@ export const siteTrafficFake: FakeService = {
       const productionOnly = !filter || !mentions(filter, "environment")
       const matching = views.filter((view) => {
         const at = Date.parse(view.ts)
-        return (since === null || at >= since) && (until === null || at <= until) && (!productionOnly || view.environment === "production") && predicate(view)
+        return (since === null || at >= since) && (until === null || at < until) && (!productionOnly || view.environment === "production") && predicate(view)
       })
       return { views: matching, params, since, until, filter }
     }
@@ -215,7 +219,7 @@ export const siteTrafficFake: FakeService = {
         method: "GET",
         path: "/v1/query/web-analytics/visits/count",
         handle: (request) => {
-          const picked = select(request, { requireDates: false })
+          const picked = select(request, { requireDates: false, roundUntil: "day-down" })
           if (picked instanceof Response) return picked
           return Response.json({ version: 1, query: { ...(picked.filter ? { filter: picked.filter } : {}) }, data: { pageviews: picked.views.length, visitors: distinct(picked.views) } })
         },
@@ -224,7 +228,7 @@ export const siteTrafficFake: FakeService = {
         method: "GET",
         path: "/v1/query/web-analytics/visits/aggregate",
         handle: (request) => {
-          const picked = select(request, { requireDates: true })
+          const picked = select(request, { requireDates: true, roundUntil: "hour-up" })
           if (picked instanceof Response) return picked
           const by = picked.params.getAll("by")
           const allowed = [...TIME_BY, ...FILTER_FIELDS] as readonly string[]
