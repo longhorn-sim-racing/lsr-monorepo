@@ -34,14 +34,15 @@ const nextConfig: NextConfig = {
   // Keys match the route path anywhere in it ("/app/admin/jack/[roomId]"), so brackets are escaped.
   // libvips goes where sharp runs (src/server/jack/sharp.ts loads it on first use): photo copies when a
   // room file is registered, and gallery adds and Instagram publishing, applied from the room, the deck
-  // page or Proposals, or run by a job.
+  // page or Proposals, or run by a job. Not the reply route: Jack's replies never run sharp, and with
+  // Chromium it's already near the 250 MB limit.
   outputFileTracingIncludes: {
     "/admin/jack/\\[roomId\\]": [...CHROMIUM_BINARY, ...LIBVIPS],
     "/admin/jack/decks/\\[deckId\\]": [...CHROMIUM_BINARY, ...LIBVIPS],
     "/admin/jack/proposals": LIBVIPS,
     "/api/admin/jack/decks/**": CHROMIUM_BINARY,
     "/api/admin/jack/render-check": CHROMIUM_BINARY,
-    "/api/admin/jack/run": [...CHROMIUM_BINARY, ...PDF_WORKER, ...LIBVIPS],
+    "/api/admin/jack/run": [...CHROMIUM_BINARY, ...PDF_WORKER],
     "/api/admin/jack/files/**": [...PDF_WORKER, ...LIBVIPS],
     "/api/cron/tick": [...PDF_WORKER, ...LIBVIPS],
   },
