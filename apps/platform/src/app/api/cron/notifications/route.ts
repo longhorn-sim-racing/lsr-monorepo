@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { prisma } from "@/server/db";
 import {
   processScheduledNotifications,
@@ -17,12 +18,8 @@ export const maxDuration = 60; // Allow up to 60 seconds for the cron job
  * Called every 15 minutes by GitHub Actions (see .github/workflows/notification-cron.yml).
  */
 export async function GET(request: Request) {
-  // Verify cron secret in production
-  const authHeader = request.headers.get("Authorization");
-  if (
-    process.env.NODE_ENV === "production" &&
-    authHeader !== `Bearer ${process.env.CRON_SECRET}`
-  ) {
+  // Fails closed: with no CRON_SECRET set, every request is refused (in every environment)
+  if (!isAuthorizedCronRequest(request.headers.get("Authorization"), process.env.CRON_SECRET)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
