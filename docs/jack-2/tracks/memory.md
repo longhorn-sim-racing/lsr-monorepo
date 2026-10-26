@@ -77,7 +77,7 @@ The drafted seed names departments as owners (`owner: "Media"`). The loader give
 ## Setup steps (release)
 
 1. After the migrations reach production: run the officer badge sync with `--apply` to backfill departments and board seats.
-2. After Gray signs off the seed drafts (recorded in `build-log.md`): run the seed loader with `--approved` against production.
+2. After Gray signs off the seed drafts (the loader records the date with `--approved`): run the seed loader with `--approved` against production.
 
 ## Trying it locally
 

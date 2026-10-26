@@ -5,7 +5,7 @@ The steps Gray follows to ship Jack 2.0 (#188): what to check before merging `ja
 - **Who runs it:** Gray, as an admin. Some steps need another account's owner; each section says who.
 - **The order matters** in sections 1 and 2. In section 3 most services stand alone (each says what it needs first), so skipping one leaves the rest working. Launch can go ahead with every connector off. [design §15]
 - **The pattern in section 3:** accounts and keys, env vars in Vercel (then redeploy), outside settings, the smoke test on System → Connections, the switch, then the jobs on System → Scheduled jobs. Off always works.
-- **Sources:** each step ends with where it came from, in brackets. `design §n` is `docs/jack-2/design.md`, `build log` is `docs/jack-2/build-log.md`, and a track name (`groundwork`, `files`, `sources-a`…) is `docs/jack-2/tracks/<track>.md`. `added here` marks a step no doc has: reasoning, or what earlier PRs showed. Commands run from the repo root.
+- **Sources:** each step ends with where it came from, in brackets. `design §n` is `docs/jack-2/design.md`, `build log` is the build's log (removed from the repo at release; Gray keeps a copy), and a track name (`groundwork`, `files`, `sources-a`…) is `docs/jack-2/tracks/<track>.md`. `added here` marks a step no doc has: reasoning, or what earlier PRs showed. Commands run from the repo root.
 - **The three security PRs (#222, #223, #224)** merged into `jack-2` on 10/23. #224 adds the twelfth migration (1.6). #223 changes render keys, so every deck in a room renders again once after the deploy. #222 makes the notifications cron hold scheduled announcement emails the day's email limit can't take; they show as failed on Notifications with a note to retry after the reset.
 
 ## 1. Before merging
@@ -108,7 +108,7 @@ After the merge, Supabase Storage is where deck renders, exports, screenshots an
 ## 2. Merge and deploy
 
 ### 2.1 Merge
-1. Just before merging, delete `docs/jack-2/build-log.md` from `jack-2` (a copy is in `~/.lsr/jack2-build/`); `design.md` and `tracks/` stay (section 5). Then merge #189 (`jack-2 → main`). Vercel deploys production. [design §17 step 4]
+1. Merge #189 (`jack-2 → main`). Vercel deploys production. The build log came out of the repo right after it; `design.md` and `tracks/` stay (section 5). [design §17 step 4]
 2. The push changes `prisma/migrations/`, so the Database Migrate workflow runs: it backs up production and finds nothing left to apply. Check it finished green. [`docs/deployment.md`: Database migrations]
 3. Run `scripts/jack-storage-setup.ts --copy-from-blob` again (as in 1.8). It skips what it copied and picks up screenshots saved since. [files: Setup 2]
 
