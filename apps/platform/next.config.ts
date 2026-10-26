@@ -1,16 +1,17 @@
+import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
 
 const CHROMIUM_BINARY = ["./node_modules/@sparticuz/chromium/bin/**", "../../node_modules/.pnpm/@sparticuz+chromium@*/node_modules/@sparticuz/chromium/bin/**"]
 // Room files (G5) and documents (T6): src/server/jack/files/extract.ts imports the worker statically,
 // which file tracing follows; listed here too so a later change to a dynamic import can't quietly drop it
 const PDF_WORKER = ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", "../../node_modules/.pnpm/pdfjs-dist@*/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"]
-// sharp's native binary finds libvips through a link next to it (@img/sharp-libvips-linux-x64), which
-// file tracing doesn't follow: without these, sharp fails on Vercel with "libvips-cpp.so…: cannot open
-// shared object file". Both the link and pnpm's real path, as for Chromium
-const LIBVIPS = [
-  "../../node_modules/.pnpm/@img+sharp-linux-x64@*/node_modules/@img/sharp-libvips-linux-x64/**",
-  "../../node_modules/.pnpm/@img+sharp-libvips-linux-x64@*/node_modules/@img/sharp-libvips-linux-x64/**",
-]
+// sharp's native binary loads libvips from the link next to it (rpath $ORIGIN/../../sharp-libvips-
+// linux-x64/lib), which file tracing doesn't follow: without this, sharp fails on Vercel with
+// "libvips-cpp.so…: cannot open shared object file". Only that one copy, for the sharp version this
+// app installs (Next has an older sharp with its own libvips): each copy is about 19 MB, and the room
+// page's function has to stay under Vercel's 250 MB
+const SHARP_VERSION = (JSON.parse(readFileSync("./node_modules/sharp/package.json", "utf8")) as { version: string }).version
+const LIBVIPS = [`../../node_modules/.pnpm/@img+sharp-linux-x64@${SHARP_VERSION}/node_modules/@img/sharp-libvips-linux-x64/lib/**`]
 
 const nextConfig: NextConfig = {
   // Jack renders slides in headless Chromium (src/server/jack/decks/renderer.ts). The Chromium build
