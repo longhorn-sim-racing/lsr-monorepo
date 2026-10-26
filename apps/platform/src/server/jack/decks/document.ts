@@ -63,7 +63,16 @@ export function cleanCss(css: string): string {
   return css.replace(/<\s*\/\s*style/gi, "<\\/style")
 }
 
-export type SlideSource = { size: JackDeckSizeKey; css: string; html: string }
+/**
+ * A slide as it renders. `roomId` is the deck's room: photos officers attached there are the only room
+ * photos its slides can show (renders.ts checks)
+ */
+export type SlideSource = { size: JackDeckSizeKey; css: string; html: string; roomId?: string | null }
+
+/** Where a slide loads a photo an officer attached in the deck's room (renders.ts answers it with the photo's model copy) */
+export function roomAssetUrl(fileId: string): string {
+  return `https://${JACK_ASSET_HOST}/room/${fileId}`
+}
 
 export function slideDocument({ size, css, html }: SlideSource): string {
   return `<!doctype html>
@@ -84,8 +93,13 @@ ${cleanSlideHtml(html)}
 
 /**
  * Names a render by what goes into it, so a cached render is reused exactly when the slide, the deck's
- * CSS, the size and the renderer all match (a restored version finds its old renders too)
+ * CSS, the size and the renderer all match (a restored version finds its old renders too). A deck in a
+ * room is named by its room as well, so the same slide in another room's deck never reuses a render
+ * showing this room's photos (it renders again, and the photos don't load there). Every slide of such a
+ * deck is, not only ones whose text names a room photo: the renderer reads URLs the way a browser does
+ * (JACK.ASSETS, /ROOM/, entities and CSS escapes all reach the photo), so the text can't tell
  */
-export function renderKey({ size, css, html }: SlideSource): string {
-  return createHash("sha256").update(`v${RENDER_VERSION}\0${size}\0${css}\0${html}`).digest("hex").slice(0, 40)
+export function renderKey({ size, css, html, roomId }: SlideSource): string {
+  const room = roomId ? `\0room:${roomId}` : ""
+  return createHash("sha256").update(`v${RENDER_VERSION}\0${size}\0${css}\0${html}${room}`).digest("hex").slice(0, 40)
 }

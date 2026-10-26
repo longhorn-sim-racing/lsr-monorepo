@@ -11,6 +11,7 @@ import { MemberAvatar } from "@/app/admin/users/_components/member-avatar"
 import { MemberBadges } from "@/app/admin/users/_components/member-badges"
 import { getActiveTierKey } from "@/lib/status-indicators"
 import { DEFAULT_TIMEZONE } from "@/lib/dates"
+import { PurgeLinkedButton } from "@/app/admin/discord/purge-form"
 
 export const dynamic = "force-dynamic"
 
@@ -83,6 +84,20 @@ export default async function AdminUserEditPage({ params }: { params: Promise<{ 
                 { label: "UT EID", value: user.eid ? <span className="font-mono text-xs">{user.eid}</span> : <span className="text-admin-subtle">Not given</span> },
                 { label: "Account", value: STATUS_LABEL[user.status] ?? user.status },
                 { label: "Membership", value: activeTier?.label ?? <span className="text-admin-subtle">None</span> },
+                {
+                  label: "Discord",
+                  value: user.discordUserId ? (
+                    <span className="flex flex-col items-start gap-1.5">
+                      <span>
+                        @{user.discordUsername ?? "linked"}
+                        {user.discordLinkedAt && <span className="text-admin-subtle"> since {formatInTimeZone(user.discordLinkedAt, DEFAULT_TIMEZONE, "MMM d, yyyy")}</span>}
+                      </span>
+                      {session.roles.includes("admin") && <PurgeLinkedButton userId={user.id} username={user.discordUsername} />}
+                    </span>
+                  ) : (
+                    <span className="text-admin-subtle">Not linked</span>
+                  ),
+                },
                 { label: "Joined", value: formatInTimeZone(user.createdAt, DEFAULT_TIMEZONE, "MMM d, yyyy") },
                 { label: "User ID", value: <span className="font-mono text-xs">{user.id}</span> },
               ]}

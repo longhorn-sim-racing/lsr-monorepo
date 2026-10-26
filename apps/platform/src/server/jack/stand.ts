@@ -16,6 +16,9 @@ const EXCERPT_CHARS = 1_500
 /** Most a naming call may take by default (per attempt; the SDK may retry once) */
 export const STAND_TIMEOUT_MS = 15_000
 
+/** The JackUsage job a naming call saves (the Usage page counts it apart from automations) */
+export const NAME_ROOM_JOB = "name_room"
+
 /** How a naming call went, as its JackUsage row says */
 export type StandOutcome = "named" | "declined" | "unusable" | "already_titled"
 
@@ -53,7 +56,7 @@ export async function nameRoom({ roomId, client, broadcast, question, answer, si
     const usage = new UsageTally(config.model)
     usage.add(message)
     const cost = usage.costUsd
-    const spent = (outcome: StandOutcome) => ({ roomId, persona: "stand" as const, job: "name_room", outcome, ...savedUsage(usage) })
+    const spent = (outcome: StandOutcome) => ({ roomId, persona: "stand" as const, job: NAME_ROOM_JOB, outcome, ...savedUsage(usage) })
 
     if (message.stop_reason === "refusal") {
       await prisma.jackUsage.create({ data: spent("declined") })

@@ -4,10 +4,12 @@
  * Badges come from the database (each user's officerTitle plus the officer/admin roles), while
  * /about reads src/app/about/roster.ts. When the roster changes, update HANDLES below and run
  * this to bring the database in line:
- * - every roster officer in HANDLES gets the officer role (admins keep admin) and their roster
- *   title, e.g. "Media Officer" or "Business Lead";
- * - anyone else with the officer role or a title loses both. Admins are never changed here,
- *   only reported, and accounts that might belong to an unmapped roster officer are skipped.
+ * - every roster officer in HANDLES gets the officer role (admins keep admin), their roster
+ *   title, e.g. "Media Officer" or "Business Lead", and their officer profile's department (the
+ *   roster team) and board seat, which Jack reads (#188);
+ * - anyone else with the officer role, a title, a department or a board seat loses them. Admins are
+ *   never changed here, only reported, and accounts that might belong to an unmapped roster
+ *   officer are skipped. "What I work on" is the officer's own and is never touched.
  *
  * Only HANDLES (or `--map "Roster Name=handle"` for a one-off) decides who gets a badge. Display
  * names are only used to suggest handles, because members can set their own display name.
@@ -19,7 +21,7 @@
  *
  * Reads no .env file; DIRECT_URL is preferred over DATABASE_URL when both are set.
  */
-import { OFFICERS, TEAMS, type Officer } from "../src/app/about/roster";
+import { OFFICERS, TEAMS, type Officer, type TeamId } from "../src/app/about/roster";
 
 const APPLY = process.argv.includes("--apply");
 
@@ -115,6 +117,8 @@ async function main() {
       displayName: true,
       status: true,
       officerTitle: true,
+      department: true,
+      isBoard: true,
       roles: { select: { role: { select: { key: true } } } },
     },
   });
@@ -124,7 +128,24 @@ async function main() {
   const officerRole = await prisma.role.findUnique({ where: { key: "officer" } });
   if (!officerRole) throw new Error('The "officer" role is missing.');
 
-  type Change = { userId: string; label: string; title: string | null; addOfficer: boolean; removeOfficer: boolean };
+  type Change = {
+    userId: string;
+    label: string;
+    title: string | null;
+    department: TeamId | null;
+    isBoard: boolean;
+    addOfficer: boolean;
+    removeOfficer: boolean;
+  };
+  /** What changes for a user, e.g. `"Media Officer" → "Media Lead", department null → "media"` */
+  const describeChange = (u: U, next: { title: string | null; department: string | null; isBoard: boolean }) =>
+    [
+      u.officerTitle !== next.title ? `${JSON.stringify(u.officerTitle)} → ${JSON.stringify(next.title)}` : null,
+      u.department !== next.department ? `department ${JSON.stringify(u.department)} → ${JSON.stringify(next.department)}` : null,
+      u.isBoard !== next.isBoard ? `board ${u.isBoard} → ${next.isBoard}` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
   const changes: Change[] = [];
   const notes: string[] = [];
   const mappedIds = new Set<string>();
@@ -156,14 +177,15 @@ async function main() {
       notes.push(`${officer.name}: @${handle} is ${user.status}; skipped.`);
       continue;
     }
-    const title = badgeTitle(officer);
+    const next = { title: badgeTitle(officer), department: officer.team, isBoard: officer.board === true };
     const keys = roleKeys(user);
     const addOfficer = !keys.includes("officer") && !keys.includes("admin");
-    if (user.officerTitle !== title || addOfficer) {
-      changes.push({ userId: user.id, label: who(user), title, addOfficer, removeOfficer: false });
-      console.log(`  update  ${who(user)}: ${JSON.stringify(user.officerTitle)} → ${JSON.stringify(title)}${addOfficer ? ", add officer role" : ""}`);
+    const changed = describeChange(user, next);
+    if (changed || addOfficer) {
+      changes.push({ userId: user.id, label: who(user), ...next, addOfficer, removeOfficer: false });
+      console.log(`  update  ${who(user)}: ${[changed, addOfficer ? "add officer role" : ""].filter(Boolean).join(", ")}`);
     } else {
-      console.log(`  ok      ${who(user)}: ${JSON.stringify(title)}`);
+      console.log(`  ok      ${who(user)}: ${JSON.stringify(next.title)}, ${next.department}${next.isBoard ? ", board" : ""}`);
     }
   }
 
@@ -171,17 +193,18 @@ async function main() {
     if (mappedIds.has(user.id)) continue;
     const keys = roleKeys(user);
     const removeOfficer = keys.includes("officer");
-    if (!removeOfficer && !user.officerTitle && !keys.includes("admin")) continue;
+    if (!removeOfficer && !user.officerTitle && !user.department && !user.isBoard && !keys.includes("admin")) continue;
     if (keys.includes("admin")) {
-      notes.push(`${who(user)} is an admin but not on the roster; left alone (title ${JSON.stringify(user.officerTitle)}).`);
+      notes.push(`${who(user)} is an admin but not on the roster; left alone (title ${JSON.stringify(user.officerTitle)}, department ${JSON.stringify(user.department)}).`);
       continue;
     }
     if (protectedIds.has(user.id)) {
       notes.push(`${who(user)} might be an unmapped roster officer; left alone until mapped.`);
       continue;
     }
-    changes.push({ userId: user.id, label: who(user), title: null, addOfficer: false, removeOfficer });
-    console.log(`  remove  ${who(user)}: ${removeOfficer ? "officer role, " : ""}title ${JSON.stringify(user.officerTitle)}`);
+    const next = { title: null, department: null, isBoard: false };
+    changes.push({ userId: user.id, label: who(user), ...next, addOfficer: false, removeOfficer });
+    console.log(`  remove  ${who(user)}: ${[removeOfficer ? "officer role" : "", describeChange(user, next)].filter(Boolean).join(", ")}`);
   }
 
   if (notes.length) console.log(`\nNotes:\n${notes.map((n) => `  ${n}`).join("\n")}`);
@@ -207,9 +230,9 @@ async function main() {
       for (const change of changes) {
         const before = await tx.user.findUniqueOrThrow({
           where: { id: change.userId },
-          select: { officerTitle: true, roles: { select: { role: { select: { key: true } } } } },
+          select: { officerTitle: true, department: true, isBoard: true, roles: { select: { role: { select: { key: true } } } } },
         });
-        await tx.user.update({ where: { id: change.userId }, data: { officerTitle: change.title } });
+        await tx.user.update({ where: { id: change.userId }, data: { officerTitle: change.title, department: change.department, isBoard: change.isBoard } });
         if (change.addOfficer) {
           await tx.userRole.upsert({
             where: { userId_roleId: { userId: change.userId, roleId: officerRole.id } },
@@ -233,9 +256,9 @@ async function main() {
             entityType: "USER",
             entityId: change.userId,
             targetUserId: change.userId,
-            summary: `Synced staff badge for ${change.label} with the officer roster`,
-            before: { officerTitle: before.officerTitle, roles: beforeRoles },
-            after: { officerTitle: change.title, roles: afterRoles },
+            summary: `Synced staff badge and officer profile for ${change.label} with the officer roster`,
+            before: { officerTitle: before.officerTitle, department: before.department, isBoard: before.isBoard, roles: beforeRoles },
+            after: { officerTitle: change.title, department: change.department, isBoard: change.isBoard, roles: afterRoles },
             metadata: { source: "scripts/sync-officer-badges.ts" },
           },
           tx

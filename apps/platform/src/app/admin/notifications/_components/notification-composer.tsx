@@ -202,7 +202,8 @@ export function NotificationComposer({
                     ) : (
                       <>
                         {sentToday} of {dailyLimit} daily emails sent today; the limit resets at 7 pm Central (6 pm in winter). An immediate send that
-                        would go over is stopped first, keeping {keptForReceipts} for confirmations and receipts. Scheduled sends aren&apos;t checked.
+                        would go over is stopped first, keeping {keptForReceipts} for confirmations and receipts. A scheduled send is checked when it goes
+                        out: emails over the limit then aren&apos;t sent, and show as failed here.
                       </>
                     )}
                   </Notice>

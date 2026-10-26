@@ -11,12 +11,24 @@ import type { JackTool } from "./types"
  */
 
 const insensitive = (value: string) => ({ equals: value.trim(), mode: "insensitive" as const })
+
+/**
+ * Recruiting entries about an application from an officer or admin (status changes, reviews and their
+ * scores, views, decision emails) are never shown: rooms are shared, and an officer mustn't read their
+ * own reviews through Jack. Jack's SQL role has the same rule as a database policy (#188)
+ */
+const RECRUITING_ENTITIES = ["APPLICATION", "APPLICATION_TRACK", "APPLICATION_EMAIL"]
+const OFFICER_APPLICANT: Prisma.AuditLogWhereInput = {
+  entityType: { in: RECRUITING_ENTITIES },
+  targetUser: { roles: { some: { role: { key: { in: ["officer", "admin"] } } } } },
+}
 const contains = (value: string) => ({ contains: value.trim(), mode: "insensitive" as const })
 
 export function auditWhere(filters: { start: Date; end: Date; action?: string; entity?: string; actor?: string; search?: string }): Prisma.AuditLogWhereInput {
   const { start, end, action, entity, actor, search } = filters
   return {
     createdAt: { gte: start, lte: end },
+    NOT: OFFICER_APPLICANT,
     ...(action ? { actionType: insensitive(action) } : {}),
     ...(entity ? { entityType: insensitive(entity) } : {}),
     ...(actor

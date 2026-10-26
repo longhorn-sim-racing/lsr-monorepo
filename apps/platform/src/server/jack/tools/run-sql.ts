@@ -35,14 +35,16 @@ export function prepareSql(raw: string): { ok: true; sql: string } | { ok: false
   if (!/^(select|with)\b/i.test(head)) {
     return {
       ok: false,
-      error: "Only a single read-only query is allowed: it must start with SELECT or WITH. Jack can't change data with SQL (draft_event is the one write).",
+      error: "Only a single read-only query is allowed: it must start with SELECT or WITH. run_sql never writes; changes go through proposals.",
     }
   }
   const offLimits = findOffLimits(sql)
   if (offLimits) {
+    // A table alias named like one of those schemas is refused when it qualifies a column ("cron"."id")
+    const rename = OFF_LIMITS_SCHEMAS.has(offLimits) ? ` If ${offLimits} is a table alias you chose, rename it.` : ""
     return {
       ok: false,
-      error: `Catalog and settings access is off-limits to Jack: ${offLimits} isn't allowed in run_sql (system catalogs and pg_ functions, server settings, XML exports, large objects and other databases). Query the club's tables in schema public instead; describe_schema lists them.`,
+      error: `Catalog and settings access is off-limits to Jack: ${offLimits} isn't allowed in run_sql (system catalogs and pg_ functions, server settings, XML exports, large objects, other databases, and the net, cron, vault and scheduler schemas). Query the club's tables in schema public instead; describe_schema lists them.${rename}`,
     }
   }
   return { ok: true, sql }
@@ -61,12 +63,21 @@ export function prepareSql(raw: string): { ok: true; sql: string } | { ok: false
  * - the XML export functions (*_to_xml*, *xmlschema*), which read a table, a schema, a whole
  *   database or a query named in a string, where the name check can't see it;
  * - the names below: settings functions, catalog columns that hold settings or source, ts_stat and
- *   ts_rewrite (both run a query from a string), large-object functions, and dblink (other databases).
+ *   ts_rewrite (both run a query given as a string, where the name check can't see it), large-object
+ *   functions, dblink (other databases), and pg_net's functions, queue and stored responses (every
+ *   role can read those, and that can't be revoked);
+ * - the schemas in OFF_LIMITS_SCHEMAS (pg_net, pg_cron, Vault and our own scheduler) wherever they
+ *   qualify a name (net.http_get, cron.job, vault.decrypted_secrets, scheduler.tick), so a query can't
+ *   make a web request or read the queue, the job list or a stored secret.
  *
  * Names count as identifiers only: in a string or a comment they're fine, and an alias like
- * "notify" or "lo_count" is fine too.
+ * "notify" or "lo_count" is fine too. So is an alias named like one of the schemas ("AS net"), until
+ * it qualifies a column ("net"."id"), where run_sql can't tell it from the schema.
  */
 export const ALLOWED_PG_NAMES = new Set(["pg_typeof", "pg_size_pretty"])
+
+/** Schemas run_sql refuses when a name is qualified with them (the next token is a ".") */
+export const OFF_LIMITS_SCHEMAS = new Set(["net", "cron", "vault", "scheduler"])
 
 export const OFF_LIMITS_NAMES = new Set([
   // settings, and catalog columns that hold settings or function source
@@ -100,10 +111,17 @@ export const OFF_LIMITS_NAMES = new Set([
   "loread",
   "lowrite",
   "lo_manage",
+  // outbound HTTP (pg_net): its request functions, queue and stored responses, wherever they appear
+  "http_get",
+  "http_post",
+  "http_delete",
+  "http_request_queue",
+  "_http_response",
 ])
 
-/** Whether run_sql refuses an identifier (lowercased) */
-export function isOffLimitsName(name: string): boolean {
+/** Whether run_sql refuses an identifier (lowercased); `qualifies` when the next token is a "." */
+export function isOffLimitsName(name: string, qualifies = false): boolean {
+  if (OFF_LIMITS_SCHEMAS.has(name)) return qualifies
   if (name.startsWith("pg_")) return !ALLOWED_PG_NAMES.has(name)
   if (name.includes("_to_xml") || name.includes("xmlschema")) return true
   return OFF_LIMITS_NAMES.has(name) || name.startsWith("dblink")
@@ -118,9 +136,55 @@ const IDENT_PART = /[A-Za-z0-9_$\u0080-\uffff]/
  * identifier (U&"…"), which can spell any name, so it's refused rather than decoded.
  */
 export function sqlIdentifiers(sql: string): string[] | null {
-  const names: string[] = []
+  return sqlNames(sql)?.map(({ name }) => name) ?? null
+}
+
+/**
+ * Like sqlIdentifiers, with whether each name qualifies the next one: the next token, past any
+ * whitespace and comments, is a "." (net.http_get, "cron" . "job", or a comment before the dot).
+ */
+export function sqlNames(sql: string): { name: string; qualifies: boolean }[] | null {
+  const names: { name: string; qualifies: boolean }[] = []
   const n = sql.length
   const atWordStart = (i: number) => i === 0 || !IDENT_PART.test(sql[i - 1])
+  /** Index just past a comment starting at i, or null when none starts there */
+  const skipComment = (i: number): number | null => {
+    if (sql[i] === "-" && sql[i + 1] === "-") {
+      // A line comment ends at a newline or a carriage return (Postgres reads both)
+      let end = i + 2
+      while (end < n && sql[end] !== "\n" && sql[end] !== "\r") end++
+      return end + 1
+    }
+    if (sql[i] === "/" && sql[i + 1] === "*") {
+      // Block comments nest in Postgres
+      let depth = 1
+      let j = i + 2
+      while (j < n && depth > 0) {
+        if (sql[j] === "/" && sql[j + 1] === "*") {
+          depth++
+          j += 2
+        } else if (sql[j] === "*" && sql[j + 1] === "/") {
+          depth--
+          j += 2
+        } else j++
+      }
+      return j
+    }
+    return null
+  }
+  /** Whether the next token from i, past whitespace and comments, is a "." */
+  const dotNext = (i: number) => {
+    let j = i
+    while (j < n) {
+      if (/\s/.test(sql[j])) j++
+      else {
+        const past = skipComment(j)
+        if (past === null) return sql[j] === "."
+        j = past
+      }
+    }
+    return false
+  }
   /** Index just past a quoted string starting at `quote`. Backslash escapes only in E'…' strings */
   const skipString = (quote: number, backslashes: boolean) => {
     let j = quote + 1
@@ -138,24 +202,9 @@ export function sqlIdentifiers(sql: string): string[] | null {
   while (i < n) {
     const ch = sql[i]
     const next = sql[i + 1]
-    if (ch === "-" && next === "-") {
-      // A line comment ends at a newline or a carriage return (Postgres reads both)
-      let end = i + 2
-      while (end < n && sql[end] !== "\n" && sql[end] !== "\r") end++
-      i = end + 1
-    } else if (ch === "/" && next === "*") {
-      // Block comments nest in Postgres
-      let depth = 1
-      i += 2
-      while (i < n && depth > 0) {
-        if (sql[i] === "/" && sql[i + 1] === "*") {
-          depth++
-          i += 2
-        } else if (sql[i] === "*" && sql[i + 1] === "/") {
-          depth--
-          i += 2
-        } else i++
-      }
+    const pastComment = skipComment(i)
+    if (pastComment !== null) {
+      i = pastComment
     } else if ((ch === "U" || ch === "u") && next === "&" && sql[i + 2] === '"' && atWordStart(i)) {
       return null
     } else if (ch === "'") {
@@ -178,12 +227,12 @@ export function sqlIdentifiers(sql: string): string[] | null {
           j += 2
         } else name += sql[j++]
       }
-      names.push(name.toLowerCase())
+      names.push({ name: name.toLowerCase(), qualifies: dotNext(j + 1) })
       i = j + 1
     } else if (IDENT_START.test(ch)) {
       let j = i + 1
       while (j < n && IDENT_PART.test(sql[j])) j++
-      names.push(sql.slice(i, j).toLowerCase())
+      names.push({ name: sql.slice(i, j).toLowerCase(), qualifies: dotNext(j) })
       i = j
     } else i++
   }
@@ -192,9 +241,9 @@ export function sqlIdentifiers(sql: string): string[] | null {
 
 /** The first off-limits name a query uses (lowercased), or null when it uses none */
 export function findOffLimits(sql: string): string | null {
-  const names = sqlIdentifiers(sql)
+  const names = sqlNames(sql)
   if (names === null) return 'a Unicode-escaped identifier (U&"…")'
-  return names.find(isOffLimitsName) ?? null
+  return names.find(({ name, qualifies }) => isOffLimitsName(name, qualifies))?.name ?? null
 }
 
 /**
@@ -294,7 +343,7 @@ export function describeSqlError(error: unknown): string {
     return `The query ran longer than ${STATEMENT_TIMEOUT} and was cancelled. Narrow it: filter, aggregate, or join less.`
   }
   if (pgCode === "25006") {
-    return `${text}. SQL here is read-only; draft_event is the only way Jack creates anything.`
+    return `${text}. SQL here is read-only: run_sql never writes; changes go through proposals.`
   }
   if (/cannot insert multiple commands/i.test(text)) {
     return "Only one statement per query. Send each SELECT in its own run_sql call."
@@ -414,7 +463,7 @@ export const runSqlTool: JackTool<z.infer<typeof input>> = {
     `At most ${MAX_SQL_ROWS} rows come back, and long results are trimmed: aggregate (COUNT, SUM, GROUP BY) rather than listing when you can.`,
     `Queries stop after ${STATEMENT_TIMEOUT}. Duplicate column names collapse, so alias them. Cast unusual types (interval, regclass, point) to text.`,
     "Money is stored in cents (amountCents): divide by 100 for dollars. The room sees the SQL and a table of the rows.",
-    "The system catalogs and pg_ functions (except pg_typeof and pg_size_pretty), server settings, XML exports and large objects are off-limits.",
+    "The system catalogs and pg_ functions (except pg_typeof and pg_size_pretty), server settings, XML exports, large objects, and the net, cron, vault and scheduler schemas are off-limits.",
   ].join(" "),
   input,
   async run({ sql, purpose }, ctx) {

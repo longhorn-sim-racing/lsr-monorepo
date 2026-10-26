@@ -4,17 +4,15 @@ import { prisma } from '@/server/db';
 import { revalidatePath } from 'next/cache';
 import { requireOfficer } from '@/server/auth/guards';
 import { createAuditLog } from '@/server/audit/log';
+import { destroyImage } from '@/server/cloudinary';
+import type { ActionResult } from '@/lib/action-result';
+import { JACK_GALLERY_PREFIX } from '@/lib/cloudinary';
+import { nextGalleryOrder as nextOrder, uniqueAlbumSlug as uniqueSlug } from '@/server/services/gallery.service';
 
 function revalidateGallery() {
   revalidatePath('/admin/gallery');
   revalidatePath('/gallery');
   revalidatePath('/');
-}
-
-/** Next order value at the end of an album (or of the unsorted photos). */
-async function nextOrder(albumId: string | null) {
-  const last = await prisma.galleryImage.aggregate({ where: { albumId }, _max: { order: true } });
-  return (last._max.order ?? 0) + 1;
 }
 
 export async function createImage(
@@ -63,10 +61,26 @@ export async function updateImageOrder(images: { id: string; order: number }[]) 
   revalidateGallery();
 }
 
-export async function deleteImage(id: string) {
+/**
+ * Takes a photo off the gallery. One Jack added (a slide or a room photo, officer-only until then) comes
+ * off Cloudinary first, so the link that was in /gallery stops working; when that copy won't delete, the
+ * photo stays (on the gallery too) and the officer tries again. Officers' own uploads keep their
+ * Cloudinary copy, as before.
+ */
+export async function deleteImage(id: string): Promise<ActionResult> {
   const user = await requireOfficer();
 
-  await prisma.galleryImage.delete({ where: { id } });
+  const image = await prisma.galleryImage.findUnique({ where: { id }, select: { publicId: true } });
+  if (!image) return { ok: true }; // already taken off
+
+  // Cloudinary counts a copy that's gone as deleted, so trying again after a failed row delete is safe
+  const jackCopy = image.publicId.startsWith(JACK_GALLERY_PREFIX);
+  if (jackCopy && !(await destroyImage(image.publicId))) {
+    console.error(`[gallery] Couldn't delete the Cloudinary copy of gallery image ${id}; the image stays`);
+    return { ok: false, error: "Couldn't delete its copy on Cloudinary, so it's still on the gallery. Try again." };
+  }
+  const { count } = await prisma.galleryImage.deleteMany({ where: { id } });
+  if (!count) return { ok: true }; // another officer took it off meanwhile
 
   await createAuditLog({
     actorUserId: user.id,
@@ -74,9 +88,11 @@ export async function deleteImage(id: string) {
     entityType: "GALLERY_IMAGE",
     entityId: id,
     summary: `Deleted gallery image ${id}`,
+    metadata: { publicId: image.publicId, ...(jackCopy ? { cloudinaryRemoved: true } : {}) },
   });
 
   revalidateGallery();
+  return { ok: true };
 }
 
 export async function updateImageCredit(id: string, creditName: string | null, creditUrl: string | null) {
@@ -129,29 +145,6 @@ export type AlbumInput = {
   description: string | null;
   eventId: string | null;
 };
-
-function slugify(title: string) {
-  return title
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^\w\s-]/g, "")
-    .trim()
-    .replace(/[\s_-]+/g, "-")
-    .slice(0, 60)
-    .replace(/^-+|-+$/g, "") || "album";
-}
-
-// /gallery shows photos without an album under this slug
-const RESERVED_SLUGS = new Set(["unsorted"]);
-
-async function uniqueSlug(title: string, excludeId?: string) {
-  const base = slugify(title);
-  for (let n = RESERVED_SLUGS.has(base) ? 2 : 1; ; n++) {
-    const slug = n === 1 ? base : `${base}-${n}`;
-    const taken = await prisma.galleryAlbum.findFirst({ where: { slug, ...(excludeId ? { id: { not: excludeId } } : {}) } });
-    if (!taken) return slug;
-  }
-}
 
 function parseAlbumInput(input: AlbumInput) {
   const title = input.title.trim();

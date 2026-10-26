@@ -69,3 +69,9 @@ nul
 
 # Jack deck renders cached locally (src/server/jack/decks/storage.ts)
 .jack-renders/
+
+# Jack knowledge seed drafts: never committed, the repo is public (docs/jack-2/knowledge-seed/README.md).
+# Only that README lives in the repo; a stray seed folder anywhere is ignored
+jack-knowledge-seed/
+docs/jack-2/knowledge-seed/*
+!docs/jack-2/knowledge-seed/README.md

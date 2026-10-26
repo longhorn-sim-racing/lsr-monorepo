@@ -33,7 +33,7 @@ _Season 3 · Fall 2026_
 
 ## Race day
 
-- Races are on Saturdays at 10am Central. The full schedule is on the Lone Star Cup page.
+- Races are on Saturdays at noon Central. The full schedule is on the Lone Star Cup page.
 - Each round is 30 minutes of practice, 10 minutes of qualifying, then a 30 minute race.
 - Practice happens on race day only. There's no practicing the track before the event.
 - The car is the Mustang GT4. Round 7 at Mount Panorama is a Halloween night race in the Mustang Supercar.

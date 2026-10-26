@@ -10,7 +10,6 @@ import {
 import { addHours, subHours } from "date-fns";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Allow up to 60 seconds for the cron job
 
 /**
  * Cron job to process scheduled notifications, retry recent unscheduled ones whose

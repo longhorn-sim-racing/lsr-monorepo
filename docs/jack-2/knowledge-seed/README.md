@@ -1,0 +1,58 @@
+# Knowledge seed files
+
+The knowledge base starts with a reviewed set of entries: the club, who does what, decisions, policies, the brand, sponsors, the events playbook, recruiting, which services exist and who holds access (names only), and the calendar rhythm (design §9).
+
+**This repo is public, so seed files are never committed.** Only this README is. Keep the drafts in a private folder outside the repo; the default is `~/.lsr/jack-knowledge-seed/`. The loader refuses any folder inside the repo (whatever it's called, and wherever you run it from), and `.gitignore` keeps a stray `jack-knowledge-seed/` folder (or anything else in this folder) out of git.
+
+## The format
+
+One entry per `.md` file. Subfolders are fine (`policies/dues.md`). `README.md` and anything whose name starts with `_` (an index, notes, open questions: `_index.md`) are skipped.
+
+```markdown
+---
+title: LSC entry fee for Season 3
+tags: [lsc, fees, decision]
+sourceNote: Competition team post in Teams General, Sep 28
+sourceDate: 2026-09-28
+owner: Competition
+---
+
+The Season 3 entry fee is $10, or $5 for drivers who raced Season 2. There are no membership dues this semester.
+```
+
+| Field | Required | What it is |
+|---|---|---|
+| `title` | yes | 3 to 120 characters, specific enough to find ("LSC entry fee for Season 3", not "Fees"). It's also how a later load finds the same entry, so keep it stable. |
+| `tags` | yes | At least one: `[a, b]`, `a, b`, or a `- item` list. Lowercase words joined by dashes; a decision gets `decision` (one entry per decision). |
+| `sourceNote` | yes | Where it came from: "Teams General, Dylan, Sep 28", "Drive: Sponsor packet", "docs/payments.md". |
+| `sourceDate` | yes | The date the source said it, `YYYY-MM-DD` (Central). |
+| `owner` | no | Who keeps it current: a department (`Executive`, `Business`, `Community`, `Competition`, `Media`, `Technology`), or an officer's handle (`@gray-marshall`). A department goes to its one board officer when the officer profiles name exactly one (so backfill the profiles first: `scripts/sync-officer-badges.ts --apply`), and to no one otherwise; either way the department is added as a tag. |
+
+The text after the front matter is Markdown, at most 20,000 characters. Keep each entry to one topic.
+
+## What the lint refuses
+
+- a missing or malformed field, or an unknown one (a typo like `sourcenote`), or an owner that's neither a department nor a handle;
+- an email address anywhere: name the role or the page instead ("the Business lead", "the Contact page");
+- anything that looks like a key, token or password (`sk_`, `rk_`, `whsec_`, `re_`, `Bot …`, private keys, long random strings, `password: …`). Say where a secret is kept ("in Vercel's env settings"), never the secret;
+- two files with the same title.
+
+Gray's private notes are never used as a source.
+
+## Loading
+
+From the repo root:
+
+```bash
+# Lint only (and, with DATABASE_URL set, show what would be created or updated)
+pnpm --filter @lsr/platform exec tsx scripts/jack-knowledge-seed.ts --dir ~/.lsr/jack-knowledge-seed
+
+# After Gray's sign-off: load, reviewed as of the sign-off date, credited to whoever runs it
+pnpm --filter @lsr/platform exec tsx scripts/jack-knowledge-seed.ts --approved=2026-10-25 --actor gray-marshall
+```
+
+- Nothing is written without `--approved`, and nothing loads unless every file passes the lint.
+- Entries load as `sourceType SEED`, reviewed as of the approval date, each with a version and an audit entry.
+- Running it again never undoes changes made on the site. An entry is matched to an earlier load by title (the title the seed last loaded, so a rename on the Knowledge page still matches). If officers or Jack changed it since the last load (a newer version, or new details such as the owner or source), it's **skipped** and listed, and the dry run says so; fold their change into the file, or pass `--overwrite` to replace it with the file (their text stays in the entry's history). Otherwise it's updated only if the file changed (a new version for new text) and left alone if not. A new sign-off date re-dates the review, but never moves an officer's later review back. Similar existing entries are listed but don't block a load.
+- Seed entries that are no longer in the folder are listed, never deleted; archive them on the Knowledge page.
+- It loads into the database `DATABASE_URL` points at. Loading production is a release step Gray runs; the sign-off is recorded in `docs/jack-2/build-log.md`.

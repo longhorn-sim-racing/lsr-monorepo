@@ -9,7 +9,7 @@ Longhorn Sim Racing platform for UT Austin. A monorepo containing the club manag
 ## Monorepo Structure
 
 - `apps/platform/` - Main Next.js web application (`@lsr/platform`)
-- `docs/` - Documentation
+- `docs/` - Documentation (`docs/jack.md` for Jack; `docs/jack-2/` for Jack 2.0's design and per-area docs)
 - `.github/` - CI/CD workflows and repo config
 - `.claude/skills/lsr-deck/` - Skill for building LSR slide decks
 
@@ -44,6 +44,15 @@ pnpm db:migrate       # Create/apply migrations (prisma migrate dev)
 pnpm db:reset         # Reset, re-apply migrations and re-seed
 pnpm db:generate      # Regenerate Prisma client
 pnpm set-role <email|handle|userId> <role>  # Assign role to user
+
+# Jack (from apps/platform/; see docs/jack.md)
+pnpm jack:fakes       # Local HTTP fakes of every outside service, on 127.0.0.1:3999
+pnpm jack:tick        # Run due scheduled jobs once, in-process (--job <key> runs one now); local only
+pnpm jack:eval --db=lsr_eval  # Jack's eval on the eval copy (without --db it uses DATABASE_URL's database; --dry-run needs no API key)
+pnpm jack:eval:prepare  # Migrate the lsr_eval copy and seed every area's fake data
+pnpm jack:scheduler-setup  # Print the scheduler's pg_cron and Vault SQL; also creates switched-off job rows in DATABASE_URL's database (--no-db skips that)
+pnpm exec tsx scripts/jack-local-sql-role.ts  # Local JACK_DATABASE_URL; resets the role's password for every worktree, so copy an existing line if you have one
+pnpm exec tsx scripts/jack-storage-setup.ts   # Create the private `jack` Storage bucket
 ```
 
 ## Architecture
@@ -57,7 +66,7 @@ pnpm set-role <email|handle|userId> <role>  # Assign role to user
 - `src/server/` - Server-side code (see below)
 - `src/schemas/` - Zod validation schemas
 - `prisma/` - Database schema, migrations and seed
-- `scripts/` - One-off and ops scripts run with `tsx` (`set-role`, `payments-smoke`, LSC season setup)
+- `scripts/` - One-off and ops scripts run with `tsx` (`set-role`, `payments-smoke`, LSC season setup), Jack's scripts (`jack-*`, `jack-eval/`), and `check-*.ts` checks that run against the local database and delete what they write
 
 ### Server Code
 
@@ -67,6 +76,15 @@ pnpm set-role <email|handle|userId> <role>  # Assign role to user
 - `src/server/repos/` - CRUD for a few entities (events, series, venues, standings, memberships)
 - `src/server/auth/` - `getSessionUser` (`session.ts`), `getCachedSessionUser` (`cached-session.ts`), guards (`guards.ts`)
 - `src/server/db.ts` - The shared Prisma client
+- `src/server/jack/` - Jack, the officer agent (`docs/jack.md`): reply loop, prompt (`prompt-sections/`), tools (`tools/`), proposals (`proposals/`), search, knowledge, room files, decks and publishing
+- `src/server/connectors/` - Outside services (Discord, Stripe, Twitch, Drive, Graph, ...): each a client, a connector (`defineConnector`) and an HTTP fake. Clients take their base URL from `serviceBaseUrl()`, so `JACK_FAKES` can point them at the fakes
+- `src/server/scheduler/` - Scheduled jobs (`jobs/`), the dispatcher and hand-offs. pg_cron calls `/api/cron/tick` (HMAC-signed) when a `ScheduledJob` is due
+- `src/server/automation/` - "Needs attention" checks (`checks/`), the weekly digest, recurring questions, the automation cap
+- `src/server/discord-post/` - The Discord outbox, standing rules, event mirror and role sync
+
+### Jack 2.0 slots
+
+Shared registries are split into one file per area so parallel work doesn't collide (`src/lib/slots.ts` lists the areas). Under `src/server/`: tools `jack/tools/registry/<area>.ts`, proposal kinds `jack/proposals/kinds/<area>.ts`, prompt sections `jack/prompt-sections/<area>.ts`, jobs `scheduler/jobs/<area>.ts`, connectors `connectors/slots/<area>.ts`, fakes `connectors/fakes/slots/<area>.ts`, digest checks `automation/checks/<area>.ts`; also schema notes, search sources, Overview cards and eval questions. Add to the right area's file. How to add a connector, job kind or proposal kind: `docs/jack-2/tracks/groundwork.md`.
 
 ### Path Alias
 
@@ -98,7 +116,12 @@ See `prisma/schema.prisma` for the full list.
 - **RawResultUpload → RaceSession / RaceParticipant / RaceResult / RaceLap / RaceEvent** - Results pipeline from uploaded sim JSON; `DriverIdentity` and `CarMapping` map sim GUIDs and car names
 - **Product / Payment / Entitlement / UserMembership** - Payments and what they grant (see `docs/payments.md`)
 - **Post / Page** - News posts and editable content pages (e.g. the LSC rules)
-- **Notification / NotificationPreference / SystemSetting** - Notifications and site-wide settings
+- **Notification / NotificationPreference / SystemSetting** - Notifications and site-wide settings. `SystemSetting` also holds tokens (Instagram, Twitch), so Jack's SQL role can't read it
+- **JackRoom / JackMessage / JackUsage / JackFeedback / JackDeck (+ Version)** - Jack's rooms, replies, side-job costs, ratings and decks
+- **JackProposal / JackFile / KnowledgeEntry (+ Version) / JackSearchDoc** - Proposed changes, room files, the knowledge base, and the full-text search index
+- **ScheduledJob / ScheduledJobRun / SchedulerHeartbeat / ConnectorState** - The scheduler and the outside-service switches
+- **Synced copies of outside services** - `Discord*`, `Twitch*`, `Stripe*`, `EmailEvent`, `SiteTrafficDaily`, `InstagramAccountDaily`, `ExternalDocument`, `Teams*`; `DiscordRule` / `DiscordPost` and `InstagramPublish` for posting
+- **SponsorProspect / SponsorActivity / Meeting / MeetingDecision / ActionItem / RecurringQuestion** - Club records added with Jack 2.0
 
 ### Client Components
 
@@ -108,9 +131,13 @@ Use `"use client"` directive only when interactivity is required. The codebase f
 
 Event registration uses database locks (`FOR UPDATE`) to prevent race conditions. Waitlist is FIFO and auto-promotes when capacity opens, except on paid events or when the event's `waitlistAutoPromote` is off. See `src/server/services/registration.service.ts`.
 
+### Vercel function limit
+
+Vercel's Hobby plan allows 12 functions per deployment, and each distinct function setting becomes its own function. So no page or route sets `maxDuration`, `runtime` or `preferredRegion` (`src/app/function-config.test.ts` checks); everything runs on the project default, 300 s. Chromium and the PDF worker are traced only into the routes listed in `outputFileTracingIncludes` (`next.config.ts`); don't add routes to it without counting functions.
+
 ## Tests
 
-Unit tests use Vitest and sit next to the code they test as `*.test.ts` (e.g. `src/lib/money.test.ts`). They run without a database or network: tests that touch Prisma or Resend replace them with `vi.mock` fakes (see `src/server/services/notification.service.test.ts`). CI runs them on every PR. Code that needs a real database (registration locking, the waitlist) isn't covered yet.
+Unit tests use Vitest and sit next to the code they test as `*.test.ts` (e.g. `src/lib/money.test.ts`). They run without a database or network: tests that touch Prisma or Resend replace them with `vi.mock` fakes (see `src/server/services/notification.service.test.ts`). Connector tests run the real client against its HTTP fake with `mountFakes()` (`src/server/connectors/fakes/testing.ts`; build the client after mounting). CI runs them on every PR. Behavior that lives in the database (locks, triggers, row level security) is checked by `scripts/check-*.ts` against local Supabase; registration locking and the waitlist aren't covered yet.
 
 ## Local Development
 
@@ -129,7 +156,7 @@ Required in `apps/platform/.env.local`:
 - `DATABASE_URL` (local: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`)
 - `DIRECT_URL` (same as `DATABASE_URL` for local dev)
 
-Optional ones (site URL, Stripe, Resend, Cloudinary, Shopify) are listed in `apps/platform/.env.example`.
+Optional ones (site URL, Stripe, Resend, Cloudinary, Shopify, Jack and its outside services) are listed in `apps/platform/.env.example`; Jack's are explained in `docs/jack.md`. Locally, `JACK_FAKES=all` with `pnpm jack:fakes` running points Jack's connector clients at the fakes (never on Vercel production); the app's own email also needs `RESEND_BASE_URL=http://127.0.0.1:3999/resend`, and checkout Stripe isn't faked. Prefer `pnpm jack:tick --job <key>` to switching a job on in a shared local database.
 
 Prisma reads `.env` (not `.env.local`), so `DATABASE_URL` and `DIRECT_URL` must also be in `apps/platform/.env`.
 

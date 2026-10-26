@@ -9,6 +9,7 @@ import { revalidateDriverList } from '@/server/cache/revalidate-public';
 import type { ActionResult } from '@/lib/action-result';
 import { eidInputSchema } from '@/schemas/eid.schema';
 import { EID_TAKEN, setUserEid } from '@/server/services/eid.service';
+import { officerProfileFromForm, officerProfileSchema, type OfficerProfile } from '@/schemas/officer-profile.schema';
 
 // Schema shared by the action
 const UserSchema = z.object({
@@ -50,6 +51,15 @@ export async function updateProfile(formData: FormData) {
     throw new Error(parsed.error.flatten().formErrors.join(', ') || 'Invalid input.');
   }
 
+  // Officers also edit their officer profile here (the form shows that step only to them)
+  const isOfficer = (await prisma.userRole.count({ where: { userId: user.id, role: { key: { in: ['officer', 'admin'] } } } })) > 0;
+  let officerProfile: OfficerProfile | null = null;
+  if (isOfficer && formData.has('department')) {
+    const profile = officerProfileSchema.safeParse(officerProfileFromForm(formData));
+    if (!profile.success) throw new Error(profile.error.issues[0]?.message ?? 'Check your officer profile.');
+    officerProfile = profile.data;
+  }
+
   const isEnforced = await getLeorgeGawrenceEnforcementUnitStatus();
   const targetUserId = '7c902926-806f-4de1-95fe-6dbbe7b339e3'; // Replace with target
   const enforcedName = 'Leorge Gawrence';
@@ -75,6 +85,7 @@ export async function updateProfile(formData: FormData) {
         twitch: parsed.data.twitch,
         youtube: parsed.data.youtube,
       },
+      ...(officerProfile ?? {}),
     },
   });
 

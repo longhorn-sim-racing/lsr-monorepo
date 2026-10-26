@@ -1,10 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk"
+import { BetaMessageStream } from "@anthropic-ai/sdk/lib/BetaMessageStream"
 import type { BetaContentBlock, BetaMessageParam, BetaToolResultBlockParam } from "@anthropic-ai/sdk/resources/beta/messages/messages"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { z } from "zod"
 import type { JackToolPart } from "@/lib/jack/parts"
 import { fakeClaude, type FakeTurn } from "./fake-claude"
-import { MAX_TOOL_RESULT_IMAGES, resultContent, runModelReply, toolDefinitions, type ModelReplyOptions } from "./model-loop"
+import { MAX_TOOL_RESULT_IMAGES, resultContent, runModelReply, streamFailureLog, toolDefinitions, type ModelReplyOptions } from "./model-loop"
 import { JACK_MODELS } from "./models"
 import { buildSystemPrompt } from "./prompt"
 import type { AnyJackTool, JackTool, JackToolContext } from "./tools/types"
@@ -43,6 +44,7 @@ function setup(script: FakeTurn[] | ((params: never, call: number) => FakeTurn),
     onPart: async (part) => {
       parts.push([part])
     },
+    requestType: "room",
     ...extra,
   }
   return { fake, options, run: () => runModelReply(options) }
@@ -409,6 +411,66 @@ describe("runModelReply", () => {
     expect(result.outcome).toBe("answered")
   })
 
+  it("logs a garbled tool input without any of its text, which can hold member data", async () => {
+    // As the SDK words it (BetaMessageStream's toolInputParseError), with the input V8's SyntaxError quotes
+    const input = '{"recipient": jane@utexas.edu, "sql": "select * from \\"User\\" where eid = \'jd12345\'"'
+    let syntax = ""
+    try {
+      JSON.parse(input)
+    } catch (error) {
+      syntax = String(error)
+    }
+    const garbled = new Anthropic.AnthropicError(`Unable to parse tool parameter JSON from model. Please retry your request or adjust your prompt. Error: ${syntax}. JSON: ${input}`)
+    const { run } = setup([
+      { text: "Let me", tools: [{ name: "count_rows", input: { table: "x" } }], error: garbled },
+      { text: "Let me", tools: [{ name: "count_rows", input: { table: "x" } }], error: new Anthropic.AnthropicError(`stream broke after ${input}`) },
+      { text: "42." },
+    ])
+
+    const result = await run()
+
+    expect(result.outcome).toBe("answered")
+    const logged = vi.mocked(console.error).mock.calls.map((args) => args.map((arg) => (arg instanceof Error ? `${arg.message}\n${arg.stack}` : String(arg))).join(" "))
+    expect(logged).toEqual([
+      "[jack] A streamed tool input wasn't valid JSON in room room-1 (attempt 1)",
+      "[jack] Claude's reply stream broke in room room-1 (attempt 2) (an SDK error; its text isn't logged)",
+    ])
+    expect(syntax).toMatch(/jane@utexa/) // what V8's message would have leaked on its own
+  })
+
+  it("recognizes the SDK's own error for a garbled tool input, and logs none of it", async () => {
+    // The real stream class, fed the events of a tool call whose input isn't JSON
+    const events = [
+      { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } },
+      { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_1", name: "run_sql", input: {} } },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: `{"sql": "select * from \\"User\\" where email = 'jane@utexas.edu'" "limit": 5}` } },
+      { type: "content_block_stop", index: 0 },
+    ]
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(events.map((event) => JSON.stringify(event)).join("\n") + "\n"))
+        controller.close()
+      },
+    })
+    let caught: unknown = null
+    try {
+      for await (const event of BetaMessageStream.fromReadableStream(body)) void event
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(Anthropic.AnthropicError)
+    expect(String(caught)).toContain("jane@utexas.edu")
+    expect(streamFailureLog(caught, "room-1", 1)).toEqual(["[jack] A streamed tool input wasn't valid JSON in room room-1 (attempt 1)"])
+  })
+
+  it("still logs an error from Jack's own code whole, for its stack", async () => {
+    const bug = new TypeError("Cannot read properties of undefined (reading 'id')")
+    const { run } = setup([{ text: "Let me", error: bug }, { text: "42." }])
+    await run()
+    expect(console.error).toHaveBeenCalledWith("[jack] Claude's reply stream failed in room room-1 (attempt 1):", bug)
+  })
+
   it("after a refusal fallback mid-answer, sends back only what came after the switch", async () => {
     const fallback = { type: "fallback", from: { model: "claude-sonnet-5-5" }, to: { model: "claude-sonnet-5" }, trigger: { type: "refusal" } } as unknown as BetaContentBlock
     const declined = [
@@ -470,6 +532,27 @@ describe("runModelReply", () => {
     expect(seen).toMatchObject({ roomId: "room-1", actor: { displayName: "Gray" } })
     expect(seen!.signal).toBeInstanceOf(AbortSignal)
   })
+
+  it("lets a tool read the reply's calls as they stand, ahead of the saved copy", async () => {
+    let seen: string[] = []
+    const peek: JackTool<{ table: string }> = {
+      ...countTool(),
+      name: "peek",
+      run: async (_input, ctx) => {
+        await Promise.resolve()
+        seen = (ctx.reply?.toolParts?.() ?? []).map((p) => `${p.name}:${JSON.stringify(p.input)}`)
+        return { forModel: "ok", label: "ok" }
+      },
+    }
+    // Saving parts is slow here, as it can be for real: nothing has reached the reply when peek runs
+    const { run } = setup([{ tools: [{ name: "peek", input: { table: "a" } }, { name: "count_rows", input: { table: "b" } }] }, { text: "ok" }], [countTool(), peek], {
+      ctx: { roomId: "room-1", actor: { userId: "officer-gray", displayName: "Gray" }, reply: { fromOfficer: true, knowledgeChanges: 0 } },
+      onPart: (part) => new Promise((resolve) => setTimeout(() => resolve(void parts.push([part])), 20)),
+    })
+    await run()
+    // The call made alongside it is there, with its input
+    expect(seen).toEqual(['peek:{"table":"a"}', 'count_rows:{"table":"b"}'])
+  })
 })
 
 describe("cancelling a reply", () => {
@@ -509,6 +592,15 @@ describe("resultContent", () => {
     const content = resultContent("Rendered.", images) as { type: string; text?: string }[]
     expect(content.filter((block) => block.type === "image")).toHaveLength(MAX_TOOL_RESULT_IMAGES)
     expect(content.at(-1)).toEqual({ type: "text", text: "(2 more images left out; ask for fewer at a time.)" })
+  })
+
+  it("sends an image by its Claude Files id in an image block", () => {
+    const content = resultContent("A photo.", [{ caption: "Photo:", fileId: "file_fake_image_1" }])
+    expect(content).toEqual([
+      { type: "text", text: "A photo." },
+      { type: "text", text: "Photo:" },
+      { type: "image", source: { type: "file", file_id: "file_fake_image_1" } },
+    ])
   })
 })
 

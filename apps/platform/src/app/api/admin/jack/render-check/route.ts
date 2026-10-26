@@ -13,7 +13,6 @@ import { SLIDE_TEMPLATES } from "@/server/jack/decks/templates"
  */
 
 export const dynamic = "force-dynamic"
-export const maxDuration = 60
 
 export async function GET(req: Request) {
   try {
@@ -52,7 +51,7 @@ export async function GET(req: Request) {
 /** Writes a small file to the render store and reads it back. "none" means no store is connected: renders work but aren't kept */
 async function checkStore(): Promise<{ kind: string; ok: boolean; error?: string; note?: string }> {
   const store = jackFileStore()
-  if (store.kind === "none") return { kind: store.kind, ok: true, note: "No Blob store is connected, so renders aren't cached and screenshots don't work" }
+  if (store.kind === "none") return { kind: store.kind, ok: true, note: "No file store is connected (Supabase Storage or Blob), so renders aren't cached and screenshots don't work" }
   const pathname = `jack/check/${Date.now()}.txt`
   const body = Buffer.from(`render check ${new Date().toISOString()}`)
   try {

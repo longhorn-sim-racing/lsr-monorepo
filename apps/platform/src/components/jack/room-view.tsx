@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { memo, useEffect, useRef, useState } from "react"
+import { Fragment, memo, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode } from "react"
 import { ChevronLeft, Pencil } from "lucide-react"
 import { Button, Input, Notice, Select, Textarea } from "@/components/admin/kit"
 import { cn } from "@/lib/utils"
@@ -17,6 +17,8 @@ import {
 import { replyPieces } from "@/lib/jack/reply-pieces"
 import { JACK_TITLE_MAX } from "@/schemas/jack.schema"
 import type { JackSpend } from "@/lib/jack/spend"
+import { NoteText } from "./note-text"
+import { FilesView } from "./parts/files-view"
 import { JackToolPartView } from "./parts/tool-part"
 import { PersonaAvatar } from "./persona-avatar"
 import { ReplyText } from "./reply-text"
@@ -49,10 +51,65 @@ type RoomViewProps = {
   onRename: (title: string) => Promise<string | null>
   /** Resolves with an error to show, or null once a run is asked to start */
   onContinue: () => Promise<string | null>
+  /*
+   * Extension points for Jack 2.0's tracks (#188, design §2.2); leaving them out changes nothing. The
+   * two functions run for every message row, which is memoized: pass stable functions (useCallback),
+   * or every row redraws while a reply streams.
+   */
+  /** Attachments, mention mode and archived rooms plug in here */
+  composer?: JackComposerOptions
+  /** Drawn under each officer message and reply (feedback, pin, copy link); not under room notes */
+  messageActions?: (message: JackMessageView) => ReactNode
+  /** Draws a message's attachments in place of the default (its `files` as tiles, when it has any) */
+  renderAttachments?: (message: JackMessageView) => ReactNode
+  /** A message to open the room at (?m=, from search): shown highlighted in the middle instead of the end */
+  anchorId?: string
+  /** Opened at an old message in a long room: newer messages weren't loaded after this one; a divider there links to the latest */
+  gap?: { afterId: string; count: number }
+  /** Drawn in the header beside who answers (the room's menu: pin, mention mode, archive) */
+  headerActions?: ReactNode
 }
 
-export function JackRoomView({ room, messages, present, connection, stall, rooms, spend, onSend, onSwitchPersona, onRename, onContinue }: RoomViewProps) {
+/** Options for the room's composer (#188); each one left out keeps today's behavior */
+export type JackComposerOptions = {
+  /** Drawn beside the Send button (an attach button, chips for files waiting to go) */
+  addons?: ReactNode
+  /** Drawn above the message box (G5: the chips for files waiting to go, which need the composer's full width) */
+  attachments?: ReactNode
+  /** Runs on paste into the message box (files pasted in); call preventDefault to keep the paste out of the text */
+  onPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void
+  /** Runs when something is dropped on the composer (files dragged in); the composer only accepts drops when this is set */
+  onDrop?: (event: DragEvent<HTMLFormElement>) => void
+  /** Send works with no text (files are attached); the room is then sent an empty message */
+  canSendEmpty?: boolean
+  /** Replaces the message box's placeholder (mention mode: "Mention @Jack to ask him") */
+  placeholder?: string
+  /** The room takes no messages (archived): this note shows in place of the composer, and the room doesn't offer to continue */
+  readOnly?: ReactNode
+}
+
+export function JackRoomView({
+  room,
+  messages,
+  present,
+  connection,
+  stall,
+  rooms,
+  spend,
+  onSend,
+  onSwitchPersona,
+  onRename,
+  onContinue,
+  composer = {},
+  messageActions,
+  renderAttachments,
+  anchorId,
+  gap,
+  headerActions,
+}: RoomViewProps) {
   const title = jackRoomTitle(room)
+  // An archived room is read-only: no renaming or switching who answers either
+  const readOnly = Boolean(composer.readOnly)
   // Bumped when this officer sends, so the list jumps to the end even if they'd scrolled up
   const [sentCount, setSentCount] = useState(0)
 
@@ -66,7 +123,7 @@ export function JackRoomView({ room, messages, present, connection, stall, rooms
     // Fills the workspace below the top bar so the conversation scrolls and the composer stays put
     <div className="-mx-4 -my-4 flex h-[calc(100dvh-44px)] bg-card md:-mx-6 md:-my-5">
       {/* The open room's title and persona are live; the rest of the rail is as of page load */}
-      <JackRoomRail rooms={rooms.map((r) => (r.id === room.id ? { ...r, title: room.title, persona: room.persona } : r))} activeId={room.id} />
+      <JackRoomRail rooms={rooms.map((r) => (r.id === room.id ? { ...r, title: room.title, persona: room.persona, pinnedAt: room.pinnedAt === undefined ? r.pinnedAt : room.pinnedAt } : r))} activeId={room.id} />
       <section aria-label={title} className="flex min-w-0 flex-1 flex-col">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-admin-row px-4 py-2.5 md:px-5">
           <div className="flex min-w-0 flex-col">
@@ -74,28 +131,40 @@ export function JackRoomView({ room, messages, present, connection, stall, rooms
               <ChevronLeft className="size-3.5" aria-hidden />
               All rooms
             </Link>
-            <RoomTitle title={title} saved={room.title} onRename={onRename} />
+            <RoomTitle title={title} saved={room.title} onRename={onRename} readOnly={readOnly} />
             <span className="flex flex-wrap items-center gap-x-3">
               <ConnectionLine connection={connection} />
               {spend ? <SpendMeter spend={spend} /> : null}
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-3.5">
-            <PersonaSwitch persona={room.persona} onSwitch={onSwitchPersona} />
+            <PersonaSwitch persona={room.persona} onSwitch={onSwitchPersona} readOnly={readOnly} />
             <PresenceStack present={present} />
+            {headerActions}
           </div>
         </header>
-        <MessageList messages={messages} followSignal={sentCount} />
+        <MessageList
+          messages={messages}
+          followSignal={sentCount}
+          anchorId={anchorId}
+          gap={gap ? { ...gap, latestHref: `/admin/jack/${room.id}` } : undefined}
+          messageActions={messageActions}
+          renderAttachments={renderAttachments}
+        />
         <AnswerStatus messages={messages} />
-        {stall ? <ContinueBar stall={stall} name={stalledName(stall, messages, room.persona)} onContinue={onContinue} /> : null}
-        <Composer persona={room.persona} onSend={send} />
+        {stall && !composer.readOnly ? <ContinueBar stall={stall} name={stalledName(stall, messages, room.persona)} onContinue={onContinue} /> : null}
+        {composer.readOnly ? (
+          <div className="border-t border-admin-row px-4 py-3 text-[13px] text-muted-foreground md:px-5">{composer.readOnly}</div>
+        ) : (
+          <Composer persona={room.persona} onSend={send} options={composer} />
+        )}
       </section>
     </div>
   )
 }
 
 /** The room's name, with a pencil to rename it in place: Enter saves, Escape cancels */
-function RoomTitle({ title, saved, onRename }: { title: string; saved: string | null; onRename: RoomViewProps["onRename"] }) {
+function RoomTitle({ title, saved, onRename, readOnly }: { title: string; saved: string | null; onRename: RoomViewProps["onRename"]; readOnly: boolean }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -132,6 +201,8 @@ function RoomTitle({ title, saved, onRename }: { title: string; saved: string | 
     if (problem) setError(problem)
     else stop()
   }
+
+  if (readOnly) return <h1 className="truncate font-display text-lg font-semibold leading-tight">{title}</h1>
 
   if (!editing)
     return (
@@ -250,7 +321,7 @@ function PresenceStack({ present }: { present: JackPresence[] }) {
   )
 }
 
-function PersonaSwitch({ persona, onSwitch }: { persona: JackRoomPersonaKey; onSwitch: RoomViewProps["onSwitchPersona"] }) {
+function PersonaSwitch({ persona, onSwitch, readOnly }: { persona: JackRoomPersonaKey; onSwitch: RoomViewProps["onSwitchPersona"]; readOnly: boolean }) {
   const [error, setError] = useState<string | null>(null)
   // What the officer picked, shown while the switch goes through so the select doesn't flick back
   const [pending, setPending] = useState<JackRoomPersonaKey | null>(null)
@@ -273,7 +344,7 @@ function PersonaSwitch({ persona, onSwitch }: { persona: JackRoomPersonaKey; onS
       <Select
         id="jack-persona"
         value={pending ?? persona}
-        disabled={pending !== null}
+        disabled={pending !== null || readOnly}
         onChange={(e) => void pick(e.target.value as JackRoomPersonaKey)}
         // 16px on phones so iOS doesn't zoom in on focus
         className="h-8 w-auto text-base font-semibold md:h-7 md:text-sm"
@@ -296,10 +367,29 @@ const timeOfDay = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago"
 /** Within this many pixels of the bottom, the list follows new text; further up, it leaves the reader where they are */
 const FOLLOW_PX = 80
 
-function MessageList({ messages, followSignal }: { messages: JackMessageView[]; followSignal: number }) {
+type MessageExtras = Pick<RoomViewProps, "messageActions" | "renderAttachments">
+
+function MessageList({
+  messages,
+  followSignal,
+  anchorId,
+  gap,
+  messageActions,
+  renderAttachments,
+}: { messages: JackMessageView[]; followSignal: number; anchorId?: string; gap?: { afterId: string; count: number; latestHref: string } } & MessageExtras) {
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
-  const following = useRef(true)
+  // Opened at a message: stay there instead of following the end
+  const following = useRef(!anchorId)
+
+  // Show the message the room was opened at in the middle, once
+  useEffect(() => {
+    if (!anchorId) return
+    const row = content.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchorId)}"]`)
+    if (!row) return
+    row.scrollIntoView({ block: "center" })
+    row.focus({ preventScroll: true })
+  }, [anchorId])
 
   // Whenever the conversation grows (text streaming in, a part, a chart loading), keep the end in view,
   // but only for a reader who's at (or near) the bottom
@@ -336,7 +426,21 @@ function MessageList({ messages, followSignal }: { messages: JackMessageView[]; 
         {messages.length ? (
           <ol className="flex flex-col gap-4">
             {messages.map((message) => (
-              <MessageRow key={message.id} message={message} />
+              <Fragment key={message.id}>
+                <MessageRow message={message} anchored={message.id === anchorId} messageActions={messageActions} renderAttachments={renderAttachments} />
+                {gap && message.id === gap.afterId ? (
+                  <li className="flex items-center gap-2.5 text-xs text-admin-subtle">
+                    <span aria-hidden className="h-px flex-1 bg-admin-row" />
+                    <span>
+                      {gap.count} newer {gap.count === 1 ? "message" : "messages"} not loaded ·{" "}
+                      <Link href={gap.latestHref} className="font-semibold text-foreground hover:underline">
+                        Jump to latest
+                      </Link>
+                    </span>
+                    <span aria-hidden className="h-px flex-1 bg-admin-row" />
+                  </li>
+                ) : null}
+              </Fragment>
             ))}
           </ol>
         ) : (
@@ -354,21 +458,43 @@ function MessageList({ messages, followSignal }: { messages: JackMessageView[]; 
  * One message. Memoized: the reducer keeps a message's object as it is until that message changes, so
  * while a reply streams only its row re-renders, not every table and chart above it.
  */
-const MessageRow = memo(function MessageRow({ message }: { message: JackMessageView }) {
-  if (message.author.kind === "system")
+const MessageRow = memo(function MessageRow({ message, anchored = false, messageActions, renderAttachments }: { message: JackMessageView; anchored?: boolean } & MessageExtras) {
+  // The message the room was opened at: highlighted, and able to take focus
+  const highlight = anchored ? "-mx-2 rounded-md bg-admin-selected px-2 py-1.5 outline-none ring-1 ring-primary/40" : undefined
+  const tabIndex = anchored ? -1 : undefined
+  if (message.author.kind === "system") {
+    // A note's first line is its summary; anything after it (a knowledge entry's saved text) shows under it as is
+    const [lead, ...rest] = message.content.split("\n")
+    const detail = rest.join("\n").trim()
     return (
-      <li className="flex items-center gap-2.5 text-xs text-admin-subtle">
-        <span aria-hidden className="h-px flex-1 bg-admin-row" />
-        <span>
-          {message.content} · {timeOfDay.format(new Date(message.createdAt))}
-        </span>
-        <span aria-hidden className="h-px flex-1 bg-admin-row" />
+      <li data-message-id={message.id} tabIndex={tabIndex} className={cn("flex flex-col gap-1.5", highlight)}>
+        <div className="flex items-center gap-2.5 text-xs text-admin-subtle">
+          <span aria-hidden className="h-px flex-1 bg-admin-row" />
+          <span>
+            <NoteText text={lead} /> · {timeOfDay.format(new Date(message.createdAt))}
+          </span>
+          <span aria-hidden className="h-px flex-1 bg-admin-row" />
+        </div>
+        {detail ? (
+          <p className="mx-auto max-h-80 w-full max-w-3xl overflow-y-auto whitespace-pre-wrap break-words rounded-md border bg-admin-surface px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+            {/* Each line may end with a site path to open, as the lead can (the weekly digest's items do) */}
+            {detail.split("\n").map((line, i) => (
+              <Fragment key={i}>
+                {i ? "\n" : null}
+                <NoteText text={line} />
+              </Fragment>
+            ))}
+          </p>
+        ) : null}
       </li>
     )
+  }
   const isModel = message.author.kind === "assistant"
   const name = message.author.kind === "assistant" ? JACK_PERSONA_NAME[message.author.persona] : message.author.displayName
+  const attachments = renderAttachments ? renderAttachments(message) : message.files?.length ? <FilesView files={message.files} /> : null
+  const actions = messageActions?.(message) ?? null
   return (
-    <li className="flex gap-3">
+    <li data-message-id={message.id} tabIndex={tabIndex} className={cn("flex gap-3", highlight)}>
       {message.author.kind === "assistant" ? (
         <PersonaAvatar persona={message.author.persona} />
       ) : (
@@ -380,11 +506,13 @@ const MessageRow = memo(function MessageRow({ message }: { message: JackMessageV
           <span className="text-xs text-admin-subtle">{message.status === "streaming" ? "answering" : timeOfDay.format(new Date(message.createdAt))}</span>
         </span>
         {isModel ? <ReplyBody message={message} /> : <p className="max-w-3xl whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>}
+        {attachments ? <div className="max-w-3xl">{attachments}</div> : null}
         {message.status === "error" ? (
           <Notice tone="warning" className="max-w-xl">
             This answer stopped early. Ask again to retry.
           </Notice>
         ) : null}
+        {actions}
       </div>
     </li>
   )
@@ -472,15 +600,17 @@ function ContinueBar({ stall, name, onContinue }: { stall: "unanswered" | "stuck
   )
 }
 
-function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: RoomViewProps["onSend"] }) {
+function Composer({ persona, onSend, options }: { persona: JackRoomPersonaKey; onSend: RoomViewProps["onSend"]; options: JackComposerOptions }) {
+  const { addons, attachments, onPaste, onDrop, canSendEmpty = false, placeholder } = options
   const [content, setContent] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const canSend = canSendEmpty || content.trim().length > 0
 
   async function send() {
-    if (sending || !content.trim()) return
+    if (sending || !canSend) return
     // Cleared right away, so whatever's typed while it sends is kept; put back if the send fails
-    const sent = content
+    const sent = content.trim() ? content : ""
     setContent("")
     setSending(true)
     setError(null)
@@ -488,9 +618,15 @@ function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: Ro
     setSending(false)
     if (problem) {
       setError(problem)
-      setContent((typed) => (typed.trim() ? `${sent}\n${typed}` : sent))
+      if (sent) setContent((typed) => (typed.trim() ? `${sent}\n${typed}` : sent))
     }
   }
+
+  const sendButton = (
+    <Button type="submit" variant="primary" pending={sending} disabled={!canSend}>
+      Send
+    </Button>
+  )
 
   return (
     <form
@@ -499,7 +635,11 @@ function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: Ro
         e.preventDefault()
         void send()
       }}
+      // Dropping only works where a track takes the files; otherwise the browser does what it always did
+      onDragOver={onDrop ? (e) => e.preventDefault() : undefined}
+      onDrop={onDrop}
     >
+      {attachments}
       <label htmlFor="jack-message" className="sr-only">
         Message the room
       </label>
@@ -507,7 +647,8 @@ function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: Ro
         id="jack-message"
         rows={2}
         value={content}
-        placeholder={`Message the room. ${JACK_PERSONA_NAME[persona]} answers every message.`}
+        placeholder={placeholder ?? `Message the room. ${JACK_PERSONA_NAME[persona]} answers every message.`}
+        onPaste={onPaste}
         onChange={(e) => setContent(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -528,9 +669,14 @@ function Composer({ persona, onSend }: { persona: JackRoomPersonaKey; onSend: Ro
             {persona !== "jack" ? `${JACK_PERSONA_NAME[persona]} answers in this room until someone switches it back to Jack.` : "Enter sends, Shift+Enter adds a line."}
           </span>
         )}
-        <Button type="submit" variant="primary" pending={sending} disabled={!content.trim()}>
-          Send
-        </Button>
+        {addons ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {addons}
+            {sendButton}
+          </div>
+        ) : (
+          sendButton
+        )}
       </div>
     </form>
   )

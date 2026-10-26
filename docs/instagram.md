@@ -26,7 +26,7 @@ Requirements on Instagram's side:
 
 - The account has to be a **Business or Creator** account, and public.
 - The Meta app can stay in Development mode. It only reads the club's own account, which has a role on the app, so Meta's App Review isn't needed.
-- Give the token read access only: in the app's Instagram use case, keep `instagram_business_basic` and remove other permissions (messages, comments, publishing) before generating it.
+- Give the token read access only: in the app's Instagram use case, keep `instagram_business_basic` and `instagram_business_manage_insights` (Jack 2.0 keeps reach and post numbers with it; still read-only) and remove other permissions (messages, comments, publishing) before generating it. A token made with `instagram_business_basic` alone still runs the feed; insights then fail with "doesn't have the insights permission" (see `docs/jack-2/tracks/sources-b.md`).
 
 ## When something goes wrong
 
@@ -42,4 +42,4 @@ Some reels with licensed music come through without a video file. That doesn't m
 
 ## Testing locally
 
-Set `INSTAGRAM_GRAPH_URL` to point the sync at a stand-in server that answers `/me`, `/me/media` and `/refresh_access_token` the way Instagram does. Don't use a real token on a local database that might be shared or reset.
+Set `JACK_FAKES=instagram` (and run `pnpm jack:fakes`) to point the sync at the shared Instagram fake, then paste its token `IGfake-read-insights-token` in Admin → Instagram (`src/server/connectors/instagram/fake/handlers.ts` has its posts and knobs). Or set `INSTAGRAM_GRAPH_URL` to another stand-in server that answers `/me`, `/me/media` and `/refresh_access_token` the way Instagram does; a path in it is kept (`http://127.0.0.1:4555/instagram`). It must be plain http on this machine (127.0.0.1, localhost or [::1]), like `JACK_FAKES_URL`, and it's ignored on Vercel production: the feed's token and Jack's publishing token both go wherever it points. Don't use a real token on a local database that might be shared or reset.

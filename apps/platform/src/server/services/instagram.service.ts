@@ -58,6 +58,16 @@ export async function getInstagramStatus(): Promise<InstagramStatus> {
   return { ...rest, connected: Boolean(token) }
 }
 
+/**
+ * The stored token and its account, for server code that calls Instagram with it (the Jack 2.0
+ * insights connector). Never send the token to a page, a log or the model. Null when nobody connected.
+ */
+export async function readInstagramAccess(): Promise<{ token: string; userId: string | null; username: string | null; tokenExpiresAt: string | null } | null> {
+  const settings = await readSettings()
+  if (!settings.token) return null
+  return { token: settings.token, userId: settings.userId ?? null, username: settings.username ?? null, tokenExpiresAt: settings.tokenExpiresAt ?? null }
+}
+
 /** Check a pasted token against Instagram and store it. Throws if Instagram rejects it. */
 export async function connectInstagram(rawToken: string) {
   const token = rawToken.trim()
