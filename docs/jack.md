@@ -124,7 +124,7 @@ Sonnet 5.5 and Opus 5.5 run safety classifiers that can decline a request (cyber
 
 ### Prompt caching
 
-Every request starts with the same tools and system prompt, with a cache breakpoint at the end of the system prompt, and automatic caching on the conversation after it. Cache reads cost a tenth of normal input (less on Opus), so a room's follow-ups mostly pay for what's new. This stays cacheable because:
+Every request starts with the same tools and system prompt, with a cache breakpoint at the end of the system prompt, and automatic caching on the conversation after it. Cache reads cost a twentieth of normal input on Sonnet 5.5 and Opus 5.5 (a tenth on Haiku), so a room's follow-ups mostly pay for what's new. This stays cacheable because:
 
 - the system prompt has no dates, names, counts or connection status in it (the time and who's asking are in each officer turn instead; whether a service is connected is in tool results), and the tools never change order. The tool list changes only with the web tools switch, and between room and scheduled replies;
 - the history is rebuilt from the saved messages the same way every time, so each request's history is the previous one plus the new exchange. The 40-exchange window moves its start in steps of 10, so it stays put for several turns;
@@ -426,7 +426,7 @@ Prices per million tokens (cache writes are 1.25× input):
 
 | Model | Input | Output | Cache read |
 |---|---|---|---|
-| Sonnet 5.5 (Jack) | $2 | $10 | $0.20 |
+| Sonnet 5.5 (Jack) | $2 | $10 | $0.10 |
 | Opus 5.5 (Lift) | $4 | $20 | $0.20 |
 | Haiku 5.5 (Stand) | $0.10 | $0.50 | $0.01 |
 

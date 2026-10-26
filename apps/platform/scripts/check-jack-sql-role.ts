@@ -313,6 +313,7 @@ async function main() {
     ["pg_terminate_backend", `SELECT pg_terminate_backend(pg_backend_pid()) AS t`],
     ["pg_cancel_backend", `SELECT pg_cancel_backend(1) AS t`],
     ["query_to_xml (a query hidden in a string)", `SELECT query_to_xml('select current_setting(''app.settings.jwt_secret'', true)', true, true, '')::text AS x`],
+    ["ts_rewrite (a query hidden in a string)", `SELECT ts_rewrite('a'::tsquery, 'SELECT ''a''::tsquery, quote_literal(setting)::tsquery FROM pg_settings LIMIT 1')::text AS x`],
     ["table_to_xml (a catalog table named in a string)", `SELECT table_to_xml('pg_db_role_setting', true, false, '')::text AS x`],
     ["schema_to_xml (the whole catalog)", `SELECT schema_to_xml('pg_catalog', true, false, '')::text AS x`],
     ["database_to_xml", `SELECT database_to_xml(true, false, '')::text AS x`],

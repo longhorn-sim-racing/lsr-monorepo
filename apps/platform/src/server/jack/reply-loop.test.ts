@@ -636,8 +636,8 @@ describe("replies from Claude", () => {
 
     const [reply] = replies()
     expect(reply).toMatchObject({ model: "claude-sonnet-5-5", inputTokens: 3_000, outputTokens: 300, cacheReadTokens: 8_000 })
-    // $2/M uncached in, $2.50/M cache writes, $0.20/M cache reads, $10/M out
-    expect(reply.costUsd).toBeCloseTo((1_000 * 2 + 2_000 * 2.5 + 8_000 * 0.2 + 300 * 10) / 1e6, 6)
+    // $2/M uncached in, $2.50/M cache writes, $0.10/M cache reads, $10/M out
+    expect(reply.costUsd).toBeCloseTo((1_000 * 2 + 2_000 * 2.5 + 8_000 * 0.1 + 300 * 10) / 1e6, 6)
   })
 
   it("streams tool calls to the room in order, after the text before them, and saves them on the reply", async () => {
@@ -863,7 +863,7 @@ describe("spend as it goes", () => {
     await onFakeTimers(() => runRoom(room.id, deps))
 
     const first = (1_000 * 2 + 100 * 10) / 1e6
-    const both = first + (50 * 2 + 10 * 10 + 1_000 * 0.2) / 1e6
+    const both = first + (50 * 2 + 10 * 10 + 1_000 * 0.1) / 1e6
     expect(costs).toHaveLength(2)
     expect(costs[0]).toBeCloseTo(first, 9)
     expect(costs[1]).toBeCloseTo(both, 9)
