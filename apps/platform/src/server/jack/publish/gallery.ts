@@ -1,4 +1,4 @@
-import sharp from "sharp"
+import { loadSharp } from "@/server/jack/sharp"
 import { JACK_GALLERY_PREFIX } from "@/lib/cloudinary"
 import { createAuditLog } from "@/server/audit/log"
 import { destroyImage, uploadImageBytes } from "@/server/cloudinary"
@@ -105,7 +105,7 @@ export async function addToGallery(
         // No worker throws, so every upload has settled (and is in `made`) before a failure is rethrown
         if (failed) return null
         try {
-          const bytes = item.kind === "slide" ? await sharp(await slideImage(deps, item.deck, item.slide)).jpeg({ quality: 88, mozjpeg: true }).toBuffer() : await roomPhoto(item.fileId, item.roomId, deps)
+          const bytes = item.kind === "slide" ? await (await loadSharp())(await slideImage(deps, item.deck, item.slide)).jpeg({ quality: 88, mozjpeg: true }).toBuffer() : await roomPhoto(item.fileId, item.roomId, deps)
           if (!bytes) {
             missing.push(item.rowId)
             return null

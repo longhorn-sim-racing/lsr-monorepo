@@ -1,4 +1,4 @@
-import sharp from "sharp"
+import { loadSharp } from "@/server/jack/sharp"
 
 /**
  * The copies made of an uploaded photo (design §5): the model copy Jack looks at (JPEG, upright,
@@ -16,6 +16,7 @@ const MAX_INPUT_PIXELS = 70_000_000
 export type ImageCopies = { width: number; height: number; model: Buffer; thumb: Buffer }
 
 export async function imageCopies(body: Buffer): Promise<ImageCopies> {
+  const sharp = await loadSharp()
   const input = sharp(body, { limitInputPixels: MAX_INPUT_PIXELS, failOn: "error" })
   const meta = await input.metadata()
   if (!meta.width || !meta.height) throw new Error("Not an image sharp can read")

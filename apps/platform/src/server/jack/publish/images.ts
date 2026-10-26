@@ -1,4 +1,4 @@
-import sharp from "sharp"
+import { loadSharp } from "@/server/jack/sharp"
 import { INSTAGRAM_CANVAS, sameRatio, type InstagramShape } from "@/lib/jack/publish"
 
 /**
@@ -22,6 +22,7 @@ async function edgeColour(png: Buffer, width: number, height: number, bars: "ver
       ? [{ left: 0, top: 0, width, height: 1 }, { left: 0, top: height - 1, width, height: 1 }]
       : [{ left: 0, top: 0, width: 1, height }, { left: width - 1, top: 0, width: 1, height }]
   // The strips' raw pixels (stats() would describe the whole input, not the extract)
+  const sharp = await loadSharp()
   const sums = [0, 0, 0]
   let pixels = 0
   for (const region of strips) {
@@ -39,6 +40,7 @@ async function edgeColour(png: Buffer, width: number, height: number, bars: "ver
  */
 export async function instagramJpeg(png: Buffer, shape: InstagramShape): Promise<InstagramJpeg> {
   const canvas = INSTAGRAM_CANVAS[shape]
+  const sharp = await loadSharp()
   const meta = await sharp(png).metadata()
   if (!meta.width || !meta.height) throw new Error("The slide's image couldn't be read")
   const fitted = !sameRatio({ width: meta.width, height: meta.height }, canvas)
