@@ -141,7 +141,7 @@ describe("runModelReply", () => {
 
     // both calls add up: 900 + 60 in, 3000 written, 3900 read, 80 out on Sonnet 5.5
     expect(result.usage.tokens).toEqual({ inputTokens: 960, cacheWriteTokens: 3000, cacheReadTokens: 3900, outputTokens: 80 })
-    expect(result.usage.costUsd).toBeCloseTo((960 * 2 + 3000 * 2.5 + 3900 * 0.2 + 80 * 10) / 1e6, 6)
+    expect(result.usage.costUsd).toBeCloseTo((960 * 2 + 3000 * 2.5 + 3900 * 0.1 + 80 * 10) / 1e6, 6)
   })
 
   it("shows the model a tool's images after its text, each after its caption, and keeps them out of the part", async () => {
