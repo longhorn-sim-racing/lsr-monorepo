@@ -1,9 +1,18 @@
+import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
 
 const CHROMIUM_BINARY = ["./node_modules/@sparticuz/chromium/bin/**", "../../node_modules/.pnpm/@sparticuz+chromium@*/node_modules/@sparticuz/chromium/bin/**"]
 // Room files (G5) and documents (T6): src/server/jack/files/extract.ts imports the worker statically,
 // which file tracing follows; listed here too so a later change to a dynamic import can't quietly drop it
 const PDF_WORKER = ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", "../../node_modules/.pnpm/pdfjs-dist@*/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"]
+// sharp's native binary loads libvips through the link next to it (rpath $ORIGIN/../../sharp-libvips-
+// linux-x64/lib). File tracing keeps that link but not the files it points to, so sharp failed on Vercel
+// with "libvips-cpp.so…: cannot open shared object file". This adds them at pnpm's real path, for the
+// libvips the installed sharp names (Next has an older sharp with its own). Not under the link: Vercel
+// rejects files in a symlinked directory. One copy is about 19 MB, and the room page has to stay under
+// Vercel's 250 MB
+const SHARP = JSON.parse(readFileSync("./node_modules/sharp/package.json", "utf8")) as { optionalDependencies: Record<string, string> }
+const LIBVIPS = [`../../node_modules/.pnpm/@img+sharp-libvips-linux-x64@${SHARP.optionalDependencies["@img/sharp-libvips-linux-x64"]}/node_modules/@img/sharp-libvips-linux-x64/lib/**`]
 
 const nextConfig: NextConfig = {
   // Jack renders slides in headless Chromium (src/server/jack/decks/renderer.ts). The Chromium build
@@ -24,14 +33,19 @@ const nextConfig: NextConfig = {
   // more functions, and the Hobby plan takes at most 12 functions per deployment (with these on every
   // /admin/jack and /api/admin/jack route, previews failed with "No more than 12 Serverless Functions").
   // Keys match the route path anywhere in it ("/app/admin/jack/[roomId]"), so brackets are escaped.
+  // libvips goes where sharp runs (src/server/jack/sharp.ts loads it on first use): photo copies when a
+  // room file is registered, and gallery adds and Instagram publishing, applied from the room, the deck
+  // page or Proposals, or run by a job. Not the reply route: Jack's replies never run sharp, and with
+  // Chromium it's already near the 250 MB limit.
   outputFileTracingIncludes: {
-    "/admin/jack/\\[roomId\\]": CHROMIUM_BINARY,
-    "/admin/jack/decks/\\[deckId\\]": CHROMIUM_BINARY,
+    "/admin/jack/\\[roomId\\]": [...CHROMIUM_BINARY, ...LIBVIPS],
+    "/admin/jack/decks/\\[deckId\\]": [...CHROMIUM_BINARY, ...LIBVIPS],
+    "/admin/jack/proposals": LIBVIPS,
     "/api/admin/jack/decks/**": CHROMIUM_BINARY,
     "/api/admin/jack/render-check": CHROMIUM_BINARY,
     "/api/admin/jack/run": [...CHROMIUM_BINARY, ...PDF_WORKER],
-    "/api/admin/jack/files/**": PDF_WORKER,
-    "/api/cron/tick": PDF_WORKER,
+    "/api/admin/jack/files/**": [...PDF_WORKER, ...LIBVIPS],
+    "/api/cron/tick": [...PDF_WORKER, ...LIBVIPS],
   },
   images: {
     remotePatterns: [
