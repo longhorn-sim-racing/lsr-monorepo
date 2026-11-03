@@ -64,6 +64,13 @@ There is no manual deployment step. If you need to roll back, use Vercel's dashb
 
 Environment variables (Supabase credentials, Stripe keys, etc.) are configured in the Vercel project dashboard, not committed to the repository. Production database credentials must **never** appear in local env files — local development uses the Supabase CLI local stack instead.
 
+## Uptime monitoring
+
+The public `/api/health` endpoint checks the application's database connection without
+reading member data. Configure external monitors, Tech Team alerts, and the monthly
+99.9% availability report using [the uptime monitoring runbook](./uptime-monitoring.md).
+Deploying the endpoint alone does not enable monitoring or alerts.
+
 ## Scheduled jobs
 
 A GitHub Actions cron job (`.github/workflows/notification-cron.yml`) runs every 15 minutes to process queued notifications. It calls the `/api/cron/notifications` endpoint with a bearer token. This is independent of deployments.
