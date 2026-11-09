@@ -67,13 +67,13 @@ export const TEAMS: Team[] = [
 export const OFFICERS: Officer[] = [
   { name: "Dylan Foley", title: "President", team: "executive", board: true, photo: "/images/officers/dylan-foley.jpg" },
   { name: "Bryan Reyes", title: "Vice President", team: "executive", board: true, photo: "/images/officers/bryan-reyes.jpg" },
-  { name: "Romer Pena", title: "Operations Lead", team: "executive" },
+  { name: "Romer Pena", title: "Operations Lead", team: "executive", photo: "/images/officers/romer-pena.jpg" },
 
   { name: "Armando Martinez", title: "Competition Lead", team: "competition", board: true, photo: "/images/officers/armando-martinez.jpg" },
-  { name: "Mark Yuan", title: "Officer", team: "competition" },
-  { name: "Prakul Sherikar", title: "Officer", team: "competition" },
-  { name: "Jacob Pineda", title: "Officer", team: "competition" },
-  { name: "Constanza Jongkind", title: "Officer", team: "competition" },
+  { name: "Mark Yuan", title: "Officer", team: "competition", photo: "/images/officers/mark-yuan.jpg" },
+  { name: "Prakul Sherikar", title: "Officer", team: "competition", photo: "/images/officers/prakul-sherikar.jpg" },
+  { name: "Jacob Pineda", title: "Officer", team: "competition", photo: "/images/officers/jacob-pineda.jpg" },
+  { name: "Constanza Jongkind", title: "Officer", team: "competition", photo: "/images/officers/constanza-jongkind.jpg" },
 
   { name: "George Lawrence", title: "Community Lead", team: "community", board: true, photo: "/images/officers/george-lawrence.jpg" },
   { name: "Ethan Chan", title: "Officer", team: "community" },
@@ -83,13 +83,13 @@ export const OFFICERS: Officer[] = [
   { name: "Diane Chagoya", title: "Media Lead", team: "media", board: true, photo: "/images/officers/diane-chagoya.jpg" },
   { name: "Anuja Manjrekar", title: "Officer", team: "media" },
   { name: "Harshika Mandula", title: "Officer", team: "media", photo: "/images/officers/harshika-mandula.jpg" },
-  { name: "Leisha Jhamnani", title: "Officer", team: "media" },
+  { name: "Leisha Jhamnani", title: "Officer", team: "media", photo: "/images/officers/leisha-jhamnani.jpg" },
   { name: "Lauren Heyde", title: "Officer", team: "media" },
 
   { name: "Jaylon Collins", title: "Business Lead", team: "business", board: true, photo: "/images/officers/jaylon-collins.jpg" },
   { name: "Boen Kelly", title: "Nonprofit Compliance Lead", team: "business", photo: "/images/officers/boen-kelly.jpg" },
   { name: "Jose Varela", title: "Officer", team: "business" },
-  { name: "Cooper Tomlin", title: "Officer", team: "business" },
+  { name: "Cooper Tomlin", title: "Officer", team: "business", photo: "/images/officers/cooper-tomlin.jpg" },
 
   { name: "Gray Marshall", title: "Technology Lead", team: "technology", board: true, photo: "/images/officers/gray-marshall.jpg" },
   { name: "Alexander Spears", title: "Officer", team: "technology" },
