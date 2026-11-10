@@ -57,7 +57,8 @@ def crop(det, src: Path, slug: str) -> None:
         return
 
     fx, fy, fw, fh = (v / scale for v in max(faces, key=lambda f: f[-1])[:4])
-    cw = fw / FACE_FRAC
+    # A close-up can want a frame bigger than the photo; shrink it to fit instead of padding with black
+    cw = min(fw / FACE_FRAC, w, h * OUT_W / OUT_H)
     ch = cw * OUT_H / OUT_W
     left = min(max(0, fx + fw / 2 - cw / 2), w - cw)
     top = min(max(0, fy + fh / 2 - FACE_CY * ch), h - ch)
