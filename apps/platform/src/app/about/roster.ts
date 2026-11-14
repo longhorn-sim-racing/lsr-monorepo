@@ -77,7 +77,7 @@ export const OFFICERS: Officer[] = [
 
   { name: "George Lawrence", title: "Community Lead", team: "community", board: true, photo: "/images/officers/george-lawrence.jpg" },
   { name: "Ethan Chan", title: "Officer", team: "community" },
-  { name: "Alejandro Palacios", title: "Officer", team: "community" },
+  { name: "Alejandro Palacios", title: "Officer", team: "community", photo: "/images/officers/alejandro-palacios.jpg" },
   { name: "Grant Ruhland", title: "Officer", team: "community", photo: "/images/officers/grant-ruhland.jpg" },
 
   { name: "Diane Chagoya", title: "Media Lead", team: "media", board: true, photo: "/images/officers/diane-chagoya.jpg" },
@@ -88,7 +88,7 @@ export const OFFICERS: Officer[] = [
 
   { name: "Jaylon Collins", title: "Business Lead", team: "business", board: true, photo: "/images/officers/jaylon-collins.jpg" },
   { name: "Boen Kelly", title: "Nonprofit Compliance Lead", team: "business", photo: "/images/officers/boen-kelly.jpg" },
-  { name: "Jose Varela", title: "Officer", team: "business" },
+  { name: "Jose Varela", title: "Officer", team: "business", photo: "/images/officers/jose-varela.jpg" },
   { name: "Cooper Tomlin", title: "Officer", team: "business", photo: "/images/officers/cooper-tomlin.jpg" },
 
   { name: "Gray Marshall", title: "Technology Lead", team: "technology", board: true, photo: "/images/officers/gray-marshall.jpg" },
